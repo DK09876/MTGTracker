@@ -57,10 +57,21 @@ npm test
 
 ## On the Pi
 
-Runs under systemd on port 3001 and is published to the tailnet at
-`/mtg` with Tailscale Serve, so LifeOS keeps the root. `MTG_BASE_PATH=/mtg`
-must be set at build time — it is baked into the client bundle, not read at
-runtime.
+Runs under systemd on port 3001 and is published to the tailnet at `/mtg`,
+so LifeOS keeps the root:
+
+```bash
+MTG_BASE_PATH=/mtg npx next build
+sudo systemctl restart mtg
+tailscale serve --bg --set-path /mtg http://127.0.0.1:3001/mtg
+```
+
+Two things that are easy to get wrong. `MTG_BASE_PATH` is baked into the
+client bundle at build time, not read at runtime, so changing it means
+rebuilding. And the serve target must repeat the path — `--set-path /mtg`
+strips the prefix before forwarding, while a build with `basePath` expects it,
+so pointing at a bare `3001` gives a 404 that looks like the app is broken
+when it is only the URL.
 
 ## Being a good Scryfall citizen
 
