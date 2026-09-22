@@ -57,21 +57,29 @@ npm test
 
 ## On the Pi
 
-Runs under systemd on port 3001 and is published to the tailnet at `/mtg`,
-so LifeOS keeps the root:
+Runs under systemd on port 3001, bound to localhost, and published to the
+tailnet on its own port so it does not share a hostname with anything else:
 
 ```bash
-MTG_BASE_PATH=/mtg npx next build
+npx next build
 sudo systemctl restart mtg
-tailscale serve --bg --set-path /mtg http://127.0.0.1:3001/mtg
+tailscale serve --bg --https=8443 3001
 ```
 
-Two things that are easy to get wrong. `MTG_BASE_PATH` is baked into the
-client bundle at build time, not read at runtime, so changing it means
-rebuilding. And the serve target must repeat the path — `--set-path /mtg`
-strips the prefix before forwarding, while a build with `basePath` expects it,
-so pointing at a bare `3001` gives a 404 that looks like the app is broken
-when it is only the URL.
+That puts it at `https://<node>.<tailnet>.ts.net:8443`, reachable from any
+device signed into the tailnet and from nowhere else.
+
+**On serving it under a subpath instead.** It can be done — set
+`MTG_BASE_PATH=/mtg` and mount it with `--set-path` — but two things bite.
+The base path is compiled into the client bundle rather than read at runtime,
+so changing it means rebuilding. And `--set-path` strips the prefix before
+forwarding while the build expects it, so the serve target has to repeat it
+(`http://127.0.0.1:3001/mtg`). Both produce a 404 that reads like a broken app
+rather than a wrong URL. A separate port avoids the whole class of problem.
+
+A distinct hostname would be nicer than a port, but Tailscale services require
+a tagged node, and tagging changes node ownership and ACLs — not something to
+do casually to a machine that is already serving something else.
 
 ## Being a good Scryfall citizen
 

@@ -1,9 +1,9 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // Served from a subpath on the Pi's tailnet hostname, alongside LifeOS at
-  // the root. Set at build time so links and assets carry the prefix; unset
-  // in development so localhost:3001 works without it.
+  // Optional subpath support. Unset in normal use - the Pi serves this on its
+  // own tailnet port, which avoids the prefix entirely. Kept because it is the
+  // only way to share a hostname, and because unsetting it later is a rebuild.
   basePath: process.env.MTG_BASE_PATH || undefined,
 
   // The client builds its own API URLs and basePath does not apply to fetch,
