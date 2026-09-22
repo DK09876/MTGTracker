@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+:root {
+  --background: #14120f;
+  --surface: #1d1a16;
+  --surface-hover: #262119;
+  --border: #322c23;
+  --foreground: #ece5da;
+  --muted: #9b9184;
+  --accent: #c9a227;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+html, body {
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Oracle text keeps its line breaks; Scryfall sends them as newlines. */
+.oracle {
+  white-space: pre-wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
