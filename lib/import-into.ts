@@ -4,7 +4,7 @@
  * deck has none and the list names or implies one.
  */
 
-import { addCardToList, setCommander, type List } from './db';
+import { addCardToList, replaceListCards, setCommander, type List } from './db';
 import { resolveDecklist } from './import';
 import { collection } from './scryfall';
 
@@ -36,4 +36,41 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     unreadable: resolved.unreadable,
     skipped: resolved.skipped,
   };
+}
+
+/**
+ * Replace a list's cards with a pasted decklist - "Edit as text", saved.
+ *
+ * Nothing is written if any line cannot be found or read: replacing means
+ * everything not in the paste is removed, so a typo would otherwise
+ * silently delete a card. The answer lists those lines to fix instead.
+ *
+ * A "Commander" section sets the commander; without one the deck keeps the
+ * commander it has.
+ */
+export async function replaceWith(
+  list: Pick<List, 'id' | 'kind' | 'commander'>, text: string,
+): Promise<ImportSummary & { applied: boolean }> {
+  const resolved = await resolveDecklist(text, collection, { commanderPicked: list.commander?.name ?? null });
+  const summary = {
+    added: resolved.cards.length,
+    copies: resolved.cards.reduce((n, c) => n + c.quantity, 0),
+    commander: null as string | null,
+    missing: resolved.missing,
+    unreadable: resolved.unreadable,
+    skipped: resolved.skipped,
+  };
+  if (resolved.missing.length || resolved.unreadable.length) return { ...summary, applied: false };
+
+  const cards = [...resolved.cards];
+  if (resolved.commander && list.kind === 'deck') {
+    if (resolved.commander.id !== list.commander?.id) {
+      setCommander(list.id, resolved.commander);
+      summary.commander = resolved.commander.name;
+    }
+  } else if (resolved.commander) {
+    cards.push({ card: resolved.commander, quantity: 1 });
+  }
+  replaceListCards(list.id, cards);
+  return { ...summary, applied: true };
 }

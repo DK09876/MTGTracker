@@ -256,6 +256,31 @@ export function setQuantity(listId: string, cardId: string, quantity: number): v
   database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
 }
 
+/**
+ * Make a list hold exactly these cards, in one transaction - for a deck
+ * edited as text and saved back. Either all of it applies or none does.
+ */
+export function replaceListCards(listId: string, items: Array<{ card: ScryfallCard; quantity: number }>): void {
+  const database = open();
+  database.run('BEGIN');
+  try {
+    database.run('DELETE FROM list_cards WHERE listId = ?', [listId]);
+    for (const { card, quantity } of items) {
+      storeCard(card);
+      database.run(
+        `INSERT INTO list_cards (listId, cardId, quantity, addedAt) VALUES (?, ?, ?, ?)
+         ON CONFLICT(listId, cardId) DO UPDATE SET quantity = quantity + excluded.quantity`,
+        [listId, card.id, quantity, now()],
+      );
+    }
+    database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+}
+
 export function removeCardFromList(listId: string, cardId: string): void {
   setQuantity(listId, cardId, 0);
 }

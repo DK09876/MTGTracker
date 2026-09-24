@@ -12,6 +12,7 @@ import CardTile from '@/components/CardTile';
 import * as api from '@/lib/api';
 import { filterCards } from '@/lib/filter';
 import type { List, ListedCard } from '@/lib/db';
+import { formatDecklist } from '@/lib/decklist';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf, typeLineOf } from '@/lib/scryfall';
@@ -32,6 +33,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [decklist, setDecklist] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [imported, setImported] = useState<ImportSummary | null>(null);
+  const [rejected, setRejected] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
@@ -89,18 +92,28 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // A Commander deck is 100 cards, the commander included.
   const deckSize = cards.reduce((sum, c) => sum + c.quantity, 0) + (list.commander ? 1 : 0);
 
-  const runImport = async (e: React.FormEvent) => {
+  // "Edit as text": the deck as it stands, in the same format it imports.
+  const openText = () => {
+    setDecklist(formatDecklist(deck ? list.commander : null, cards));
+    setImported(null);
+    setRejected(false);
+    setImporting(true);
+  };
+
+  /** Save the text back: the list becomes exactly what it says. */
+  const saveText = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!decklist.trim()) return;
     setImportBusy(true);
     try {
-      const { imported: result } = await api.importDecklist(id, decklist);
+      const { imported: result, ok } = await api.replaceDecklist(id, decklist);
       setImported(result);
-      setDecklist('');
-      setImporting(false);
-      await load();
+      setRejected(!ok);
+      if (ok) {
+        setImporting(false);
+        await load();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not import that list');
+      setError(err instanceof Error ? err.message : 'Could not save that list');
     } finally {
       setImportBusy(false);
     }
@@ -150,10 +163,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
         <div className="flex gap-2 text-sm">
           <button
-            onClick={() => setImporting((v) => !v)}
+            onClick={() => (importing ? setImporting(false) : openText())}
             className="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface)]"
           >
-            Import
+            Edit as text
           </button>
           {!renaming && (
             <button
@@ -221,27 +234,47 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
 
       {importing && (
-        <form onSubmit={runImport} className="mt-4 flex flex-col gap-2">
+        <form onSubmit={saveText} className="mt-4 flex flex-col gap-2">
+          <p className="text-sm text-[var(--muted)]">
+            Edit the list, or paste a new one over it. Saving makes the {deck ? 'deck' : 'list'} exactly this —
+            same format as Moxfield, Archidekt, Arena and MTGO.
+          </p>
           <textarea
             value={decklist}
-            onChange={(e) => setDecklist(e.target.value)}
-            rows={8}
+            onChange={(e) => { setDecklist(e.target.value); setRejected(false); }}
+            rows={Math.min(24, Math.max(8, decklist.split('\n').length + 1))}
             autoFocus
-            placeholder={'Paste a decklist — 1x Sol Ring (SOC) 128, one card per line'}
+            placeholder={'1 Sol Ring (SOC) 128\n33 Mountain (ACR) 107'}
             spellCheck={false}
             className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
           />
-          <div className="flex gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <button disabled={importBusy} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
-              {importBusy ? 'Importing…' : 'Add these cards'}
+              {importBusy ? 'Saving…' : 'Save'}
             </button>
             <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
               Cancel
             </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(decklist);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                } catch { /* clipboard blocked: the text is still there to select */ }
+              }}
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
           </div>
         </form>
       )}
-      {imported && <ImportResult result={imported} />}
+      {imported && rejected && (
+        <p className="mt-3 text-sm text-amber-400">Nothing was changed — fix the lines below and save again.</p>
+      )}
+      {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
       {cards.length > 0 && (
         <div className="mt-5">

@@ -113,6 +113,24 @@ export const setCommander = (listId: string, commanderId: string | null) =>
     body: JSON.stringify({ commanderId }),
   }).then(json<{ list: List }>);
 
+/**
+ * Make a list exactly this decklist. A 422 carries the lines that could not
+ * be found, and means nothing was changed.
+ */
+export async function replaceDecklist(listId: string, decklist: string): Promise<{ imported: ImportSummary; ok: boolean }> {
+  const response = await fetch(url(`lists/${listId}/import`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decklist }),
+  });
+  if (response.status === 422) {
+    const body = (await response.json()) as { imported: ImportSummary };
+    return { imported: body.imported, ok: false };
+  }
+  const body = await json<{ imported: ImportSummary }>(response);
+  return { imported: body.imported, ok: true };
+}
+
 export const importDecklist = (listId: string, decklist: string) =>
   fetch(url(`lists/${listId}/import`), {
     method: 'POST',
