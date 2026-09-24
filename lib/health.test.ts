@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { analyse, pips } from './health';
+import { analyse, fetchedColors, pips } from './health';
 import type { ScryfallCard } from './scryfall';
 
 const card = (name: string, over: Partial<ScryfallCard> = {}): ScryfallCard =>
@@ -72,5 +72,42 @@ describe('analyse', () => {
   it('asks for a commander when there is none, and does not count basics as duplicates', () => {
     const h = analyse({ commander: null, cards: deck });
     expect(h.warnings.map((w) => w.title)).toEqual(['No commander', '11 cards, not 100']);
+  });
+});
+
+describe('fetchedColors', () => {
+  const basics = new Set(['G', 'B'] as const);
+  const lands = new Set(['G', 'B', 'R'] as const);
+  const text = (oracle_text: string) => card('x', { oracle_text });
+
+  it.each([
+    ['Wooded Foothills', 'Search your library for a Mountain or Forest card, put it onto the battlefield, then shuffle.', ['R', 'G']],
+    ['Farseek', 'Search your library for a Plains, Island, Swamp, or Mountain card, put it onto the battlefield tapped.', ['W', 'U', 'B', 'R']],
+    ['Cabaretti Courtyard', 'When you do, search your library for a basic Mountain, Forest, or Plains card, put it onto the battlefield tapped.', ['W', 'R', 'G']],
+    ['Cultivate', 'Search your library for up to two basic land cards, reveal those cards.', ['B', 'G']],
+    ['Myriad Landscape', '{2}, {T}, Sacrifice this land: Search your library for up to two basic land cards that share a land type.', ['B', 'G']],
+    ['Crop Rotation', 'Search your library for a land card, put that card onto the battlefield, then shuffle.', ['B', 'R', 'G']],
+    ['Lightning Bolt', 'Lightning Bolt deals 3 damage to any target.', []],
+  ])('%s fetches %j', (_name, oracle, expected) => {
+    const order = ['W', 'U', 'B', 'R', 'G'];
+    expect([...fetchedColors(text(oracle), basics, lands)].sort((a, b) => order.indexOf(a) - order.indexOf(b))).toEqual(expected);
+  });
+
+  it('counts fetch lands and land-fetching spells as colour sources', () => {
+    const h = analyse({
+      commander: hull,
+      cards: [
+        { card: land('Forest', ['G'], { type_line: 'Basic Land — Forest' }), quantity: 5 },
+        { card: land('Swamp', ['B'], { type_line: 'Basic Land — Swamp' }), quantity: 3 },
+        { card: card('Evolving Wilds', { type_line: 'Land', oracle_text: '{T}, Sacrifice Evolving Wilds: Search your library for a basic land card.' }), quantity: 1 },
+        { card: card('Cultivate', { type_line: 'Sorcery', mana_cost: '{2}{G}', oracle_text: 'Search your library for up to two basic land cards.' }), quantity: 1 },
+      ],
+    });
+    const green = h.colors.find((c) => c.color === 'G')!;
+    const black = h.colors.find((c) => c.color === 'B')!;
+    expect([green.landSources, green.otherSources]).toEqual([6, 1]);
+    expect([black.landSources, black.otherSources]).toEqual([4, 1]);
+    // No basic Mountain, so fetching "a basic land" cannot find red.
+    expect(h.colors.find((c) => c.color === 'R')!.landSources).toBe(0);
   });
 });

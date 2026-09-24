@@ -59,6 +59,26 @@ export function pips(cost: string): Record<Color, number> {
   return out;
 }
 
+const LAND_TYPES: Record<string, Color> = { Plains: 'W', Island: 'U', Swamp: 'B', Mountain: 'R', Forest: 'G' };
+
+/**
+ * Colours a card can fetch rather than make: "search your library for a
+ * Mountain or Forest card" is red and green; "a basic land card" is whatever
+ * the deck's basics make; "a land card" is whatever its lands make. Scryfall
+ * lists no mana for Evolving Wilds or Cultivate, which left a deck's
+ * colour sources several lands short.
+ */
+export function fetchedColors(card: ScryfallCard, basics: Set<Color>, lands: Set<Color>): Set<Color> {
+  const out = new Set<Color>();
+  for (const [, what] of oracle(card).matchAll(/search your library for ([^.]*?) cards?\b/gi)) {
+    const named = Object.entries(LAND_TYPES).filter(([type]) => new RegExp(`\\b${type}\\b`).test(what)).map(([, c]) => c);
+    if (named.length) named.forEach((c) => out.add(c));
+    else if (/\bbasic land\b/i.test(what)) basics.forEach((c) => out.add(c));
+    else if (/\bland\b/i.test(what)) lands.forEach((c) => out.add(c));
+  }
+  return out;
+}
+
 /** Cards a Commander deck may run more than one of. */
 function anyNumberAllowed(card: ScryfallCard): boolean {
   return /\bBasic\b/.test(typeLine(card)) || /A deck can have (any number of|up to \w+) cards named/i.test(oracle(card));
@@ -94,12 +114,18 @@ export function analyse({ commander, cards }: HealthInput): Health {
   }
   const totalPips = COLORS.reduce((n, c) => n + demand[c], 0);
   const shown = COLORS.filter((c) => (commander ? identity.has(c) : demand[c] > 0));
+  // A source is anything that makes a colour or fetches a land that does.
+  const colorsOf = (list: typeof cards) => new Set(list.flatMap((c) => c.card.produced_mana ?? []).filter((c): c is Color => (COLORS as string[]).includes(c)));
+  const basics = colorsOf(lands.filter((c) => /\bBasic\b/.test(typeLine(c.card))));
+  const landColors = colorsOf(lands);
+  const makes = (card: ScryfallCard, color: Color) =>
+    !!card.produced_mana?.includes(color) || fetchedColors(card, basics, landColors).has(color);
   const colors = shown.map((color) => ({
     color,
     pips: Math.round(demand[color] * 10) / 10,
     share: totalPips ? demand[color] / totalPips : 0,
-    landSources: count(lands.filter((c) => c.card.produced_mana?.includes(color))),
-    otherSources: count(spells.filter((c) => c.card.produced_mana?.includes(color))),
+    landSources: count(lands.filter((c) => makes(c.card, color))),
+    otherSources: count(spells.filter((c) => makes(c.card, color))),
   }));
 
   const gameChangers = [commander, ...cards.map((c) => c.card)]
