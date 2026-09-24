@@ -250,6 +250,7 @@ describe('the EDHREC view', () => {
     expect(search.mock.calls[0][0]).toContain('(t:enchantment (o:copy or o:cast))');
     expect(search.mock.calls[1][0]).toMatch(/^t:enchantment id<=ubr f:commander -!"Fire Lord Azula" \(!"/);
     expect(result.interpretation.constraints).toBe('t:enchantment');
+    expect(result.edhrec?.narrowedBy).toBe('type enchantment');
   });
 
   it('shows EDHREC\'s own lists when the request states no conditions', async () => {

@@ -155,6 +155,9 @@ export default function SearchPage() {
           loadingMore={s.loadingMore}
           onSelect={setSelected}
           onAdd={setAdding}
+          edhrecFull={s.edhrecFull}
+          onEdhrecFull={answer && answer.interpretation.constraints !== undefined
+            && answer.interpretation.constraints !== answer.interpretation.query ? s.toggleEdhrecFull : undefined}
         />
       )}
 

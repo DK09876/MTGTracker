@@ -144,4 +144,17 @@ describe('robustness', () => {
   it('parses a quoted phrase as one term', () => {
     expect(parseQuery('o:"draw a card"').terms).toHaveLength(1);
   });
+
+  // Scryfall's /pattern/ syntax, run locally - with its escapes intact.
+  it('matches rules text and names by pattern', () => {
+    const cards = [
+      card({ name: 'Zuran Orb', oracle_text: 'Sacrifice a land: You gain 2 life.' }),
+      card({ name: 'Springbloom Druid', oracle_text: 'When this creature enters, you may sacrifice a land. If you do, search...' }),
+      card({ name: 'Ashnod\'s Altar', oracle_text: 'Sacrifice a creature: Add {C}{C}.' }),
+    ].map((c) => ({ card: c }));
+    const names = (q: string) => filterCards(cards, q).results.map((c) => c.card.name);
+    expect(names('o:/sacrifice an? [^.:]*:/')).toEqual(['Zuran Orb', "Ashnod's Altar"]);
+    expect(names('o:/\\{C\\}\\{C\\}/')).toEqual(["Ashnod's Altar"]);
+    expect(names('name:/^z/')).toEqual(['Zuran Orb']);
+  });
 });

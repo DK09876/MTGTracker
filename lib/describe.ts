@@ -58,7 +58,9 @@ interface Token {
 /** Split into terms, `or`, and parentheses, keeping quoted phrases whole. */
 function tokenize(query: string): Array<Token | 'or' | '(' | ')'> {
   const out: Array<Token | 'or' | '(' | ')'> = [];
-  const pattern = /\(|\)|-?!?(?:[a-z]+(?:>=|<=|!=|[:=<>]))?(?:"[^"]*"|[^\s()]+)/gi;
+  // A value is a "quoted phrase", a /pattern/ (which may hold spaces and
+  // brackets of its own), or a plain word.
+  const pattern = /\(|\)|-?!?(?:[a-z]+(?:>=|<=|!=|[:=<>]))?(?:"[^"]*"|\/(?:\\.|[^/\\])*\/|[^\s()]+)/gi;
   for (const [raw] of query.matchAll(pattern)) {
     if (raw === '(' || raw === ')') { out.push(raw); continue; }
     if (raw.toLowerCase() === 'or') { out.push('or'); continue; }
@@ -101,7 +103,9 @@ function describeTerm(token: Token): string {
 
   switch (NOUN_KEYS[token.key]) {
     case 'type': return token.negated ? `not a ${value}` : `type ${value}`;
-    case 'text': return `${not}text says “${value}”`;
+    case 'text': return value.startsWith('/') && value.endsWith('/') && value.length > 1
+      ? `${not}text matches ${value}`
+      : `${not}text says “${value}”`;
     case 'tag': return `${not}tagged ${value.replace(/-/g, ' ')}`;
     case 'keyword': return `${token.negated ? 'without' : 'has'} ${value}`;
     case 'colour': {

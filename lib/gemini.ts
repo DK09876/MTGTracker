@@ -257,11 +257,13 @@ Return JSON with:
     For "combos": usually empty. Only add Commander Spellbook terms when the
     request narrows the combos: result:"infinite mana", cards<=2 (at most two
     pieces), price<50, coloridentity<=UR (only when no commander is given).
-- constraints: for "cards", the part of the query the request itself states,
-  in Scryfall syntax - card types, mana value, price, colours, rarity, a role
-  the user named ("ramp", "card draw", "removal"). Leave out anything you
-  added to judge synergy with the commander. Empty when the request states
-  nothing ("good cards for Azula"). For "card" and "combos", empty.
+- constraints: for "cards", every condition the request itself asks for, in
+  Scryfall syntax - card types, mana value, price, colours, rarity, a role
+  ("ramp", "card draw", "removal"), and qualities described in words
+  ("repeatable", "at instant speed", "that can't be countered", "like Zuran's
+  Orb" - what that card is like). Leave out only what you added yourself to
+  fit the commander's rules text. Empty when the request asks for nothing
+  but the commander ("good cards for Azula"). For "card" and "combos", empty.
 
 When a commander is given, the server adds its colour identity, Commander
 legality, and removes the commander itself. So never write id:, f:commander
@@ -297,6 +299,12 @@ Scryfall syntax:
   express a role, but ONLY these tags exist - any other otag matches nothing:
   ${ORACLE_TAGS.join(', ')}.
   For a role not in that list, use o:"..." with the words such cards print.
+  Tags are broad: otag:sacrifice-outlet includes one-off sacrifices (an
+  enter-the-battlefield trigger, an additional cost to cast).
+- o:/regex/ matches rules text by pattern. Something usable again and again
+  is an activated ability - a cost, then a colon. A repeatable sacrifice
+  outlet is o:/sacrifice an? [^.:]*:/ ("Sacrifice a land: ..."), and a
+  repeatable tapper o:/\{T\}[^.:]*: tap target/.
 - Plural creature types are a type search: "goblins" is t:goblin.
 
 Prefer a query that finds a few too many cards over one that finds none, and
@@ -309,6 +317,9 @@ Examples:
 "enchantments that work well for fire lord azula" ->
   kind: cards; commander: Fire Lord Azula; query: t:enchantment; constraints: t:enchantment
   (once shown Azula's rules text: query: t:enchantment (o:copy or o:"whenever you cast"); constraints: t:enchantment)
+"a repeatable sacrifice outlet like zuran's orb for hearthhull" ->
+  kind: cards; commander: Hearthhull; query: o:/sacrifice an? [^.:]*:/;
+  constraints: o:/sacrifice an? [^.:]*:/ (repeatable is asked for, so it is a constraint)
 "a card under 5 cmc for azula that helps me draw cards" ->
   kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5;
   constraints: (otag:draw or otag:card-advantage) mv<5

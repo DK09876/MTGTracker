@@ -42,6 +42,10 @@ export function useSearch() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [inLists, setInLists] = useState<Record<string, string[]>>({});
   const [status, setStatus] = useState<Status>('idle');
+  // The EDHREC tab narrows by what was asked for; it can be switched to the
+  // whole search, and back.
+  const [edhrecFull, setEdhrecFull] = useState(false);
+  const statedEdhrec = useRef<Views['edhrec']>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   // Guards against a slow request overwriting the result of a later one.
@@ -71,7 +75,35 @@ export function useSearch() {
     setAnswer(result);
     setViews(viewsOf(result));
     setTab(firstTab(result));
+    setEdhrecFull(false);
+    statedEdhrec.current = undefined;
   }, []);
+
+  /** Switch the EDHREC tab between the stated conditions and the whole search. */
+  const toggleEdhrecFull = async () => {
+    const commander = answer?.interpretation.commander?.name;
+    if (!answer || !commander) return;
+    if (edhrecFull) {
+      setViews((v) => ({ ...v, edhrec: statedEdhrec.current }));
+      setEdhrecFull(false);
+      return;
+    }
+    const id = runId.current;
+    setTabLoading(true);
+    try {
+      // An edited-query run narrows EDHREC by the whole query - which is this.
+      const r = await api.runQuery(answer.interpretation.query, { commander, sort: views.cards?.sort });
+      if (id !== runId.current) return;
+      statedEdhrec.current = views.edhrec;
+      setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setViews((v) => ({ ...v, edhrec: r.edhrec ?? null }));
+      setEdhrecFull(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load that');
+    } finally {
+      setTabLoading(false);
+    }
+  };
 
   /** An edited query: both card views change, the explanation stays. */
   const runEdited = (edited: string) => {
@@ -168,6 +200,6 @@ export function useSearch() {
 
   return {
     answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists,
-    status, error, run, showAnswer, runEdited, resort, loadMore, openTab,
+    status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull,
   };
 }

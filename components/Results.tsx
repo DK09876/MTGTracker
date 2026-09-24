@@ -57,12 +57,19 @@ interface Props {
   actions?: (card: ScryfallCard) => React.ReactNode;
   /** Fewer columns, for a panel rather than the whole page. */
   dense?: boolean;
+  /**
+   * Offered when the EDHREC tab was narrowed by less than the whole search:
+   * whether it now matches the whole search, and the switch.
+   */
+  edhrecFull?: boolean;
+  onEdhrecFull?: () => void;
 }
 
 const short = (name: string) => name.split(',')[0];
 
 export default function Results({
   views, commander, tab, onTab, loading, inLists, onSort, onLoadMore, loadingMore, onSelect, onAdd, actions, dense,
+  edhrecFull, onEdhrecFull,
 }: Props) {
   const grid = { inLists, onSelect, onAdd, actions, dense };
 
@@ -101,7 +108,7 @@ export default function Results({
 
       {!loading && tab === 'edhrec' && (
         views.edhrec
-          ? <EdhrecTab view={views.edhrec} {...grid} />
+          ? <EdhrecTab view={views.edhrec} full={edhrecFull} onFull={onEdhrecFull} {...grid} />
           : <p className="mt-8 text-center text-[var(--muted)]">
             EDHREC has no data for {commander ?? 'this commander'} yet — try <button className="underline" onClick={() => onTab('cards')}>All matching cards</button>.
           </p>
@@ -144,7 +151,11 @@ export default function Results({
   );
 }
 
-function EdhrecTab({ view, inLists, onSelect, onAdd, actions, dense }: { view: EdhrecView } & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
+function EdhrecTab({ view, full, onFull, inLists, onSelect, onAdd, actions, dense }: {
+  view: EdhrecView;
+  full?: boolean;
+  onFull?: () => void;
+} & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   const byId = new Map(view.cards.map((c) => [c.id, c]));
   return (
     <div>
@@ -153,6 +164,16 @@ function EdhrecTab({ view, inLists, onSelect, onAdd, actions, dense }: { view: E
         {view.filtered ? ', narrowed to your search' : ''}.{' '}
         <a href={view.url} target="_blank" rel="noreferrer" className="underline hover:text-[var(--foreground)]">EDHREC ↗</a>
       </p>
+      {(view.narrowedBy || onFull) && (
+        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
+          {view.narrowedBy && <span>Narrowed by: <span className="text-[var(--foreground)]">{view.narrowedBy}</span></span>}
+          {onFull && (
+            <button onClick={onFull} className="rounded-md border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
+              {full ? 'Use only what you asked for' : 'Match the full search instead'}
+            </button>
+          )}
+        </p>
+      )}
       {view.cards.length === 0 && (
         <p className="mt-8 text-center text-[var(--muted)]">
           None of the cards {short(view.commander)} decks play match this search — see All matching cards.

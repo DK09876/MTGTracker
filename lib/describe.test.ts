@@ -22,6 +22,10 @@ describe('describeQuery', () => {
     ['date>=2026-01-01 c:izzet', 'released since 2026-01-01 · blue/red'],
     ['dragon', 'name contains “dragon”'],
     ['weird:thing', 'weird:thing'],
+    // A /pattern/ is one term, spaces and brackets included.
+    ['o:/sacrifice an? [^.:]*:/ id<=brg', 'text matches /sacrifice an? [^.:]*:/ · fits a black/red/green deck'],
+    ['(o:/(land|creature)[^.]*:/ or otag:sacrifice-outlet) t:permanent',
+      'text matches /(land|creature)[^.]*:/ or tagged sacrifice outlet · type permanent'],
     ['t:enchantment (o:copy or o:"whenever you cast") id<=ubr',
       'type enchantment · text says “copy” or text says “whenever you cast” · fits a blue/black/red deck'],
     ['((otag:draw or otag:card-advantage) mv<5) id<=ubr',
