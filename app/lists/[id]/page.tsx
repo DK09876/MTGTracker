@@ -85,17 +85,20 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   if (!list) return null;
 
   // Filtering runs over the stored payloads, so it never touches the network.
-  const { results: shown, unsupported } = filterCards(cards, filter);
   const deck = list.kind === 'deck';
+  // The commander is one of the 100: it leads the grid, and the filter,
+  // counts and value all include it.
+  const entries: Array<ListedCard & { commander?: boolean }> = deck && list.commander
+    ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, addedAt: '', commander: true }, ...cards]
+    : cards;
+  const { results: shown, unsupported } = filterCards(entries, filter);
   // A Commander deck is 100 cards with the commander, so every count and
   // total here includes it - "100 / 100", never "99 cards".
-  const commander = deck && list.commander ? 1 : 0;
-  const commanderValue = commander ? priceOf(list.commander!, list.commanderFinish) ?? 0 : 0;
-  const value = shown.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0) + (filter ? 0 : commanderValue);
-  const copies = shown.reduce((sum, c) => sum + c.quantity, 0) + (filter ? 0 : commander);
-  const unique = shown.length + (filter ? 0 : commander);
-  const filtered = shown.length !== cards.length;
-  const deckSize = cards.reduce((sum, c) => sum + c.quantity, 0) + commander;
+  const value = shown.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0);
+  const copies = shown.reduce((sum, c) => sum + c.quantity, 0);
+  const unique = shown.length;
+  const filtered = shown.length !== entries.length;
+  const deckSize = entries.reduce((sum, c) => sum + c.quantity, 0);
 
   // "Edit as text": the deck as it stands, in the same format it imports.
   const openText = () => {
@@ -163,7 +166,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               : <>{copies} card{copies === 1 ? '' : 's'}</>}
             {unique !== copies && <> · {unique} unique</>}
             {value > 0 && <> · ${value.toFixed(2)}</>}
-            {filtered && <> · filtered from {cards.length}</>}
+            {filtered && <> · filtered from {entries.length}</>}
           </p>
         </div>
 
@@ -300,7 +303,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
-      {cards.length > 0 && (
+      {entries.length > 0 && (
         <div className="mt-5">
           <input
             value={filter}
@@ -318,19 +321,23 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
 
-      {!cards.length ? (
+      {!entries.length ? (
         <p className="mt-12 text-center text-[var(--muted)]">
           Nothing here yet. <Link href="/" className="text-[var(--accent)] underline">Search for a card</Link> to add one.
         </p>
       ) : (
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {shown.map(({ card, quantity, finish }) => (
+          {shown.map(({ card, quantity, finish, commander }) => (
             <CardTile
               key={card.id}
               card={card}
               finish={finish}
               onSelect={setSelected}
-              footer={
+              footer={commander ? (
+                <p className="mt-auto rounded-lg bg-[var(--accent)]/15 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">
+                  Commander
+                </p>
+              ) : (
                 <div className="mt-auto flex items-center gap-2">
                   <button
                     onClick={() => changeQuantity(card.id, quantity - 1)}
@@ -355,13 +362,13 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                     Remove
                   </button>
                 </div>
-              }
+              )}
             />
           ))}
         </div>
       )}
 
-      {cards.length > 0 && !shown.length && (
+      {entries.length > 0 && !shown.length && (
         <p className="mt-12 text-center text-[var(--muted)]">Nothing in this list matches that filter.</p>
       )}
 
