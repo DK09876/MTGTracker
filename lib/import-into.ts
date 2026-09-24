@@ -28,7 +28,7 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     setCommander(list.id, list.commander, resolved.commanderFinish);
   }
 
-  for (const { card, quantity, finish } of resolved.cards) addCardToList(list.id, card, quantity, finish);
+  for (const { card, quantity, finish, board } of resolved.cards) addCardToList(list.id, card, quantity, finish, board);
   // A plain list has no header, so a commander found in the paste stays a card in it.
   if (list.kind !== 'deck' && resolved.commander) {
     addCardToList(list.id, resolved.commander, 1, resolved.commanderFinish ?? 'nonfoil');
@@ -74,7 +74,7 @@ export async function replaceWith(
     if (resolved.commander.id !== list.commander?.id) summary.commander = resolved.commander.name;
     setCommander(list.id, resolved.commander, finish);
   } else if (resolved.commander) {
-    cards.push({ card: resolved.commander, quantity: 1, finish });
+    cards.push({ card: resolved.commander, quantity: 1, finish, board: 'main' });
   } else if (list.commander && resolved.commanderFinish) {
     // The commander's own line, with a new finish or printing marker.
     setCommander(list.id, list.commander, resolved.commanderFinish);

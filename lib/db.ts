@@ -21,6 +21,7 @@ import { dirname } from 'path';
 
 import { Database } from 'node-sqlite3-wasm';
 
+import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
 
 const DB_PATH = process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`;
@@ -90,6 +91,10 @@ function open(): Database {
   const cardColumns = db.all('PRAGMA table_info(list_cards)') as Array<{ name: string }>;
   if (!cardColumns.some((c) => c.name === 'finish')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'nonfoil'`);
+  }
+  // Main, sideboard or maybeboard. A card sits on one board at a time.
+  if (!cardColumns.some((c) => c.name === 'board')) {
+    db.run(`ALTER TABLE list_cards ADD COLUMN board TEXT NOT NULL DEFAULT 'main'`);
   }
   return db;
 }
@@ -162,15 +167,16 @@ const PRICE = (finish: string, card: string) => `COALESCE(CAST(CASE ${finish}
 
 /**
  * A profile's lists, or only its decks or only its plain lists.
- * Counts and value include a deck's commander: a Commander deck is 100 cards.
+ * Counts and value are the main board plus the commander: a Commander deck
+ * is 100 cards, and the sideboard and maybeboard are not in it.
  */
 export function listLists(profileId: string, kind?: ListKind): List[] {
   const rows = open().all(`
     SELECT l.id, l.kind, l.name, l.note, l.createdAt, l.updatedAt, l.commanderFinish,
            cm.data                                            AS commanderData,
-           COUNT(lc.cardId) + (l.commanderId IS NOT NULL)     AS cardCount,
-           COALESCE(SUM(lc.quantity), 0) + (l.commanderId IS NOT NULL) AS totalCards,
-           COALESCE(SUM(lc.quantity * ${PRICE('lc.finish', 'c')}), 0)
+           COUNT(CASE WHEN lc.board = 'main' THEN 1 END) + (l.commanderId IS NOT NULL) AS cardCount,
+           COALESCE(SUM(CASE WHEN lc.board = 'main' THEN lc.quantity END), 0) + (l.commanderId IS NOT NULL) AS totalCards,
+           COALESCE(SUM(CASE WHEN lc.board = 'main' THEN lc.quantity * ${PRICE('lc.finish', 'c')} END), 0)
              + COALESCE(MAX(${PRICE('l.commanderFinish', 'cm')}), 0) AS totalValue
     FROM lists l
     LEFT JOIN list_cards lc ON lc.listId = l.id
@@ -267,6 +273,7 @@ export interface ListedCard {
   card: ScryfallCard;
   quantity: number;
   finish: Finish;
+  board: Board;
   addedAt: string;
 }
 
@@ -285,17 +292,23 @@ function storeCard(card: ScryfallCard): void {
 }
 
 /** Store (or refresh) a card, then put it in a list. */
-export function addCardToList(listId: string, card: ScryfallCard, quantity = 1, finish: Finish = 'nonfoil'): void {
+export function addCardToList(
+  listId: string, card: ScryfallCard, quantity = 1, finish: Finish = 'nonfoil', board: Board = 'main',
+): void {
   const database = open();
   storeCard(card);
 
   // Adding a card already in the list adds a copy rather than erroring -
   // wanting a second Lightning Bolt is the common case, not a mistake.
+  // Adding to the board it is already on adds a copy; adding to another
+  // board moves it there, as a card sits on one board at a time.
   database.run(
-    `INSERT INTO list_cards (listId, cardId, quantity, finish, addedAt)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(listId, cardId) DO UPDATE SET quantity = quantity + excluded.quantity`,
-    [listId, card.id, quantity, finish, now()],
+    `INSERT INTO list_cards (listId, cardId, quantity, finish, board, addedAt)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(listId, cardId) DO UPDATE SET
+       quantity = CASE WHEN board = excluded.board THEN quantity + excluded.quantity ELSE excluded.quantity END,
+       board = excluded.board`,
+    [listId, card.id, quantity, finish, board, now()],
   );
   database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
 }
@@ -315,17 +328,19 @@ export function setQuantity(listId: string, cardId: string, quantity: number): v
  * Make a list hold exactly these cards, in one transaction - for a deck
  * edited as text and saved back. Either all of it applies or none does.
  */
-export function replaceListCards(listId: string, items: Array<{ card: ScryfallCard; quantity: number; finish?: Finish }>): void {
+export function replaceListCards(
+  listId: string, items: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board }>,
+): void {
   const database = open();
   database.run('BEGIN');
   try {
     database.run('DELETE FROM list_cards WHERE listId = ?', [listId]);
-    for (const { card, quantity, finish = 'nonfoil' } of items) {
+    for (const { card, quantity, finish = 'nonfoil', board = 'main' } of items) {
       storeCard(card);
       database.run(
-        `INSERT INTO list_cards (listId, cardId, quantity, finish, addedAt) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO list_cards (listId, cardId, quantity, finish, board, addedAt) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(listId, cardId) DO UPDATE SET quantity = quantity + excluded.quantity`,
-        [listId, card.id, quantity, finish, now()],
+        [listId, card.id, quantity, finish, board, now()],
       );
     }
     database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
@@ -336,24 +351,60 @@ export function replaceListCards(listId: string, items: Array<{ card: ScryfallCa
   }
 }
 
+/** Move a card to another board, or change its printing or finish. */
+export function updateListCard(
+  listId: string, cardId: string,
+  change: { board?: Board; finish?: Finish; printing?: ScryfallCard },
+): boolean {
+  const database = open();
+  const row = database.get('SELECT quantity FROM list_cards WHERE listId = ? AND cardId = ?', [listId, cardId]);
+  if (!row) return false;
+  database.run('BEGIN');
+  try {
+    if (change.board) database.run('UPDATE list_cards SET board = ? WHERE listId = ? AND cardId = ?', [change.board, listId, cardId]);
+    if (change.finish) database.run('UPDATE list_cards SET finish = ? WHERE listId = ? AND cardId = ?', [change.finish, listId, cardId]);
+    if (change.printing && change.printing.id !== cardId) {
+      storeCard(change.printing);
+      // The new printing takes over the row; one already in the list absorbs it.
+      const existing = database.get('SELECT 1 FROM list_cards WHERE listId = ? AND cardId = ?', [listId, change.printing.id]);
+      if (existing) {
+        database.run(
+          `UPDATE list_cards SET quantity = quantity + (SELECT quantity FROM list_cards WHERE listId = ? AND cardId = ?)
+           WHERE listId = ? AND cardId = ?`, [listId, cardId, listId, change.printing.id],
+        );
+        database.run('DELETE FROM list_cards WHERE listId = ? AND cardId = ?', [listId, cardId]);
+      } else {
+        database.run('UPDATE list_cards SET cardId = ? WHERE listId = ? AND cardId = ?', [change.printing.id, listId, cardId]);
+      }
+    }
+    database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return true;
+}
+
 export function removeCardFromList(listId: string, cardId: string): void {
   setQuantity(listId, cardId, 0);
 }
 
 export function cardsInList(listId: string): ListedCard[] {
   const rows = open().all(
-    `SELECT c.data, lc.quantity, lc.finish, lc.addedAt
+    `SELECT c.data, lc.quantity, lc.finish, lc.board, lc.addedAt
      FROM list_cards lc
      JOIN cards c ON c.id = lc.cardId
      WHERE lc.listId = ?
      ORDER BY c.name`,
     [listId],
-  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; addedAt: string }>;
+  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; board: Board; addedAt: string }>;
 
   return rows.map((row) => ({
     card: JSON.parse(row.data) as ScryfallCard,
     quantity: row.quantity,
     finish: row.finish,
+    board: row.board,
     addedAt: row.addedAt,
   }));
 }

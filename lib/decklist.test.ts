@@ -61,7 +61,7 @@ describe('parseDecklist', () => {
     const text = 'Commander\n1 Fire Lord Azula\n\nDeck\n1 Snap\n\n// Sideboard\n1 Pyroblast\nMAYBEBOARD:\n1 Opt';
     const { entries } = parseDecklist(text);
     expect(entries.map((e) => [e.name, e.section])).toEqual([
-      ['Fire Lord Azula', 'commander'], ['Snap', 'main'], ['Pyroblast', 'side'], ['Opt', 'side'],
+      ['Fire Lord Azula', 'commander'], ['Snap', 'main'], ['Pyroblast', 'side'], ['Opt', 'maybe'],
     ]);
   });
 
@@ -89,6 +89,25 @@ describe('parseDecklist', () => {
       [1, "Assassin's Trophy", 'acr', '228', 'etched'],
       [6, 'Forest', 'eoe', '276', 'nonfoil'],
       [1, 'Sol Ring', 'soc', '128', 'nonfoil'],
+    ]);
+  });
+
+  it('writes the sideboard and maybeboard under their headings, and reads them back', () => {
+    const card = (name: string) => ({ id: name, name, set: 'm21', collector_number: '1' }) as never;
+    const text = formatDecklist(null, [
+      { card: card('Sol Ring'), quantity: 1 },
+      { card: card('Pyroblast'), quantity: 1, board: 'side' },
+      { card: card('Opt'), quantity: 2, board: 'maybe' },
+    ]);
+    expect(text).toBe('1x Sol Ring (m21) 1\n\nSIDEBOARD:\n1x Pyroblast (m21) 1\n\nMAYBEBOARD:\n2x Opt (m21) 1');
+    expect(parseDecklist(text).entries.map((e) => [e.name, e.section])).toEqual([
+      ['Sol Ring', 'main'], ['Pyroblast', 'side'], ['Opt', 'maybe'],
+    ]);
+  });
+
+  it('skips tokens', () => {
+    expect(parseDecklist('1 Sol Ring\nTokens\n1 Treasure').entries.map((e) => [e.name, e.section])).toEqual([
+      ['Sol Ring', 'main'], ['Treasure', 'skip'],
     ]);
   });
 });

@@ -147,4 +147,54 @@ describe('decks', () => {
     expect(db.cardsInList(deck.id).map((c) => c.card.name)).toEqual(['Lightning Bolt']);
     expect(db.promoteToCommander(deck.id, 'not-in-deck')).toBe(false);
   });
+
+  it('counts only the main board and the commander towards the deck', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Deck', '', { kind: 'deck', commander: kratos });
+    db.addCardToList(deck.id, card('bolt', 'Lightning Bolt'), 1);
+    db.addCardToList(deck.id, card('opt', 'Opt'), 3, 'nonfoil', 'maybe');
+    db.addCardToList(deck.id, card('blast', 'Pyroblast'), 1, 'nonfoil', 'side');
+    const stored = db.getList(deck.id, 'dk')!;
+    expect([stored.totalCards, stored.cardCount]).toEqual([2, 2]);
+    expect(stored.totalValue).toBeCloseTo(5 + 1);
+    expect(db.cardsInList(deck.id).map((c) => [c.card.name, c.board])).toEqual([
+      ['Lightning Bolt', 'main'], ['Opt', 'maybe'], ['Pyroblast', 'side'],
+    ]);
+  });
+
+  it('moves a card to another board when it is added there, rather than adding a copy', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Deck', '', { kind: 'deck' });
+    db.addCardToList(deck.id, card('opt', 'Opt'), 1, 'nonfoil', 'maybe');
+    db.addCardToList(deck.id, card('opt', 'Opt'), 1, 'nonfoil', 'main');
+    expect(db.cardsInList(deck.id).map((c) => [c.card.name, c.quantity, c.board])).toEqual([['Opt', 1, 'main']]);
+    db.addCardToList(deck.id, card('opt', 'Opt'), 1, 'nonfoil', 'main');
+    expect(db.cardsInList(deck.id)[0].quantity).toBe(2);
+  });
+
+  it('changes a card\'s board, finish and printing in place', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Deck', '', { kind: 'deck' });
+    db.addCardToList(deck.id, card('bolt-a', 'Lightning Bolt'), 2);
+
+    expect(db.updateListCard(deck.id, 'bolt-a', { board: 'maybe', finish: 'foil' })).toBe(true);
+    expect(db.cardsInList(deck.id).map((c) => [c.card.id, c.quantity, c.finish, c.board])).toEqual([['bolt-a', 2, 'foil', 'maybe']]);
+
+    db.updateListCard(deck.id, 'bolt-a', { printing: card('bolt-b', 'Lightning Bolt') });
+    expect(db.cardsInList(deck.id).map((c) => [c.card.id, c.quantity, c.finish, c.board])).toEqual([['bolt-b', 2, 'foil', 'maybe']]);
+    expect(db.updateListCard(deck.id, 'not-there', { board: 'main' })).toBe(false);
+  });
+
+  it('merges into a printing already in the deck', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Deck', '', { kind: 'deck' });
+    db.addCardToList(deck.id, card('forest-a', 'Forest'), 3);
+    db.addCardToList(deck.id, card('forest-b', 'Forest'), 2);
+    db.updateListCard(deck.id, 'forest-a', { printing: card('forest-b', 'Forest') });
+    expect(db.cardsInList(deck.id).map((c) => [c.card.id, c.quantity])).toEqual([['forest-b', 5]]);
+  });
 });

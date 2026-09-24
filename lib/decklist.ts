@@ -10,8 +10,8 @@
  *
  * with optional section headings - "Commander", "Deck", "Sideboard" - which
  * Arena and Moxfield write as a bare line, sometimes with a colon or `//`.
- * Anything in a sideboard or maybeboard is kept apart, since it is not in
- * the deck. A line that cannot be read is reported rather than dropped.
+ * Sideboard and maybeboard cards keep their board; tokens are skipped. A
+ * line that cannot be read is reported rather than dropped.
  *
  * The set code and collector number pin the exact printing, so a card
  * imported from a Secret Lair list keeps its Secret Lair art and price.
@@ -19,7 +19,11 @@
 
 import type { Finish, ScryfallCard } from './scryfall';
 
-export type Section = 'commander' | 'main' | 'side';
+/** Where a card goes: the commander, one of a deck's boards, or nowhere (tokens). */
+export type Section = 'commander' | 'main' | 'side' | 'maybe' | 'skip';
+
+/** A deck's boards. Only main (plus the commander) counts towards 100. */
+export type Board = 'main' | 'side' | 'maybe';
 
 export interface Entry {
   quantity: number;
@@ -36,7 +40,9 @@ export interface Entry {
 const HEADINGS: Array<[RegExp, Section]> = [
   [/^commanders?$/, 'commander'],
   [/^(deck|main ?deck|main ?board|mainboard|main)$/, 'main'],
-  [/^(sideboard|side ?board|maybe ?board|maybeboard|considering|companion|tokens?)$/, 'side'],
+  [/^(sideboard|side ?board|side|companion)$/, 'side'],
+  [/^(maybe ?board|maybeboard|maybe|considering)$/, 'maybe'],
+  [/^(tokens?|attractions?|stickers?)$/, 'skip'],
 ];
 
 // "1x Name (SET) 123 *F*" - count, name, then optional printing and markers.
@@ -87,15 +93,22 @@ const lineFor = (card: ScryfallCard, quantity: number, finish: Finish = 'nonfoil
  * A deck written out as Moxfield exports it - one flat list, `1x Name (set)
  * number *F*` - so the same text imports here and anywhere else, and
  * copying it out and pasting it back changes nothing. The commander is the
- * first line: that is where an import looks for it.
+ * first line: that is where an import looks for it. Sideboard and
+ * maybeboard follow under their own headings, only when they hold cards.
  */
 export function formatDecklist(
   commander: ScryfallCard | null,
-  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish }>,
+  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board }>,
   commanderFinish: Finish = 'nonfoil',
 ): string {
-  const main = [...cards]
+  const lines = (board: Board) => cards
+    .filter((c) => (c.board ?? 'main') === board)
     .sort((a, b) => a.card.name.localeCompare(b.card.name))
     .map(({ card, quantity, finish }) => lineFor(card, quantity, finish));
-  return [...(commander ? [lineFor(commander, 1, commanderFinish)] : []), ...main].join('\n');
+  const out = [...(commander ? [lineFor(commander, 1, commanderFinish)] : []), ...lines('main')];
+  for (const [board, heading] of [['side', 'SIDEBOARD:'], ['maybe', 'MAYBEBOARD:']] as const) {
+    const rows = lines(board);
+    if (rows.length) out.push('', heading, ...rows);
+  }
+  return out.join('\n');
 }

@@ -21,12 +21,15 @@ interface Props {
   /** The card every combo was searched for, if any. */
   anchor?: string;
   onSelect: (card: ScryfallCard) => void;
-  onAdd: (card: ScryfallCard) => void;
+  onAdd?: (card: ScryfallCard) => void;
+  /** The caller's own buttons on each piece, in place of "Add to list". */
+  actions?: (card: ScryfallCard) => React.ReactNode;
+  dense?: boolean;
 }
 
 const front = (name: string) => name.split(' // ')[0];
 
-export default function ComboList({ combos, cards, inLists, anchor, onSelect, onAdd }: Props) {
+export default function ComboList({ combos, cards, inLists, anchor, onSelect, onAdd, actions, dense }: Props) {
   const byName = new Map<string, ScryfallCard>();
   for (const card of cards) {
     byName.set(card.name, card);
@@ -60,11 +63,11 @@ export default function ComboList({ combos, cards, inLists, anchor, onSelect, on
               {withAnchor ? `${anchor} + ` : ''}{pieces.length} card{pieces.length === 1 ? '' : 's'}
             </p>
 
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className={`mt-3 grid gap-3 ${dense ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5'}`}>
               {pieces.map((name) => {
                 const card = byName.get(name) ?? byName.get(front(name));
                 return card ? (
-                  <CardTile key={name} card={card} inLists={inLists[card.id]} onSelect={onSelect} onAdd={onAdd} />
+                  <CardTile key={name} card={card} inLists={inLists[card.id]} onSelect={onSelect} onAdd={onAdd} footer={actions?.(card)} />
                 ) : (
                   <div key={name} className="flex aspect-[488/680] items-center justify-center rounded-xl border border-[var(--border)] p-3 text-center text-sm text-[var(--muted)]">
                     {name}

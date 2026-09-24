@@ -21,7 +21,9 @@ import type { List, ListedCard, ListKind, Profile } from './db';
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
+import type { Board } from './decklist';
 import type { Interpreted } from './interpret';
+import type { Finish } from './scryfall';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
@@ -58,6 +60,10 @@ const post = (body: object) =>
 
 /** A follow-up that refines the search before it. */
 export const followUp = (q: string, previous: Previous) => post({ q, previous });
+
+/** A search from inside a deck, always for that deck's commander. */
+export const askForDeck = (q: string, commander: string, previous?: Previous) =>
+  post({ q, previous, forDeck: { commander } });
 
 /** Carry on a search that stopped to ask which commander was meant. */
 export const resume = (q: string, previous: Previous | undefined, plan: Translation, commander: string) =>
@@ -159,12 +165,34 @@ export const deleteList = (id: string) =>
 export const fetchList = (id: string) =>
   fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[] }>);
 
-export const addCard = (listId: string, cardId: string, quantity = 1) =>
+export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cardId, quantity }),
+    body: JSON.stringify({ cardId, quantity, board }),
   }).then(json<{ ok: true }>);
+
+/** Move a card to another board, or change its printing or finish. */
+export const updateCard = (listId: string, cardId: string, change: { board?: Board; finish?: Finish; printingId?: string }) =>
+  fetch(url(`lists/${listId}/cards`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cardId, ...change }),
+  }).then(json<{ ok: true }>);
+
+export interface Printing {
+  id: string;
+  set: string;
+  setName: string;
+  collectorNumber: string;
+  released: string;
+  finishes: string[];
+  image: string | null;
+  prices: { usd: string | null; usd_foil: string | null; usd_etched: string | null };
+}
+
+export const printings = (oracleId: string) =>
+  fetch(url(`prints?oracleId=${encodeURIComponent(oracleId)}`)).then(json<{ printings: Printing[] }>).then((b) => b.printings);
 
 export const setQuantity = (listId: string, cardId: string, quantity: number) =>
   fetch(url(`lists/${listId}/cards`), {

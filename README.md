@@ -59,6 +59,21 @@ who is using it, and anyone can add themselves from there or from the switcher
 in the header. It is separation, not a login: anyone on the tailnet can pick
 any profile.
 
+**Building a deck** happens on its page:
+
+- **Add cards** opens a window that starts on suggestions - what the
+  commander's decks play on EDHREC that this deck does not have yet - and
+  takes plain English (*ramp that fetches lands*), Scryfall syntax or a card
+  name, always for the deck's commander. Each card has *Add* and *Maybe*.
+- **Main, maybeboard and sideboard.** Only the main board and the commander
+  count towards 100.
+- **Grouped views**: visual stacks or a compact text list, grouped by type or
+  mana value, sorted by name, mana value or price.
+- **Printing and finish**: open a card to pick any of its printings, and
+  foil, non-foil or etched - priced accordingly.
+- **Edit as text** opens the deck in Moxfield's export format and saves it
+  back exactly; sideboard and maybeboard keep their own sections.
+
 **Decks** are lists with a commander. Pick the commander from a search that
 shows each card's art and type line; the deck counts towards 100 with the
 commander included. **Import** a decklist from Moxfield, Archidekt, Arena or

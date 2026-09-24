@@ -15,7 +15,8 @@ const kratos = card('Kratos, God of War', 'sld', '2207', { type_line: 'Legendary
 const bolt = card('Lightning Bolt', 'pf19', '1');
 const boltDefault = card('Lightning Bolt', 'lea', '161');
 const mountain = card('Mountain', 'acr', '107', { type_line: 'Basic Land — Mountain' });
-const known = [kratos, bolt, boltDefault, mountain];
+const solRing = card('Sol Ring', 'soc', '128', { type_line: 'Artifact' });
+const known = [kratos, bolt, boltDefault, mountain, solRing];
 
 function fakeCollection() {
   return vi.fn(async (identifiers: Identifier[]) => {
@@ -70,11 +71,18 @@ describe('resolveDecklist', () => {
     expect(result.cards.map((c) => c.card.name)).toEqual(['Lightning Bolt']);
   });
 
-  it('adds up repeats and leaves the sideboard out', async () => {
-    const text = '1 Lightning Bolt\n2 Lightning Bolt\nSideboard\n1 Mountain';
+  it('adds up repeats, keeps side and maybe cards on their boards, and skips tokens', async () => {
+    const text = '1 Lightning Bolt\n2 Lightning Bolt\nSideboard\n1 Mountain\nMaybeboard\n1 Sol Ring\nTokens\n1 Kratos, God of War';
     const result = await resolveDecklist(text, fakeCollection(), { commanderPicked: null });
-    expect(result.cards.map((c) => [c.card.name, c.quantity])).toEqual([['Lightning Bolt', 3]]);
+    expect(result.cards.map((c) => [c.card.name, c.quantity, c.board])).toEqual([
+      ['Lightning Bolt', 3, 'main'], ['Mountain', 1, 'side'], ['Sol Ring', 1, 'maybe'],
+    ]);
     expect(result.skipped).toBe(1);
+  });
+
+  it('never takes a commander from the sideboard', async () => {
+    const result = await resolveDecklist('Sideboard\n1 Kratos, God of War', fakeCollection(), { commanderPicked: null });
+    expect(result.commander).toBeNull();
   });
 
   it('makes one request per pass, not one per card', async () => {
