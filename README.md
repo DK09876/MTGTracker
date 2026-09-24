@@ -30,11 +30,14 @@ model only ever plans: every card and combo you see came back from Scryfall,
 EDHREC or Commander Spellbook, so a model that misremembers a card can give
 you a bad search but never a card that doesn't exist.
 
+The *All matching cards* view shows 175 cards at a time, with *Load more*
+for the next page in the same order.
+
 **Name a commander and the answer comes in three tabs:**
 
 | Tab | Shows | Order |
 |---|---|---|
-| *Played in Omnath decks* (opens first) | what that commander's decks actually run, from EDHREC — narrowed to your search, or EDHREC's own lists when there is nothing to narrow | share of its decks |
+| *Played in Omnath decks* (opens first) | what that commander's decks actually run, from EDHREC — narrowed by the conditions you stated ("enchantments", "under 5 mana") but not by the AI's guesses at synergy, or EDHREC's own lists when you stated none | share of its decks |
 | *All matching cards* | everything that fits the search in its colours and legal in Commander, from Scryfall — including cards nobody has tried yet | the sort menu; most played in Commander by default |
 | *Combos* | Commander Spellbook's combos for it | most popular |
 
@@ -51,7 +54,29 @@ The query that ran is shown and editable, and a collapsed *How this search
 ran* lists every step — each query in plain English and as written, and how
 many results it found. See [how a search is read](#how-a-search-is-read).
 
-**Lists** are whatever you need them to be: a deck, a trade binder, a wishlist.
+**Profiles** keep people's lists apart, as LifeOS's do. A new browser asks
+who is using it, and anyone can add themselves from there or from the switcher
+in the header. It is separation, not a login: anyone on the tailnet can pick
+any profile.
+
+**Decks** are lists with a commander. Pick the commander from a search that
+shows each card's art and type line; the deck counts towards 100 with the
+commander included. **Import** a decklist from Moxfield, Archidekt, Arena or
+MTGO when making a deck or into an existing one:
+
+```
+1x Kratos, God of War (SLD) 2207
+1x Lightning Bolt (PF19) 1 *F*
+33x Mountain (ACR) 107
+```
+
+Each line keeps its exact printing (set and collector number), falling back
+to the card's name when Scryfall does not know that printing. The commander
+comes from a *Commander* section, or else the first card if it can be one.
+Sideboards and maybeboards are left out, and any line that cannot be found
+is listed so it can be fixed. Foil markers are read but not yet kept.
+
+**Lists** are whatever you need them to be: a trade binder, a wishlist.
 A card can sit in several at once, with its own count in each, and the search
 results tell you which lists already hold a card so you don't add it twice.
 
@@ -117,7 +142,17 @@ it:
 sudo tailscale --socket=/run/tailscale-mtg.sock serve --bg 3001
 ```
 
-Reachable from any device signed into the tailnet and from nowhere else.
+Reachable from any device signed into the tailnet and from nowhere else. To
+let a friend in without giving them the rest of the tailnet, share the `mtg`
+machine with them from the Tailscale admin console.
+
+Profiles can also be managed on the Pi:
+
+```bash
+node scripts/profile.cjs list
+node scripts/profile.cjs add kevin "Kevin"
+node scripts/profile.cjs rename kevin "Kev"
+```
 
 **Why a second node.** The Pi's main node already serves LifeOS, and a node
 has one hostname. The alternatives were worse: a subpath (`/mtg`) is

@@ -12,7 +12,7 @@ export default function ListsPage() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const load = () => api.fetchLists().then(setLists).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  const load = () => api.fetchLists('list').then(setLists).catch((e) => setError(e.message)).finally(() => setLoading(false));
   useEffect(() => { load(); }, []);
 
   const create = async (e: React.FormEvent) => {

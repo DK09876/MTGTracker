@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 
+import ProfileGate from '@/components/ProfileGate';
+import ProfileSwitcher from '@/components/ProfileSwitcher';
+
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -27,13 +30,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
                 Search
               </Link>
+              <Link href="/decks" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
+                Decks
+              </Link>
               <Link href="/lists" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
                 Lists
               </Link>
+              <ProfileSwitcher />
             </div>
           </nav>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <main className="mx-auto max-w-6xl px-4 py-6"><ProfileGate>{children}</ProfileGate></main>
         <footer className="mx-auto max-w-6xl px-4 pb-8 pt-4 text-xs text-[var(--muted)]">
           Card data and images from{' '}
           <a href="https://scryfall.com" className="underline hover:text-[var(--foreground)]" target="_blank" rel="noreferrer">
