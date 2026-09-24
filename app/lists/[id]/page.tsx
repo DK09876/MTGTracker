@@ -10,6 +10,7 @@ import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckHealth from '@/components/DeckHealth';
 import ImportResult from '@/components/ImportResult';
 import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
@@ -30,6 +31,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [section, setSection] = useState<'cards' | 'health'>('cards');
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -322,13 +324,37 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
-      <DeckCards
-        entries={entries}
-        isDeck={deck}
-        onSelect={setSelected}
-        onQuantity={changeQuantity}
-        onMove={moveCard}
-      />
+      {deck && (
+        <div className="mt-5 inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
+          {([['cards', 'Cards'], ['health', 'Deck health']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              role="tab"
+              aria-selected={section === value}
+              onClick={() => setSection(value)}
+              className={`px-4 py-1.5 ${section === value ? 'bg-[var(--surface-hover)] font-medium text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {deck && section === 'health' ? (
+        <DeckHealth
+          listId={id}
+          commander={list.commander?.name ?? null}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+        />
+      ) : (
+        <DeckCards
+          entries={entries}
+          isDeck={deck}
+          onSelect={setSelected}
+          onQuantity={changeQuantity}
+          onMove={moveCard}
+        />
+      )}
 
       <CardModal
         card={selected}

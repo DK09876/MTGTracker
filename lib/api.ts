@@ -22,7 +22,9 @@ import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
 import type { Board } from './decklist';
+import type { Health } from './health';
 import type { Interpreted } from './interpret';
+import type { RoleCount } from './roles';
 import type { Finish } from './scryfall';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
@@ -214,3 +216,15 @@ export const createProfile = (name: string) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   }).then(json<{ profile: Profile }>).then((b) => b.profile);
+
+export interface DeckHealth {
+  health: Health;
+  landTarget: [number, number];
+}
+
+/** Everything that comes from the stored cards - immediate. */
+export const deckHealth = (listId: string) => fetch(url(`lists/${listId}/health`)).then(json<DeckHealth>);
+
+/** Role counts - slow the first time a deck's cards are seen, then immediate. */
+export const deckRoles = (listId: string) =>
+  fetch(url(`lists/${listId}/health?roles=1`)).then(json<{ roles: RoleCount[] }>).then((b) => b.roles);

@@ -526,11 +526,11 @@ async function edhrecView(
 
   const full = scoped(filters, commander);
   const found = new Map<string, ScryfallCard>();
-  for (const batch of batches(full, names)) {
-    try {
-      for (const card of (await deps.search(batch, DEFAULT_SORT)).cards) found.set(card.id, card);
-    } catch { /* one failed batch only costs its own cards */ }
-  }
+  // All at once: the Scryfall client spaces them out. One failed batch only
+  // costs its own cards.
+  const results = await Promise.all(batches(full, names).map((batch) =>
+    deps.search(batch, DEFAULT_SORT).catch(() => ({ cards: [] as ScryfallCard[] }))));
+  for (const { cards } of results) for (const card of cards) found.set(card.id, card);
   const stats = statsById([...found.values()], page.stats);
   const cards = [...found.values()].sort((a, b) => (stats[b.id]?.inclusion ?? 0) - (stats[a.id]?.inclusion ?? 0));
   trace.push({
