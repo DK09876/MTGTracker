@@ -22,18 +22,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--background)]/95 backdrop-blur">
-          <nav className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
+          <nav className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3 sm:gap-4">
+            <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">
               <span className="text-[var(--accent)]">MTG</span> Tracker
             </Link>
-            <div className="ml-auto flex items-center gap-1 text-sm">
-              <Link href="/" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
+            <div className="ml-auto flex items-center gap-0.5 text-sm sm:gap-1">
+              <Link href="/" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Search
               </Link>
-              <Link href="/decks" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
+              <Link href="/decks" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Decks
               </Link>
-              <Link href="/lists" className="rounded-lg px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
+              <Link href="/lists" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Lists
               </Link>
               <ProfileSwitcher />

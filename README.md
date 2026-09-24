@@ -73,6 +73,12 @@ any profile.
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it
   back exactly; sideboard and maybeboard keep their own sections.
+- **Deck health**: warnings (not 100 cards, off-colour cards, duplicates,
+  bans, Game Changers), the mana curve, each colour's share of the costs
+  against the lands that make it, role counts - ramp, card advantage,
+  removal, board wipes, tutors - against common guidelines, and how often
+  an opening hand has 2-4 lands. Roles come from Scryfall's tags, looked up
+  once per card and saved.
 
 **Decks** are lists with a commander. Pick the commander from a search that
 shows each card's art and type line; the deck counts towards 100 with the

@@ -92,6 +92,15 @@ function open(): Database {
   if (!cardColumns.some((c) => c.name === 'finish')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'nonfoil'`);
   }
+  // What each card does - ramp, removal... - from Scryfall's tags, by
+  // oracle id so every printing shares the answer. `checkedAt` records that
+  // a card was looked up, so one with no roles is not looked up again.
+  db.run(`CREATE TABLE IF NOT EXISTS card_roles (oracleId TEXT NOT NULL, role TEXT NOT NULL, PRIMARY KEY (oracleId, role))`);
+  db.run(`CREATE TABLE IF NOT EXISTS card_roles_checked (oracleId TEXT PRIMARY KEY, checkedAt TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1)`);
+  const roleColumns = db.all('PRAGMA table_info(card_roles_checked)') as Array<{ name: string }>;
+  if (!roleColumns.some((c) => c.name === 'version')) {
+    db.run('ALTER TABLE card_roles_checked ADD COLUMN version INTEGER NOT NULL DEFAULT 1');
+  }
   // Main, sideboard or maybeboard. A card sits on one board at a time.
   if (!cardColumns.some((c) => c.name === 'board')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN board TEXT NOT NULL DEFAULT 'main'`);
@@ -423,4 +432,47 @@ export function listsHolding(cardIds: string[], profileId: string | null): Recor
   const out: Record<string, string[]> = {};
   for (const row of rows) (out[row.cardId] ??= []).push(row.name);
   return out;
+}
+
+// --- card roles ----------------------------------------------------------
+
+/** Roles already known for these cards, and which were looked up since `since` under this `version` of the roles. */
+export function cachedRoles(oracleIds: string[], since: string, version: number): { roles: Map<string, string[]>; checked: Set<string> } {
+  const roles = new Map<string, string[]>();
+  const checked = new Set<string>();
+  if (!oracleIds.length) return { roles, checked };
+  const database = open();
+  const marks = oracleIds.map(() => '?').join(',');
+  const current = database.all(
+    `SELECT oracleId FROM card_roles_checked WHERE checkedAt >= ? AND version = ? AND oracleId IN (${marks})`,
+    [since, version, ...oracleIds],
+  ) as Array<{ oracleId: string }>;
+  for (const row of current) {
+    checked.add(row.oracleId);
+  }
+  for (const row of database.all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${marks})`, oracleIds) as Array<{ oracleId: string; role: string }>) {
+    roles.set(row.oracleId, [...(roles.get(row.oracleId) ?? []), row.role]);
+  }
+  return { roles, checked };
+}
+
+/** Record what was found for cards just looked up - including finding nothing. */
+export function saveRoles(found: Map<string, string[]>, version: number): void {
+  const database = open();
+  database.run('BEGIN');
+  try {
+    for (const [oracleId, roles] of found) {
+      database.run('DELETE FROM card_roles WHERE oracleId = ?', [oracleId]);
+      for (const role of roles) database.run('INSERT INTO card_roles (oracleId, role) VALUES (?, ?)', [oracleId, role]);
+      database.run(
+        `INSERT INTO card_roles_checked (oracleId, checkedAt, version) VALUES (?, ?, ?)
+         ON CONFLICT(oracleId) DO UPDATE SET checkedAt = excluded.checkedAt, version = excluded.version`,
+        [oracleId, now(), version],
+      );
+    }
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
 }

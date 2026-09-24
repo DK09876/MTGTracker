@@ -97,3 +97,17 @@ describe('printingsOf', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('throttle', () => {
+  it('spaces the starts of requests 100ms apart but lets them overlap', async () => {
+    const { throttle, MIN_GAP_MS } = await import('./scryfall');
+    const starts: number[] = [];
+    const t0 = Date.now();
+    // Each takes 300ms: run one after another, three would take 900ms.
+    const slow = () => { starts.push(Date.now() - t0); return new Promise((r) => setTimeout(r, 300)); };
+    await Promise.all([throttle(slow), throttle(slow), throttle(slow)]);
+    const elapsed = Date.now() - t0;
+    for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(MIN_GAP_MS - 5);
+    expect(elapsed).toBeLessThan(700);
+  });
+});

@@ -22,22 +22,23 @@ const HEADERS = {
   Accept: 'application/json',
 };
 
-/** Scryfall ask for 50-100ms between requests. Serialised so bursts cannot slip past. */
-const MIN_GAP_MS = 100;
-let lastCall = 0;
-let queue: Promise<unknown> = Promise.resolve();
+/**
+ * Scryfall ask for 50-100ms between requests. Each request is given the
+ * next free start time, 100ms after the last, so no burst can slip past -
+ * about ten a second at most, which is their limit.
+ *
+ * Starts are spaced, not whole requests: waiting for each to finish before
+ * starting the next made twenty role lookups take eighteen seconds, since a
+ * search can take the best part of one.
+ */
+export const MIN_GAP_MS = 100;
+let nextStart = 0;
 
-function throttle<T>(work: () => Promise<T>): Promise<T> {
-  const run = async (): Promise<T> => {
-    const wait = MIN_GAP_MS - (Date.now() - lastCall);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastCall = Date.now();
-    return work();
-  };
-  // Chain onto the previous call so two concurrent requests still queue.
-  const result = queue.then(run, run);
-  queue = result.catch(() => {});
-  return result;
+export function throttle<T>(work: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const start = Math.max(now, nextStart);
+  nextStart = start + MIN_GAP_MS;
+  return new Promise((resolve) => setTimeout(resolve, start - now)).then(work);
 }
 
 export interface ScryfallCard {
@@ -76,6 +77,10 @@ export interface ScryfallCard {
     artist?: string;
     image_uris?: { small?: string; normal?: string; large?: string; art_crop?: string };
   }>;
+  /** Colours of mana the card can make - lands, rocks, dorks. */
+  produced_mana?: string[];
+  /** On the official Commander Game Changers list. */
+  game_changer?: boolean;
   /** Which finishes this printing exists in: nonfoil, foil, etched. */
   finishes?: string[];
   prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null; eur?: string | null; tix?: string | null };
