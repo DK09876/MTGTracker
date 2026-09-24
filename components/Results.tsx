@@ -25,7 +25,15 @@ export type Tab = 'edhrec' | 'cards' | 'combos';
 
 /** What the page has for each view; undefined means not loaded yet. */
 export interface Views {
-  cards?: { cards: ScryfallCard[]; total: number; stats?: Record<string, CardStats>; sort?: Sort };
+  cards?: {
+    cards: ScryfallCard[];
+    total: number;
+    stats?: Record<string, CardStats>;
+    sort?: Sort;
+    /** Scryfall pages of 175; more can be loaded when there are. */
+    page?: number;
+    hasMore?: boolean;
+  };
   /** null: EDHREC has nothing for this commander. */
   edhrec?: EdhrecView | null;
   combos?: { combos: Combo[]; cards: ScryfallCard[]; note?: string };
@@ -40,13 +48,17 @@ interface Props {
   loading: boolean;
   inLists: Record<string, string[]>;
   onSort: (sort: Sort) => void;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
   onSelect: (card: ScryfallCard) => void;
   onAdd: (card: ScryfallCard) => void;
 }
 
 const short = (name: string) => name.split(',')[0];
 
-export default function Results({ views, commander, tab, onTab, loading, inLists, onSort, onSelect, onAdd }: Props) {
+export default function Results({
+  views, commander, tab, onTab, loading, inLists, onSort, onLoadMore, loadingMore, onSelect, onAdd,
+}: Props) {
   const grid = { inLists, onSelect, onAdd };
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = commander
@@ -102,6 +114,17 @@ export default function Results({ views, commander, tab, onTab, loading, inLists
                 {views.cards.sort && <SortMenu sort={views.cards.sort} onChange={onSort} />}
               </div>
               <CardGrid cards={views.cards.cards} stats={views.cards.stats} commander={commander} {...grid} />
+              {views.cards.hasMore && onLoadMore && (
+                <div className="mt-6 text-center">
+                  <button
+                    onClick={onLoadMore}
+                    disabled={loadingMore}
+                    className="rounded-xl border border-[var(--border)] px-5 py-2 text-sm hover:bg-[var(--surface)] disabled:opacity-60"
+                  >
+                    {loadingMore ? 'Loading…' : `Load more · ${(views.cards.total - views.cards.cards.length).toLocaleString()} to go`}
+                  </button>
+                </div>
+              )}
             </>
           )
           : <p className="mt-8 text-center text-[var(--muted)]">No cards matched that search.</p>

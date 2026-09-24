@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 
 import { addCardToList, removeCardFromList, setQuantity } from '@/lib/db';
+import { requireList } from '@/lib/profile-route';
 import { getCard, ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -17,6 +18,8 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: listId } = await params;
+  const owned = requireList(request, listId);
+  if (owned instanceof NextResponse) return owned;
   let body: { cardId?: string; quantity?: number };
   try {
     body = await request.json();
@@ -40,6 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: listId } = await params;
+  const owned = requireList(request, listId);
+  if (owned instanceof NextResponse) return owned;
   let body: { cardId?: string; quantity?: number };
   try {
     body = await request.json();
@@ -60,6 +65,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: listId } = await params;
+  const owned = requireList(request, listId);
+  if (owned instanceof NextResponse) return owned;
   const cardId = new URL(request.url).searchParams.get('cardId');
   if (!cardId) return NextResponse.json({ error: 'cardId required' }, { status: 400 });
   try {

@@ -43,6 +43,14 @@ export interface Translation {
    * kind "combos": extra Commander Spellbook terms, usually empty.
    */
   query: string;
+  /**
+   * Only the conditions the request itself states - "enchantments", "under
+   * 5 mana" - without the synergy the model added to `query`. The EDHREC tab
+   * filters by these: its list is already what works with the commander, and
+   * re-filtering it by guessed rules text threw most of it away (12 of
+   * Azula's 20 enchantments). Null when the model did not say.
+   */
+  constraints: string | null;
   /** One sentence restating what the search looks for, shown above the results. */
   explanation: string;
 }
@@ -55,6 +63,7 @@ export interface Previous {
   commander?: string;
   cardName?: string;
   query: string;
+  constraints?: string;
 }
 
 /** What the model is told on top of the request. */
@@ -89,7 +98,8 @@ export function userMessage(request: string, context: Context = {}, today = new 
       `Plan that ran: kind ${previous.kind}`
         + (previous.commander ? `; commander ${previous.commander}` : '')
         + (previous.cardName ? `; cardName ${previous.cardName}` : '')
-        + `; query ${previous.query || '(empty)'}`,
+        + `; query ${previous.query || '(empty)'}`
+        + (previous.constraints !== undefined ? `; constraints ${previous.constraints || '(empty)'}` : ''),
       '',
       `Follow-up: ${request}`,
       '',
@@ -189,7 +199,8 @@ export function parseTranslation(body: unknown): Translation {
     else throw new GeminiError('the model returned an empty query');
   }
 
-  return { kind, cardName, commander, query, explanation: clean(parsed.explanation) };
+  const constraints = typeof parsed.constraints === 'string' ? parsed.constraints.trim() : null;
+  return { kind, cardName, commander, query, constraints, explanation: clean(parsed.explanation) };
 }
 
 const RESPONSE_SCHEMA = {
@@ -200,9 +211,10 @@ const RESPONSE_SCHEMA = {
     commander: { type: 'STRING', nullable: true },
     explanation: { type: 'STRING' },
     query: { type: 'STRING' },
+    constraints: { type: 'STRING' },
   },
-  required: ['kind', 'cardName', 'commander', 'explanation', 'query'],
-  propertyOrdering: ['kind', 'cardName', 'commander', 'explanation', 'query'],
+  required: ['kind', 'cardName', 'commander', 'explanation', 'query', 'constraints'],
+  propertyOrdering: ['kind', 'cardName', 'commander', 'explanation', 'query', 'constraints'],
 };
 
 // Tags checked against Scryfall on 2026-09-24. An unknown otag does not
@@ -245,6 +257,11 @@ Return JSON with:
     For "combos": usually empty. Only add Commander Spellbook terms when the
     request narrows the combos: result:"infinite mana", cards<=2 (at most two
     pieces), price<50, coloridentity<=UR (only when no commander is given).
+- constraints: for "cards", the part of the query the request itself states,
+  in Scryfall syntax - card types, mana value, price, colours, rarity, a role
+  the user named ("ramp", "card draw", "removal"). Leave out anything you
+  added to judge synergy with the commander. Empty when the request states
+  nothing ("good cards for Azula"). For "card" and "combos", empty.
 
 When a commander is given, the server adds its colour identity, Commander
 legality, and removes the commander itself. So never write id:, f:commander
@@ -287,12 +304,14 @@ never invent a keyword - if you are unsure a clause is valid, leave it out.
 
 Examples:
 "cheap green ramp that isn't a land" ->
-  kind: cards; query: otag:ramp c:g -t:land usd<2
+  kind: cards; query: otag:ramp c:g -t:land usd<2; constraints: otag:ramp c:g -t:land usd<2
 "lightnig bolt" -> kind: card; cardName: Lightning Bolt
 "enchantments that work well for fire lord azula" ->
-  kind: cards; commander: Fire Lord Azula; query: t:enchantment
+  kind: cards; commander: Fire Lord Azula; query: t:enchantment; constraints: t:enchantment
+  (once shown Azula's rules text: query: t:enchantment (o:copy or o:"whenever you cast"); constraints: t:enchantment)
 "a card under 5 cmc for azula that helps me draw cards" ->
-  kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5
+  kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5;
+  constraints: (otag:draw or otag:card-advantage) mv<5
 "combo cards for vivi" -> kind: combos; commander: Vivi
 "what goes infinite with doubling season" -> kind: combos; cardName: Doubling Season
 "two card infinite mana combos in izzet" ->

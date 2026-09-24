@@ -32,7 +32,10 @@ function viewsOf(answer: api.AskResponse): Views {
     return { combos: { combos: answer.combos ?? [], cards: answer.cards, note: answer.interpretation.note } };
   }
   return {
-    cards: { cards: answer.cards, total: answer.totalCards, stats: answer.stats, sort: answer.interpretation.sort },
+    cards: {
+      cards: answer.cards, total: answer.totalCards, stats: answer.stats, sort: answer.interpretation.sort,
+      page: 1, hasMore: answer.hasMore,
+    },
     edhrec: answer.interpretation.commander ? answer.edhrec ?? null : undefined,
   };
 }
@@ -44,13 +47,14 @@ function firstTab(answer: api.AskResponse): Tab {
 
 /** The search that ran, for a follow-up to refine. */
 function previousOf(answer: api.AskResponse, thread: string[]): Previous {
-  const { kind, commander, query } = answer.interpretation;
+  const { kind, commander, query, constraints } = answer.interpretation;
   return {
     request: thread.join(' › '),
     kind,
     commander: commander?.name,
     cardName: kind === 'card' ? query.replace(/^!"|"$/g, '') : undefined,
     query,
+    constraints,
   };
 }
 
@@ -61,6 +65,7 @@ export default function SearchPage() {
   const [views, setViews] = useState<Views>({});
   const [tab, setTab] = useState<Tab>('cards');
   const [tabLoading, setTabLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [thread, setThread] = useState<string[]>([]);
   // The request that produced the current answer, so a search that stopped
   // to ask which commander can carry on from it.
@@ -163,9 +168,49 @@ export default function SearchPage() {
     const { commander } = answer.interpretation;
     run('searching', () => api.runQuery(answer.interpretation.query, { commander: commander?.name, sort, edhrec: false }), (r) => {
       const result = r as api.AskResponse;
-      setViews((v) => ({ ...v, cards: { cards: result.cards, total: result.totalCards, stats: result.stats, sort: result.interpretation.sort } }));
+      setViews((v) => ({
+        ...v,
+        cards: {
+          cards: result.cards, total: result.totalCards, stats: result.stats, sort: result.interpretation.sort,
+          page: 1, hasMore: result.hasMore,
+        },
+      }));
       setAnswer((a) => (a ? { ...a, interpretation: { ...a.interpretation, sort: result.interpretation.sort } } : a));
     });
+  };
+
+  /** The next page of the Scryfall view, added below what is already there. */
+  const loadMore = async () => {
+    const current = views.cards;
+    if (!answer || !current?.hasMore || loadingMore) return;
+    const id = runId.current;
+    setLoadingMore(true);
+    try {
+      const next = (current.page ?? 1) + 1;
+      const r = await api.runQuery(answer.interpretation.query, {
+        commander: answer.interpretation.commander?.name, sort: current.sort, edhrec: false, page: next,
+      });
+      if (id !== runId.current) return;
+      setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setViews((v) => {
+        if (!v.cards) return v;
+        const seen = new Set(v.cards.cards.map((c) => c.id));
+        return {
+          ...v,
+          cards: {
+            ...v.cards,
+            cards: [...v.cards.cards, ...r.cards.filter((c) => !seen.has(c.id))],
+            stats: { ...v.cards.stats, ...r.stats },
+            page: next,
+            hasMore: r.hasMore,
+          },
+        };
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load more');
+    } finally {
+      setLoadingMore(false);
+    }
   };
 
   /** Open a tab, fetching its view the first time. */
@@ -191,7 +236,7 @@ export default function SearchPage() {
         setInLists((prev) => ({ ...prev, ...r.inLists }));
         setViews((v) => ({
           ...v,
-          cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort },
+          cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
           edhrec: r.edhrec ?? null,
         }));
       }
@@ -256,6 +301,8 @@ export default function SearchPage() {
           loading={tabLoading}
           inLists={inLists}
           onSort={resort}
+          onLoadMore={answer ? loadMore : undefined}
+          loadingMore={loadingMore}
           onSelect={setSelected}
           onAdd={setAdding}
         />

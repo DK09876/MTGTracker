@@ -8,9 +8,18 @@
  */
 
 const BASE = process.env.NEXT_PUBLIC_MTG_BASE_PATH ?? '';
-const url = (path: string) => `${BASE}/api/${path}`;
 
-import type { List, ListedCard } from './db';
+// Every call says which profile it is for; list routes refuse a request that
+// does not, and search uses it to mark which of your lists hold a card.
+const url = (path: string) => {
+  const profile = getProfile();
+  if (!profile) return `${BASE}/api/${path}`;
+  return `${BASE}/api/${path}${path.includes('?') ? '&' : '?'}profile=${encodeURIComponent(profile)}`;
+};
+
+import type { List, ListedCard, ListKind, Profile } from './db';
+import type { ImportSummary } from './import-into';
+import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
 import type { Interpreted } from './interpret';
 import { sortKey, type Sort } from './sort';
@@ -59,12 +68,13 @@ export const resume = (q: string, previous: Previous | undefined, plan: Translat
  * scoped to the same commander. `edhrec: false` skips rebuilding the EDHREC
  * tab, for a change that only affects the Scryfall one.
  */
-export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean } = {}) =>
+export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean; page?: number } = {}) =>
   fetch(url(`ask?${new URLSearchParams({
     query,
     ...(opts.commander ? { commander: opts.commander } : {}),
     ...(opts.sort ? { sort: sortKey(opts.sort) } : {}),
     ...(opts.edhrec === false ? { edhrec: '0' } : {}),
+    ...(opts.page && opts.page > 1 ? { page: String(opts.page) } : {}),
   })}`)).then(json<AskResponse>);
 
 /** A commander's combos, for the Combos tab. */
@@ -75,8 +85,40 @@ export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ names: string[] }>).then((b) => b.names);
 
-export const fetchLists = () =>
-  fetch(url('lists')).then(json<{ lists: List[] }>).then((b) => b.lists);
+export const fetchLists = (kind?: ListKind) =>
+  fetch(url(kind ? `lists?kind=${kind}` : 'lists')).then(json<{ lists: List[] }>).then((b) => b.lists);
+
+export interface CommanderOption {
+  id: string;
+  name: string;
+  typeLine: string;
+  image: string | null;
+}
+
+export const searchCommanders = (q: string, signal?: AbortSignal) =>
+  fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
+    .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
+
+export const createDeck = (name: string, commanderId: string | null, decklist: string) =>
+  fetch(url('lists'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist }),
+  }).then(json<{ list: List; imported?: ImportSummary }>);
+
+export const setCommander = (listId: string, commanderId: string | null) =>
+  fetch(url(`lists/${listId}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commanderId }),
+  }).then(json<{ list: List }>);
+
+export const importDecklist = (listId: string, decklist: string) =>
+  fetch(url(`lists/${listId}/import`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decklist }),
+  }).then(json<{ list: List; imported: ImportSummary }>);
 
 export const createList = (name: string) =>
   fetch(url('lists'), {
@@ -115,3 +157,13 @@ export const setQuantity = (listId: string, cardId: string, quantity: number) =>
 export const removeCard = (listId: string, cardId: string) =>
   fetch(url(`lists/${listId}/cards?cardId=${encodeURIComponent(cardId)}`), { method: 'DELETE' })
     .then(json<{ ok: true }>);
+
+export const fetchProfiles = () =>
+  fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
+
+export const createProfile = (name: string) =>
+  fetch(url('profiles'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  }).then(json<{ profile: Profile }>).then((b) => b.profile);

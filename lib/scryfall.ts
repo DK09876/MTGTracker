@@ -217,23 +217,36 @@ export async function findCommanders(mention: string): Promise<ScryfallCard[]> {
 // Scryfall's limit for one collection request.
 const COLLECTION_MAX = 75;
 
+/** A way to name one card to Scryfall's collection endpoint. */
+export type Identifier = { name: string } | { set: string; collector_number: string };
+
 /**
- * Cards by exact name, in as few requests as Scryfall allows.
+ * Many cards in as few requests as Scryfall allows. What it cannot find is
+ * returned separately rather than failing the rest.
+ */
+export async function collection(identifiers: Identifier[]): Promise<{ cards: ScryfallCard[]; notFound: Identifier[] }> {
+  const cards: ScryfallCard[] = [];
+  const notFound: Identifier[] = [];
+  for (let i = 0; i < identifiers.length; i += COLLECTION_MAX) {
+    const body = await request<{ data: ScryfallCard[]; not_found?: Identifier[] }>(
+      '/cards/collection', { identifiers: identifiers.slice(i, i + COLLECTION_MAX) },
+    );
+    cards.push(...body.data);
+    notFound.push(...(body.not_found ?? []));
+  }
+  return { cards, notFound };
+}
+
+/**
+ * Cards by exact name.
  *
  * A double-faced card is looked up by its front face: the collection
  * endpoint finds "Delver of Secrets" but not the full
- * "Delver of Secrets // Insectile Aberration". Names it cannot find are
- * left out rather than failing the rest.
+ * "Delver of Secrets // Insectile Aberration".
  */
 export async function cardsNamed(names: string[]): Promise<ScryfallCard[]> {
   const fronts = [...new Set(names.map((n) => n.split(' // ')[0].trim()).filter(Boolean))];
-  const found: ScryfallCard[] = [];
-  for (let i = 0; i < fronts.length; i += COLLECTION_MAX) {
-    const identifiers = fronts.slice(i, i + COLLECTION_MAX).map((name) => ({ name }));
-    const body = await request<{ data: ScryfallCard[] }>('/cards/collection', { identifiers });
-    found.push(...body.data);
-  }
-  return found;
+  return (await collection(fronts.map((name) => ({ name })))).cards;
 }
 
 /** A card's rules text, with both faces of a double-faced card. */

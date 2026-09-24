@@ -7,7 +7,7 @@
  *   GET  ?query=&commander=&sort=  run a query as written, no model - for an
  *                                  edited query, a new sort (&edhrec=0 skips
  *                                  rebuilding the EDHREC tab), or a tab
- *                                  opened later
+ *                                  opened later; &page=2 for the next 175
  *   GET  ?combosFor=...            a commander's combos, for the Combos tab
  *
  * /api/search still runs a bare query with nothing else attached.
@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server';
 
 import { listsHolding } from '@/lib/db';
+import { profileOf } from '@/lib/profile-route';
 import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
 import { geminiTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
@@ -28,7 +29,7 @@ export const dynamic = 'force-dynamic';
 
 function deps(): Deps {
   return {
-    search: (q, sort) => searchCards(q, 1, sort),
+    search: (q, sort, page) => searchCards(q, page ?? 1, sort),
     findCardNamed,
     findCommanders,
     cardsNamed,
@@ -38,11 +39,12 @@ function deps(): Deps {
   };
 }
 
-async function respond(work: () => Promise<Interpreted>) {
+/** Run a search, and mark which of the asking profile's lists already hold each card. */
+async function respond(request: Request, work: () => Promise<Interpreted>) {
   try {
     const result = await work();
     const ids = [...result.cards, ...(result.edhrec?.cards ?? [])].map((c) => c.id);
-    return NextResponse.json({ ...result, inLists: listsHolding([...new Set(ids)]) });
+    return NextResponse.json({ ...result, inLists: listsHolding([...new Set(ids)], profileOf(request)) });
   } catch (error) {
     if (error instanceof ScryfallError || error instanceof SpellbookError) {
       // 400 usually means the query syntax is wrong, which is worth showing.
@@ -56,16 +58,17 @@ async function respond(work: () => Promise<Interpreted>) {
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const combosFor = params.get('combosFor');
-  if (combosFor) return respond(() => runCombos(combosFor, deps()));
+  if (combosFor) return respond(request, () => runCombos(combosFor, deps()));
 
   const query = params.get('query');
   if (query !== null) {
-    return respond(() => runQuery(query, params.get('commander') || null, deps(), parseSortKey(params.get('sort')), {
+    return respond(request, () => runQuery(query, params.get('commander') || null, deps(), parseSortKey(params.get('sort')), {
       withEdhrec: params.get('edhrec') !== '0',
+      page: Math.max(1, Number(params.get('page')) || 1),
     }));
   }
 
-  return respond(() => interpret(params.get('q') ?? '', deps()));
+  return respond(request, () => interpret(params.get('q') ?? '', deps()));
 }
 
 const KINDS = new Set<Kind>(['cards', 'card', 'combos']);
@@ -84,6 +87,7 @@ function resumeOf(raw: unknown): Resume | undefined {
       cardName: text(p.cardName) ?? null,
       commander: text(p.commander) ?? null,
       query: text(p.query) ?? '',
+      constraints: text(p.constraints) ?? null,
       explanation: text(p.explanation) ?? '',
     },
   };
@@ -99,7 +103,10 @@ export async function POST(request: Request) {
   const p = body.previous ?? {};
   const kind = p.kind === 'card' || p.kind === 'combos' ? p.kind : 'cards';
   const previous: Previous | undefined = text(p.request)
-    ? { request: text(p.request)!, kind, commander: text(p.commander), cardName: text(p.cardName), query: text(p.query) ?? '' }
+    ? {
+      request: text(p.request)!, kind, commander: text(p.commander), cardName: text(p.cardName),
+      query: text(p.query) ?? '', constraints: text(p.constraints),
+    }
     : undefined;
-  return respond(() => interpret(text(body.q) ?? '', deps(), previous, resumeOf(body.resume)));
+  return respond(request, () => interpret(text(body.q) ?? '', deps(), previous, resumeOf(body.resume)));
 }

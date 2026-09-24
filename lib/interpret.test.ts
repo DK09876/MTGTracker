@@ -24,7 +24,7 @@ const found = (...names: string[]): SearchResult =>
 const nothing = found();
 
 const plan = (over: Partial<Translation> = {}): Translation =>
-  ({ kind: 'cards', query: 'otag:ramp c:g', explanation: 'Something', commander: null, cardName: null, ...over });
+  ({ kind: 'cards', query: 'otag:ramp c:g', constraints: null, explanation: 'Something', commander: null, cardName: null, ...over });
 
 const azula = card('Fire Lord Azula', {
   color_identity: ['U', 'B', 'R'],
@@ -55,7 +55,7 @@ describe('syntax and fallbacks', () => {
   it('sends syntax straight to Scryfall without asking the model', async () => {
     const d = deps();
     const result = await interpret('t:goblin c:r', d);
-    expect(d.search).toHaveBeenCalledWith('t:goblin c:r', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('t:goblin c:r', DEFAULT_SORT, 1);
     expect(d.translate).not.toHaveBeenCalled();
     expect(result.interpretation).toMatchObject({ via: 'syntax', query: 't:goblin c:r', sort: DEFAULT_SORT });
     expect(result.trace[1]).toMatchObject({ query: 't:goblin c:r order:edhrec', count: 1 });
@@ -70,7 +70,7 @@ describe('syntax and fallbacks', () => {
   it('searches as typed, and says so, when no model is configured', async () => {
     const d = deps({ translate: null });
     const result = await interpret('Lightning Bolt', d);
-    expect(d.search).toHaveBeenCalledWith('Lightning Bolt', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('Lightning Bolt', DEFAULT_SORT, 1);
     expect(result.interpretation.note).toMatch(/AI search is off/);
   });
 
@@ -84,7 +84,7 @@ describe('syntax and fallbacks', () => {
   it('falls back to a plain search when the model fails', async () => {
     const d = deps({ translate: vi.fn(async () => { throw new Error('the model took too long'); }) });
     const result = await interpret('Lightning Bolt', d);
-    expect(d.search).toHaveBeenCalledWith('Lightning Bolt', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('Lightning Bolt', DEFAULT_SORT, 1);
     expect(result.interpretation.note).toMatch(/the model took too long/);
   });
 
@@ -101,7 +101,7 @@ describe('one card by name', () => {
   it('builds the exact-name search itself', async () => {
     const d = deps({ translate: vi.fn(async () => plan({ kind: 'card', cardName: 'Lightning Bolt', query: '' })) });
     const result = await interpret('lightnig bolt', d);
-    expect(d.search).toHaveBeenCalledWith('!"Lightning Bolt"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('!"Lightning Bolt"', DEFAULT_SORT, 1);
     expect(result.interpretation).toMatchObject({ kind: 'card', query: '!"Lightning Bolt"' });
   });
 
@@ -132,7 +132,7 @@ describe('cards for a commander', () => {
       text: expect.stringContaining('copy that spell'),
     });
     expect(d.search).toHaveBeenCalledWith(
-      '(t:enchantment (o:copy or o:"whenever you cast")) id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT);
+      '(t:enchantment (o:copy or o:"whenever you cast")) id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
     expect(result.interpretation).toMatchObject({
       query: 't:enchantment (o:copy or o:"whenever you cast")',
       commander: { name: 'Fire Lord Azula', identity: 'UBR', edhrecUrl: 'https://edhrec.com/commanders/fire-lord-azula' },
@@ -145,7 +145,7 @@ describe('cards for a commander', () => {
     const d = deps({ translate, findCommanders: vi.fn(async () => [azula]), now: () => clock });
     const result = await interpret('instants for azula', d);
     expect(translate).toHaveBeenCalledTimes(1);
-    expect(d.search).toHaveBeenCalledWith('t:instant id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('t:instant id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
     expect(result.trace.some((s) => s.text.includes('too slow'))).toBe(true);
   });
 
@@ -155,13 +155,13 @@ describe('cards for a commander', () => {
       .mockRejectedValueOnce(new Error('timeout'));
     const d = deps({ translate, findCommanders: vi.fn(async () => [azula]) });
     await interpret('draw under 5 for azula', d);
-    expect(d.search).toHaveBeenCalledWith('otag:draw mv<5 id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('otag:draw mv<5 id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
   });
 
   it('searches without a commander when none can be found', async () => {
     const d = deps({ translate: vi.fn(async () => plan({ commander: 'Nobody Real', query: 't:elf' })) });
     const result = await interpret('elves for nobody real', d);
-    expect(d.search).toHaveBeenCalledWith('t:elf', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('t:elf', DEFAULT_SORT, 1);
     expect(result.trace.some((s) => s.text.includes('Could not find a commander'))).toBe(true);
   });
 
@@ -171,14 +171,14 @@ describe('cards for a commander', () => {
       findCommanders: vi.fn(async () => [azula]),
     });
     await interpret('cards for azula', d);
-    expect(d.search).toHaveBeenCalledWith('id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
   });
 
   it('re-runs an edited query for the same commander without the model', async () => {
     const d = deps({ findCommanders: vi.fn(async () => [azula]) });
     const result = await runQuery('t:instant', 'Fire Lord Azula', d);
     expect(d.translate).not.toHaveBeenCalled();
-    expect(d.search).toHaveBeenCalledWith('t:instant id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('t:instant id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
     expect(result.interpretation.commander?.name).toBe('Fire Lord Azula');
   });
 });
@@ -236,6 +236,39 @@ describe('the EDHREC view', () => {
     expect(result.edhrec!.cards.map((c) => c.name)).toEqual(['Leyline of Anticipation', 'Rhystic Study']);
   });
 
+  // Azula's enchantments: the model's synergy words cut EDHREC's 20 to 12.
+  it('narrows by what was asked for, not by the model\'s synergy guesses', async () => {
+    const search = vi.fn<Deps['search']>(async () => found('Leyline of Anticipation'));
+    const d = withEdhrec({
+      search,
+      translate: vi.fn(async () => plan({
+        commander: 'azula', query: 't:enchantment (o:copy or o:cast)', constraints: 't:enchantment',
+      })),
+    });
+    const result = await interpret('enchantments that work well for azula', d);
+
+    expect(search.mock.calls[0][0]).toContain('(t:enchantment (o:copy or o:cast))');
+    expect(search.mock.calls[1][0]).toMatch(/^t:enchantment id<=ubr f:commander -!"Fire Lord Azula" \(!"/);
+    expect(result.interpretation.constraints).toBe('t:enchantment');
+  });
+
+  it('shows EDHREC\'s own lists when the request states no conditions', async () => {
+    const d = withEdhrec({
+      translate: vi.fn(async () => plan({ commander: 'azula', query: 'o:copy', constraints: '' })),
+    });
+    const result = await interpret('good cards for azula', d);
+    expect(result.edhrec?.filtered).toBe(false);
+  });
+
+  it('fetches a later page of results on its own, without the EDHREC tab', async () => {
+    const d = withEdhrec();
+    const result = await runQuery('t:enchantment', 'Fire Lord Azula', d, null, { page: 2 });
+    expect(d.search).toHaveBeenCalledTimes(1);
+    expect(d.search).toHaveBeenCalledWith('t:enchantment id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 2);
+    expect(result.edhrec).toBeUndefined();
+    expect(result.trace.some((s) => s.text === 'Searched Scryfall, page 2')).toBe(true);
+  });
+
   it('shows EDHREC\'s own lists when nothing narrows them', async () => {
     const d = withEdhrec({ translate: vi.fn(async () => plan({ commander: 'azula', query: '' })) });
     const result = await interpret('cards for azula', d);
@@ -270,7 +303,7 @@ describe('the EDHREC view', () => {
     const d = withEdhrec();
     const result = await runQuery('t:enchantment', 'Fire Lord Azula', d, { order: 'usd', dir: 'asc' }, { withEdhrec: false });
     expect(d.search).toHaveBeenCalledTimes(1);
-    expect(d.search).toHaveBeenCalledWith('t:enchantment id<=ubr f:commander -!"Fire Lord Azula"', { order: 'usd', dir: 'asc' });
+    expect(d.search).toHaveBeenCalledWith('t:enchantment id<=ubr f:commander -!"Fire Lord Azula"', { order: 'usd', dir: 'asc' }, 1);
     expect(result.edhrec).toBeUndefined();
     expect(result.interpretation.sort).toEqual({ order: 'usd', dir: 'asc' });
   });
@@ -280,14 +313,14 @@ describe('sorting', () => {
   it('lifts an order out of the model\'s query and sends it as the sort', async () => {
     const d = deps({ translate: vi.fn(async () => plan({ query: 'c:r year>=2026 order:released direction:desc' })) });
     const result = await interpret('newest red cards', d);
-    expect(d.search).toHaveBeenCalledWith('c:r year>=2026', { order: 'released', dir: 'desc' });
+    expect(d.search).toHaveBeenCalledWith('c:r year>=2026', { order: 'released', dir: 'desc' }, 1);
     expect(result.interpretation).toMatchObject({ query: 'c:r year>=2026', sort: { order: 'released', dir: 'desc' } });
   });
 
   it('lets an order typed into an edited query win over the menu', async () => {
     const d = deps();
     await runQuery('t:elf order:usd', null, d, { order: 'name', dir: 'auto' });
-    expect(d.search).toHaveBeenCalledWith('t:elf', { order: 'usd', dir: 'auto' });
+    expect(d.search).toHaveBeenCalledWith('t:elf', { order: 'usd', dir: 'auto' }, 1);
   });
 });
 
@@ -303,7 +336,7 @@ describe('follow-ups', () => {
 
     expect(translate).toHaveBeenCalledTimes(1);
     expect(translate.mock.calls[0][1]).toMatchObject({ previous, commander: { name: 'Omnath, Locus of Creation', text: 'Landfall' } });
-    expect(d.search).toHaveBeenCalledWith('otag:ramp c:g t:instant id<=wurg f:commander -!"Omnath, Locus of Creation"', DEFAULT_SORT);
+    expect(d.search).toHaveBeenCalledWith('otag:ramp c:g t:instant id<=wurg f:commander -!"Omnath, Locus of Creation"', DEFAULT_SORT, 1);
   });
 
   it('looks up a different commander when the follow-up switches', async () => {

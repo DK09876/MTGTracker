@@ -1,16 +1,20 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { use, useCallback, useEffect, useState } from 'react';
 
 import CardModal from '@/components/CardModal';
+import CommanderPicker from '@/components/CommanderPicker';
+import ImportResult from '@/components/ImportResult';
 import CardTile from '@/components/CardTile';
 import * as api from '@/lib/api';
 import { filterCards } from '@/lib/filter';
 import type { List, ListedCard } from '@/lib/db';
+import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
-import { priceOf } from '@/lib/scryfall';
+import { imageOf, priceOf, typeLineOf } from '@/lib/scryfall';
 
 export default function ListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -23,6 +27,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [filter, setFilter] = useState('');
+  const [changingCommander, setChangingCommander] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [decklist, setDecklist] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
+  const [imported, setImported] = useState<ImportSummary | null>(null);
 
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
@@ -76,11 +85,31 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const value = shown.reduce((sum, c) => sum + (priceOf(c.card) ?? 0) * c.quantity, 0);
   const copies = shown.reduce((sum, c) => sum + c.quantity, 0);
   const filtered = shown.length !== cards.length;
+  const deck = list.kind === 'deck';
+  // A Commander deck is 100 cards, the commander included.
+  const deckSize = cards.reduce((sum, c) => sum + c.quantity, 0) + (list.commander ? 1 : 0);
+
+  const runImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!decklist.trim()) return;
+    setImportBusy(true);
+    try {
+      const { imported: result } = await api.importDecklist(id, decklist);
+      setImported(result);
+      setDecklist('');
+      setImporting(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not import that list');
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   return (
     <div>
-      <Link href="/lists" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
-        ← All lists
+      <Link href={deck ? '/decks' : '/lists'} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+        ← All {deck ? 'decks' : 'lists'}
       </Link>
 
       <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
@@ -111,6 +140,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             <h1 className="truncate text-xl font-semibold">{list.name}</h1>
           )}
           <p className="mt-1 text-sm text-[var(--muted)]">
+            {deck && !filtered && <><span className={deckSize === 100 ? 'text-[var(--foreground)]' : ''}>{deckSize} / 100</span> · </>}
             {copies} card{copies === 1 ? '' : 's'}
             {shown.length !== copies && <> · {shown.length} unique</>}
             {value > 0 && <> · ${value.toFixed(2)}</>}
@@ -119,6 +149,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
 
         <div className="flex gap-2 text-sm">
+          <button
+            onClick={() => setImporting((v) => !v)}
+            className="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface)]"
+          >
+            Import
+          </button>
           {!renaming && (
             <button
               onClick={() => setRenaming(true)}
@@ -131,7 +167,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onClick={async () => {
               if (!confirm(`Delete "${list.name}"? The cards stay in any other lists.`)) return;
               await api.deleteList(id);
-              router.push('/lists');
+              router.push(deck ? '/decks' : '/lists');
             }}
             className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-red-400 hover:bg-[var(--surface)]"
           >
@@ -139,6 +175,73 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           </button>
         </div>
       </div>
+
+      {deck && (
+        <div className="mt-4">
+          {list.commander && !changingCommander ? (
+            <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
+              <button onClick={() => setSelected(list.commander)} aria-label={`Show details for ${list.commander.name}`}>
+                {imageOf(list.commander, 'small') && (
+                  <Image src={imageOf(list.commander, 'small')!} alt="" width={56} height={78} className="rounded" unoptimized />
+                )}
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Commander</p>
+                <p className="truncate font-medium">{list.commander.name}</p>
+                <p className="truncate text-sm text-[var(--muted)]">{typeLineOf(list.commander)}</p>
+              </div>
+              <button
+                onClick={() => setChangingCommander(true)}
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <div>
+              <p className="mb-1.5 text-sm text-[var(--muted)]">{list.commander ? 'New commander' : 'Pick a commander'}</p>
+              <CommanderPicker
+                value={null}
+                autoFocus={changingCommander}
+                onChange={async (picked) => {
+                  if (!picked) return;
+                  await api.setCommander(id, picked.id);
+                  setChangingCommander(false);
+                  await load();
+                }}
+              />
+              {changingCommander && (
+                <button onClick={() => setChangingCommander(false)} className="mt-2 text-sm text-[var(--muted)] underline">
+                  Keep {list.commander?.name}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {importing && (
+        <form onSubmit={runImport} className="mt-4 flex flex-col gap-2">
+          <textarea
+            value={decklist}
+            onChange={(e) => setDecklist(e.target.value)}
+            rows={8}
+            autoFocus
+            placeholder={'Paste a decklist — 1x Sol Ring (SOC) 128, one card per line'}
+            spellCheck={false}
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
+          />
+          <div className="flex gap-2 text-sm">
+            <button disabled={importBusy} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
+              {importBusy ? 'Importing…' : 'Add these cards'}
+            </button>
+            <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {imported && <ImportResult result={imported} />}
 
       {cards.length > 0 && (
         <div className="mt-5">

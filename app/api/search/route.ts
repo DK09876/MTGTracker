@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 
 import { listsHolding } from '@/lib/db';
+import { profileOf } from '@/lib/profile-route';
 import { searchCards, ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     const result = await searchCards(query, page);
     return NextResponse.json({
       ...result,
-      inLists: listsHolding(result.cards.map((c) => c.id)),
+      inLists: listsHolding(result.cards.map((c) => c.id), profileOf(request)),
     });
   } catch (error) {
     if (error instanceof ScryfallError) {

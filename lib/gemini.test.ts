@@ -18,12 +18,18 @@ const base = { kind: 'cards', cardName: null, commander: null, explanation: 'x',
 describe('parseTranslation', () => {
   it('reads a plan', () => {
     expect(parseTranslation(json({ ...base, commander: 'azula', explanation: 'Elves' })))
-      .toEqual({ kind: 'cards', cardName: null, commander: 'azula', explanation: 'Elves', query: 't:elf' });
+      .toEqual({ kind: 'cards', cardName: null, commander: 'azula', explanation: 'Elves', query: 't:elf', constraints: null });
   });
 
   it('drops the query when the input was a card name', () => {
     expect(parseTranslation(json({ ...base, kind: 'card', cardName: 'Lightning Bolt', query: '-"Lightning Bolt"' })))
       .toMatchObject({ kind: 'card', cardName: 'Lightning Bolt', query: '' });
+  });
+
+  it('keeps the stated conditions apart from the query, and tells an empty answer from none', () => {
+    expect(parseTranslation(json({ ...base, query: 't:enchantment o:copy', constraints: 't:enchantment' })).constraints).toBe('t:enchantment');
+    expect(parseTranslation(json({ ...base, constraints: '' })).constraints).toBe('');
+    expect(parseTranslation(json(base)).constraints).toBeNull();
   });
 
   it('refuses a card lookup with no card', () => {

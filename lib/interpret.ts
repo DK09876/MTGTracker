@@ -70,6 +70,8 @@ export interface Interpretation {
   commander?: CommanderRef;
   /** The order the card results are in. */
   sort?: Sort;
+  /** What the EDHREC tab was narrowed by: only the conditions the request stated. */
+  constraints?: string;
 }
 
 /** What a commander's decks play, from EDHREC, as the page's first tab. */
@@ -110,7 +112,7 @@ export interface Resume {
 }
 
 export interface Deps {
-  search: (query: string, sort?: Sort) => Promise<SearchResult>;
+  search: (query: string, sort?: Sort, page?: number) => Promise<SearchResult>;
   findCardNamed: (fuzzy: string) => Promise<ScryfallCard | null>;
   findCommanders: (mention: string) => Promise<ScryfallCard[]>;
   cardsNamed: (names: string[]) => Promise<ScryfallCard[]>;
@@ -224,15 +226,18 @@ export async function interpret(input: string, deps: Deps, previous?: Previous, 
  */
 export async function runQuery(
   query: string, commanderName: string | null, deps: Deps,
-  sort: Sort | null = null, { withEdhrec = true } = {},
+  sort: Sort | null = null, { withEdhrec = true, page = 1 } = {},
 ): Promise<Interpreted> {
   const trace: Step[] = [{ text: 'Ran the query without the AI' }];
   const commander = commanderName ? await findExactly(commanderName, deps) : null;
   // An `order:` typed into the query wins over the menu.
   const { filters, sort: typed } = splitSort(query);
-  const page = commander ? await pageFor(commander, deps, trace) : null;
-  const { sort: used, ...result } = await runCards(filters, commander, page, deps, trace, typed ?? sort ?? DEFAULT_SORT);
-  const edhrec = commander && page && withEdhrec ? await edhrecView(filters, commander, page, deps, trace) : undefined;
+  const edhrecPage = commander ? await pageFor(commander, deps, trace) : null;
+  const { sort: used, ...result } = await runCards(filters, commander, edhrecPage, deps, trace, typed ?? sort ?? DEFAULT_SORT, page);
+  // A later page of results only adds to the Scryfall tab.
+  const edhrec = commander && edhrecPage && withEdhrec && page === 1
+    ? await edhrecView(filters, commander, edhrecPage, deps, trace)
+    : undefined;
   const interpretation: Interpretation = {
     via: 'syntax', kind: 'cards', query: filters, sort: used,
     commander: commander ? refOf(commander) : undefined,
@@ -244,7 +249,7 @@ export async function runQuery(
 export async function runCombos(commanderName: string, deps: Deps): Promise<Interpreted> {
   const trace: Step[] = [];
   const commander = await findExactly(commanderName, deps);
-  const plan: Translation = { kind: 'combos', cardName: null, commander: commanderName, query: '', explanation: '' };
+  const plan: Translation = { kind: 'combos', cardName: null, commander: commanderName, query: '', constraints: null, explanation: '' };
   return comboRoute(plan, commander, deps, trace);
 }
 
@@ -400,8 +405,10 @@ async function cardsRoute(
       continue;
     }
 
-    const edhrec = commander && page ? await edhrecView(filters, commander, page, deps, trace) : undefined;
-    return { ...result, trace, interpretation: last, edhrec };
+    // The EDHREC tab takes only what was asked for, not the model's synergy guesses.
+    const stated = plan.constraints === null ? filters : splitSort(plan.constraints).filters;
+    const edhrec = commander && page ? await edhrecView(stated, commander, page, deps, trace) : undefined;
+    return { ...result, trace, interpretation: { ...last, constraints: stated }, edhrec };
   }
 
   if (unfiltered) return unfiltered;
@@ -414,17 +421,19 @@ async function cardsRoute(
 
 // --- steps -----------------------------------------------------------------
 
-async function searchStep(query: string, deps: Deps, trace: Step[], sort: Sort = DEFAULT_SORT): Promise<SearchResult> {
+async function searchStep(
+  query: string, deps: Deps, trace: Step[], sort: Sort = DEFAULT_SORT, page = 1,
+): Promise<SearchResult> {
   // Shown as the equivalent syntax, so the line can be pasted into Scryfall.
   const order = sortKey(sort) === 'name:auto' ? '' : ` order:${sort.order}${sort.dir === 'auto' ? '' : ` direction:${sort.dir}`}`;
   const step: Step = {
-    text: 'Searched Scryfall',
+    text: page > 1 ? `Searched Scryfall, page ${page}` : 'Searched Scryfall',
     query: query + order,
     described: `${describeQuery(query)} · sorted by ${sortLabel(sort).toLowerCase()}`,
   };
   trace.push(step);
   try {
-    const result = await deps.search(query, sort);
+    const result = await deps.search(query, sort, page);
     step.count = result.totalCards;
     return result;
   } catch (error) {
@@ -464,12 +473,12 @@ async function pageFor(commander: ScryfallCard, deps: Deps, trace: Step[]): Prom
  * decks play it - shown on the tile, whatever the sort.
  */
 async function runCards(
-  filters: string, commander: ScryfallCard | null, page: CommanderPage | null,
-  deps: Deps, trace: Step[], sort: Sort,
+  filters: string, commander: ScryfallCard | null, edhrecPage: CommanderPage | null,
+  deps: Deps, trace: Step[], sort: Sort, page = 1,
 ): Promise<SearchResult & { stats?: Record<string, CardStats>; sort: Sort }> {
-  const result = await searchStep(scoped(filters, commander), deps, trace, sort);
-  if (!page) return { ...result, sort };
-  return { ...result, sort, stats: statsById(result.cards, page.stats) };
+  const result = await searchStep(scoped(filters, commander), deps, trace, sort, page);
+  if (!edhrecPage) return { ...result, sort };
+  return { ...result, sort, stats: statsById(result.cards, edhrecPage.stats) };
 }
 
 /**
