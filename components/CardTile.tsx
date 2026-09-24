@@ -12,7 +12,7 @@ import Image from 'next/image';
 
 import ManaCost from './ManaCost';
 import { RarityBadge } from './CardDetail';
-import type { ScryfallCard } from '@/lib/scryfall';
+import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf } from '@/lib/scryfall';
 
 interface Props {
@@ -21,11 +21,13 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
   onAdd?: (card: ScryfallCard) => void;
   footer?: React.ReactNode;
+  /** Foil or etched copies are labelled and priced as such. */
+  finish?: Finish;
 }
 
-export default function CardTile({ card, inLists, onSelect, onAdd, footer }: Props) {
+export default function CardTile({ card, inLists, onSelect, onAdd, footer, finish = 'nonfoil' }: Props) {
   const image = imageOf(card, 'normal');
-  const usd = priceOf(card);
+  const usd = priceOf(card, finish);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
@@ -69,6 +71,11 @@ export default function CardTile({ card, inLists, onSelect, onAdd, footer }: Pro
         <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
           <RarityBadge rarity={card.rarity} />
           <span className="truncate uppercase">{card.set}</span>
+          {finish !== 'nonfoil' && (
+            <span className="rounded bg-gradient-to-r from-amber-300/30 via-fuchsia-300/30 to-sky-300/30 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--foreground)]">
+              {finish === 'etched' ? 'Etched' : 'Foil'}
+            </span>
+          )}
           <span className="ml-auto tabular-nums">{usd === null ? '—' : `$${usd.toFixed(2)}`}</span>
         </div>
 

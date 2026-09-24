@@ -91,4 +91,11 @@ describe('canLead', () => {
     expect(canLead(card('Urza\'s Saga', 'x', '2', { type_line: 'Legendary Enchantment Land — Urza\'s Saga' }))).toBe(false);
     expect(canLead({ ...kratos, legalities: { commander: 'banned' } })).toBe(false);
   });
+
+  // Legendary Vehicles and Spacecraft with power and toughness can lead a deck.
+  it('takes a legendary Spacecraft with a body, but not one without', () => {
+    const hearthhull = card('Hearthhull, the Worldseed', 'eoc', '1', { type_line: 'Legendary Artifact — Spacecraft', power: '6', toughness: '7' });
+    expect(canLead(hearthhull)).toBe(true);
+    expect(canLead(card('Some Station', 'x', '3', { type_line: 'Legendary Artifact — Spacecraft' }))).toBe(false);
+  });
 });

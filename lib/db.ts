@@ -21,7 +21,7 @@ import { dirname } from 'path';
 
 import { Database } from 'node-sqlite3-wasm';
 
-import type { ScryfallCard } from './scryfall';
+import type { Finish, ScryfallCard } from './scryfall';
 
 const DB_PATH = process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`;
 
@@ -82,6 +82,15 @@ function open(): Database {
   if (!columns.some((c) => c.name === 'commanderId')) {
     db.run('ALTER TABLE lists ADD COLUMN commanderId TEXT');
   }
+  if (!columns.some((c) => c.name === 'commanderFinish')) {
+    db.run(`ALTER TABLE lists ADD COLUMN commanderFinish TEXT NOT NULL DEFAULT 'nonfoil'`);
+  }
+  // Foil and etched copies, so "*F*" in an import survives a round trip
+  // and prices use what the card actually is.
+  const cardColumns = db.all('PRAGMA table_info(list_cards)') as Array<{ name: string }>;
+  if (!cardColumns.some((c) => c.name === 'finish')) {
+    db.run(`ALTER TABLE list_cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'nonfoil'`);
+  }
   return db;
 }
 
@@ -139,18 +148,30 @@ export interface List {
   cardCount: number;
   totalCards: number;
   totalValue: number;
-  /** A deck's commander, stored like any other card. Not counted in the totals. */
+  /** A deck's commander, stored like any other card. Counted in the totals. */
   commander: ScryfallCard | null;
+  commanderFinish: Finish;
 }
 
-/** A profile's lists, or only its decks or only its plain lists. */
+/** A card's price for a finish, in SQL - the same fallbacks as priceOf in scryfall.ts. */
+const PRICE = (finish: string, card: string) => `COALESCE(CAST(CASE ${finish}
+    WHEN 'foil'   THEN COALESCE(json_extract(${card}.data, '$.prices.usd_foil'), json_extract(${card}.data, '$.prices.usd'))
+    WHEN 'etched' THEN COALESCE(json_extract(${card}.data, '$.prices.usd_etched'), json_extract(${card}.data, '$.prices.usd_foil'), json_extract(${card}.data, '$.prices.usd'))
+    ELSE COALESCE(json_extract(${card}.data, '$.prices.usd'), json_extract(${card}.data, '$.prices.usd_foil'))
+  END AS REAL), 0)`;
+
+/**
+ * A profile's lists, or only its decks or only its plain lists.
+ * Counts and value include a deck's commander: a Commander deck is 100 cards.
+ */
 export function listLists(profileId: string, kind?: ListKind): List[] {
   const rows = open().all(`
-    SELECT l.id, l.kind, l.name, l.note, l.createdAt, l.updatedAt,
+    SELECT l.id, l.kind, l.name, l.note, l.createdAt, l.updatedAt, l.commanderFinish,
            cm.data                                            AS commanderData,
-           COUNT(lc.cardId)                                   AS cardCount,
-           COALESCE(SUM(lc.quantity), 0)                      AS totalCards,
-           COALESCE(SUM(lc.quantity * COALESCE(c.usd, 0)), 0) AS totalValue
+           COUNT(lc.cardId) + (l.commanderId IS NOT NULL)     AS cardCount,
+           COALESCE(SUM(lc.quantity), 0) + (l.commanderId IS NOT NULL) AS totalCards,
+           COALESCE(SUM(lc.quantity * ${PRICE('lc.finish', 'c')}), 0)
+             + COALESCE(MAX(${PRICE('l.commanderFinish', 'cm')}), 0) AS totalValue
     FROM lists l
     LEFT JOIN list_cards lc ON lc.listId = l.id
     LEFT JOIN cards c       ON c.id = lc.cardId
@@ -167,22 +188,55 @@ export function listLists(profileId: string, kind?: ListKind): List[] {
 
 export function createList(
   profileId: string, name: string, note = '',
-  { kind = 'list', commander = null }: { kind?: ListKind; commander?: ScryfallCard | null } = {},
+  { kind = 'list', commander = null, commanderFinish = 'nonfoil' }:
+    { kind?: ListKind; commander?: ScryfallCard | null; commanderFinish?: Finish } = {},
 ): List {
   const id = randomUUID();
   const stamp = now();
   if (commander) storeCard(commander);
   open().run(
-    'INSERT INTO lists (id, profileId, kind, name, note, commanderId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [id, profileId, kind, name, note, commander?.id ?? null, stamp, stamp],
+    'INSERT INTO lists (id, profileId, kind, name, note, commanderId, commanderFinish, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id, profileId, kind, name, note, commander?.id ?? null, commanderFinish, stamp, stamp],
   );
-  return { id, kind, name, note, createdAt: stamp, updatedAt: stamp, cardCount: 0, totalCards: 0, totalValue: 0, commander };
+  return {
+    id, kind, name, note, createdAt: stamp, updatedAt: stamp, commander, commanderFinish,
+    cardCount: commander ? 1 : 0, totalCards: commander ? 1 : 0, totalValue: 0,
+  };
+}
+
+/**
+ * Make a card already in the deck its commander: it leaves the 99 (one
+ * copy of it) and takes the commander slot with its finish. For a flat
+ * decklist, where the commander is one line among the rest.
+ */
+export function promoteToCommander(listId: string, cardId: string): boolean {
+  const database = open();
+  const row = database.get(
+    `SELECT c.data, lc.quantity, lc.finish FROM list_cards lc JOIN cards c ON c.id = lc.cardId
+     WHERE lc.listId = ? AND lc.cardId = ?`, [listId, cardId],
+  ) as { data: string; quantity: number; finish: Finish } | null;
+  if (!row) return false;
+  database.run('BEGIN');
+  try {
+    if (row.quantity > 1) {
+      database.run('UPDATE list_cards SET quantity = quantity - 1 WHERE listId = ? AND cardId = ?', [listId, cardId]);
+    } else {
+      database.run('DELETE FROM list_cards WHERE listId = ? AND cardId = ?', [listId, cardId]);
+    }
+    setCommander(listId, JSON.parse(row.data) as ScryfallCard, row.finish);
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return true;
 }
 
 /** Set or clear a deck's commander. */
-export function setCommander(listId: string, commander: ScryfallCard | null): void {
+export function setCommander(listId: string, commander: ScryfallCard | null, finish: Finish = 'nonfoil'): void {
   if (commander) storeCard(commander);
-  open().run('UPDATE lists SET commanderId = ?, updatedAt = ? WHERE id = ?', [commander?.id ?? null, now(), listId]);
+  open().run('UPDATE lists SET commanderId = ?, commanderFinish = ?, updatedAt = ? WHERE id = ?',
+    [commander?.id ?? null, finish, now(), listId]);
 }
 
 export function renameList(id: string, name: string, note?: string): void {
@@ -212,6 +266,7 @@ export function getList(id: string, profileId: string): List | null {
 export interface ListedCard {
   card: ScryfallCard;
   quantity: number;
+  finish: Finish;
   addedAt: string;
 }
 
@@ -230,17 +285,17 @@ function storeCard(card: ScryfallCard): void {
 }
 
 /** Store (or refresh) a card, then put it in a list. */
-export function addCardToList(listId: string, card: ScryfallCard, quantity = 1): void {
+export function addCardToList(listId: string, card: ScryfallCard, quantity = 1, finish: Finish = 'nonfoil'): void {
   const database = open();
   storeCard(card);
 
   // Adding a card already in the list adds a copy rather than erroring -
   // wanting a second Lightning Bolt is the common case, not a mistake.
   database.run(
-    `INSERT INTO list_cards (listId, cardId, quantity, addedAt)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO list_cards (listId, cardId, quantity, finish, addedAt)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(listId, cardId) DO UPDATE SET quantity = quantity + excluded.quantity`,
-    [listId, card.id, quantity, now()],
+    [listId, card.id, quantity, finish, now()],
   );
   database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
 }
@@ -260,17 +315,17 @@ export function setQuantity(listId: string, cardId: string, quantity: number): v
  * Make a list hold exactly these cards, in one transaction - for a deck
  * edited as text and saved back. Either all of it applies or none does.
  */
-export function replaceListCards(listId: string, items: Array<{ card: ScryfallCard; quantity: number }>): void {
+export function replaceListCards(listId: string, items: Array<{ card: ScryfallCard; quantity: number; finish?: Finish }>): void {
   const database = open();
   database.run('BEGIN');
   try {
     database.run('DELETE FROM list_cards WHERE listId = ?', [listId]);
-    for (const { card, quantity } of items) {
+    for (const { card, quantity, finish = 'nonfoil' } of items) {
       storeCard(card);
       database.run(
-        `INSERT INTO list_cards (listId, cardId, quantity, addedAt) VALUES (?, ?, ?, ?)
+        `INSERT INTO list_cards (listId, cardId, quantity, finish, addedAt) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(listId, cardId) DO UPDATE SET quantity = quantity + excluded.quantity`,
-        [listId, card.id, quantity, now()],
+        [listId, card.id, quantity, finish, now()],
       );
     }
     database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
@@ -287,17 +342,18 @@ export function removeCardFromList(listId: string, cardId: string): void {
 
 export function cardsInList(listId: string): ListedCard[] {
   const rows = open().all(
-    `SELECT c.data, lc.quantity, lc.addedAt
+    `SELECT c.data, lc.quantity, lc.finish, lc.addedAt
      FROM list_cards lc
      JOIN cards c ON c.id = lc.cardId
      WHERE lc.listId = ?
      ORDER BY c.name`,
     [listId],
-  ) as unknown as Array<{ data: string; quantity: number; addedAt: string }>;
+  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; addedAt: string }>;
 
   return rows.map((row) => ({
     card: JSON.parse(row.data) as ScryfallCard,
     quantity: row.quantity,
+    finish: row.finish,
     addedAt: row.addedAt,
   }));
 }

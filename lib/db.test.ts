@@ -105,8 +105,9 @@ describe('decks', () => {
     expect(db.listLists('dk', 'list').map((l) => l.name)).toEqual(['Trade binder']);
     const [stored] = db.listLists('dk', 'deck');
     expect(stored).toMatchObject({ name: 'Kratos', kind: 'deck', commander: { name: 'Kratos, God of War' } });
-    // The commander sits in the header, not in the counts.
-    expect(stored.totalCards).toBe(1);
+    // A Commander deck is 100 cards with the commander: it counts, and its price with it.
+    expect(stored.totalCards).toBe(2);
+    expect(stored.totalValue).toBeCloseTo(6);
     expect(db.listLists('dk').map((l) => l.name)).toEqual(['Trade binder', 'Kratos']);
   });
 
@@ -119,5 +120,31 @@ describe('decks', () => {
     expect(db.getList(deck.id, 'dk')?.commander?.name).toBe('Kratos, God of War');
     db.setCommander(deck.id, null);
     expect(db.getList(deck.id, 'dk')?.commander).toBeNull();
+  });
+
+  it('prices foil and etched copies as what they are', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const list = db.createList('dk', 'Binder');
+    const priced = (id: string, prices: object) => ({ id, name: id, prices }) as ScryfallCard;
+    db.addCardToList(list.id, priced('a', { usd: '1.00', usd_foil: '5.00' }), 2, 'foil');
+    db.addCardToList(list.id, priced('b', { usd: '1.00', usd_etched: '9.00' }), 1, 'etched');
+    db.addCardToList(list.id, priced('c', { usd: null, usd_foil: '3.00' }), 1);
+    expect(db.getList(list.id, 'dk')!.totalValue).toBeCloseTo(2 * 5 + 9 + 3);
+    expect(db.cardsInList(list.id).map((c) => c.finish)).toEqual(['foil', 'etched', 'nonfoil']);
+  });
+
+  it('can promote a card in the deck to commander, taking it out of the 99', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Flat import', '', { kind: 'deck' });
+    db.addCardToList(deck.id, kratos, 1, 'foil');
+    db.addCardToList(deck.id, card('bolt', 'Lightning Bolt'), 1);
+
+    expect(db.promoteToCommander(deck.id, 'kratos')).toBe(true);
+    const after = db.getList(deck.id, 'dk')!;
+    expect([after.commander?.name, after.commanderFinish, after.totalCards]).toEqual(['Kratos, God of War', 'foil', 2]);
+    expect(db.cardsInList(deck.id).map((c) => c.card.name)).toEqual(['Lightning Bolt']);
+    expect(db.promoteToCommander(deck.id, 'not-in-deck')).toBe(false);
   });
 });

@@ -76,7 +76,7 @@ export interface ScryfallCard {
     artist?: string;
     image_uris?: { small?: string; normal?: string; large?: string; art_crop?: string };
   }>;
-  prices?: { usd?: string | null; usd_foil?: string | null; eur?: string | null; tix?: string | null };
+  prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null; eur?: string | null; tix?: string | null };
   legalities?: Record<string, string>;
 }
 
@@ -191,9 +191,19 @@ export function typeLineOf(card: ScryfallCard): string {
   return card.type_line ?? card.card_faces?.map((f) => f.type_line).filter(Boolean).join(' // ') ?? '';
 }
 
-/** Price in US dollars, or null when Scryfall has none for this printing. */
-export function priceOf(card: ScryfallCard): number | null {
-  const usd = card.prices?.usd ?? card.prices?.usd_foil;
+/** Which version of a printing: ordinary, foil, or etched foil. */
+export type Finish = 'nonfoil' | 'foil' | 'etched';
+
+/**
+ * Price in US dollars for this finish, or null when Scryfall has none.
+ * Falls back to whichever finish is priced, since a total that skips a card
+ * is further off than one using its other finish.
+ */
+export function priceOf(card: ScryfallCard, finish: Finish = 'nonfoil'): number | null {
+  const p = card.prices;
+  const usd = finish === 'foil' ? p?.usd_foil ?? p?.usd
+    : finish === 'etched' ? p?.usd_etched ?? p?.usd_foil ?? p?.usd
+    : p?.usd ?? p?.usd_foil;
   if (!usd) return null;
   const value = Number(usd);
   return Number.isFinite(value) ? value : null;

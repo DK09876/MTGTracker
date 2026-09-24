@@ -102,15 +102,31 @@ describe('replaceWith', () => {
     expect(db.cardsInList(list.id).map((c) => c.card.name)).toEqual(['Sol Ring']);
   });
 
-  it('round-trips: saving the text it was given changes nothing', async () => {
-    const { db, list } = await deckWith(known[0], [[known[2], 1], [known[3], 33]]);
+  it('round-trips: saving the text it was given changes nothing, foils included', async () => {
+    const { db, list } = await deckWith(known[0], [[known[3], 33]]);
+    db.addCardToList(list.id, known[2], 1, 'foil');
+    db.setCommander(list.id, known[0], 'foil');
+    const fresh = db.getList(list.id, 'dk')!;
     const { formatDecklist } = await import('./decklist');
     const { replaceWith } = await import('./import-into');
-    const before = db.cardsInList(list.id).map((c) => [c.card.id, c.quantity]);
+    const state = () => db.cardsInList(list.id).map((c) => [c.card.id, c.quantity, c.finish]);
+    const before = state();
 
-    await replaceWith(list, formatDecklist(list.commander, db.cardsInList(list.id)));
+    const text = formatDecklist(fresh.commander, db.cardsInList(list.id), fresh.commanderFinish);
+    expect(text.split('\n')[0]).toBe('1x Hearthhull, the Worldseed (eoc) 1 *F*');
+    await replaceWith(fresh, text);
 
-    expect(db.cardsInList(list.id).map((c) => [c.card.id, c.quantity])).toEqual(before);
-    expect(db.getList(list.id, 'dk')!.commander?.id).toBe(known[0].id);
+    expect(state()).toEqual(before);
+    const after = db.getList(list.id, 'dk')!;
+    expect([after.commander?.id, after.commanderFinish]).toEqual([known[0].id, 'foil']);
+  });
+
+  it('takes the commander\'s finish from its own line in a flat list', async () => {
+    const { db, list } = await deckWith(known[0], []);
+    const { replaceWith } = await import('./import-into');
+    await replaceWith(list, '1x Hearthhull, the Worldseed (eoc) 1 *F*\n1x Sol Ring (soc) 128 *F*');
+    const after = db.getList(list.id, 'dk')!;
+    expect(after.commanderFinish).toBe('foil');
+    expect(db.cardsInList(list.id).map((c) => [c.card.name, c.finish])).toEqual([['Sol Ring', 'foil']]);
   });
 });

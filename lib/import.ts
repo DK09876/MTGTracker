@@ -14,13 +14,15 @@
  */
 
 import { parseDecklist, type Entry } from './decklist';
-import type { Identifier, ScryfallCard } from './scryfall';
+import type { Finish, Identifier, ScryfallCard } from './scryfall';
 
 export interface Resolved {
-  /** Cards for the deck itself, with how many of each. */
-  cards: Array<{ card: ScryfallCard; quantity: number }>;
+  /** Cards for the deck itself, with how many of each and which finish. */
+  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish }>;
   /** The commander, when the list says or implies one. */
   commander: ScryfallCard | null;
+  /** The finish of the commander's line, including a picked commander's. */
+  commanderFinish: Finish | null;
   /** Lines that named a card Scryfall could not find. */
   missing: string[];
   /** Lines that could not be read as a card at all. */
@@ -34,12 +36,18 @@ type Collection = (identifiers: Identifier[]) => Promise<{ cards: ScryfallCard[]
 const front = (name: string) => name.split(' // ')[0].trim().toLowerCase();
 const printingKey = (set: string, number: string) => `${set.toLowerCase()}/${number.toLowerCase()}`;
 
-/** Whether a card can lead a Commander deck. */
+/**
+ * Whether a card can lead a Commander deck: a legendary creature, a
+ * legendary Vehicle or Spacecraft with power and toughness (Hearthhull, the
+ * Worldseed), or a card that says it can be your commander.
+ */
 export function canLead(card: ScryfallCard): boolean {
-  const type = card.type_line ?? card.card_faces?.[0]?.type_line ?? '';
+  const face = card.card_faces?.[0];
+  const type = card.type_line ?? face?.type_line ?? '';
   const text = card.oracle_text ?? card.card_faces?.map((f) => f.oracle_text).join('\n') ?? '';
+  const hasBody = (card.power ?? face?.power) !== undefined && (card.toughness ?? face?.toughness) !== undefined;
   const legal = !card.legalities || card.legalities.commander === 'legal';
-  return legal && /Legendary/.test(type) && (/Creature/.test(type) || /can be your commander/i.test(text));
+  return legal && /Legendary/.test(type) && (/Creature/.test(type) || hasBody || /can be your commander/i.test(text));
 }
 
 export async function resolveDecklist(
@@ -64,6 +72,7 @@ export async function resolveDecklist(
   const named = resolved.find((r) => r.entry.section === 'commander');
   if (named) commander = named.card;
   else if (!commanderPicked && resolved[0] && canLead(resolved[0].card)) commander = resolved[0].card;
+  let commanderFinish: Finish | null = null;
 
   // The commander sits in the header, not in the 99 - whether it came from
   // the list or was picked separately and also appears in it.
@@ -71,12 +80,16 @@ export async function resolveDecklist(
   let leaderRemoved = false;
   const cards: Resolved['cards'] = [];
   for (const { entry, card } of resolved) {
-    if (leader && !leaderRemoved && front(card.name) === leader) { leaderRemoved = true; continue; }
+    if (leader && !leaderRemoved && front(card.name) === leader) {
+      leaderRemoved = true;
+      commanderFinish = entry.finish;
+      continue;
+    }
     const existing = cards.find((c) => c.card.id === card.id);
     if (existing) existing.quantity += entry.quantity;
-    else cards.push({ card, quantity: entry.quantity });
+    else cards.push({ card, quantity: entry.quantity, finish: entry.finish });
   }
-  return { cards, commander, missing, unreadable, skipped };
+  return { cards, commander, commanderFinish, missing, unreadable, skipped };
 }
 
 async function lookUp(entries: Entry[], collection: Collection, printings: boolean): Promise<Map<Entry, ScryfallCard>> {

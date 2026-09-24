@@ -106,11 +106,12 @@ export const createDeck = (name: string, commanderId: string | null, decklist: s
     body: JSON.stringify({ name, kind: 'deck', commanderId, decklist }),
   }).then(json<{ list: List; imported?: ImportSummary }>);
 
-export const setCommander = (listId: string, commanderId: string | null) =>
+/** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
+export const setCommander = (listId: string, commanderId: string | null, fromList = false) =>
   fetch(url(`lists/${listId}`), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ commanderId }),
+    body: JSON.stringify({ commanderId, fromList }),
   }).then(json<{ list: List }>);
 
 /**

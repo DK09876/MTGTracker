@@ -13,6 +13,7 @@ import * as api from '@/lib/api';
 import { filterCards } from '@/lib/filter';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist } from '@/lib/decklist';
+import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf, typeLineOf } from '@/lib/scryfall';
@@ -85,16 +86,20 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
   // Filtering runs over the stored payloads, so it never touches the network.
   const { results: shown, unsupported } = filterCards(cards, filter);
-  const value = shown.reduce((sum, c) => sum + (priceOf(c.card) ?? 0) * c.quantity, 0);
-  const copies = shown.reduce((sum, c) => sum + c.quantity, 0);
-  const filtered = shown.length !== cards.length;
   const deck = list.kind === 'deck';
-  // A Commander deck is 100 cards, the commander included.
-  const deckSize = cards.reduce((sum, c) => sum + c.quantity, 0) + (list.commander ? 1 : 0);
+  // A Commander deck is 100 cards with the commander, so every count and
+  // total here includes it - "100 / 100", never "99 cards".
+  const commander = deck && list.commander ? 1 : 0;
+  const commanderValue = commander ? priceOf(list.commander!, list.commanderFinish) ?? 0 : 0;
+  const value = shown.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0) + (filter ? 0 : commanderValue);
+  const copies = shown.reduce((sum, c) => sum + c.quantity, 0) + (filter ? 0 : commander);
+  const unique = shown.length + (filter ? 0 : commander);
+  const filtered = shown.length !== cards.length;
+  const deckSize = cards.reduce((sum, c) => sum + c.quantity, 0) + commander;
 
   // "Edit as text": the deck as it stands, in the same format it imports.
   const openText = () => {
-    setDecklist(formatDecklist(deck ? list.commander : null, cards));
+    setDecklist(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
     setImported(null);
     setRejected(false);
     setImporting(true);
@@ -153,9 +158,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             <h1 className="truncate text-xl font-semibold">{list.name}</h1>
           )}
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {deck && !filtered && <><span className={deckSize === 100 ? 'text-[var(--foreground)]' : ''}>{deckSize} / 100</span> · </>}
-            {copies} card{copies === 1 ? '' : 's'}
-            {shown.length !== copies && <> · {shown.length} unique</>}
+            {deck && !filtered
+              ? <span className={deckSize === 100 ? 'text-[var(--foreground)]' : ''}>{deckSize} / 100 cards</span>
+              : <>{copies} card{copies === 1 ? '' : 's'}</>}
+            {unique !== copies && <> · {unique} unique</>}
             {value > 0 && <> · ${value.toFixed(2)}</>}
             {filtered && <> · filtered from {cards.length}</>}
           </p>
@@ -212,7 +218,25 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </div>
           ) : (
             <div>
-              <p className="mb-1.5 text-sm text-[var(--muted)]">{list.commander ? 'New commander' : 'Pick a commander'}</p>
+              {!list.commander && cards.some((c) => canLead(c.card)) && (
+                // A flat decklist sorts the commander in with the rest.
+                <div className="mb-4">
+                  <p className="mb-1.5 text-sm text-[var(--muted)]">Commander from this deck?</p>
+                  <div className="flex flex-wrap gap-2">
+                    {cards.filter((c) => canLead(c.card)).map(({ card }) => (
+                      <button
+                        key={card.id}
+                        onClick={async () => { await api.setCommander(id, card.id, true); await load(); }}
+                        className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1 pl-1 pr-3 text-sm hover:border-[var(--accent)]"
+                      >
+                        {imageOf(card, 'small') && <Image src={imageOf(card, 'small')!} alt="" width={28} height={39} className="rounded-sm" unoptimized />}
+                        {card.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <p className="mb-1.5 text-sm text-[var(--muted)]">{list.commander ? 'New commander' : 'Or search for one'}</p>
               <CommanderPicker
                 value={null}
                 autoFocus={changingCommander}
@@ -300,10 +324,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </p>
       ) : (
         <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {shown.map(({ card, quantity }) => (
+          {shown.map(({ card, quantity, finish }) => (
             <CardTile
               key={card.id}
               card={card}
+              finish={finish}
               onSelect={setSelected}
               footer={
                 <div className="mt-auto flex items-center gap-2">
