@@ -3,24 +3,34 @@
 Search Magic cards and keep them in lists. Runs on a Raspberry Pi on your own
 network, alongside [LifeOS](https://github.com/DK09876/LifeOS).
 
-Card data comes from [Scryfall](https://scryfall.com). The one other thing
-that leaves the Pi is the text of a plain-English search, which goes to Gemini
-to be turned into a Scryfall query — and only if you give it an API key.
-There is no account.
+Card data comes from [Scryfall](https://scryfall.com) and combos from
+[Commander Spellbook](https://commanderspellbook.com). The text of a
+plain-English search goes to Gemini to be planned — only if you give it an
+API key — and, if you switch it on, a commander's name goes to EDHREC. There
+is no account.
 
 ## What it does
 
 **Search** takes whatever you type. Card names are suggested as you type, and
 picking one goes straight to that card. Scryfall's own syntax — `t:goblin c:r`,
 `set:mh3 r:mythic`, `o:"draw a card" cmc<=2` — runs as written. Anything else
-is plain English: *cheap green ramp that isn't a land*, *best board wipes for
-Atraxa*, or a card name spelled wrong.
+is plain English:
 
-Plain English is translated into Scryfall syntax by a model, and the query it
-wrote is shown above the results, where you can edit it and run it again. The
-model only ever writes a query; every card you see came back from Scryfall, so
-a model that misremembers a card can give you a bad search but never a card
-that doesn't exist. See [how a search is read](#how-a-search-is-read).
+- *cheap green ramp that isn't a land*
+- *enchantments that work well for Fire Lord Azula*
+- *a card under 5 cmc for azula that helps me draw cards*
+- *combo cards for vivi*, *what goes infinite with Doubling Season*,
+  *two card infinite mana combos in izzet*
+- *best commanders for a goblin deck*, *new red cards from this year*
+- a card name spelled wrong
+
+A model reads the request and plans the search; the server runs it. The
+query that ran is shown above the results, where you can edit it and run it
+again, and a collapsed *How this search ran* lists every step — each query in
+plain English and as written, and how many results it found. The model only
+ever plans: every card and combo you see came back from Scryfall or Commander
+Spellbook, so a model that misremembers a card can give you a bad search but
+never a card that doesn't exist. See [how a search is read](#how-a-search-is-read).
 
 **Lists** are whatever you need them to be: a deck, a trade binder, a wishlist.
 A card can sit in several at once, with its own count in each, and the search
@@ -61,6 +71,7 @@ npm run dev          # http://localhost:3000
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
+| `MTG_EDHREC` | *(off)* | `on` ranks commander searches by how often that commander's decks play each card — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.
 
@@ -99,30 +110,75 @@ do casually to a machine that is already serving something else.
 
 ```
 typing  → name suggestions from Scryfall's autocomplete (prefix only)
-Enter   → Scryfall syntax?  → run as written
-          otherwise         → model writes a query → Scryfall
-                              ├ rejected or empty → model tries once more, told why
-                              └ still nothing     → Scryfall's fuzzy name match
+Enter   → Scryfall syntax?  → run as written, no model
+          otherwise         → the model says what kind of request it is:
+
+  one card          → exact-name search → else Scryfall's fuzzy name match
+  combos            → commander or card looked up on Scryfall
+                      → Commander Spellbook, in the commander's colours
+                      → the pieces fetched from Scryfall
+  cards             → commander looked up on Scryfall
+                      → model shown its real rules text, asked again
+                      → Scryfall, scoped to its colours and Commander
+                      → (EDHREC on) re-ranked by what its decks play
+                      ├ rejected, empty, or filters nothing → model retries once, told why
+                      └ still nothing → Scryfall's fuzzy name match
 ```
 
 A few choices in there are deliberate:
 
+- **The model picks a route; code runs it.** A search box should be quick and
+  predictable, and there are only a few kinds of request. Each is a fixed
+  pipeline rather than the model calling tools in a loop, which would be
+  slower and harder to reason about. That style is kept for a future deck
+  assistant, where open-ended reasoning pays for itself.
+- **Commanders are looked up, not remembered.** The model only says who the
+  commander is — "azula", "vivi" is fine. Scryfall supplies the card, most
+  played namesake first, and with it the real colour identity. The model is
+  then shown the commander's rules text and asked again, so "works well with
+  Azula" is judged against what Azula actually does. This is what makes a
+  commander printed after the model was trained work at all.
+- **Combos come from Commander Spellbook.** Scryfall has no notion of a
+  combo, so no query the model could write would find one.
+- **A query that filters nothing is sent back.** `f:commander order:edhrec`
+  is 30,000 cards led by Sol Ring — a non-answer that looks like an answer.
+  The model gets one more try; if it insists, it may be what was meant.
 - **Fuzzy name matching is the last resort, not the first.** It is generous
   enough that "green ramp" finds *Greenbelt Rampager*, so trying it first
-  would hijack sentences. It stays useful for a misspelled name the model
-  didn't recognise.
-- **The model names a commander; Scryfall supplies its colours.** For "board
-  wipes for Atraxa" the model returns *Atraxa, Praetors' Voice* and the server
-  looks up her colour identity and adds `id<=wubg`. A model knows names far
-  more reliably than it knows colours, and a commander printed after it was
-  trained still works.
-- **Only verified `otag:` values are offered.** Scryfall's tags are the best
-  way to say what a card *does* (`otag:ramp`, `otag:board-wipe`), but an
-  unknown tag doesn't error — it quietly matches nothing. The list in
-  `lib/gemini.ts` was checked against Scryfall, and an empty result is fed
-  back to the model rather than shown as the answer.
-- **If the model is down or unconfigured, search still works** — as a name
-  search, with a note saying so.
+  would hijack sentences.
+- **Only verified `otag:` values are offered.** An unknown tag doesn't error
+  — it quietly matches nothing. The list in `lib/gemini.ts` was checked
+  against Scryfall.
+- **Model calls have a time budget.** A commander search can make three. When
+  Gemini is slow the optional ones — the rules-text pass and the retry — are
+  skipped rather than making you wait out every timeout, and *How this search
+  ran* says so.
+- **If the model is down or unconfigured, search still works** for names and
+  syntax, with a note saying so.
+
+## Sources
+
+| | What for | Access |
+|---|---|---|
+| [Scryfall](https://scryfall.com/docs/api) | cards, prices, tags, popularity order | official API |
+| [Commander Spellbook](https://backend.commanderspellbook.com/schema/swagger/) | combos | official API, MIT-licensed |
+| [EDHREC](https://edhrec.com) | how often a commander's decks play each card | **off by default**, see below |
+
+### EDHREC
+
+EDHREC is the best source there is for "cards that work well with this
+commander", but it has no public API, and its terms of use forbid automated
+requests to the site. With `MTG_EDHREC=on`, commander searches read the JSON
+behind EDHREC's commander pages anyway: results are re-ranked by the share of
+that commander's decks playing each card, shown on each tile, and its most
+played cards that match the search but missed the first page are added.
+
+That is a knowing choice for a personal, self-hosted tool, and it is kept
+small — each commander is fetched at most once a day, and a failure is
+remembered for an hour. The endpoint is undocumented and may change or be
+blocked; if it is, searches carry on without it. The *EDHREC ↗* link on
+every commander search is always there, since a person following a link is
+how the site is meant to be used.
 
 ## Being a good Scryfall citizen
 

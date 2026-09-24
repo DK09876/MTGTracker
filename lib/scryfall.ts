@@ -85,7 +85,13 @@ export class ScryfallError extends Error {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const response = await throttle(() => fetch(`${API}${path}`, { headers: HEADERS }));
+  return request<T>(path);
+}
+
+async function request<T>(path: string, body?: unknown): Promise<T> {
+  const response = await throttle(() => fetch(`${API}${path}`, body === undefined
+    ? { headers: HEADERS }
+    : { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
   if (!response.ok) {
     // Scryfall puts a human-readable reason in the body; pass it through so
     // "no cards matched" does not surface as a bare 404.
@@ -189,4 +195,49 @@ export function priceOf(card: ScryfallCard): number | null {
   if (!usd) return null;
   const value = Number(usd);
   return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The commander a loose mention most likely means: "azula" is Fire Lord
+ * Azula, "vivi" is Vivi Ornitier.
+ *
+ * Searched among cards that can lead a deck, most played first, so a bare
+ * first name picks the popular commander rather than an obscure namesake.
+ * Falls back to the fuzzy name match for spellings the word search misses.
+ */
+export async function findCommander(mention: string): Promise<ScryfallCard | null> {
+  const words = mention.replace(/["()]/g, ' ').trim();
+  if (!words) return null;
+  const { cards } = await searchCards(`is:commander ${words} order:edhrec`);
+  return cards[0] ?? findCardNamed(words);
+}
+
+// Scryfall's limit for one collection request.
+const COLLECTION_MAX = 75;
+
+/**
+ * Cards by exact name, in as few requests as Scryfall allows.
+ *
+ * A double-faced card is looked up by its front face: the collection
+ * endpoint finds "Delver of Secrets" but not the full
+ * "Delver of Secrets // Insectile Aberration". Names it cannot find are
+ * left out rather than failing the rest.
+ */
+export async function cardsNamed(names: string[]): Promise<ScryfallCard[]> {
+  const fronts = [...new Set(names.map((n) => n.split(' // ')[0].trim()).filter(Boolean))];
+  const found: ScryfallCard[] = [];
+  for (let i = 0; i < fronts.length; i += COLLECTION_MAX) {
+    const identifiers = fronts.slice(i, i + COLLECTION_MAX).map((name) => ({ name }));
+    const body = await request<{ data: ScryfallCard[] }>('/cards/collection', { identifiers });
+    found.push(...body.data);
+  }
+  return found;
+}
+
+/** A card's rules text, with both faces of a double-faced card. */
+export function oracleTextOf(card: ScryfallCard): string {
+  if (card.oracle_text) return card.oracle_text;
+  return (card.card_faces ?? [])
+    .map((f) => [f.name, f.oracle_text].filter(Boolean).join(': '))
+    .join('\n//\n');
 }

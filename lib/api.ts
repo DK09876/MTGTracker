@@ -11,7 +11,7 @@ const BASE = process.env.NEXT_PUBLIC_MTG_BASE_PATH ?? '';
 const url = (path: string) => `${BASE}/api/${path}`;
 
 import type { List, ListedCard } from './db';
-import type { Interpretation } from './interpret';
+import type { Interpreted } from './interpret';
 import type { ScryfallCard } from './scryfall';
 
 async function json<T>(response: Response): Promise<T> {
@@ -32,10 +32,16 @@ export interface SearchResponse {
 export const search = (q: string, page = 1) =>
   fetch(url(`search?q=${encodeURIComponent(q)}&page=${page}`)).then(json<SearchResponse>);
 
+export type AskResponse = SearchResponse & Omit<Interpreted, keyof SearchResponse>;
+
 /** Search from anything typed - syntax, a name, or plain English. */
 export const ask = (q: string) =>
-  fetch(url(`ask?q=${encodeURIComponent(q)}`))
-    .then(json<SearchResponse & { interpretation: Interpretation }>);
+  fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>);
+
+/** Re-run an edited query as written, scoped to the same commander. */
+export const runEdited = (query: string, commander?: string) =>
+  fetch(url(`ask?${new URLSearchParams({ query, ...(commander ? { commander } : {}) })}`))
+    .then(json<AskResponse>);
 
 export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })
