@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { commanderStats, edhrecEnabled, edhrecSlug, edhrecUrl, parseCommanderPage } from './edhrec';
+import { commanderPage, edhrecEnabled, edhrecSlug, edhrecUrl, parseCommanderPage } from './edhrec';
 import { searchCombos, SpellbookError, toCombo } from './spellbook';
 
 afterEach(() => {
@@ -88,18 +88,27 @@ describe('EDHREC', () => {
     expect(edhrecUrl('Vivi Ornitier')).toBe('https://edhrec.com/commanders/vivi-ornitier');
   });
 
-  it('reads how often each card is played, once per card', () => {
-    const stats = parseCommanderPage({
-      container: { json_dict: { cardlists: [
-        { cardviews: [{ name: 'Storm-Kiln Artist', synergy: 0.51, num_decks: 23596, potential_decks: 37882 }] },
-        { cardviews: [
-          { name: 'Storm-Kiln Artist', synergy: 0.51, num_decks: 1, potential_decks: 2 },
-          { name: 'Sol Ring', synergy: -0.1, num_decks: 30000, potential_decks: 37882 },
-        ] },
-      ] } },
+  it('reads how often each card is played, and EDHREC\'s own lists', () => {
+    const page = parseCommanderPage({
+      container: { json_dict: {
+        card: { num_decks: 37882 },
+        cardlists: [
+          { header: 'High Synergy Cards', cardviews: [{ name: 'Storm-Kiln Artist', synergy: 0.51, num_decks: 23596, potential_decks: 37882 }] },
+          { header: 'Top Cards', cardviews: [
+            { name: 'Storm-Kiln Artist', synergy: 0.51, num_decks: 1, potential_decks: 2 },
+            { name: 'Sol Ring', synergy: -0.1, num_decks: 30000, potential_decks: 37882 },
+          ] },
+        ],
+      } },
     });
-    expect(stats?.get('Storm-Kiln Artist')?.inclusion).toBeCloseTo(0.623, 3);
-    expect(stats?.size).toBe(2);
+    expect(page?.decks).toBe(37882);
+    // A card in two lists keeps the figures from the first.
+    expect(page?.stats.get('Storm-Kiln Artist')?.inclusion).toBeCloseTo(0.623, 3);
+    expect(page?.stats.size).toBe(2);
+    expect(page?.sections).toEqual([
+      { header: 'High Synergy Cards', names: ['Storm-Kiln Artist'] },
+      { header: 'Top Cards', names: ['Storm-Kiln Artist', 'Sol Ring'] },
+    ]);
   });
 
   it('returns null for a page it does not recognise', () => {
@@ -111,16 +120,16 @@ describe('EDHREC', () => {
       container: { json_dict: { cardlists: [{ cardviews: [{ name: 'Sol Ring', num_decks: 1, potential_decks: 2 }] }] } },
     })));
     vi.stubGlobal('fetch', fetchMock);
-    await commanderStats('Cache Test Commander');
-    await commanderStats('Cache Test Commander');
+    await commanderPage('Cache Test Commander');
+    await commanderPage('Cache Test Commander');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('remembers a failure instead of retrying every search', async () => {
     const fetchMock = vi.fn(async () => new Response('<Error/>', { status: 403 }));
     vi.stubGlobal('fetch', fetchMock);
-    expect(await commanderStats('Unknown Commander')).toBeNull();
-    expect(await commanderStats('Unknown Commander')).toBeNull();
+    expect(await commanderPage('Unknown Commander')).toBeNull();
+    expect(await commanderPage('Unknown Commander')).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

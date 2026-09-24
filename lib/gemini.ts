@@ -47,8 +47,20 @@ export interface Translation {
   explanation: string;
 }
 
+/** A search that has already run, which a follow-up refines. */
+export interface Previous {
+  /** What was asked, including earlier follow-ups: "green ramp for omnath › only instants". */
+  request: string;
+  kind: Kind;
+  commander?: string;
+  cardName?: string;
+  query: string;
+}
+
 /** What the model is told on top of the request. */
 export interface Context {
+  /** The search this request follows up on. */
+  previous?: Previous;
   /** The resolved commander, so synergy is judged from its real rules text. */
   commander?: { name: string; manaCost: string; typeLine: string; text: string };
   /** Why the previous attempt failed. */
@@ -69,8 +81,23 @@ export function geminiTranslator(): Translator | null {
 
 /** The request plus whatever the server has learned, as one message. */
 export function userMessage(request: string, context: Context = {}, today = new Date()): string {
-  const lines = [`Request: ${request}`, '', `Today is ${today.toISOString().slice(0, 10)}.`];
-  const { commander, feedback } = context;
+  const { commander, feedback, previous } = context;
+  const lines = previous
+    ? [
+      'This is a follow-up to a search that already ran.',
+      `Earlier request: ${previous.request}`,
+      `Plan that ran: kind ${previous.kind}`
+        + (previous.commander ? `; commander ${previous.commander}` : '')
+        + (previous.cardName ? `; cardName ${previous.cardName}` : '')
+        + `; query ${previous.query || '(empty)'}`,
+      '',
+      `Follow-up: ${request}`,
+      '',
+      'Return the whole plan with the follow-up applied. Keep everything the follow-up does not change -',
+      'the commander, the kind, and the conditions already in the query - unless it replaces them.',
+    ]
+    : [`Request: ${request}`];
+  lines.push('', `Today is ${today.toISOString().slice(0, 10)}.`);
   if (commander) {
     lines.push(
       '',
@@ -245,10 +272,10 @@ Scryfall syntax:
 - is:commander finds cards that can be a commander.
 - kw: keyword abilities (kw:flying, kw:trample).
 - -term excludes. Terms are ANDed. (a or b) groups alternatives.
-- order: sets the sort. Without one, results are sorted by how often each
-  card is played in Commander (order:edhrec), which suits most requests.
-  Use order:released for "new" or "latest" cards, and order:usd with
-  direction:asc for "cheapest".
+- order: sets the sort. Only add one when the request asks for an order:
+  order:edhrec for "best", "most popular" or "staples"; order:released for
+  "new" or "latest"; order:usd direction:asc for "cheapest". Otherwise leave
+  it out - the user picks the order from a menu.
 - otag: is a curated tag for what a card does. It is often the best way to
   express a role, but ONLY these tags exist - any other otag matches nothing:
   ${ORACLE_TAGS.join(', ')}.
@@ -271,7 +298,7 @@ Examples:
 "two card infinite mana combos in izzet" ->
   kind: combos; query: coloridentity<=UR result:"infinite mana" cards<=2
 "best commanders for a goblin deck" ->
-  kind: cards; query: is:commander (t:goblin or o:goblin)
+  kind: cards; query: is:commander (t:goblin or o:goblin) order:edhrec
 "new red cards from this year" -> kind: cards; query: c:r year>=YYYY order:released, with YYYY the current year
 "blue two drops that draw a card when they enter" ->
   kind: cards; query: t:creature c:u mv=2 o:"when ~ enters" o:"draw"

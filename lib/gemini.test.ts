@@ -70,6 +70,16 @@ describe('userMessage', () => {
     expect(userMessage('new red cards', {}, today)).toContain('Today is 2026-09-24.');
   });
 
+  it('frames a follow-up around the search that ran', () => {
+    const text = userMessage('only instants', {
+      previous: { request: 'green ramp for omnath', kind: 'cards', commander: 'Omnath, Locus of Creation', query: 'otag:ramp c:g' },
+    }, today);
+    expect(text).toContain('Earlier request: green ramp for omnath');
+    expect(text).toContain('kind cards; commander Omnath, Locus of Creation; query otag:ramp c:g');
+    expect(text).toContain('Follow-up: only instants');
+    expect(text).not.toContain('Request:');
+  });
+
   it('includes the commander\'s rules text and the reason a try failed', () => {
     const text = userMessage('enchantments for azula', {
       commander: { name: 'Fire Lord Azula', manaCost: '{1}{U}{B}{R}', typeLine: 'Legendary Creature', text: 'copy that spell' },

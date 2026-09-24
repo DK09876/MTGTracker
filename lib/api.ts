@@ -11,7 +11,9 @@ const BASE = process.env.NEXT_PUBLIC_MTG_BASE_PATH ?? '';
 const url = (path: string) => `${BASE}/api/${path}`;
 
 import type { List, ListedCard } from './db';
+import type { Previous, Translation } from './gemini';
 import type { Interpreted } from './interpret';
+import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
 async function json<T>(response: Response): Promise<T> {
@@ -38,10 +40,36 @@ export type AskResponse = SearchResponse & Omit<Interpreted, keyof SearchRespons
 export const ask = (q: string) =>
   fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>);
 
-/** Re-run an edited query as written, scoped to the same commander. */
-export const runEdited = (query: string, commander?: string) =>
-  fetch(url(`ask?${new URLSearchParams({ query, ...(commander ? { commander } : {}) })}`))
-    .then(json<AskResponse>);
+const post = (body: object) =>
+  fetch(url('ask'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(json<AskResponse>);
+
+/** A follow-up that refines the search before it. */
+export const followUp = (q: string, previous: Previous) => post({ q, previous });
+
+/** Carry on a search that stopped to ask which commander was meant. */
+export const resume = (q: string, previous: Previous | undefined, plan: Translation, commander: string) =>
+  post({ q, previous, resume: { plan, commander } });
+
+/**
+ * Re-run a query as written - edited, re-sorted, or for a tab opened later -
+ * scoped to the same commander. `edhrec: false` skips rebuilding the EDHREC
+ * tab, for a change that only affects the Scryfall one.
+ */
+export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean } = {}) =>
+  fetch(url(`ask?${new URLSearchParams({
+    query,
+    ...(opts.commander ? { commander: opts.commander } : {}),
+    ...(opts.sort ? { sort: sortKey(opts.sort) } : {}),
+    ...(opts.edhrec === false ? { edhrec: '0' } : {}),
+  })}`)).then(json<AskResponse>);
+
+/** A commander's combos, for the Combos tab. */
+export const combosFor = (commander: string) =>
+  fetch(url(`ask?combosFor=${encodeURIComponent(commander)}`)).then(json<AskResponse>);
 
 export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })
