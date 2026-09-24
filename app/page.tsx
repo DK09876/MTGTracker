@@ -5,18 +5,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CardTile from '@/components/CardTile';
+import Interpreted from '@/components/Interpreted';
+import SearchBox from '@/components/SearchBox';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
+import type { Interpretation } from '@/lib/interpret';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { exactName, looksLikeSyntax } from '@/lib/syntax';
 
-const EXAMPLES = ['Lightning Bolt', 't:goblin c:r', 'set:mh3 r:mythic', 'o:"draw a card" cmc<=2'];
+const EXAMPLES = [
+  'cheap green ramp that isn\'t a land',
+  'best board wipes for Atraxa',
+  'lightnig bolt',
+  't:goblin c:r',
+];
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [cards, setCards] = useState<ScryfallCard[]>([]);
   const [inLists, setInLists] = useState<Record<string, string[]>>({});
   const [total, setTotal] = useState(0);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
+  const [status, setStatus] = useState<'idle' | 'searching' | 'thinking' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
@@ -36,19 +46,23 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const runSearch = useCallback(async (q: string) => {
+  // `ask` works out what was typed; `exact` runs a query as written, for a
+  // picked name or an edited translation.
+  const runSearch = useCallback(async (q: string, how: 'ask' | 'exact' = 'ask') => {
     const term = q.trim();
     if (!term) return;
     const id = ++runId.current;
-    setStatus('loading');
+    setStatus(how === 'ask' && !looksLikeSyntax(term) ? 'thinking' : 'searching');
     setError(null);
     setSearched(true);
     try {
-      const result = await api.search(term);
+      const asked = how === 'ask' ? await api.ask(term) : null;
+      const result = asked ?? await api.search(term);
       if (id !== runId.current) return;
       setCards(result.cards);
       setInLists(result.inLists);
       setTotal(result.totalCards);
+      if (asked) setInterpretation(asked.interpretation);
       setStatus('idle');
     } catch (e) {
       if (id !== runId.current) return;
@@ -70,24 +84,12 @@ export default function SearchPage() {
 
   return (
     <div>
-      <form
-        onSubmit={(e) => { e.preventDefault(); runSearch(query); }}
-        className="flex gap-2"
-      >
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search cards — name, or Scryfall syntax"
-          aria-label="Search cards"
-          className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-base outline-none focus:border-[var(--accent)]"
-        />
-        <button
-          type="submit"
-          className="rounded-xl bg-[var(--accent)] px-5 py-3 font-medium text-[#221c08] hover:brightness-110"
-        >
-          Search
-        </button>
-      </form>
+      <SearchBox
+        value={query}
+        onChange={setQuery}
+        onSubmit={(q) => { setInterpretation(null); runSearch(q); }}
+        onPickName={(name) => { setQuery(name); setInterpretation(null); runSearch(exactName(name), 'exact'); }}
+      />
 
       {!searched && (
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
@@ -96,7 +98,7 @@ export default function SearchPage() {
             <button
               key={example}
               onClick={() => { setQuery(example); runSearch(example); }}
-              className="rounded-lg border border-[var(--border)] px-2 py-1 font-mono text-xs hover:bg-[var(--surface)]"
+              className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface)]"
             >
               {example}
             </button>
@@ -104,7 +106,19 @@ export default function SearchPage() {
         </div>
       )}
 
-      {status === 'loading' && <p className="mt-8 text-center text-[var(--muted)]">Searching…</p>}
+      {interpretation && status !== 'thinking' && (
+        <Interpreted
+          interpretation={interpretation}
+          onRun={(q) => {
+            // An edited query keeps the explanation it was edited from.
+            setInterpretation({ ...interpretation, query: q, note: undefined });
+            runSearch(q, 'exact');
+          }}
+        />
+      )}
+
+      {status === 'searching' && <p className="mt-8 text-center text-[var(--muted)]">Searching…</p>}
+      {status === 'thinking' && <p className="mt-8 text-center text-[var(--muted)]">Working out what you mean…</p>}
       {status === 'error' && <p className="mt-8 text-center text-red-400">{error}</p>}
       {status === 'idle' && searched && !cards.length && (
         <p className="mt-8 text-center text-[var(--muted)]">No cards matched that search.</p>
