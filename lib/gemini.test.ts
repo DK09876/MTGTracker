@@ -15,7 +15,12 @@ const reply = (text: string) => ({ candidates: [{ content: { parts: [{ text }] }
 describe('parseTranslation', () => {
   it('reads the JSON the model was asked for', () => {
     expect(parseTranslation(reply('{"explanation":"Green ramp","commander":null,"query":"otag:ramp c:g"}')))
-      .toEqual({ query: 'otag:ramp c:g', explanation: 'Green ramp', commander: null });
+      .toEqual({ query: 'otag:ramp c:g', explanation: 'Green ramp', commander: null, cardName: null });
+  });
+
+  it('drops the query when the input was a card name', () => {
+    expect(parseTranslation(reply('{"cardName":"Lightning Bolt","explanation":"x","commander":null,"query":"-\\"Lightning Bolt\\""}')))
+      .toMatchObject({ cardName: 'Lightning Bolt', query: '' });
   });
 
   it('treats a blank commander as none', () => {
@@ -73,6 +78,26 @@ describe('geminiTranslator', () => {
 
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.contents[0].parts[0].text).toContain('Scryfall found no cards');
+  });
+
+  it('retries once when the model is momentarily overloaded', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'k');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{"error":{"message":"high demand"}}', { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(reply('{"explanation":"x","commander":null,"cardName":null,"query":"t:elf"}'))));
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect((await geminiTranslator()!('elves')).query).toBe('t:elf');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry past the second 503', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'k');
+    const fetchMock = vi.fn(async () => new Response('{"error":{"message":"high demand"}}', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(geminiTranslator()!('elves')).rejects.toThrow('the model returned 503: high demand');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('turns an API error into a readable message', async () => {

@@ -20,7 +20,7 @@ const found = (...names: string[]): SearchResult =>
 const nothing = found();
 
 const said = (query: string, over: Partial<Translation> = {}): Translation =>
-  ({ query, explanation: 'Something', commander: null, ...over });
+  ({ query, explanation: 'Something', commander: null, cardName: null, ...over });
 
 function deps(over: Partial<Deps> = {}): Deps {
   return {
@@ -53,6 +53,15 @@ describe('interpret', () => {
     expect(d.search).toHaveBeenCalledWith('otag:ramp c:g -t:land');
     expect(result.cards.map((c) => c.name)).toEqual(['Llanowar Elves']);
     expect(result.interpretation).toEqual({ via: 'ai', query: 'otag:ramp c:g -t:land', explanation: 'Green ramp' });
+  });
+
+  // The model names the card; the exact-name syntax is built here, because
+  // asked to write it the model wrote `-"Name"` - every card but that one.
+  it('builds the exact-name search for a card the model recognised', async () => {
+    const d = deps({ translate: vi.fn(async () => said('', { cardName: 'Lightning Bolt' })) });
+    const result = await interpret('lightnig bolt', d);
+    expect(d.search).toHaveBeenCalledWith('!"Lightning Bolt"');
+    expect(result.interpretation.query).toBe('!"Lightning Bolt"');
   });
 
   // The model is trusted with the commander's name, not its colours.
