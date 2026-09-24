@@ -22,11 +22,17 @@ export interface ImportSummary {
 export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, text: string): Promise<ImportSummary> {
   const resolved = await resolveDecklist(text, collection, { commanderPicked: list.commander?.name ?? null });
   const takeCommander = list.kind === 'deck' && !list.commander && resolved.commander;
-  if (takeCommander) setCommander(list.id, resolved.commander);
+  if (takeCommander) setCommander(list.id, resolved.commander, resolved.commanderFinish ?? 'nonfoil');
+  // A commander picked separately still takes "*F*" from its own line in the paste.
+  else if (list.kind === 'deck' && list.commander && resolved.commanderFinish) {
+    setCommander(list.id, list.commander, resolved.commanderFinish);
+  }
 
-  for (const { card, quantity } of resolved.cards) addCardToList(list.id, card, quantity);
+  for (const { card, quantity, finish } of resolved.cards) addCardToList(list.id, card, quantity, finish);
   // A plain list has no header, so a commander found in the paste stays a card in it.
-  if (list.kind !== 'deck' && resolved.commander) addCardToList(list.id, resolved.commander, 1);
+  if (list.kind !== 'deck' && resolved.commander) {
+    addCardToList(list.id, resolved.commander, 1, resolved.commanderFinish ?? 'nonfoil');
+  }
 
   return {
     added: resolved.cards.length,
@@ -49,7 +55,7 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
  * commander it has.
  */
 export async function replaceWith(
-  list: Pick<List, 'id' | 'kind' | 'commander'>, text: string,
+  list: Pick<List, 'id' | 'kind' | 'commander' | 'commanderFinish'>, text: string,
 ): Promise<ImportSummary & { applied: boolean }> {
   const resolved = await resolveDecklist(text, collection, { commanderPicked: list.commander?.name ?? null });
   const summary = {
@@ -63,13 +69,15 @@ export async function replaceWith(
   if (resolved.missing.length || resolved.unreadable.length) return { ...summary, applied: false };
 
   const cards = [...resolved.cards];
+  const finish = resolved.commanderFinish ?? list.commanderFinish ?? 'nonfoil';
   if (resolved.commander && list.kind === 'deck') {
-    if (resolved.commander.id !== list.commander?.id) {
-      setCommander(list.id, resolved.commander);
-      summary.commander = resolved.commander.name;
-    }
+    if (resolved.commander.id !== list.commander?.id) summary.commander = resolved.commander.name;
+    setCommander(list.id, resolved.commander, finish);
   } else if (resolved.commander) {
-    cards.push({ card: resolved.commander, quantity: 1 });
+    cards.push({ card: resolved.commander, quantity: 1, finish });
+  } else if (list.commander && resolved.commanderFinish) {
+    // The commander's own line, with a new finish or printing marker.
+    setCommander(list.id, list.commander, resolved.commanderFinish);
   }
   replaceListCards(list.id, cards);
   return { ...summary, applied: true };

@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { cardsInList, deleteList, getList, renameList, setCommander } from '@/lib/db';
+import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander } from '@/lib/db';
 import { requireList } from '@/lib/profile-route';
 import { getCard, ScryfallError } from '@/lib/scryfall';
 
@@ -28,7 +28,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let body: { name?: string; note?: string; commanderId?: string | null };
+  let body: { name?: string; note?: string; commanderId?: string | null; fromList?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -39,8 +39,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   try {
     if (name !== undefined) renameList(id, name, body.note);
-    // A deck's commander, by Scryfall id; null clears it.
-    if (body.commanderId !== undefined) {
+    // A deck's commander, by Scryfall id; null clears it. `fromList` takes
+    // a card already in the deck, moving it out of the 99.
+    if (body.commanderId && body.fromList) {
+      if (!promoteToCommander(id, body.commanderId)) {
+        return NextResponse.json({ error: 'That card is not in this deck' }, { status: 400 });
+      }
+    } else if (body.commanderId !== undefined) {
       setCommander(id, body.commanderId ? await getCard(body.commanderId) : null);
     }
     return NextResponse.json({ list: getList(id, owned.profile) });

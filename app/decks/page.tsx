@@ -99,7 +99,8 @@ export default function DecksPage() {
             />
             {!commander && decklist.trim() && (
               <span className="text-xs text-[var(--muted)]">
-                No commander picked: the list&apos;s &ldquo;Commander&rdquo; section is used, or its first card if that can be one.
+                No commander picked: the list&apos;s &ldquo;Commander&rdquo; section is used, or its first card if that can be one —
+                otherwise you can pick it from the deck&apos;s legendary cards afterwards.
               </span>
             )}
           </label>

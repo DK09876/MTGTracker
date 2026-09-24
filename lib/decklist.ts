@@ -4,7 +4,7 @@
  * The common export shapes all come down to one card per line:
  *
  *   1x Kratos, God of War (SLD) 2207        Moxfield, Archidekt
- *   1 Lightning Bolt (PF19) 1 *F*           with a foil marker
+ *   1 Lightning Bolt (PF19) 1 *F*           foil (*E* for etched)
  *   33 Mountain                             MTGO, plain text
  *   Sol Ring                                no count means one
  *
@@ -17,7 +17,7 @@
  * imported from a Secret Lair list keeps its Secret Lair art and price.
  */
 
-import type { ScryfallCard } from './scryfall';
+import type { Finish, ScryfallCard } from './scryfall';
 
 export type Section = 'commander' | 'main' | 'side';
 
@@ -27,7 +27,7 @@ export interface Entry {
   /** Set code, lower-cased, when the line gave one. */
   set?: string;
   collectorNumber?: string;
-  foil: boolean;
+  finish: Finish;
   section: Section;
   /** The line as written, for reporting a card that could not be found. */
   line: string;
@@ -68,7 +68,7 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
       name,
       set: parts[3]?.toLowerCase(),
       collectorNumber: parts[4],
-      foil: /\*F\*/i.test(parts[5] ?? ''),
+      finish: /\*E\*/i.test(parts[5] ?? '') ? 'etched' : /\*F\*/i.test(parts[5] ?? '') ? 'foil' : 'nonfoil',
       section,
       line,
     });
@@ -76,18 +76,26 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
   return { entries, unreadable };
 }
 
-const lineFor = (card: ScryfallCard, quantity: number) =>
-  `${quantity} ${card.name}${card.set && card.collector_number ? ` (${card.set.toUpperCase()}) ${card.collector_number}` : ''}`;
+const MARKER: Record<Finish, string> = { nonfoil: '', foil: ' *F*', etched: ' *E*' };
+
+const lineFor = (card: ScryfallCard, quantity: number, finish: Finish = 'nonfoil') =>
+  `${quantity}x ${card.name}`
+  + (card.set && card.collector_number ? ` (${card.set.toLowerCase()}) ${card.collector_number}` : '')
+  + MARKER[finish];
 
 /**
- * A deck written out in the same format it is read in - Moxfield's - so it
- * can be edited as text and saved back, or copied to another site. Printings
- * are kept, so a round trip changes nothing.
+ * A deck written out as Moxfield exports it - one flat list, `1x Name (set)
+ * number *F*` - so the same text imports here and anywhere else, and
+ * copying it out and pasting it back changes nothing. The commander is the
+ * first line: that is where an import looks for it.
  */
-export function formatDecklist(commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): string {
+export function formatDecklist(
+  commander: ScryfallCard | null,
+  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish }>,
+  commanderFinish: Finish = 'nonfoil',
+): string {
   const main = [...cards]
     .sort((a, b) => a.card.name.localeCompare(b.card.name))
-    .map(({ card, quantity }) => lineFor(card, quantity));
-  if (!commander) return main.join('\n');
-  return ['Commander', lineFor(commander, 1), '', 'Deck', ...main].join('\n');
+    .map(({ card, quantity, finish }) => lineFor(card, quantity, finish));
+  return [...(commander ? [lineFor(commander, 1, commanderFinish)] : []), ...main].join('\n');
 }
