@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { commanderPage, edhrecEnabled, edhrecSlug, edhrecUrl, parseCommanderPage } from './edhrec';
-import { searchCombos, SpellbookError, toCombo } from './spellbook';
+import { combosInDeck, estimateBracket, searchCombos, SpellbookError, toCombo } from './spellbook';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -131,5 +131,41 @@ describe('EDHREC', () => {
     expect(await commanderPage('Unknown Commander')).toBeNull();
     expect(await commanderPage('Unknown Commander')).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Commander Spellbook, for a whole deck', () => {
+  const deck = { commanders: ['Vivi Ornitier'], main: [{ name: 'Sol Ring', quantity: 1 }, { name: 'Deadeye Navigator', quantity: 1 }] };
+
+  it('sends the deck and names what each near-miss combo lacks', async () => {
+    const near = { ...variant, id: '2', uses: [{ card: { name: 'Deadeye Navigator' } }, { card: { name: 'Peregrine Drake' } }] };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: { included: [variant], almostIncluded: [near] } })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await combosInDeck(deck);
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/find-my-combos$/);
+    expect(JSON.parse(init.body as string)).toEqual({
+      commanders: [{ card: 'Vivi Ornitier' }],
+      main: [{ card: 'Sol Ring', quantity: 1 }, { card: 'Deadeye Navigator', quantity: 1 }],
+    });
+    expect(result.included.map((c) => c.id)).toEqual(['1369-6586']);
+    expect(result.almost[0].missing).toEqual(['Peregrine Drake']);
+  });
+
+  it('reads the bracket estimate, keeping only the combos it found relevant', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      bracketTag: 'S',
+      cards: [{ card: { name: 'Rhystic Study' }, gameChanger: true, massLandDenial: false, extraTurn: false, banned: false }],
+      combos: [
+        { combo: variant, relevant: true, definitelyTwoCard: true, speed: 5 },
+        { combo: variant, relevant: false, definitelyTwoCard: false, speed: 1 },
+      ],
+    }))));
+    const report = await estimateBracket(deck);
+    expect(report.tag).toBe('S');
+    expect(report.cards[0]).toMatchObject({ name: 'Rhystic Study', gameChanger: true });
+    expect(report.combos).toEqual([{ cards: ['Vivi Ornitier', 'Quicksilver Elemental'], twoCard: true, speed: 5, produces: ['Infinite red mana', 'Infinite blue mana'] }]);
   });
 });

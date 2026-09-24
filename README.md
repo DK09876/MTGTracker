@@ -79,6 +79,16 @@ any profile.
   removal, board wipes, tutors - against common guidelines, and how often
   an opening hand has 2-4 lands. Roles come from Scryfall's tags, looked up
   once per card and saved.
+- **Bracket**: the lowest official bracket the list can be - from Game
+  Changers, mass land denial and two-card combos, as classified by Commander
+  Spellbook - with the reasons, cautions for what depends on play (early
+  combos, chained extra turns), and Spellbook's own label beside it.
+- **Geek stats** (folded away): mulligan odds, land drops by turn, casting
+  each colour's hungriest spell on curve, drawing each role in time, mana and
+  money breakdowns, and an odds calculator - exact hypergeometric numbers.
+- **Suggestions**: the combos the deck has, the cards that would complete
+  more (grouped, cheapest legal paper printing, one click to add), and cut
+  candidates - the least-played cards in roles over their guideline.
 
 **Decks** are lists with a commander. Pick the commander from a search that
 shows each card's art and type line; the deck counts towards 100 with the

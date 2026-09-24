@@ -36,7 +36,11 @@ export interface Health {
   averageMv: number;
   curve: Array<{ label: string; count: number; cards: string[] }>;
   types: Array<{ label: string; count: number }>;
-  colors: Array<{ color: Color; pips: number; share: number; landSources: number; otherSources: number }>;
+  colors: Array<{
+    color: Color; pips: number; share: number; landSources: number; otherSources: number;
+    /** How many of the land sources count only because they fetch the colour. */
+    fetchLandSources: number;
+  }>;
   gameChangers: string[];
   warnings: Warning[];
   hand: { library: number; lands: number; distribution: number[]; twoToFour: number; averageLands: number };
@@ -126,6 +130,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
     share: totalPips ? demand[color] / totalPips : 0,
     landSources: count(lands.filter((c) => makes(c.card, color))),
     otherSources: count(spells.filter((c) => makes(c.card, color))),
+    fetchLandSources: count(lands.filter((c) => !c.card.produced_mana?.includes(color) && makes(c.card, color))),
   }));
 
   const gameChangers = [commander, ...cards.map((c) => c.card)]
