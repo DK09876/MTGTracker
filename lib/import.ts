@@ -13,12 +13,12 @@
  * deck's header.
  */
 
-import { parseDecklist, type Entry } from './decklist';
+import { parseDecklist, type Board, type Entry } from './decklist';
 import type { Finish, Identifier, ScryfallCard } from './scryfall';
 
 export interface Resolved {
-  /** Cards for the deck itself, with how many of each and which finish. */
-  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish }>;
+  /** Cards for the deck, with how many of each, which finish and which board. */
+  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish; board: Board }>;
   /** The commander, when the list says or implies one. */
   commander: ScryfallCard | null;
   /** The finish of the commander's line, including a picked commander's. */
@@ -27,7 +27,7 @@ export interface Resolved {
   missing: string[];
   /** Lines that could not be read as a card at all. */
   unreadable: string[];
-  /** Cards left out because they were in a sideboard or maybeboard. */
+  /** Lines left out: tokens and the like. */
   skipped: number;
 }
 
@@ -54,7 +54,7 @@ export async function resolveDecklist(
   text: string, collection: Collection, { commanderPicked }: { commanderPicked: string | null },
 ): Promise<Resolved> {
   const { entries, unreadable } = parseDecklist(text);
-  const wanted = entries.filter((e) => e.section !== 'side');
+  const wanted = entries.filter((e) => e.section !== 'skip');
   const skipped = entries.length - wanted.length;
 
   // First pass: exact printings where given, names otherwise.
@@ -71,7 +71,7 @@ export async function resolveDecklist(
   let commander: ScryfallCard | null = null;
   const named = resolved.find((r) => r.entry.section === 'commander');
   if (named) commander = named.card;
-  else if (!commanderPicked && resolved[0] && canLead(resolved[0].card)) commander = resolved[0].card;
+  else if (!commanderPicked && resolved[0]?.entry.section === 'main' && canLead(resolved[0].card)) commander = resolved[0].card;
   let commanderFinish: Finish | null = null;
 
   // The commander sits in the header, not in the 99 - whether it came from
@@ -85,9 +85,10 @@ export async function resolveDecklist(
       commanderFinish = entry.finish;
       continue;
     }
+    const board: Board = entry.section === 'side' || entry.section === 'maybe' ? entry.section : 'main';
     const existing = cards.find((c) => c.card.id === card.id);
     if (existing) existing.quantity += entry.quantity;
-    else cards.push({ card, quantity: entry.quantity, finish: entry.finish });
+    else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board });
   }
   return { cards, commander, commanderFinish, missing, unreadable, skipped };
 }

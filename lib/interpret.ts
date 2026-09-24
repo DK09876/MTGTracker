@@ -145,13 +145,25 @@ const ONE_CALL_MS = 12_000;
 // name search for it is noise.
 const NAME_WORDS = 5;
 
-export async function interpret(input: string, deps: Deps, previous?: Previous, resume?: Resume): Promise<Interpreted> {
+/**
+ * `forDeck` fixes the commander: a search from inside a deck is always for
+ * that deck's commander, whether or not the request names it.
+ */
+export async function interpret(
+  input: string, deps: Deps, previous?: Previous, resume?: Resume, forDeck?: { commander: string },
+): Promise<Interpreted> {
   const text = input.trim();
   const trace: Step[] = [];
   const now = deps.now ?? Date.now;
   const deadline = now() + TIME_BUDGET_MS;
   const timeForAnotherCall = () => deadline - now() > ONE_CALL_MS;
   if (!text) return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '' } };
+
+  // Syntax typed inside a deck still gets the deck's colours and legality.
+  if (forDeck && !previous && !resume && looksLikeSyntax(text)) {
+    const result = await runQuery(text, forDeck.commander, deps);
+    return { ...result, trace: [{ text: 'Read as Scryfall syntax, so it ran as written without the AI' }, ...result.trace.slice(1)] };
+  }
 
   if (!previous && !resume && looksLikeSyntax(text)) {
     trace.push({ text: 'Read as Scryfall syntax, so it ran as written without the AI' });
@@ -170,7 +182,8 @@ export async function interpret(input: string, deps: Deps, previous?: Previous, 
 
   // A follow-up keeps the commander it had, so the model can be shown its
   // rules text in the first call instead of needing a second.
-  const known = previous?.commander && !resume ? await findExactly(previous.commander, deps) : null;
+  const knownName = forDeck?.commander ?? (resume ? undefined : previous?.commander);
+  const known = knownName ? await findExactly(knownName, deps) : null;
   const context: Context = { previous, commander: known ? contextOf(known) : undefined };
 
   let plan: Translation;
@@ -194,7 +207,12 @@ export async function interpret(input: string, deps: Deps, previous?: Previous, 
 
   let commander: ScryfallCard | null = null;
   let grounded = false;
-  if (resume) {
+  if (forDeck && known) {
+    commander = known;
+    grounded = true;
+    trace.push({ text: `For this deck's commander, ${known.name}` });
+    plan = { ...plan, commander: known.name };
+  } else if (resume) {
     commander = await findExactly(resume.commander, deps);
     trace.push({ text: `You picked ${commander?.name ?? resume.commander}` });
   } else if (plan.commander && known && sameCard(plan.commander, known.name)) {

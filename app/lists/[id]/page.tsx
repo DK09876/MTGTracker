@@ -5,14 +5,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { use, useCallback, useEffect, useState } from 'react';
 
+import AddCardsPanel from '@/components/AddCardsPanel';
+import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
 import CommanderPicker from '@/components/CommanderPicker';
+import DeckCards, { type Entry } from '@/components/DeckCards';
 import ImportResult from '@/components/ImportResult';
-import CardTile from '@/components/CardTile';
 import * as api from '@/lib/api';
-import { filterCards } from '@/lib/filter';
 import type { List, ListedCard } from '@/lib/db';
-import { formatDecklist } from '@/lib/decklist';
+import { formatDecklist, type Board } from '@/lib/decklist';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -28,7 +29,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
-  const [filter, setFilter] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -84,21 +85,32 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   if (error) return <p className="text-red-400">{error}</p>;
   if (!list) return null;
 
-  // Filtering runs over the stored payloads, so it never touches the network.
   const deck = list.kind === 'deck';
-  // The commander is one of the 100: it leads the grid, and the filter,
-  // counts and value all include it.
-  const entries: Array<ListedCard & { commander?: boolean }> = deck && list.commander
-    ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, addedAt: '', commander: true }, ...cards]
+  // The commander is one of the 100: it leads the main board, and the
+  // counts and value include it - "100 / 100", never "99 cards". The
+  // sideboard and maybeboard are not in the deck, so not in the totals.
+  const entries: Entry[] = deck && list.commander
+    ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, board: 'main', commander: true }, ...cards]
     : cards;
-  const { results: shown, unsupported } = filterCards(entries, filter);
-  // A Commander deck is 100 cards with the commander, so every count and
-  // total here includes it - "100 / 100", never "99 cards".
-  const value = shown.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0);
-  const copies = shown.reduce((sum, c) => sum + c.quantity, 0);
-  const unique = shown.length;
-  const filtered = shown.length !== entries.length;
-  const deckSize = entries.reduce((sum, c) => sum + c.quantity, 0);
+  const main = entries.filter((e) => !deck || e.board === 'main');
+  const value = main.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0);
+  const copies = main.reduce((sum, c) => sum + c.quantity, 0);
+  const unique = main.length;
+  const deckSize = copies;
+  const maybe = entries.filter((e) => e.board === 'maybe').reduce((n, e) => n + e.quantity, 0);
+  const side = entries.filter((e) => e.board === 'side').reduce((n, e) => n + e.quantity, 0);
+  // By name, so another printing of a card still counts as "in the deck".
+  const inDeck = new Map<string, Board>(entries.map((e) => [e.card.name.split(' // ')[0], e.board]));
+  const selectedEntry = selected ? cards.find((c) => c.card.id === selected.id) : undefined;
+
+  const moveCard = async (cardId: string, board: Board) => {
+    setCards((prev) => prev.map((c) => (c.card.id === cardId ? { ...c, board } : c)));
+    try {
+      await api.updateCard(id, cardId, { board });
+    } finally {
+      await load().catch(() => {});
+    }
+  };
 
   // "Edit as text": the deck as it stands, in the same format it imports.
   const openText = () => {
@@ -161,16 +173,23 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             <h1 className="truncate text-xl font-semibold">{list.name}</h1>
           )}
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {deck && !filtered
+            {deck
               ? <span className={deckSize === 100 ? 'text-[var(--foreground)]' : ''}>{deckSize} / 100 cards</span>
               : <>{copies} card{copies === 1 ? '' : 's'}</>}
             {unique !== copies && <> · {unique} unique</>}
             {value > 0 && <> · ${value.toFixed(2)}</>}
-            {filtered && <> · filtered from {entries.length}</>}
+            {maybe > 0 && <> · {maybe} on maybeboard</>}
+            {side > 0 && <> · {side} in sideboard</>}
           </p>
         </div>
 
-        <div className="flex gap-2 text-sm">
+        <div className="flex flex-wrap gap-2 text-sm">
+          <button
+            onClick={() => setAddOpen(true)}
+            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] hover:brightness-110"
+          >
+            Add cards
+          </button>
           <button
             onClick={() => (importing ? setImporting(false) : openText())}
             className="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface)]"
@@ -303,76 +322,44 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
-      {entries.length > 0 && (
-        <div className="mt-5">
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter this list — t:creature, c:rg, cmc<=3, usd>5, -t:land"
-            aria-label="Filter this list"
-            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm outline-none focus:border-[var(--accent)]"
+      <DeckCards
+        entries={entries}
+        isDeck={deck}
+        onSelect={setSelected}
+        onQuantity={changeQuantity}
+        onMove={moveCard}
+      />
+
+      <CardModal
+        card={selected}
+        onClose={() => setSelected(null)}
+        actions={selectedEntry && (
+          <CardEditor
+            key={selectedEntry.card.id}
+            listId={id}
+            card={selectedEntry.card}
+            finish={selectedEntry.finish}
+            board={selectedEntry.board}
+            isDeck={deck}
+            onChanged={async (printingId) => {
+              const data = await api.fetchList(id);
+              setList(data.list);
+              setCards(data.cards);
+              setSelected(data.cards.find((c) => c.card.id === printingId)?.card ?? null);
+            }}
           />
-          {unsupported.length > 0 && (
-            <p className="mt-2 text-xs text-amber-400">
-              Ignoring {unsupported.map((u) => `"${u}"`).join(', ')} — not supported here.
-              Supported: name, t, o, c/id, cmc/mv, usd, pow, tou, r, set, a, kw, is, and - to exclude.
-            </p>
-          )}
-        </div>
-      )}
+        )}
+      />
 
-      {!entries.length ? (
-        <p className="mt-12 text-center text-[var(--muted)]">
-          Nothing here yet. <Link href="/" className="text-[var(--accent)] underline">Search for a card</Link> to add one.
-        </p>
-      ) : (
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {shown.map(({ card, quantity, finish, commander }) => (
-            <CardTile
-              key={card.id}
-              card={card}
-              finish={finish}
-              onSelect={setSelected}
-              footer={commander ? (
-                <p className="mt-auto rounded-lg bg-[var(--accent)]/15 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">
-                  Commander
-                </p>
-              ) : (
-                <div className="mt-auto flex items-center gap-2">
-                  <button
-                    onClick={() => changeQuantity(card.id, quantity - 1)}
-                    aria-label={`One fewer ${card.name}`}
-                    className="h-8 w-8 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-hover)]"
-                  >
-                    −
-                  </button>
-                  <span className="min-w-[2ch] text-center text-sm tabular-nums">{quantity}</span>
-                  <button
-                    onClick={() => changeQuantity(card.id, quantity + 1)}
-                    aria-label={`One more ${card.name}`}
-                    className="h-8 w-8 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-hover)]"
-                  >
-                    +
-                  </button>
-                  <button
-                    onClick={() => changeQuantity(card.id, 0)}
-                    aria-label={`Remove ${card.name}`}
-                    className="ml-auto rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                </div>
-              )}
-            />
-          ))}
-        </div>
+      {addOpen && (
+        <AddCardsPanel
+          listId={id}
+          commander={deck ? list.commander?.name ?? null : null}
+          inDeck={inDeck}
+          onAdded={() => { load().catch(() => {}); }}
+          onClose={() => setAddOpen(false)}
+        />
       )}
-
-      {entries.length > 0 && !shown.length && (
-        <p className="mt-12 text-center text-[var(--muted)]">Nothing in this list matches that filter.</p>
-      )}
-
-      <CardModal card={selected} onClose={() => setSelected(null)} />
     </div>
   );
 }

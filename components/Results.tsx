@@ -51,15 +51,20 @@ interface Props {
   onLoadMore?: () => void;
   loadingMore?: boolean;
   onSelect: (card: ScryfallCard) => void;
-  onAdd: (card: ScryfallCard) => void;
+  /** "Add to list" on each card. Leave out to use `actions` instead. */
+  onAdd?: (card: ScryfallCard) => void;
+  /** Buttons of the caller's own on each card - Add / Maybe inside a deck. */
+  actions?: (card: ScryfallCard) => React.ReactNode;
+  /** Fewer columns, for a panel rather than the whole page. */
+  dense?: boolean;
 }
 
 const short = (name: string) => name.split(',')[0];
 
 export default function Results({
-  views, commander, tab, onTab, loading, inLists, onSort, onLoadMore, loadingMore, onSelect, onAdd,
+  views, commander, tab, onTab, loading, inLists, onSort, onLoadMore, loadingMore, onSelect, onAdd, actions, dense,
 }: Props) {
-  const grid = { inLists, onSelect, onAdd };
+  const grid = { inLists, onSelect, onAdd, actions, dense };
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = commander
     ? [
@@ -139,7 +144,7 @@ export default function Results({
   );
 }
 
-function EdhrecTab({ view, inLists, onSelect, onAdd }: { view: EdhrecView } & Pick<Props, 'inLists' | 'onSelect' | 'onAdd'>) {
+function EdhrecTab({ view, inLists, onSelect, onAdd, actions, dense }: { view: EdhrecView } & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   const byId = new Map(view.cards.map((c) => [c.id, c]));
   return (
     <div>
@@ -163,6 +168,8 @@ function EdhrecTab({ view, inLists, onSelect, onAdd }: { view: EdhrecView } & Pi
             inLists={inLists}
             onSelect={onSelect}
             onAdd={onAdd}
+            actions={actions}
+            dense={dense}
           />
         </section>
       ))}
@@ -170,13 +177,13 @@ function EdhrecTab({ view, inLists, onSelect, onAdd }: { view: EdhrecView } & Pi
   );
 }
 
-function CardGrid({ cards, stats, commander, inLists, onSelect, onAdd }: {
+function CardGrid({ cards, stats, commander, inLists, onSelect, onAdd, actions, dense }: {
   cards: ScryfallCard[];
   stats?: Record<string, CardStats>;
   commander?: string;
-} & Pick<Props, 'inLists' | 'onSelect' | 'onAdd'>) {
+} & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   return (
-    <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+    <div className={`mt-3 grid gap-4 ${dense ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {cards.map((card) => {
         const s = stats?.[card.id];
         return (
@@ -186,11 +193,16 @@ function CardGrid({ cards, stats, commander, inLists, onSelect, onAdd }: {
             inLists={inLists[card.id]}
             onSelect={onSelect}
             onAdd={onAdd}
-            footer={s && commander && (
-              <p className="text-xs text-[var(--muted)]">
-                In {Math.round(s.inclusion * 100)}% of {short(commander)} decks
-              </p>
-            )}
+            footer={(s && commander) || actions ? (
+              <>
+                {s && commander && (
+                  <p className="text-xs text-[var(--muted)]">
+                    In {Math.round(s.inclusion * 100)}% of {short(commander)} decks
+                  </p>
+                )}
+                {actions?.(card)}
+              </>
+            ) : undefined}
           />
         );
       })}

@@ -6,7 +6,7 @@
  * looks at the top level shows a blank where half the card should be.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { imageOf, manaCostOf, priceOf, typeLineOf, type ScryfallCard } from './scryfall';
 
@@ -82,5 +82,18 @@ describe('priceOf', () => {
 
   it('refuses a price that is not a number', () => {
     expect(priceOf(card({ prices: { usd: 'lots' } }))).toBeNull();
+  });
+});
+
+describe('printingsOf', () => {
+  it('asks for every printing, not one per card', async () => {
+    const { printingsOf } = await import('./scryfall');
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [{ id: 'a', name: 'Cultivate' }], total_cards: 1, has_more: false })));
+    vi.stubGlobal('fetch', fetchMock);
+    await printingsOf('0e0f2a9e-9a9c-4a47-b2b5-8b8cf1a0c1f1');
+    const url = new URL((fetchMock.mock.calls[0] as unknown as [string])[0]);
+    expect(url.searchParams.get('unique')).toBe('prints');
+    expect(url.searchParams.get('q')).toContain('oracleid:');
+    vi.unstubAllGlobals();
   });
 });

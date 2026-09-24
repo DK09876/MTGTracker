@@ -76,6 +76,8 @@ export interface ScryfallCard {
     artist?: string;
     image_uris?: { small?: string; normal?: string; large?: string; art_crop?: string };
   }>;
+  /** Which finishes this printing exists in: nonfoil, foil, etched. */
+  finishes?: string[];
   prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null; eur?: string | null; tix?: string | null };
   legalities?: Record<string, string>;
 }
@@ -120,13 +122,19 @@ export interface SearchResult {
  * `t:goblin`, `c:rg`, `set:mh3`, `cmc<=3` and the rest. Prefix matching is
  * their job, not ours.
  */
-export async function searchCards(query: string, page = 1, sort: Sort = DEFAULT_SORT): Promise<SearchResult> {
+/**
+ * `unique` is `cards` for search - one result per card - and `prints` to
+ * list every printing of one.
+ */
+export async function searchCards(
+  query: string, page = 1, sort: Sort = DEFAULT_SORT, unique: 'cards' | 'prints' = 'cards',
+): Promise<SearchResult> {
   const trimmed = query.trim();
   if (!trimmed) return { cards: [], totalCards: 0, hasMore: false };
 
   try {
     const body = await get<{ data: ScryfallCard[]; total_cards: number; has_more: boolean }>(
-      `/cards/search?q=${encodeURIComponent(trimmed)}&unique=cards&order=${sort.order}&dir=${sort.dir}&page=${page}`,
+      `/cards/search?q=${encodeURIComponent(trimmed)}&unique=${unique}&order=${sort.order}&dir=${sort.dir}&page=${page}`,
     );
     return { cards: body.data, totalCards: body.total_cards, hasMore: body.has_more };
   } catch (error) {
@@ -265,4 +273,19 @@ export function oracleTextOf(card: ScryfallCard): string {
   return (card.card_faces ?? [])
     .map((f) => [f.name, f.oracle_text].filter(Boolean).join(': '))
     .join('\n//\n');
+}
+
+/** Every printing of a card, newest first - for choosing which one a deck holds. */
+export async function printingsOf(oracleId: string): Promise<ScryfallCard[]> {
+  const cards: ScryfallCard[] = [];
+  let page = 1;
+  // A handful of cards have hundreds of printings (basic lands); three pages is plenty.
+  for (;;) {
+    // Every printing, not one per card: without this Cultivate has 1, not 61.
+    const result = await searchCards(`oracleid:${oracleId} include:extras`, page, { order: 'released', dir: 'desc' }, 'prints');
+    cards.push(...result.cards);
+    if (!result.hasMore || page >= 3) break;
+    page++;
+  }
+  return cards;
 }

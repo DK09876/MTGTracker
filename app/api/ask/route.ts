@@ -4,6 +4,7 @@
  *   GET  ?q=...                    work out what was meant (lib/interpret.ts)
  *   POST {q, previous}             a follow-up, refining the search before it
  *   POST {q, previous?, resume}    carry on after the user picked a commander
+ *   POST {q, forDeck: {commander}} search from inside a deck, for its commander
  *   GET  ?query=&commander=&sort=  run a query as written, no model - for an
  *                                  edited query, a new sort (&edhrec=0 skips
  *                                  rebuilding the EDHREC tab), or a tab
@@ -94,7 +95,7 @@ function resumeOf(raw: unknown): Resume | undefined {
 }
 
 export async function POST(request: Request) {
-  let body: { q?: unknown; previous?: Partial<Previous>; resume?: unknown };
+  let body: { q?: unknown; previous?: Partial<Previous>; resume?: unknown; forDeck?: { commander?: unknown } };
   try {
     body = await request.json();
   } catch {
@@ -108,5 +109,8 @@ export async function POST(request: Request) {
       query: text(p.query) ?? '', constraints: text(p.constraints),
     }
     : undefined;
-  return respond(request, () => interpret(text(body.q) ?? '', deps(), previous, resumeOf(body.resume)));
+  const deckCommander = text(body.forDeck?.commander);
+  return respond(request, () => interpret(
+    text(body.q) ?? '', deps(), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
+  ));
 }
