@@ -72,7 +72,9 @@ export async function interpret(input: string, deps: Deps): Promise<Interpreted>
       return asTyped(text, deps, `AI search failed (${reason}), so this searched card names for what you typed.`);
     }
 
-    const query = await withCommander(translation, deps);
+    const query = translation.cardName
+      ? exactName(translation.cardName)
+      : await withCommander(translation, deps);
     last = { via: 'ai', query, explanation: translation.explanation || undefined };
 
     try {

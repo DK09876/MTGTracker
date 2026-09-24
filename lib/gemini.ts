@@ -17,9 +17,22 @@ const DEFAULT_MODEL = 'gemini-flash-lite-latest';
 
 const TIMEOUT_MS = 15_000;
 
+// When Gemini is overloaded it refuses with a 503 in a fraction of a second,
+// so one quick retry is cheap. A slow request is not retried - it has
+// already used up the time a retry would need.
+const RETRY_STATUSES = new Set([429, 503]);
+const RETRY_DELAY_MS = 500;
+
 export interface Translation {
-  /** Scryfall syntax, without the commander's colour identity. */
+  /** Scryfall syntax, without the commander's colour identity. Empty when `cardName` is set. */
   query: string;
+  /**
+   * The input was one card's name, spelled right or wrong; this is the
+   * corrected name. Asked for separately because both Flash Lite models,
+   * told to write an exact-name search (`!"Name"`), wrote its negation
+   * (`-"Name"`) instead - which matches every other card.
+   */
+  cardName: string | null;
   /** One sentence restating what the search looks for, shown above the results. */
   explanation: string;
   /** A commander named in the request, resolved against Scryfall by the caller. */
@@ -41,9 +54,27 @@ async function translate(key: string, model: string, request: string, feedback?:
     ? `${request}\n\nYour previous attempt did not work: ${feedback}`
     : request;
 
-  let response: Response;
+  const started = Date.now();
+  let response = await call(key, model, user);
+  if (RETRY_STATUSES.has(response.status) && Date.now() - started < TIMEOUT_MS / 2) {
+    await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    response = await call(key, model, user);
+  }
+
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = ((await response.json()) as { error?: { message?: string } }).error?.message ?? '';
+    } catch { /* non-JSON error body */ }
+    throw new GeminiError(`the model returned ${response.status}${detail ? `: ${detail}` : ''}`);
+  }
+
+  return parseTranslation(await response.json());
+}
+
+async function call(key: string, model: string, user: string): Promise<Response> {
   try {
-    response = await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
+    return await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
@@ -63,16 +94,6 @@ async function translate(key: string, model: string, request: string, feedback?:
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     throw new GeminiError(timedOut ? 'the model took too long' : 'could not reach the model');
   }
-
-  if (!response.ok) {
-    let detail = '';
-    try {
-      detail = ((await response.json()) as { error?: { message?: string } }).error?.message ?? '';
-    } catch { /* non-JSON error body */ }
-    throw new GeminiError(`the model returned ${response.status}${detail ? `: ${detail}` : ''}`);
-  }
-
-  return parseTranslation(await response.json());
 }
 
 /** Pull the translation out of a generateContent response, refusing anything malformed. */
@@ -88,13 +109,15 @@ export function parseTranslation(body: unknown): Translation {
     throw new GeminiError('the model returned something other than JSON');
   }
 
-  const query = typeof parsed.query === 'string' ? parsed.query.trim() : '';
-  if (!query) throw new GeminiError('the model returned an empty query');
-  const commander = typeof parsed.commander === 'string' ? parsed.commander.trim() : '';
+  const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+  const query = clean(parsed.query);
+  const cardName = clean(parsed.cardName);
+  if (!query && !cardName) throw new GeminiError('the model returned an empty query');
   return {
-    query,
-    explanation: typeof parsed.explanation === 'string' ? parsed.explanation.trim() : '',
-    commander: commander || null,
+    query: cardName ? '' : query,
+    cardName: cardName || null,
+    explanation: clean(parsed.explanation),
+    commander: clean(parsed.commander) || null,
   };
 }
 
@@ -104,9 +127,10 @@ const RESPONSE_SCHEMA = {
     query: { type: 'STRING' },
     explanation: { type: 'STRING' },
     commander: { type: 'STRING', nullable: true },
+    cardName: { type: 'STRING', nullable: true },
   },
-  required: ['query', 'explanation', 'commander'],
-  propertyOrdering: ['explanation', 'commander', 'query'],
+  required: ['query', 'explanation', 'commander', 'cardName'],
+  propertyOrdering: ['cardName', 'explanation', 'commander', 'query'],
 };
 
 // Tags checked against Scryfall on 2026-09-24. An unknown otag does not
@@ -128,13 +152,15 @@ Scryfall runs the query and the user sees whatever it returns, so the query
 must be valid Scryfall syntax and must actually find the cards asked for.
 
 Return JSON with:
+- cardName: if the input is just the name of one card, possibly misspelled or
+  partial, that card's correct full name. Leave query empty. Otherwise null.
 - explanation: one short sentence saying what the search looks for, in plain
   words, e.g. "Green ramp that isn't a land, under $2".
 - commander: if the request names a commander to build around ("for my Omnath
   deck", "good with Atraxa"), that card's name as best you know it. Otherwise
   null. When you set this, do NOT put a colour identity (id:) in the query -
   the real identity is looked up and added for you.
-- query: the Scryfall query.
+- query: the Scryfall query. Empty when cardName is set.
 
 Syntax reminders:
 - t: type line (t:creature t:goblin). o:"text" searches rules text; use ~ for
@@ -155,8 +181,6 @@ Syntax reminders:
   For a role not in that list, use o:"..." with the words such cards print.
 
 Rules:
-- If the input is just a card name, possibly misspelled, return its correct
-  exact name as !"Card Name".
 - Plural creature types are a type search: "goblins" is t:goblin.
 - Prefer a query that finds a few too many cards over one that finds none.
   Do not stack every possible condition.
@@ -165,7 +189,7 @@ Rules:
 Examples:
 "cheap green ramp that isn't a land" ->
   query: otag:ramp c:g -t:land usd<2
-"lightnig bolt" -> query: !"Lightning Bolt"
+"lightnig bolt" -> cardName: Lightning Bolt; query: (empty)
 "best board wipes for my Atraxa deck" ->
   commander: Atraxa, Praetors' Voice; query: otag:board-wipe f:commander order:edhrec
 "red creatures that give other creatures haste" ->
