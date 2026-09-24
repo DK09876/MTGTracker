@@ -7,14 +7,17 @@
  *   node scripts/profile.cjs rename <id> "<display name>"
  *
  * A profile is only a name that lists belong to - there is no password.
- * Run it from the app directory, or set MTG_DB_PATH.
+ * Uses the app's own database (data/mtg.db next to this folder) unless
+ * MTG_DB_PATH says otherwise.
  */
 
 const { mkdirSync } = require('fs');
 const { dirname, join } = require('path');
 const { Database } = require('node-sqlite3-wasm');
 
-const DB_PATH = process.env.MTG_DB_PATH || join(process.cwd(), 'data', 'mtg.db');
+// Relative to the app, not the current directory: run from anywhere else,
+// it once created an empty database of its own.
+const DB_PATH = process.env.MTG_DB_PATH || join(__dirname, '..', 'data', 'mtg.db');
 mkdirSync(dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 

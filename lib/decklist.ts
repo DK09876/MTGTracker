@@ -17,6 +17,8 @@
  * imported from a Secret Lair list keeps its Secret Lair art and price.
  */
 
+import type { ScryfallCard } from './scryfall';
+
 export type Section = 'commander' | 'main' | 'side';
 
 export interface Entry {
@@ -72,4 +74,20 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
     });
   }
   return { entries, unreadable };
+}
+
+const lineFor = (card: ScryfallCard, quantity: number) =>
+  `${quantity} ${card.name}${card.set && card.collector_number ? ` (${card.set.toUpperCase()}) ${card.collector_number}` : ''}`;
+
+/**
+ * A deck written out in the same format it is read in - Moxfield's - so it
+ * can be edited as text and saved back, or copied to another site. Printings
+ * are kept, so a round trip changes nothing.
+ */
+export function formatDecklist(commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): string {
+  const main = [...cards]
+    .sort((a, b) => a.card.name.localeCompare(b.card.name))
+    .map(({ card, quantity }) => lineFor(card, quantity));
+  if (!commander) return main.join('\n');
+  return ['Commander', lineFor(commander, 1), '', 'Deck', ...main].join('\n');
 }

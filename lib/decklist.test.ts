@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseDecklist } from './decklist';
+import { formatDecklist, parseDecklist } from './decklist';
 
 const MOXFIELD = `1x Kratos, God of War (SLD) 2207
 1x Alexios, Deimos of Kosmos (ACR) 134 *F*
@@ -52,5 +52,20 @@ describe('parseDecklist', () => {
     const { entries, unreadable } = parseDecklist('# my deck\n// notes on the deck\n12\n1 Sol Ring');
     expect(entries.map((e) => e.name)).toEqual(['Sol Ring']);
     expect(unreadable).toEqual(['12']);
+  });
+
+  it('writes a deck out in the format it reads back', () => {
+    const card = (name: string, set: string, collector_number: string) => ({ id: name, name, set, collector_number }) as never;
+    const text = formatDecklist(card('Kratos, God of War', 'sld', '2207'), [
+      { card: card('Sol Ring', 'soc', '128'), quantity: 1 },
+      { card: card('Mountain', 'acr', '107'), quantity: 33 },
+    ]);
+    expect(text).toBe('Commander\n1 Kratos, God of War (SLD) 2207\n\nDeck\n33 Mountain (ACR) 107\n1 Sol Ring (SOC) 128');
+    const back = parseDecklist(text).entries;
+    expect(back.map((e) => [e.section, e.quantity, e.name, e.set, e.collectorNumber])).toEqual([
+      ['commander', 1, 'Kratos, God of War', 'sld', '2207'],
+      ['main', 33, 'Mountain', 'acr', '107'],
+      ['main', 1, 'Sol Ring', 'soc', '128'],
+    ]);
   });
 });
