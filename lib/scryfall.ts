@@ -136,6 +136,35 @@ export function getCard(id: string): Promise<ScryfallCard> {
   return get<ScryfallCard>(`/cards/${encodeURIComponent(id)}`);
 }
 
+/**
+ * Card names starting with what has been typed, for the search dropdown.
+ *
+ * Prefix matching only - "lightnig" finds nothing. Misspellings are caught
+ * later, by the translator and then by `findCardNamed`.
+ */
+export async function autocomplete(prefix: string): Promise<string[]> {
+  const trimmed = prefix.trim();
+  if (trimmed.length < 2) return [];
+  const body = await get<{ data: string[] }>(`/cards/autocomplete?q=${encodeURIComponent(trimmed)}`);
+  return body.data;
+}
+
+/**
+ * The card whose name best matches a loose spelling, or null.
+ *
+ * Scryfall's fuzzy match is generous - "green ramp" finds Greenbelt Rampager -
+ * so this is only safe as a last resort, never as a first guess at what a
+ * sentence meant. Too many matches and no match are both null.
+ */
+export async function findCardNamed(fuzzy: string): Promise<ScryfallCard | null> {
+  try {
+    return await get<ScryfallCard>(`/cards/named?fuzzy=${encodeURIComponent(fuzzy.trim())}`);
+  } catch (error) {
+    if (error instanceof ScryfallError && error.status === 404) return null;
+    throw error;
+  }
+}
+
 // --- reading a card ------------------------------------------------------
 
 /** The front face's image, wherever the card happens to keep it. */
