@@ -106,6 +106,7 @@ describe('fetchedColors', () => {
     const green = h.colors.find((c) => c.color === 'G')!;
     const black = h.colors.find((c) => c.color === 'B')!;
     expect([green.landSources, green.otherSources]).toEqual([6, 1]);
+    expect(green.fetchLandSources).toBe(1);
     expect([black.landSources, black.otherSources]).toEqual([4, 1]);
     // No basic Mountain, so fetching "a basic land" cannot find red.
     expect(h.colors.find((c) => c.color === 'R')!.landSources).toBe(0);

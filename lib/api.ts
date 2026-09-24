@@ -22,9 +22,12 @@ import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
 import type { Board } from './decklist';
+import type { BracketFloor } from './bracket';
+import type { CutGroup } from './cuts';
 import type { Health } from './health';
 import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
+import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
@@ -228,3 +231,23 @@ export const deckHealth = (listId: string) => fetch(url(`lists/${listId}/health`
 /** Role counts - slow the first time a deck's cards are seen, then immediate. */
 export const deckRoles = (listId: string) =>
   fetch(url(`lists/${listId}/health?roles=1`)).then(json<{ roles: RoleCount[] }>).then((b) => b.roles);
+
+export interface DeckInsights {
+  bracket: (BracketFloor & { spellbook: { tag: string; label: string } }) | null;
+  combos: {
+    included: Combo[];
+    /** Cards that would each complete one or more combos, most combos first. */
+    toAdd: Array<{
+      name: string;
+      id: string | null;
+      image: string | null;
+      price: string | null;
+      combos: Array<{ id: string; url: string; produces: string[]; popularity: number | null; have: string[] }>;
+    }>;
+  } | null;
+  cuts: CutGroup[];
+  /** Parts that could not be worked out just now: 'bracket', 'combos'. */
+  unavailable: string[];
+}
+
+export const deckInsights = (listId: string) => fetch(url(`lists/${listId}/insights`)).then(json<DeckInsights>);

@@ -11,6 +11,7 @@ import CardModal from '@/components/CardModal';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckHealth from '@/components/DeckHealth';
+import DeckSuggestions from '@/components/DeckSuggestions';
 import ImportResult from '@/components/ImportResult';
 import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
@@ -31,7 +32,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'cards' | 'health'>('cards');
+  const [section, setSection] = useState<'cards' | 'health' | 'suggestions'>('cards');
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -326,7 +327,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && (
         <div className="mt-5 inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['health', 'Deck health']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['health', 'Deck health'], ['suggestions', 'Suggestions']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -340,10 +341,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
 
-      {deck && section === 'health' ? (
+      {deck && section === 'suggestions' ? (
+        <DeckSuggestions
+          listId={id}
+          cards={cards}
+          commander={list.commander?.name ?? null}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onMove={moveCard}
+          onRemove={(cardId) => changeQuantity(cardId, 0)}
+        />
+      ) : deck && section === 'health' ? (
         <DeckHealth
           listId={id}
-          commander={list.commander?.name ?? null}
+          commander={list.commander ? { card: list.commander, finish: list.commanderFinish } : null}
+          cards={cards.filter((c) => c.board === 'main')}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
         />
       ) : (
