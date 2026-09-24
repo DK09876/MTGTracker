@@ -87,6 +87,8 @@ export interface EdhrecView {
   sections: Array<{ header: string; ids: string[] }>;
   /** True when the search's conditions narrowed EDHREC's list. */
   filtered: boolean;
+  /** Those conditions in plain English, so the tab can say what it kept. */
+  narrowedBy?: string;
 }
 
 export interface Interpreted extends SearchResult {
@@ -538,7 +540,10 @@ async function edhrecView(
     described: describeQuery(full),
     count: cards.length,
   });
-  return { ...base, cards, stats, sections: [{ header: 'Matching your search', ids: cards.map((c) => c.id) }], filtered: true };
+  return {
+    ...base, cards, stats, sections: [{ header: 'Matching your search', ids: cards.map((c) => c.id) }],
+    filtered: true, narrowedBy: describeQuery(filters),
+  };
 }
 
 function statsById(cards: ScryfallCard[], stats: Map<string, CardStats>): Record<string, CardStats> {

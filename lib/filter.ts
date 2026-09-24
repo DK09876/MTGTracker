@@ -38,7 +38,18 @@ const KNOWN = new Set([
 
 /** Split on whitespace, but keep "quoted phrases" together. */
 function tokenize(input: string): string[] {
-  return Array.from(input.matchAll(/-?(?:[\w]+[:=<>!]+)?"[^"]*"|\S+/g), (m) => m[0]);
+  // "Quoted phrases" and /patterns/ stay whole, spaces and all.
+  return Array.from(input.matchAll(/-?(?:[\w]+[:=<>!]+)?(?:"[^"]*"|\/(?:\\.|[^/\\])*\/)|\S+/g), (m) => m[0]);
+}
+
+/** A Scryfall-style /pattern/ as a case-insensitive RegExp, or null if it is not one (or does not compile). */
+function patternOf(value: string): RegExp | null {
+  if (value.length < 2 || !value.startsWith('/') || !value.endsWith('/')) return null;
+  try {
+    return new RegExp(value.slice(1, -1), 'i');
+  } catch {
+    return null;
+  }
 }
 
 export function parseQuery(input: string): ParsedQuery {
@@ -129,11 +140,11 @@ function matchesTerm(card: ScryfallCard, term: Term): boolean {
 
   switch (term.key) {
     case 'name': case 'n':
-      return card.name.toLowerCase().includes(value);
+      return patternOf(term.value)?.test(card.name) ?? card.name.toLowerCase().includes(value);
     case 'type': case 't':
       return typeLineOf(card).toLowerCase().includes(value);
     case 'oracle': case 'o': case 'text':
-      return oracleOf(card).includes(value);
+      return patternOf(term.value)?.test(oracleOf(card)) ?? oracleOf(card).includes(value);
     case 'rarity': case 'r':
       return (card.rarity ?? '').toLowerCase() === value
         || (card.rarity ?? '').toLowerCase().startsWith(value);

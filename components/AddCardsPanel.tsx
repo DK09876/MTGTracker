@@ -168,6 +168,9 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
               onSelect={setSelected}
               actions={actions}
               dense
+              edhrecFull={s.edhrecFull}
+              onEdhrecFull={s.answer && s.answer.interpretation.constraints !== undefined
+                && s.answer.interpretation.constraints !== s.answer.interpretation.query ? s.toggleEdhrecFull : undefined}
             />
           )}
         </div>
