@@ -1,28 +1,32 @@
 'use client';
 
 /**
- * The current profile, in the header, and a way to change it. Switching
- * reloads the page: every view is someone's, and a reload is the simplest
- * way to be sure nothing of the last profile's is left on screen.
+ * The current profile, in the header: switch to another, or add a new one.
+ *
+ * It reads the same store as the "Who's using this?" screen, so it appears
+ * the moment a profile is picked there. Switching reloads the page: every
+ * view belongs to someone, and a reload is the simplest way to be sure
+ * nothing of the last profile's is left on screen.
  */
 
 import { useEffect, useRef, useState } from 'react';
 
 import AddProfile from './AddProfile';
 import * as api from '@/lib/api';
-import { getProfile, setProfile, type Profile } from '@/lib/profile';
+import { setProfile, useProfile, type Profile } from '@/lib/profile';
 
 export default function ProfileSwitcher() {
+  const active = useProfile();
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [active, setActive] = useState('');
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
 
+  // Re-read when the profile changes, so one just added on the
+  // "Who's using this?" screen is in the menu.
   useEffect(() => {
-    api.fetchProfiles()
-      .then((found) => { setProfiles(found); setActive(getProfile()); })
-      .catch(() => {});
-  }, []);
+    if (!active) return;
+    api.fetchProfiles().then(setProfiles).catch(() => {});
+  }, [active]);
 
   useEffect(() => {
     if (!open) return;
@@ -36,8 +40,15 @@ export default function ProfileSwitcher() {
     };
   }, [open]);
 
-  const current = profiles.find((p) => p.id === active);
-  if (!current) return null;
+  if (!active) return null;
+  const name = profiles.find((p) => p.id === active)?.name ?? active;
+
+  const switchTo = (id: string) => {
+    setOpen(false);
+    if (id === active) return;
+    setProfile(id);
+    window.location.reload();
+  };
 
   return (
     <div className="relative" ref={container}>
@@ -48,9 +59,12 @@ export default function ProfileSwitcher() {
         className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
       >
         <span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[#221c08]">
-          {current.name.charAt(0).toUpperCase()}
+          {name.charAt(0).toUpperCase()}
         </span>
-        {current.name}
+        <span className="max-w-[8rem] truncate">{name}</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden className={open ? 'rotate-180' : ''}>
+          <path d="M1 1L5 5L9 1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
       {open && (
         <div role="menu" className="absolute right-0 z-40 mt-1 min-w-[14rem] rounded-lg border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg">
@@ -58,12 +72,7 @@ export default function ProfileSwitcher() {
             <button
               key={p.id}
               role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                if (p.id === active) return;
-                setProfile(p.id);
-                window.location.reload();
-              }}
+              onClick={() => switchTo(p.id)}
               className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface-hover)] ${p.id === active ? '' : 'text-[var(--muted)]'}`}
             >
               <span className="w-3 text-[var(--accent)]">{p.id === active ? '✓' : ''}</span>
@@ -71,7 +80,7 @@ export default function ProfileSwitcher() {
             </button>
           ))}
           <div className="mt-1 border-t border-[var(--border)] pt-1">
-            <AddProfile compact onAdded={(p) => { setProfile(p.id); window.location.reload(); }} />
+            <AddProfile compact onAdded={(p) => switchTo(p.id)} />
           </div>
         </div>
       )}
