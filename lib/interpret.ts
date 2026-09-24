@@ -7,11 +7,17 @@
  *     combos               -> Commander Spellbook, then the pieces from Scryfall
  *     cards                -> a Scryfall query, scoped to the commander if any
  *
+ * When a commander is named, the answer comes in views the page shows as
+ * tabs: what that commander's decks actually play (EDHREC), every card that
+ * fits (Scryfall), and combos (Commander Spellbook).
+ *
  * The model plans; this runs the plan. A commander is looked up on Scryfall
- * rather than taken from the model's memory, and when there is one the model
- * is shown its real rules text and asked again - so "works well with Azula"
- * is judged against what Azula actually does, and a commander printed after
- * the model was trained still works.
+ * rather than taken from the model's memory, and the model is shown its real
+ * rules text - so "works well with Azula" is judged against what Azula does,
+ * and a commander printed after the model was trained still works.
+ *
+ * A follow-up ("only instants") is planned against the search it follows,
+ * so the model changes what was asked and keeps the rest.
  *
  * Every step is recorded, so the page can show exactly what ran. Everything
  * that talks to the network is passed in, so the routing can be tested
@@ -19,10 +25,11 @@
  */
 
 import { colours, describeQuery, isUnfiltered } from './describe';
-import { edhrecUrl, type CardStats, type CommanderStats } from './edhrec';
-import type { Context, Kind, Translation, Translator } from './gemini';
+import { edhrecUrl, type CardStats, type CommanderPage } from './edhrec';
+import type { Context, Kind, Previous, Translation, Translator } from './gemini';
 import type { ScryfallCard, SearchResult } from './scryfall';
-import { manaCostOf, oracleTextOf, ScryfallError, typeLineOf } from './scryfall';
+import { imageOf, manaCostOf, oracleTextOf, ScryfallError, typeLineOf } from './scryfall';
+import { DEFAULT_SORT, sortKey, sortLabel, splitSort, type Sort } from './sort';
 import { SpellbookError, type Combo } from './spellbook';
 import { exactName, looksLikeSyntax } from './syntax';
 
@@ -32,6 +39,7 @@ export interface CommanderRef {
   identity: string;
   manaCost: string;
   edhrecUrl: string;
+  image?: string | null;
 }
 
 /** One thing that happened while answering a search, for "How this search ran". */
@@ -60,24 +68,55 @@ export interface Interpretation {
   /** Something the user should know about how this search went. */
   note?: string;
   commander?: CommanderRef;
+  /** The order the card results are in. */
+  sort?: Sort;
+}
+
+/** What a commander's decks play, from EDHREC, as the page's first tab. */
+export interface EdhrecView {
+  commander: string;
+  /** Decks EDHREC has seen for this commander. */
+  decks: number;
+  url: string;
+  cards: ScryfallCard[];
+  /** Figures by Scryfall card id. */
+  stats: Record<string, CardStats>;
+  /** EDHREC's own lists when nothing narrowed them; one list of matches when the search did. */
+  sections: Array<{ header: string; ids: string[] }>;
+  /** True when the search's conditions narrowed EDHREC's list. */
+  filtered: boolean;
 }
 
 export interface Interpreted extends SearchResult {
   interpretation: Interpretation;
   trace: Step[];
   combos?: Combo[];
-  /** EDHREC figures by Scryfall card id, when EDHREC is switched on and knows the commander. */
+  /** EDHREC figures for the Scryfall results, by card id, when a commander is named. */
   stats?: Record<string, CardStats>;
+  edhrec?: EdhrecView;
+  /**
+   * The commander named could be several; the page asks which, then sends
+   * `plan` back with the answer so the search carries on without asking the
+   * model again.
+   */
+  choice?: { mention: string; options: CommanderRef[] };
+  plan?: Translation;
+}
+
+/** A search paused to ask which commander was meant, resumed with the answer. */
+export interface Resume {
+  plan: Translation;
+  commander: string;
 }
 
 export interface Deps {
-  search: (query: string) => Promise<SearchResult>;
+  search: (query: string, sort?: Sort) => Promise<SearchResult>;
   findCardNamed: (fuzzy: string) => Promise<ScryfallCard | null>;
-  findCommander: (mention: string) => Promise<ScryfallCard | null>;
+  findCommanders: (mention: string) => Promise<ScryfallCard[]>;
   cardsNamed: (names: string[]) => Promise<ScryfallCard[]>;
   searchCombos: (query: string) => Promise<Combo[]>;
   /** Null unless EDHREC is switched on. */
-  commanderStats: ((commander: string) => Promise<CommanderStats | null>) | null;
+  edhrec: ((commander: string) => Promise<CommanderPage | null>) | null;
   /** Null when no model is configured; searches then run as typed. */
   translate: Translator | null;
   /** The clock, so the time budget can be tested. */
@@ -90,9 +129,8 @@ const EMPTY: SearchResult = { cards: [], totalCards: 0, hasMore: false };
 // that is mostly the model guessing, at a second or more per guess.
 const ATTEMPTS = 2;
 
-// How many of a commander's EDHREC cards to check against a search, and how
-// long one check may be - Scryfall stops parsing at around 1,000 characters.
-const EDHREC_CANDIDATES = 90;
+// Scryfall stops parsing a query at around 1,000 characters, so EDHREC's
+// card names are checked against a search in batches that fit.
 const QUERY_BUDGET = 950;
 
 // A search makes up to three model calls. When the model is slow each can
@@ -105,7 +143,7 @@ const ONE_CALL_MS = 12_000;
 // name search for it is noise.
 const NAME_WORDS = 5;
 
-export async function interpret(input: string, deps: Deps): Promise<Interpreted> {
+export async function interpret(input: string, deps: Deps, previous?: Previous, resume?: Resume): Promise<Interpreted> {
   const text = input.trim();
   const trace: Step[] = [];
   const now = deps.now ?? Date.now;
@@ -113,47 +151,101 @@ export async function interpret(input: string, deps: Deps): Promise<Interpreted>
   const timeForAnotherCall = () => deadline - now() > ONE_CALL_MS;
   if (!text) return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '' } };
 
-  if (looksLikeSyntax(text)) {
+  if (!previous && !resume && looksLikeSyntax(text)) {
     trace.push({ text: 'Read as Scryfall syntax, so it ran as written without the AI' });
-    const result = await searchStep(text, deps, trace);
-    return { ...result, trace, interpretation: { via: 'syntax', kind: 'cards', query: text } };
+    const { filters, sort } = splitSort(text);
+    const used = sort ?? DEFAULT_SORT;
+    const result = await searchStep(filters, deps, trace, used);
+    return { ...result, trace, interpretation: { via: 'syntax', kind: 'cards', query: filters, sort: used } };
   }
 
   if (!deps.translate) {
+    if (previous) {
+      return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '', note: 'Follow-ups need the AI, and it is off (no GEMINI_API_KEY).' } };
+    }
     return asTyped(text, deps, trace, 'AI search is off (no GEMINI_API_KEY), so this searched card names for what you typed.');
   }
 
+  // A follow-up keeps the commander it had, so the model can be shown its
+  // rules text in the first call instead of needing a second.
+  const known = previous?.commander && !resume ? await findExactly(previous.commander, deps) : null;
+  const context: Context = { previous, commander: known ? contextOf(known) : undefined };
+
   let plan: Translation;
   try {
-    plan = await deps.translate(text);
+    plan = resume?.plan ?? await deps.translate(text, context);
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'the model failed';
     trace.push({ text: `Asked the AI what this means, but ${reason}` });
+    if (previous) {
+      return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '', note: `AI search failed (${reason}). Try the follow-up again in a moment.` } };
+    }
     return asTyped(text, deps, trace, `AI search failed (${reason}), so this searched card names for what you typed.`);
   }
-  trace.push({ text: `Asked the AI what “${text}” means: ${summarise(plan)}` });
+  if (!resume) {
+    trace.push({
+      text: previous
+        ? `Asked the AI to apply “${text}” to the previous search: ${summarise(plan)}`
+        : `Asked the AI what “${text}” means: ${summarise(plan)}`,
+    });
+  }
 
-  const commander = plan.commander ? await lookUpCommander(plan.commander, deps, trace) : null;
+  let commander: ScryfallCard | null = null;
+  let grounded = false;
+  if (resume) {
+    commander = await findExactly(resume.commander, deps);
+    trace.push({ text: `You picked ${commander?.name ?? resume.commander}` });
+  } else if (plan.commander && known && sameCard(plan.commander, known.name)) {
+    commander = known;
+    grounded = true;
+    trace.push({ text: `Kept the commander, ${known.name}` });
+  } else if (plan.commander) {
+    const found = await lookUpCommander(plan.commander, deps, trace);
+    if (found && 'choices' in found) {
+      return {
+        ...EMPTY, trace, plan,
+        choice: { mention: plan.commander, options: found.choices.map(refOf) },
+        interpretation: { via: 'ai', kind: plan.kind, query: plan.query, explanation: plan.explanation || undefined },
+      };
+    }
+    commander = found;
+  }
 
   switch (plan.kind) {
     case 'card': return cardRoute(text, plan, deps, trace);
     case 'combos': return comboRoute(plan, commander, deps, trace);
-    default: return cardsRoute(text, plan, commander, deps, trace, timeForAnotherCall);
+    default: return cardsRoute(text, plan, commander, deps, trace, { previous, grounded, timeForAnotherCall });
   }
 }
 
 /**
- * Run a query as given, scoped to a commander if one is named - for a query
- * the user has edited. No model is involved.
+ * Run a query as given, scoped to a commander if one is named - for an
+ * edited query, a different sort, or a tab opened later. No model.
  */
-export async function runQuery(query: string, commanderName: string | null, deps: Deps): Promise<Interpreted> {
-  const trace: Step[] = [{ text: 'Ran your edited query, without the AI' }];
-  const commander = commanderName ? await lookUpCommander(commanderName, deps, trace) : null;
+export async function runQuery(
+  query: string, commanderName: string | null, deps: Deps,
+  sort: Sort | null = null, { withEdhrec = true } = {},
+): Promise<Interpreted> {
+  const trace: Step[] = [{ text: 'Ran the query without the AI' }];
+  const commander = commanderName ? await findExactly(commanderName, deps) : null;
+  // An `order:` typed into the query wins over the menu.
+  const { filters, sort: typed } = splitSort(query);
+  const page = commander ? await pageFor(commander, deps, trace) : null;
+  const { sort: used, ...result } = await runCards(filters, commander, page, deps, trace, typed ?? sort ?? DEFAULT_SORT);
+  const edhrec = commander && page && withEdhrec ? await edhrecView(filters, commander, page, deps, trace) : undefined;
   const interpretation: Interpretation = {
-    via: 'syntax', kind: 'cards', query, commander: commander ? refOf(commander) : undefined,
+    via: 'syntax', kind: 'cards', query: filters, sort: used,
+    commander: commander ? refOf(commander) : undefined,
   };
-  const result = await runCards(query, commander, deps, trace);
-  return { ...result, trace, interpretation };
+  return { ...result, trace, interpretation, edhrec };
+}
+
+/** Combos for a commander, for the Combos tab when it is opened later. */
+export async function runCombos(commanderName: string, deps: Deps): Promise<Interpreted> {
+  const trace: Step[] = [];
+  const commander = await findExactly(commanderName, deps);
+  const plan: Translation = { kind: 'combos', cardName: null, commander: commanderName, query: '', explanation: '' };
+  return comboRoute(plan, commander, deps, trace);
 }
 
 // --- routes ----------------------------------------------------------------
@@ -177,7 +269,7 @@ async function comboRoute(
 ): Promise<Interpreted> {
   let target = commander;
   if (plan.cardName) {
-    target = await deps.findCardNamed(plan.cardName) ?? await deps.findCommander(plan.cardName);
+    target = await deps.findCardNamed(plan.cardName) ?? await findExactly(plan.cardName, deps);
     trace.push({
       text: target
         ? `Looked up “${plan.cardName}” on Scryfall → ${target.name}`
@@ -215,7 +307,7 @@ async function comboRoute(
   if (!combos.length) {
     const about = target ? ` for ${target.name}` : '';
     const within = commander && target !== commander ? ` in ${commander.name}'s colours` : '';
-    return { ...EMPTY, trace, interpretation: { ...interpretation, note: `Commander Spellbook has no combos${about}${within}.` } };
+    return { ...EMPTY, trace, combos, interpretation: { ...interpretation, note: `Commander Spellbook has no combos${about}${within}.` } };
   }
 
   const cards = await deps.cardsNamed(combos.flatMap((c) => c.cards));
@@ -223,30 +315,40 @@ async function comboRoute(
   return { cards, totalCards: cards.length, hasMore: false, trace, interpretation, combos };
 }
 
+interface CardsOptions {
+  previous?: Previous;
+  /** The model has already seen the commander's rules text. */
+  grounded: boolean;
+  timeForAnotherCall: () => boolean;
+}
+
 async function cardsRoute(
   text: string, first: Translation, commander: ScryfallCard | null, deps: Deps, trace: Step[],
-  timeForAnotherCall: () => boolean,
+  { previous, grounded, timeForAnotherCall }: CardsOptions,
 ): Promise<Interpreted> {
-  const context: Context = commander ? { commander: contextOf(commander) } : {};
+  const context: Context = { previous, commander: commander ? contextOf(commander) : undefined };
   let plan = first;
 
-  if (commander && !timeForAnotherCall()) {
-    trace.push({ text: `The AI was too slow to also show it ${commander.name}'s rules text, so its first answer is used` });
-  } else if (commander) {
-    // The first pass was written before anyone knew what the commander does.
-    try {
-      const grounded = await deps.translate!(text, context);
-      if (grounded.kind === 'cards') {
-        plan = grounded;
-        trace.push({ text: `Showed the AI ${commander.name}'s rules text and asked again` });
+  if (commander && !grounded) {
+    if (!timeForAnotherCall()) {
+      trace.push({ text: `The AI was too slow to also show it ${commander.name}'s rules text, so its first answer is used` });
+    } else {
+      // The first pass was written before anyone knew what the commander does.
+      try {
+        const reread = await deps.translate!(text, context);
+        if (reread.kind === 'cards') {
+          plan = reread;
+          trace.push({ text: `Showed the AI ${commander.name}'s rules text and asked again` });
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'it failed';
+        trace.push({ text: `Tried to show the AI ${commander.name}'s rules text, but ${reason}; using its first answer` });
       }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'it failed';
-      trace.push({ text: `Tried to show the AI ${commander.name}'s rules text, but ${reason}; using its first answer` });
     }
   }
 
   const ref = commander ? refOf(commander) : undefined;
+  const page = commander ? await pageFor(commander, deps, trace) : null;
   let last: Interpretation | undefined;
   let unfiltered: Interpreted | undefined;
   let feedback: string | undefined;
@@ -267,11 +369,14 @@ async function cardsRoute(
       if (plan.kind !== 'cards') break;
     }
 
-    last = { via: 'ai', kind: 'cards', query: plan.query, explanation: plan.explanation || undefined, commander: ref };
+    const { filters, sort } = splitSort(plan.query);
+    last = { via: 'ai', kind: 'cards', query: filters, explanation: plan.explanation || undefined, commander: ref };
 
     let result: SearchResult & { stats?: Record<string, CardStats> };
     try {
-      result = await runCards(plan.query, commander, deps, trace);
+      const { sort: used, ...found } = await runCards(filters, commander, page, deps, trace, sort ?? DEFAULT_SORT);
+      result = found;
+      last = { ...last, sort: used };
     } catch (error) {
       if (!(error instanceof ScryfallError) || error.status !== 400) throw error;
       feedback = `Scryfall rejected ${plan.query}: ${error.message}`;
@@ -287,7 +392,7 @@ async function cardsRoute(
 
     // A query that only sets format or order matches most of Magic. Worth
     // one more try; if the model insists, it may be what was meant.
-    if (!commander && attempt === 0 && isUnfiltered(plan.query)) {
+    if (!commander && attempt === 0 && isUnfiltered(filters)) {
       unfiltered = { ...result, trace, interpretation: last };
       feedback = `${plan.query} matched ${result.totalCards} cards because it says nothing about what the `
         + 'cards are or do. Add the condition the request implies, or return the same query if it really '
@@ -295,7 +400,8 @@ async function cardsRoute(
       continue;
     }
 
-    return { ...result, trace, interpretation: last };
+    const edhrec = commander && page ? await edhrecView(filters, commander, page, deps, trace) : undefined;
+    return { ...result, trace, interpretation: last, edhrec };
   }
 
   if (unfiltered) return unfiltered;
@@ -308,11 +414,17 @@ async function cardsRoute(
 
 // --- steps -----------------------------------------------------------------
 
-async function searchStep(query: string, deps: Deps, trace: Step[]): Promise<SearchResult> {
-  const step: Step = { text: 'Searched Scryfall', query, described: describeQuery(query) };
+async function searchStep(query: string, deps: Deps, trace: Step[], sort: Sort = DEFAULT_SORT): Promise<SearchResult> {
+  // Shown as the equivalent syntax, so the line can be pasted into Scryfall.
+  const order = sortKey(sort) === 'name:auto' ? '' : ` order:${sort.order}${sort.dir === 'auto' ? '' : ` direction:${sort.dir}`}`;
+  const step: Step = {
+    text: 'Searched Scryfall',
+    query: query + order,
+    described: `${describeQuery(query)} · sorted by ${sortLabel(sort).toLowerCase()}`,
+  };
   trace.push(step);
   try {
-    const result = await deps.search(query);
+    const result = await deps.search(query, sort);
     step.count = result.totalCards;
     return result;
   } catch (error) {
@@ -334,70 +446,94 @@ async function comboStep(query: string, deps: Deps, trace: Step[]): Promise<Comb
   }
 }
 
-/** A Scryfall search for cards, scoped to a commander and ranked by EDHREC when there is one. */
-async function runCards(
-  query: string, commander: ScryfallCard | null, deps: Deps, trace: Step[],
-): Promise<SearchResult & { stats?: Record<string, CardStats> }> {
-  const full = scoped(query, commander);
-  const result = await searchStep(full, deps, trace);
-  if (!commander || !deps.commanderStats || result.totalCards === 0) return result;
-
-  const stats = await deps.commanderStats(commander.name);
-  if (!stats) {
-    trace.push({ text: `EDHREC had nothing for ${commander.name}, so results are in overall Commander popularity order` });
-    return result;
-  }
-  return rankByEdhrec(full, result, commander, stats, deps, trace);
+/** A commander's EDHREC page, noting in the trace when there is none. */
+async function pageFor(commander: ScryfallCard, deps: Deps, trace: Step[]): Promise<CommanderPage | null> {
+  if (!deps.edhrec) return null;
+  const page = await deps.edhrec(commander.name);
+  trace.push({
+    text: page
+      ? `Read EDHREC's page for ${commander.name}: ${page.decks.toLocaleString()} decks, ${page.stats.size} cards listed`
+      : `EDHREC has no data for ${commander.name} yet`,
+  });
+  return page;
 }
 
 /**
- * Put the cards a commander's decks actually play first.
- *
- * The first page of a broad search is only the most popular cards overall,
- * so a card that is niche everywhere except in this commander's decks may
- * not be on it. Its EDHREC cards are checked against the same search in a
- * few batches, and the ones that match are added.
+ * Every card that fits, from Scryfall, scoped to the commander if there is
+ * one. With EDHREC data, each card also carries how often that commander's
+ * decks play it - shown on the tile, whatever the sort.
  */
-async function rankByEdhrec(
-  full: string, result: SearchResult, commander: ScryfallCard, stats: CommanderStats,
-  deps: Deps, trace: Step[],
-): Promise<SearchResult & { stats: Record<string, CardStats> }> {
-  const statFor = (card: ScryfallCard) => stats.get(card.name) ?? stats.get(card.name.split(' // ')[0]);
-  const shown = new Set(result.cards.map((c) => c.name.split(' // ')[0]));
+async function runCards(
+  filters: string, commander: ScryfallCard | null, page: CommanderPage | null,
+  deps: Deps, trace: Step[], sort: Sort,
+): Promise<SearchResult & { stats?: Record<string, CardStats>; sort: Sort }> {
+  const result = await searchStep(scoped(filters, commander), deps, trace, sort);
+  if (!page) return { ...result, sort };
+  return { ...result, sort, stats: statsById(result.cards, page.stats) };
+}
 
-  const candidates = [...stats.entries()]
-    .filter(([name]) => !shown.has(name.split(' // ')[0]))
-    .sort(([, a], [, b]) => b.inclusion - a.inclusion)
-    .slice(0, EDHREC_CANDIDATES)
-    .map(([name]) => name);
+/**
+ * What the commander's decks actually play, for the EDHREC tab.
+ *
+ * With no conditions this is EDHREC's own lists. With conditions ("green
+ * ramp"), every card EDHREC lists is checked against the same Scryfall
+ * search, in batches that fit Scryfall's query length, and the matches are
+ * ranked by how many of the commander's decks run them. Only cards those
+ * decks really play can appear here.
+ */
+async function edhrecView(
+  filters: string, commander: ScryfallCard, page: CommanderPage, deps: Deps, trace: Step[],
+): Promise<EdhrecView> {
+  const names = [...page.stats.keys()];
+  const base = { commander: commander.name, decks: page.decks, url: edhrecUrl(commander.name) };
 
-  const extra: ScryfallCard[] = [];
-  for (const batch of batches(full, candidates)) {
+  if (!filters.trim()) {
+    const cards = await deps.cardsNamed(names);
+    trace.push({ text: `Fetched the ${cards.length} cards EDHREC lists for ${commander.name} from Scryfall` });
+    const idOf = nameIndex(cards);
+    const sections = page.sections
+      .map((s) => ({ header: s.header, ids: s.names.map(idOf).filter((id): id is string => !!id) }))
+      .filter((s) => s.ids.length);
+    return { ...base, cards, stats: statsById(cards, page.stats), sections, filtered: false };
+  }
+
+  const full = scoped(filters, commander);
+  const found = new Map<string, ScryfallCard>();
+  for (const batch of batches(full, names)) {
     try {
-      extra.push(...(await deps.search(batch)).cards);
+      for (const card of (await deps.search(batch, DEFAULT_SORT)).cards) found.set(card.id, card);
     } catch { /* one failed batch only costs its own cards */ }
   }
+  const stats = statsById([...found.values()], page.stats);
+  const cards = [...found.values()].sort((a, b) => (stats[b.id]?.inclusion ?? 0) - (stats[a.id]?.inclusion ?? 0));
   trace.push({
-    text: `Checked ${candidates.length} of the cards ${commander.name}'s decks play most on EDHREC against the `
-      + `same search, and found ${extra.length} more`,
+    text: `Checked all ${names.length} cards EDHREC lists for ${commander.name} against the same search`,
+    described: describeQuery(full),
+    count: cards.length,
   });
+  return { ...base, cards, stats, sections: [{ header: 'Matching your search', ids: cards.map((c) => c.id) }], filtered: true };
+}
 
-  const cards = [...result.cards, ...extra];
+function statsById(cards: ScryfallCard[], stats: Map<string, CardStats>): Record<string, CardStats> {
   const byId: Record<string, CardStats> = {};
   for (const card of cards) {
-    const s = statFor(card);
+    const s = stats.get(card.name) ?? stats.get(front(card.name));
     if (s) byId[card.id] = s;
   }
-  // Stable sort: EDHREC-known cards by how often they are played, then the
-  // rest in Scryfall's order.
-  const order = new Map(cards.map((c, i) => [c.id, i]));
-  cards.sort((a, b) => {
-    const sa = byId[a.id]?.inclusion ?? -1;
-    const sb = byId[b.id]?.inclusion ?? -1;
-    return sb - sa || order.get(a.id)! - order.get(b.id)!;
-  });
-  return { ...result, cards, stats: byId };
+  return byId;
 }
+
+/** Name -> card id, matching a double-faced card by either its full name or its front. */
+function nameIndex(cards: ScryfallCard[]): (name: string) => string | undefined {
+  const ids = new Map<string, string>();
+  for (const card of cards) {
+    ids.set(card.name, card.id);
+    ids.set(front(card.name), card.id);
+  }
+  return (name) => ids.get(name) ?? ids.get(front(name));
+}
+
+const front = (name: string) => name.split(' // ')[0];
 
 /** `full` plus an exact-name group, as many names per query as fit. */
 function batches(full: string, names: string[]): string[] {
@@ -417,18 +553,16 @@ function batches(full: string, names: string[]): string[] {
 
 /**
  * Add a commander's colour identity and Commander legality to a query, and
- * leave out the commander itself. With or without one, sort by how much a
- * card is played unless the query says otherwise - Scryfall's own default is
- * alphabetical, which put "Abomination" first in "new red cards".
+ * leave out the commander itself. The sort is not part of this: it travels
+ * separately, as a Scryfall parameter.
  */
 export function scoped(query: string, commander: ScryfallCard | null): string {
-  const display = query.match(DISPLAY) ?? [];
-  const order = display.some((d) => /order:/i.test(d)) ? '' : 'order:edhrec';
-  if (!commander) return [query, order].filter(Boolean).join(' ');
+  if (!commander) return query;
 
-  // Sorting and display options are not allowed inside parentheses, so they
-  // come out before the rest is wrapped - and the rest is wrapped because
-  // Scryfall's `or` binds looser than the terms added here.
+  // Display options are not allowed inside parentheses, so they come out
+  // before the rest is wrapped - and the rest is wrapped because Scryfall's
+  // `or` binds looser than the terms added here.
+  const display = query.match(DISPLAY) ?? [];
   const filters = query.replace(DISPLAY, ' ').replace(/\s+/g, ' ').trim();
   return [
     /\bor\b/i.test(filters) ? `(${filters})` : filters,
@@ -436,20 +570,60 @@ export function scoped(query: string, commander: ScryfallCard | null): string {
     /(^|[\s(])-?(f|format|legal):/i.test(filters) ? '' : 'f:commander',
     `-${exactName(commander.name)}`,
     ...display.map((d) => d.trim()),
-    order,
   ].filter(Boolean).join(' ');
 }
 
 const DISPLAY = /(?:^|\s)(?:order|direction|unique|prefer|display):\S+/gi;
 
-async function lookUpCommander(mention: string, deps: Deps, trace: Step[]): Promise<ScryfallCard | null> {
-  const card = await deps.findCommander(mention);
+/**
+ * Which commander a mention means, or the ones it could mean.
+ *
+ * A candidate has to match the mention word by word - "omnath" is Omnath,
+ * Locus of Rage but not Henrika Domnathi, which only contains the letters.
+ * One candidate, or one whose name is exactly what was written, is the
+ * answer. Several equally good ones are a question for the user: guessing
+ * "the most played Omnath" picked Locus of Rage when Locus of Creation was
+ * meant, because Scryfall's popularity counts every deck a card is in, not
+ * the decks it leads.
+ */
+export function pickCommander(mention: string, found: ScryfallCard[]): { card: ScryfallCard } | { choices: ScryfallCard[] } | null {
+  const wanted = words(mention);
+  const fits = found.filter((c) => wanted.every((w) => words(c.name).some((n) => n.startsWith(w))));
+  // A fuzzy match for a typo will not fit word by word, and is still the answer.
+  const pool = fits.length ? fits : found;
+  if (!pool.length) return null;
+  const exact = pool.find((c) => squash(c.name) === squash(mention) || squash(front(c.name)) === squash(mention));
+  if (exact) return { card: exact };
+  if (pool.length === 1) return { card: pool[0] };
+  return { choices: pool.slice(0, MAX_CHOICES) };
+}
+
+const MAX_CHOICES = 8;
+const words = (s: string) => s.toLowerCase().replace(/['’]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+async function lookUpCommander(
+  mention: string, deps: Deps, trace: Step[],
+): Promise<ScryfallCard | { choices: ScryfallCard[] } | null> {
+  const picked = pickCommander(mention, await deps.findCommanders(mention));
+  if (picked && 'choices' in picked) {
+    trace.push({ text: `“${mention}” could be ${picked.choices.length} commanders, so this asks which` });
+    return picked;
+  }
+  const card = picked?.card ?? null;
   trace.push({
     text: card
       ? `Looked up commander “${mention}” on Scryfall → ${card.name} (${colours(identityOf(card)) || 'colourless'})`
       : `Could not find a commander called “${mention}” on Scryfall, so this searched without one`,
   });
   return card;
+}
+
+/** A commander named in full - one already picked or kept - without asking again. */
+async function findExactly(name: string, deps: Deps): Promise<ScryfallCard | null> {
+  const picked = pickCommander(name, await deps.findCommanders(name));
+  if (!picked) return null;
+  return 'card' in picked ? picked.card : picked.choices[0];
 }
 
 async function nearestName(text: string, deps: Deps, trace: Step[]): Promise<Interpreted | null> {
@@ -494,12 +668,22 @@ const rejectedAs = <T>(fallback: T) => (error: unknown): T => {
   throw error;
 };
 
+/** "azula" names Fire Lord Azula; "Fire Lord Azula" does too. */
+function sameCard(mention: string, name: string): boolean {
+  const a = mention.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const b = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return !!a && (b.includes(a) || a.includes(b));
+}
+
 const WUBRG = 'WUBRG';
 const identityOf = (card: ScryfallCard) =>
   [...(card.color_identity ?? [])].sort((a, b) => WUBRG.indexOf(a) - WUBRG.indexOf(b)).join('');
 
 function refOf(card: ScryfallCard): CommanderRef {
-  return { name: card.name, identity: identityOf(card), manaCost: manaCostOf(card), edhrecUrl: edhrecUrl(card.name) };
+  return {
+    name: card.name, identity: identityOf(card), manaCost: manaCostOf(card),
+    edhrecUrl: edhrecUrl(card.name), image: imageOf(card, 'small'),
+  };
 }
 
 function contextOf(card: ScryfallCard): NonNullable<Context['commander']> {

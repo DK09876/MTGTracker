@@ -11,6 +11,8 @@
  * https://scryfall.com/docs/api
  */
 
+import { DEFAULT_SORT, type Sort } from './sort';
+
 const API = 'https://api.scryfall.com';
 
 const HEADERS = {
@@ -118,13 +120,13 @@ export interface SearchResult {
  * `t:goblin`, `c:rg`, `set:mh3`, `cmc<=3` and the rest. Prefix matching is
  * their job, not ours.
  */
-export async function searchCards(query: string, page = 1): Promise<SearchResult> {
+export async function searchCards(query: string, page = 1, sort: Sort = DEFAULT_SORT): Promise<SearchResult> {
   const trimmed = query.trim();
   if (!trimmed) return { cards: [], totalCards: 0, hasMore: false };
 
   try {
     const body = await get<{ data: ScryfallCard[]; total_cards: number; has_more: boolean }>(
-      `/cards/search?q=${encodeURIComponent(trimmed)}&unique=cards&order=name&page=${page}`,
+      `/cards/search?q=${encodeURIComponent(trimmed)}&unique=cards&order=${sort.order}&dir=${sort.dir}&page=${page}`,
     );
     return { cards: body.data, totalCards: body.total_cards, hasMore: body.has_more };
   } catch (error) {
@@ -198,18 +200,18 @@ export function priceOf(card: ScryfallCard): number | null {
 }
 
 /**
- * The commander a loose mention most likely means: "azula" is Fire Lord
- * Azula, "vivi" is Vivi Ornitier.
- *
- * Searched among cards that can lead a deck, most played first, so a bare
- * first name picks the popular commander rather than an obscure namesake.
- * Falls back to the fuzzy name match for spellings the word search misses.
+ * Commanders a loose mention could mean - "omnath" is six of them - most
+ * played first. Deciding between them is the caller's job (see
+ * pickCommander in interpret.ts), which may mean asking. Falls back to the
+ * fuzzy name match for spellings the word search misses.
  */
-export async function findCommander(mention: string): Promise<ScryfallCard | null> {
+export async function findCommanders(mention: string): Promise<ScryfallCard[]> {
   const words = mention.replace(/["()]/g, ' ').trim();
-  if (!words) return null;
+  if (!words) return [];
   const { cards } = await searchCards(`is:commander ${words} order:edhrec`);
-  return cards[0] ?? findCardNamed(words);
+  if (cards.length) return cards;
+  const named = await findCardNamed(words);
+  return named ? [named] : [];
 }
 
 // Scryfall's limit for one collection request.

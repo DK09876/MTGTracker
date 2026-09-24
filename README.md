@@ -16,6 +16,7 @@ picking one goes straight to that card. Scryfall's own syntax — `t:goblin c:r`
 `set:mh3 r:mythic`, `o:"draw a card" cmc<=2` — runs as written. Anything else
 is plain English:
 
+- *green ramp spells for Omnath*
 - *cheap green ramp that isn't a land*
 - *enchantments that work well for Fire Lord Azula*
 - *a card under 5 cmc for azula that helps me draw cards*
@@ -25,12 +26,30 @@ is plain English:
 - a card name spelled wrong
 
 A model reads the request and plans the search; the server runs it. The
-query that ran is shown above the results, where you can edit it and run it
-again, and a collapsed *How this search ran* lists every step — each query in
-plain English and as written, and how many results it found. The model only
-ever plans: every card and combo you see came back from Scryfall or Commander
-Spellbook, so a model that misremembers a card can give you a bad search but
-never a card that doesn't exist. See [how a search is read](#how-a-search-is-read).
+model only ever plans: every card and combo you see came back from Scryfall,
+EDHREC or Commander Spellbook, so a model that misremembers a card can give
+you a bad search but never a card that doesn't exist.
+
+**Name a commander and the answer comes in three tabs:**
+
+| Tab | Shows | Order |
+|---|---|---|
+| *Played in Omnath decks* (opens first) | what that commander's decks actually run, from EDHREC — narrowed to your search, or EDHREC's own lists when there is nothing to narrow | share of its decks |
+| *All matching cards* | everything that fits the search in its colours and legal in Commander, from Scryfall — including cards nobody has tried yet | the sort menu; most played in Commander by default |
+| *Combos* | Commander Spellbook's combos for it | most popular |
+
+Without a commander there is just the one view the search was for.
+
+**If a name could mean several commanders** — "omnath" is six — it asks
+which, rather than guessing, and carries on with your pick.
+
+**Refine with a follow-up** — *only instants*, *under $3*, *for Atraxa
+instead*. The model changes what you asked and keeps the rest, and the chain
+shows above the box.
+
+The query that ran is shown and editable, and a collapsed *How this search
+ran* lists every step — each query in plain English and as written, and how
+many results it found. See [how a search is read](#how-a-search-is-read).
 
 **Lists** are whatever you need them to be: a deck, a trade binder, a wishlist.
 A card can sit in several at once, with its own count in each, and the search
@@ -71,7 +90,7 @@ npm run dev          # http://localhost:3000
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
-| `MTG_EDHREC` | *(off)* | `on` ranks commander searches by how often that commander's decks play each card — [read this first](#edhrec) |
+| `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.
 
@@ -82,29 +101,31 @@ npm test
 
 ## On the Pi
 
-Runs under systemd on port 3001, bound to localhost, and published to the
-tailnet on its own port so it does not share a hostname with anything else:
+Runs under systemd on port 3001, bound to localhost:
 
 ```bash
 npx next build
 sudo systemctl restart mtg
-tailscale serve --bg --https=8443 3001
 ```
 
-That puts it at `https://<node>.<tailnet>.ts.net:8443`, reachable from any
-device signed into the tailnet and from nowhere else.
+It has its own hostname on the tailnet, `https://mtg.<tailnet>.ts.net`, from
+a second Tailscale node on the same Pi — `tailscaled-mtg.service`, with its
+own state directory and socket, in userspace networking mode — which serves
+it:
 
-**On serving it under a subpath instead.** It can be done — set
-`MTG_BASE_PATH=/mtg` and mount it with `--set-path` — but two things bite.
-The base path is compiled into the client bundle rather than read at runtime,
-so changing it means rebuilding. And `--set-path` strips the prefix before
-forwarding while the build expects it, so the serve target has to repeat it
-(`http://127.0.0.1:3001/mtg`). Both produce a 404 that reads like a broken app
-rather than a wrong URL. A separate port avoids the whole class of problem.
+```bash
+sudo tailscale --socket=/run/tailscale-mtg.sock serve --bg 3001
+```
 
-A distinct hostname would be nicer than a port, but Tailscale services require
-a tagged node, and tagging changes node ownership and ACLs — not something to
-do casually to a machine that is already serving something else.
+Reachable from any device signed into the tailnet and from nowhere else.
+
+**Why a second node.** The Pi's main node already serves LifeOS, and a node
+has one hostname. The alternatives were worse: a subpath (`/mtg`) is
+compiled into the client bundle, and Tailscale's `--set-path` strips the
+prefix while the build expects it, so both produce 404s that read like a
+broken app; a separate port (`:8443`) works but is not a name anyone
+remembers; Tailscale services need a tagged node, which changes ownership
+and ACLs on a machine already serving something else.
 
 ## How a search is read
 
@@ -118,12 +139,21 @@ Enter   → Scryfall syntax?  → run as written, no model
                       → Commander Spellbook, in the commander's colours
                       → the pieces fetched from Scryfall
   cards             → commander looked up on Scryfall
+                        (several fit? → ask which, carry on with the pick)
                       → model shown its real rules text, asked again
-                      → Scryfall, scoped to its colours and Commander
-                      → (EDHREC on) re-ranked by what its decks play
+                      → All matching cards: Scryfall, scoped to its colours
+                      → Played in its decks: EDHREC's cards checked
+                        against the same search, by share of decks
                       ├ rejected, empty, or filters nothing → model retries once, told why
                       └ still nothing → Scryfall's fuzzy name match
+
+follow-up           → the model gets the plan that ran, applies the change
+sort / edit / tab   → re-run without the model
 ```
+
+The sort is sent to Scryfall rather than applied in the browser: only the
+first page of results is on screen, and sorting that would show "the
+cheapest of the 175 most played" rather than the cheapest.
 
 A few choices in there are deliberate:
 
@@ -168,10 +198,11 @@ A few choices in there are deliberate:
 
 EDHREC is the best source there is for "cards that work well with this
 commander", but it has no public API, and its terms of use forbid automated
-requests to the site. With `MTG_EDHREC=on`, commander searches read the JSON
-behind EDHREC's commander pages anyway: results are re-ranked by the share of
-that commander's decks playing each card, shown on each tile, and its most
-played cards that match the search but missed the first page are added.
+requests to the site. Its website loads each commander's data as a JSON
+file (`json.edhrec.com/pages/commanders/<name>.json`); with `MTG_EDHREC=on`,
+the server reads that same file. From it come the *Played in … decks* tab
+and the "in 74% of Omnath decks" line on each card. Off, commander searches
+still work, without that tab.
 
 That is a knowing choice for a personal, self-hosted tool, and it is kept
 small — each commander is fetched at most once a day, and a failure is

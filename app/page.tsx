@@ -4,31 +4,69 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
-import CardTile from '@/components/CardTile';
-import ComboList from '@/components/ComboList';
+import CommanderChoice from '@/components/CommanderChoice';
+import FollowUp from '@/components/FollowUp';
 import Interpreted from '@/components/Interpreted';
+import Results, { type Tab, type Views } from '@/components/Results';
 import SearchBox from '@/components/SearchBox';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
+import type { Previous } from '@/lib/gemini';
 import type { ScryfallCard } from '@/lib/scryfall';
+import type { Sort } from '@/lib/sort';
 import { exactName, looksLikeSyntax } from '@/lib/syntax';
 
 const EXAMPLES = [
+  'green ramp spells for omnath',
   'enchantments that work well for fire lord azula',
-  'a card under 5 cmc for azula that helps me draw cards',
   'combo cards for vivi',
   'cheap green ramp that isn\'t a land',
   'lightnig bolt',
 ];
 
+type Status = 'idle' | 'searching' | 'thinking' | 'error';
+
+/** The views an answer brings with it; tabs it does not cover load when opened. */
+function viewsOf(answer: api.AskResponse): Views {
+  if (answer.interpretation.kind === 'combos') {
+    return { combos: { combos: answer.combos ?? [], cards: answer.cards, note: answer.interpretation.note } };
+  }
+  return {
+    cards: { cards: answer.cards, total: answer.totalCards, stats: answer.stats, sort: answer.interpretation.sort },
+    edhrec: answer.interpretation.commander ? answer.edhrec ?? null : undefined,
+  };
+}
+
+function firstTab(answer: api.AskResponse): Tab {
+  if (answer.interpretation.kind === 'combos') return 'combos';
+  return answer.edhrec ? 'edhrec' : 'cards';
+}
+
+/** The search that ran, for a follow-up to refine. */
+function previousOf(answer: api.AskResponse, thread: string[]): Previous {
+  const { kind, commander, query } = answer.interpretation;
+  return {
+    request: thread.join(' › '),
+    kind,
+    commander: commander?.name,
+    cardName: kind === 'card' ? query.replace(/^!"|"$/g, '') : undefined,
+    query,
+  };
+}
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
-  const [cards, setCards] = useState<ScryfallCard[]>([]);
-  const [inLists, setInLists] = useState<Record<string, string[]>>({});
-  const [total, setTotal] = useState(0);
-  // What the search was taken to mean and how it ran; null for a plain search.
+  // What the search was taken to mean and how it ran; null for a picked name.
   const [answer, setAnswer] = useState<api.AskResponse | null>(null);
-  const [status, setStatus] = useState<'idle' | 'searching' | 'thinking' | 'error'>('idle');
+  const [views, setViews] = useState<Views>({});
+  const [tab, setTab] = useState<Tab>('cards');
+  const [tabLoading, setTabLoading] = useState(false);
+  const [thread, setThread] = useState<string[]>([]);
+  // The request that produced the current answer, so a search that stopped
+  // to ask which commander can carry on from it.
+  const [asked, setAsked] = useState<{ text: string; previous?: Previous } | null>(null);
+  const [inLists, setInLists] = useState<Record<string, string[]>>({});
+  const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
 
@@ -37,7 +75,7 @@ export default function SearchPage() {
   const [adding, setAdding] = useState<ScryfallCard | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  // Guards against a slow search overwriting the results of a faster later one.
+  // Guards against a slow request overwriting the result of a later one.
   const runId = useRef(0);
 
   useEffect(() => { api.fetchLists().then(setLists).catch(() => {}); }, []);
@@ -48,59 +86,138 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // `ask` works out what was typed; `exact` runs a query as written, for a
-  // picked name; `edited` re-runs a changed query for the same commander.
-  const runSearch = useCallback(async (q: string, how: 'ask' | 'exact' | 'edited' = 'ask', commander?: string) => {
-    const term = q.trim();
-    if (!term && !(how === 'edited' && commander)) return;
+  /** Run a request, and show its answer if nothing newer has started. */
+  const run = useCallback(async (status: Status, request: () => Promise<api.AskResponse | api.SearchResponse>,
+    show: (result: api.AskResponse | api.SearchResponse) => void) => {
     const id = ++runId.current;
-    setStatus(how === 'ask' && !looksLikeSyntax(term) ? 'thinking' : 'searching');
+    setStatus(status);
     setError(null);
     setSearched(true);
     try {
-      const asked = how === 'ask' ? await api.ask(term)
-        : how === 'edited' ? await api.runEdited(term, commander)
-        : null;
-      const result = asked ?? await api.search(term);
+      const result = await request();
       if (id !== runId.current) return;
-      setCards(result.cards);
-      setInLists(result.inLists);
-      setTotal(result.totalCards);
-      setAnswer((previous) => {
-        if (!asked) return null;
-        // An edited query keeps the explanation it was edited from.
-        if (how === 'edited' && previous) {
-          return { ...asked, interpretation: { ...asked.interpretation, explanation: previous.interpretation.explanation } };
-        }
-        return asked;
-      });
+      setInLists((prev) => ({ ...prev, ...result.inLists }));
+      show(result);
       setStatus('idle');
     } catch (e) {
       if (id !== runId.current) return;
       setError(e instanceof Error ? e.message : 'Search failed');
-      setCards([]);
       setStatus('error');
     }
   }, []);
 
+  const showAnswer = useCallback((result: api.AskResponse) => {
+    setAnswer(result);
+    setViews(viewsOf(result));
+    setTab(firstTab(result));
+  }, []);
+
+  const search = (text: string) => {
+    const term = text.trim();
+    if (!term) return;
+    setThread([term]);
+    setAsked({ text: term });
+    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => api.ask(term), (r) => showAnswer(r as api.AskResponse));
+  };
+
+  const pickName = (name: string) => {
+    setQuery(name);
+    setThread([]);
+    run('searching', () => api.search(exactName(name)), (r) => {
+      setAnswer(null);
+      setViews({ cards: { cards: r.cards, total: r.totalCards } });
+      setTab('cards');
+    });
+  };
+
+  const followUp = (text: string) => {
+    if (!answer) return;
+    const previous = previousOf(answer, thread);
+    run('thinking', () => api.followUp(text, previous), (r) => {
+      setThread((t) => [...t, text]);
+      setAsked({ text, previous });
+      showAnswer(r as api.AskResponse);
+    });
+  };
+
+  /** Answer "which commander?" and let the search carry on. */
+  const pickCommander = (name: string) => {
+    if (!answer?.plan || !asked) return;
+    const plan = answer.plan;
+    run('thinking', () => api.resume(asked.text, asked.previous, plan, name), (r) => showAnswer(r as api.AskResponse));
+  };
+
+  /** An edited query: both card views change, the explanation stays. */
+  const runEdited = (edited: string) => {
+    if (!answer) return;
+    const { commander, sort, explanation } = answer.interpretation;
+    run('searching', () => api.runQuery(edited, { commander: commander?.name, sort }), (r) => {
+      const result = r as api.AskResponse;
+      showAnswer({ ...result, interpretation: { ...result.interpretation, explanation } });
+    });
+  };
+
+  /** A new order only touches the Scryfall view. */
+  const resort = (sort: Sort) => {
+    if (!answer) return;
+    const { commander } = answer.interpretation;
+    run('searching', () => api.runQuery(answer.interpretation.query, { commander: commander?.name, sort, edhrec: false }), (r) => {
+      const result = r as api.AskResponse;
+      setViews((v) => ({ ...v, cards: { cards: result.cards, total: result.totalCards, stats: result.stats, sort: result.interpretation.sort } }));
+      setAnswer((a) => (a ? { ...a, interpretation: { ...a.interpretation, sort: result.interpretation.sort } } : a));
+    });
+  };
+
+  /** Open a tab, fetching its view the first time. */
+  const openTab = async (next: Tab) => {
+    setTab(next);
+    const commander = answer?.interpretation.commander?.name;
+    if (!commander) return;
+    const missing = next === 'combos' ? !views.combos : next === 'edhrec' ? views.edhrec === undefined : !views.cards;
+    if (!missing) return;
+
+    const id = runId.current;
+    setTabLoading(true);
+    try {
+      if (next === 'combos') {
+        const r = await api.combosFor(commander);
+        if (id !== runId.current) return;
+        setInLists((prev) => ({ ...prev, ...r.inLists }));
+        setViews((v) => ({ ...v, combos: { combos: r.combos ?? [], cards: r.cards, note: r.interpretation.note } }));
+      } else {
+        // Came from a combo search: fetch "everything for this commander".
+        const r = await api.runQuery('', { commander });
+        if (id !== runId.current) return;
+        setInLists((prev) => ({ ...prev, ...r.inLists }));
+        setViews((v) => ({
+          ...v,
+          cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort },
+          edhrec: r.edhrec ?? null,
+        }));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load that tab');
+    } finally {
+      setTabLoading(false);
+    }
+  };
+
   const addCard = async (listId: string, quantity: number) => {
     if (!adding) return;
     await api.addCard(listId, adding.id, quantity);
-    const [fresh] = await Promise.all([api.fetchLists()]);
+    const fresh = await api.fetchLists();
     setLists(fresh);
     const name = fresh.find((l) => l.id === listId)?.name ?? 'list';
     setInLists((prev) => ({ ...prev, [adding.id]: [...new Set([...(prev[adding.id] ?? []), name])] }));
     setToast(`Added ${quantity > 1 ? `${quantity}× ` : ''}${adding.name} to ${name}`);
   };
 
+  const busy = status === 'searching' || status === 'thinking';
+  const hasViews = Object.keys(views).length > 0;
+
   return (
     <div>
-      <SearchBox
-        value={query}
-        onChange={setQuery}
-        onSubmit={(q) => { setAnswer(null); runSearch(q); }}
-        onPickName={(name) => { setQuery(name); setAnswer(null); runSearch(exactName(name), 'exact'); }}
-      />
+      <SearchBox value={query} onChange={setQuery} onSubmit={search} onPickName={pickName} />
 
       {!searched && (
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
@@ -108,7 +225,7 @@ export default function SearchPage() {
           {EXAMPLES.map((example) => (
             <button
               key={example}
-              onClick={() => { setQuery(example); runSearch(example); }}
+              onClick={() => { setQuery(example); search(example); }}
               className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface)]"
             >
               {example}
@@ -118,55 +235,30 @@ export default function SearchPage() {
       )}
 
       {answer && status !== 'thinking' && (
-        <Interpreted
-          interpretation={answer.interpretation}
-          trace={answer.trace}
-          onRun={(q) => runSearch(q, 'edited', answer.interpretation.commander?.name)}
-        />
+        <Interpreted interpretation={answer.interpretation} trace={answer.trace} onRun={runEdited} />
+      )}
+      {answer && !answer.choice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
+
+      {status === 'idle' && answer?.choice && (
+        <CommanderChoice mention={answer.choice.mention} options={answer.choice.options} onPick={pickCommander} />
       )}
 
       {status === 'searching' && <p className="mt-8 text-center text-[var(--muted)]">Searching…</p>}
       {status === 'thinking' && <p className="mt-8 text-center text-[var(--muted)]">Working out what you mean…</p>}
       {status === 'error' && <p className="mt-8 text-center text-red-400">{error}</p>}
-      {status === 'idle' && searched && !cards.length && (
-        <p className="mt-8 text-center text-[var(--muted)]">No cards matched that search.</p>
-      )}
 
-      {answer?.combos && cards.length > 0 && (
-        <ComboList
-          combos={answer.combos}
-          cards={cards}
+      {status === 'idle' && hasViews && !answer?.choice && (
+        <Results
+          views={views}
+          commander={answer?.interpretation.kind !== 'card' ? answer?.interpretation.commander?.name : undefined}
+          tab={tab}
+          onTab={openTab}
+          loading={tabLoading}
           inLists={inLists}
-          anchor={anchorOf(answer.combos)}
+          onSort={resort}
           onSelect={setSelected}
           onAdd={setAdding}
         />
-      )}
-
-      {!answer?.combos && cards.length > 0 && (
-        <>
-          <p className="mt-6 text-sm text-[var(--muted)]">
-            {total.toLocaleString()} match{total === 1 ? '' : 'es'}
-            {cards.length < total && <> · showing the first {cards.length}</>}
-          </p>
-          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {cards.map((card) => (
-              <CardTile
-                key={card.id}
-                card={card}
-                inLists={inLists[card.id]}
-                onSelect={setSelected}
-                onAdd={setAdding}
-                footer={answer?.stats?.[card.id] && answer.interpretation.commander && (
-                  <p className="text-xs text-[var(--muted)]">
-                    In {Math.round(answer.stats[card.id].inclusion * 100)}% of{' '}
-                    {answer.interpretation.commander.name.split(',')[0]} decks
-                  </p>
-                )}
-              />
-            ))}
-          </div>
-        </>
       )}
 
       <CardModal
@@ -205,10 +297,4 @@ export default function SearchPage() {
       )}
     </div>
   );
-}
-
-/** The one card every combo shares, if there is one - the commander or the card asked about. */
-function anchorOf(combos: api.AskResponse['combos'] & object): string | undefined {
-  const [first, ...rest] = combos;
-  return first?.cards.find((name) => rest.every((c) => c.cards.includes(name)));
 }

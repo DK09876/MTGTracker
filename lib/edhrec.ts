@@ -1,5 +1,5 @@
 /**
- * How often a commander's decks run each card, from EDHREC. Off by default.
+ * What a commander's decks actually play, from EDHREC. Off unless switched on.
  *
  * EDHREC has no public API, and its terms of use forbid automated requests
  * to the site. This reads the JSON behind its commander pages, which is
@@ -29,7 +29,15 @@ export interface CardStats {
   synergy: number;
 }
 
-export type CommanderStats = Map<string, CardStats>;
+/** What EDHREC knows about one commander's decks. */
+export interface CommanderPage {
+  /** Decks EDHREC has seen for this commander. */
+  decks: number;
+  /** Card name -> how its decks use it. */
+  stats: Map<string, CardStats>;
+  /** EDHREC's own lists - High Synergy Cards, Top Cards, Creatures... - in its order. */
+  sections: Array<{ header: string; names: string[] }>;
+}
 
 export const edhrecEnabled = () => /^(1|on|true|yes)$/i.test(process.env.MTG_EDHREC ?? '');
 
@@ -45,27 +53,27 @@ export function edhrecSlug(name: string): string {
 
 export const edhrecUrl = (commander: string) => `${SITE}/${edhrecSlug(commander)}`;
 
-const cache = new Map<string, { at: number; stats: CommanderStats | null }>();
+const cache = new Map<string, { at: number; page: CommanderPage | null }>();
 
-/** Card name -> stats for one commander, or null when EDHREC has nothing or cannot be reached. */
-export async function commanderStats(commander: string): Promise<CommanderStats | null> {
+/** One commander's EDHREC page, or null when EDHREC has nothing or cannot be reached. */
+export async function commanderPage(commander: string): Promise<CommanderPage | null> {
   const slug = edhrecSlug(commander);
   const hit = cache.get(slug);
-  if (hit && Date.now() - hit.at < (hit.stats ? FRESH_MS : FAILED_MS)) return hit.stats;
+  if (hit && Date.now() - hit.at < (hit.page ? FRESH_MS : FAILED_MS)) return hit.page;
 
-  let stats: CommanderStats | null = null;
+  let page: CommanderPage | null = null;
   try {
     const response = await fetch(`${DATA}/${slug}.json`, {
       headers: { Accept: 'application/json', 'User-Agent': 'MTGTracker/0.1 (https://github.com/DK09876/MTGTracker)' },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     // A commander EDHREC has never seen is a 403 from their storage, not a 404.
-    if (response.ok) stats = parseCommanderPage(await response.json());
+    if (response.ok) page = parseCommanderPage(await response.json());
   } catch {
-    stats = null;
+    page = null;
   }
-  cache.set(slug, { at: Date.now(), stats });
-  return stats;
+  cache.set(slug, { at: Date.now(), page });
+  return page;
 }
 
 interface CardView {
@@ -75,19 +83,37 @@ interface CardView {
   potential_decks?: number;
 }
 
-export function parseCommanderPage(body: unknown): CommanderStats | null {
-  const lists = (body as { container?: { json_dict?: { cardlists?: Array<{ cardviews?: CardView[] }> } } })
-    ?.container?.json_dict?.cardlists;
+interface PageBody {
+  container?: {
+    json_dict?: {
+      card?: { num_decks?: number };
+      cardlists?: Array<{ header?: string; cardviews?: CardView[] }>;
+    };
+  };
+}
+
+export function parseCommanderPage(body: unknown): CommanderPage | null {
+  const dict = (body as PageBody)?.container?.json_dict;
+  const lists = dict?.cardlists;
   if (!Array.isArray(lists)) return null;
 
-  const stats: CommanderStats = new Map();
-  for (const view of lists.flatMap((l) => l.cardviews ?? [])) {
-    if (!view.name || !view.potential_decks || stats.has(view.name)) continue;
-    stats.set(view.name, {
-      decks: view.num_decks ?? 0,
-      inclusion: (view.num_decks ?? 0) / view.potential_decks,
-      synergy: view.synergy ?? 0,
-    });
+  const stats = new Map<string, CardStats>();
+  const sections: CommanderPage['sections'] = [];
+  for (const list of lists) {
+    const names: string[] = [];
+    for (const view of list.cardviews ?? []) {
+      if (!view.name || !view.potential_decks) continue;
+      names.push(view.name);
+      if (!stats.has(view.name)) {
+        stats.set(view.name, {
+          decks: view.num_decks ?? 0,
+          inclusion: (view.num_decks ?? 0) / view.potential_decks,
+          synergy: view.synergy ?? 0,
+        });
+      }
+    }
+    if (names.length) sections.push({ header: list.header ?? 'Cards', names });
   }
-  return stats.size ? stats : null;
+  if (!stats.size) return null;
+  return { decks: dict?.card?.num_decks ?? 0, stats, sections };
 }
