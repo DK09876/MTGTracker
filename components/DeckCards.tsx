@@ -8,20 +8,28 @@
  * likes to look at every deck, not a property of one deck.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import CardTile from './CardTile';
 import ManaCost from './ManaCost';
 import type { Board } from '@/lib/decklist';
-import { groupCards, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
+import * as api from '@/lib/api';
+import { groupCards, primaryType, type Categories, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
 import { filterCards } from '@/lib/filter';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { manaCostOf, priceOf } from '@/lib/scryfall';
+import type { RoleCount } from '@/lib/roles';
+import { tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
 
 export type Entry = Item & { board: Board };
 
 interface Props {
+  listId: string;
   entries: Entry[];
+  /** The deck's own tags, for grouping by them. */
+  tags?: DeckTags | null;
+  /** Changes when the deck does, so the role lookup is redone. */
+  version?: string;
   /** A deck gets board tabs; a plain list shows everything together. */
   isDeck: boolean;
   onSelect: (card: ScryfallCard) => void;
@@ -43,7 +51,7 @@ function loadPrefs(): { view: View; groupBy: GroupBy; sortBy: SortBy } {
   }
 }
 
-export default function DeckCards({ entries, isDeck, onSelect, onQuantity, onMove }: Props) {
+export default function DeckCards({ listId, entries, tags, version, isDeck, onSelect, onQuantity, onMove }: Props) {
   const [board, setBoard] = useState<Board>('main');
   const [filter, setFilter] = useState('');
   const [prefs, setPrefs] = useState(() => (typeof window === 'undefined'
@@ -54,9 +62,44 @@ export default function DeckCards({ entries, isDeck, onSelect, onQuantity, onMov
     try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch { /* not remembered, still works */ }
   }, [prefs]);
 
+  // A plain list has no tags or roles; it groups as it did before.
+  const groupBy: GroupBy = !isDeck && (prefs.groupBy === 'tag' || prefs.groupBy === 'role') ? 'type' : prefs.groupBy;
+
+  // Roles are looked up only when someone groups by them.
+  const [roles, setRoles] = useState<RoleCount[] | null>(null);
+  useEffect(() => {
+    if (!isDeck || groupBy !== 'role') return;
+    let cancelled = false;
+    api.deckRoles(listId).then((r) => { if (!cancelled) setRoles(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [isDeck, groupBy, listId, version]);
+
+  const onCard = useMemo(() => tagsByCard(tags ?? { brief: '', overview: '', tags: [], cardTags: [] }), [tags]);
+  const categories = useMemo((): Categories | undefined => {
+    if (groupBy === 'tag' && tags) {
+      return {
+        of: (card) => (onCard.get(tagKey(card)) ?? []).map(({ tag }) => tag.id),
+        order: tags.tags.filter((t) => t.status === 'accepted').map((t) => ({ key: t.id, label: t.name, color: t.color })),
+        none: 'Untagged',
+      };
+    }
+    if (groupBy === 'role' && roles) {
+      const byName = new Map<string, string[]>();
+      for (const r of roles) for (const name of r.cards) byName.set(name, [...(byName.get(name) ?? []), r.id]);
+      return {
+        of: (card) => (primaryType(card) === 'Lands' ? ['lands'] : byName.get(card.name) ?? []),
+        order: [...roles.map((r) => ({ key: r.id, label: r.label })), { key: 'lands', label: 'Lands' }],
+        none: 'No role',
+      };
+    }
+    return undefined;
+  }, [groupBy, tags, roles, onCard]);
+
   const onBoard = isDeck ? entries.filter((e) => e.board === board) : entries;
   const { results: shown, unsupported } = filterCards(onBoard, filter);
-  const groups = groupCards(shown, prefs.groupBy, prefs.sortBy);
+  const groups = groupCards(shown, groupBy, prefs.sortBy, categories);
+  const waiting = (groupBy === 'tag' && !tags) || (groupBy === 'role' && !roles);
+  const noTags = groupBy === 'tag' && tags && !tags.tags.some((t) => t.status === 'accepted');
   const copies = (b: Board) => entries.filter((e) => e.board === b).reduce((n, e) => n + e.quantity, 0);
 
   const select = (className: string) =>
@@ -102,9 +145,11 @@ export default function DeckCards({ entries, isDeck, onSelect, onQuantity, onMov
             </button>
           ))}
         </div>
-        <select aria-label="Group by" value={prefs.groupBy} onChange={(e) => setPrefs((p) => ({ ...p, groupBy: e.target.value as GroupBy }))} className={select('')}>
+        <select aria-label="Group by" value={groupBy} onChange={(e) => setPrefs((p) => ({ ...p, groupBy: e.target.value as GroupBy }))} className={select('')}>
           <option value="type">Group: type</option>
           <option value="mv">Group: mana value</option>
+          {isDeck && <option value="tag">Group: my tags</option>}
+          {isDeck && <option value="role">Group: role (automatic)</option>}
           <option value="none">No groups</option>
         </select>
         <select aria-label="Sort by" value={prefs.sortBy} onChange={(e) => setPrefs((p) => ({ ...p, sortBy: e.target.value as SortBy }))} className={select('')}>
@@ -127,15 +172,26 @@ export default function DeckCards({ entries, isDeck, onSelect, onQuantity, onMov
             : 'Nothing here yet — use Add cards.'}
         </p>
       )}
+      {waiting && onBoard.length > 0 && (
+        <p className="mt-3 text-xs text-[var(--muted)]">{groupBy === 'role' ? 'Looking up roles…' : 'Loading tags…'}</p>
+      )}
+      {noTags && (
+        <p className="mt-3 text-xs text-[var(--muted)]">This deck has no tags yet — make some in the Tags tab, or open a card to tag it.</p>
+      )}
+      {(groupBy === 'tag' || groupBy === 'role') && categories && (
+        <p className="mt-3 text-xs text-[var(--muted)]">A card with several {groupBy === 'tag' ? 'tags' : 'roles'} is listed under each.</p>
+      )}
       {onBoard.length > 0 && !shown.length && (
         <p className="mt-10 text-center text-[var(--muted)]">Nothing here matches that filter.</p>
       )}
 
       {groups.map((group) => (
         <section key={group.key} className="mt-6">
-          {prefs.groupBy !== 'none' || group.key === 'commander' ? (
-            <h3 className="mb-2 text-sm font-medium text-[var(--muted)]">
-              {group.label} <span className="tabular-nums">({group.count})</span>
+          {groupBy !== 'none' || group.key === 'commander' ? (
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)]">
+              {group.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: group.color }} aria-hidden="true" />}
+              <span style={group.color ? { color: group.color } : undefined}>{group.label}</span>
+              <span className="tabular-nums">({group.count})</span>
             </h3>
           ) : null}
           {prefs.view === 'visual' ? (
@@ -165,6 +221,13 @@ export default function DeckCards({ entries, isDeck, onSelect, onQuantity, onMov
                     {entry.card.name}
                     {entry.finish !== 'nonfoil' && <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">{entry.finish}</span>}
                   </button>
+                  {isDeck && (onCard.get(tagKey(entry.card)) ?? []).length > 0 && (
+                    <span className="hidden items-center gap-1 sm:flex" title={(onCard.get(tagKey(entry.card)) ?? []).map(({ tag }) => tag.name).join(', ')}>
+                      {(onCard.get(tagKey(entry.card)) ?? []).map(({ tag }) => (
+                        <span key={tag.id} className="h-2 w-2 rounded-full" style={{ background: tag.color }} />
+                      ))}
+                    </span>
+                  )}
                   <ManaCost cost={manaCostOf(entry.card)} size={13} />
                   <span className="w-16 text-right tabular-nums text-[var(--muted)]">
                     {priceOf(entry.card, entry.finish) === null ? '—' : `$${priceOf(entry.card, entry.finish)!.toFixed(2)}`}

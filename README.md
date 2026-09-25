@@ -6,7 +6,8 @@ network, alongside [LifeOS](https://github.com/DK09876/LifeOS).
 Card data comes from [Scryfall](https://scryfall.com) and combos from
 [Commander Spellbook](https://commanderspellbook.com). The text of a
 plain-English search goes to Gemini to be planned — only if you give it an
-API key — and, if you switch it on, a commander's name goes to EDHREC. There
+API key — as does a deck's card list and brief when you ask the model to tag
+it, and, if you switch it on, a commander's name goes to EDHREC. There
 is no account.
 
 ## What it does
@@ -67,8 +68,24 @@ any profile.
   name, always for the deck's commander. Each card has *Add* and *Maybe*.
 - **Main, maybeboard and sideboard.** Only the main board and the commander
   count towards 100.
-- **Grouped views**: visual stacks or a compact text list, grouped by type or
-  mana value, sorted by name, mana value or price.
+- **Grouped views**: visual stacks or a compact text list, grouped by type,
+  mana value, your tags or role, sorted by name, mana value or price. A card
+  with several tags or roles is listed under each.
+- **Tags** are your own categories for a deck - *Sac outlets*, *Token
+  makers*, *Win conditions* - and a card can carry several. Open any card to
+  see its tags, put one on or take it off, or make a new one. The *Tags* tab
+  manages them, and can have the model do the work in two steps you control:
+  1. **Suggest tags.** Write what the deck should do, if you like; the model
+     reads the commander and every card and suggests tags, each with a test
+     for what belongs and example cards. Keep, edit or drop each one, or ask
+     again with instructions (*split removal by what it hits*).
+  2. **Tag the cards.** The model goes through the deck in batches of twelve,
+     weighing every kept tag against each card's full text and saying why for
+     each one it applies, then takes each tag in turn and checks the whole
+     deck for cards missed or wrongly included.
+  Tags you put on or took off by hand are never changed by the model, and a
+  suggestion you dropped is not suggested again. A card is tagged by its
+  oracle id, so changing its printing keeps its tags.
 - **Printing and finish**: open a card to pick any of its printings, and
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it
@@ -146,6 +163,7 @@ npm run dev          # http://localhost:3000
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
+| `GEMINI_TAG_MODEL` | `gemini-3.8-flash` | which model suggests and applies deck tags - a bigger, slower one, thinking at `high`; falls back to 3.7 Flash and `gemini-flash-latest` if it is gone |
 | `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.

@@ -57,3 +57,31 @@ describe('groupCards', () => {
     expect(group.items.map((i) => i.card.name)).toEqual(['Lightning Bolt', 'Lotus Cobra', 'Cultivate']);
   });
 });
+
+describe('grouping by tags', () => {
+  const card = (name: string, type = 'Creature') => ({ id: name, name, type_line: type, cmc: 1 }) as ScryfallCard;
+  const items = [
+    { card: card('Korvold'), quantity: 1, finish: 'nonfoil' as const, commander: true },
+    { card: card('Viscera Seer'), quantity: 1, finish: 'nonfoil' as const },
+    { card: card('Bitterblossom', 'Enchantment'), quantity: 1, finish: 'nonfoil' as const },
+    { card: card('Forest', 'Basic Land'), quantity: 30, finish: 'nonfoil' as const },
+  ];
+  const categories = {
+    of: (c: ScryfallCard) => ({ 'Viscera Seer': ['sac', 'draw'], Bitterblossom: ['tokens', 'gone'] } as Record<string, string[]>)[c.name] ?? [],
+    order: [{ key: 'tokens', label: 'Tokens', color: '#fff000' }, { key: 'sac', label: 'Sac outlets' }, { key: 'draw', label: 'Draw' }],
+    none: 'Untagged',
+  };
+
+  it('lists a card under each of its tags, in tag order, untagged last', () => {
+    const groups = groupCards(items, 'tag', 'name', categories);
+    expect(groups.map((g) => `${g.label}:${g.items.map((i) => i.card.name).join(',')}`)).toEqual([
+      'Commander:Korvold', 'Tokens:Bitterblossom', 'Sac outlets:Viscera Seer', 'Draw:Viscera Seer', 'Untagged:Forest',
+    ]);
+    expect(groups[1].color).toBe('#fff000');
+    expect(groups[4].count).toBe(30);
+  });
+
+  it('falls back to one group until the tags arrive', () => {
+    expect(groupCards(items, 'tag', 'name').map((g) => g.key)).toEqual(['commander', 'all']);
+  });
+});
