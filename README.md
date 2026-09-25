@@ -101,9 +101,24 @@ what is left on each and what a run will cost.
 
 Gemini cannot be asked how many requests are left, so the app counts what
 it sends, and believes a refusal over its own count: a model that says its
-day is spent is passed over until the reset. A busy model is tried three
-times with long waits between - waiting is free, asking is not - and then
-passed over for the next.
+day is spent is passed over until the reset.
+
+### When Gemini is busy
+
+Gemini's Flash models go through spells of refusing most requests ("high
+demand", 503) - on 2026-09-25 for hours - and paid tiers see them too. So
+suggesting and tagging run as a **job on the server**, patient with it: a
+busy model gets one request, then the job waits a minute, two, four, up to
+fifteen between tries, each one request and on the next model down. It
+gives up after 12 refusals (about two hours), or at once when every model
+has used the day.
+
+The Tags tab shows the job as it goes - progress, requests spent and how
+many were refused, when it will try next, and an activity log of every try,
+refusal and answer - and a **Stop** button, which also cuts off a request in
+flight. What was applied before a stop stays applied. The job keeps going
+with the page closed and is picked up on opening it again; if the server
+restarts mid-job, the job shows as interrupted.
 - **Printing and finish**: open a card to pick any of its printings, and
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it

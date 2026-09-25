@@ -29,7 +29,34 @@ const STEP_DEADLINE_MS = 240_000;
 // Longer than this and a per-minute limit is not worth waiting out.
 const MAX_ADVISED_WAIT_MS = 45_000;
 
-export class ModelError extends Error {}
+/**
+ * Why a call failed: `busy` is worth trying again later, `quota` means
+ * every model has used the day, `stopped` is the owner's doing.
+ */
+export type FailureKind = 'busy' | 'quota' | 'stopped' | 'other';
+
+export class ModelError extends Error {
+  constructor(message: string, readonly kind: FailureKind = 'other') {
+    super(message);
+  }
+}
+
+/** Something that happened on the way to an answer, for the owner to see. */
+export interface ModelEvent {
+  model: string;
+  /** busy: 503/500; limited: a per-minute 429, waited out; spent: the model's day is used; gone: 404. */
+  what: 'busy' | 'limited' | 'spent' | 'gone';
+  waitMs?: number;
+}
+
+export interface CallOptions {
+  /** Busy refusals before giving up; three by default. */
+  maxBusy?: number;
+  /** Start this many places down the ladder, wrapping: spreads retries across models. */
+  rotate?: number;
+  signal?: AbortSignal;
+  onEvent?: (event: ModelEvent) => void;
+}
 
 export interface JsonRequest {
   system: string;
@@ -48,7 +75,7 @@ export interface Answer {
   model: string;
 }
 
-export type JsonModel = (request: JsonRequest) => Promise<Answer>;
+export type JsonModel = (request: JsonRequest, options?: CallOptions) => Promise<Answer>;
 
 /** Which models to try, and the record of what was spent on them. */
 export interface Usage {
@@ -77,23 +104,32 @@ export function currentBudget(): Budget {
 export function taggingModel(usage: Usage = storedUsage()): JsonModel | null {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  return (request) => generate(key, usage, request);
+  return (request, options) => generate(key, usage, request, options);
 }
 
-async function generate(key: string, usage: Usage, request: JsonRequest, sleep = wait, now = Date.now): Promise<Answer> {
-  const models = usage.available();
-  if (!models.length) {
-    throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific');
+async function generate(
+  key: string, usage: Usage, request: JsonRequest, options: CallOptions = {}, sleep = wait, now = Date.now,
+): Promise<Answer> {
+  const { maxBusy = MAX_BUSY, rotate = 0, signal, onEvent } = options;
+  const available = usage.available();
+  if (!available.length) {
+    throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
   }
+  const shift = rotate % available.length;
+  const models = [...available.slice(shift), ...available.slice(0, shift)];
   const deadline = now() + (request.timeoutMs ?? STEP_DEADLINE_MS);
   let busyCount = 0;
-  const busy = () => new ModelError(`Gemini is overloaded right now - try again in a few minutes (${busyCount} request${busyCount === 1 ? '' : 's'} spent on refusals)`);
+  const busy = () => new ModelError(
+    `Gemini is overloaded right now - try again in a few minutes (${busyCount} request${busyCount === 1 ? '' : 's'} spent on refusals)`, 'busy',
+  );
+  const stopped = () => new ModelError('stopped', 'stopped');
   let lastError: ModelError | null = null;
   for (const model of models) {
     for (;;) {
+      if (signal?.aborted) throw stopped();
       const left = deadline - now();
-      if (left <= 0) throw busyCount ? busy() : new ModelError('the model took too long');
-      const response = await call(key, model, request, left);
+      if (left <= 0) throw busyCount ? busy() : new ModelError('the model took too long', 'busy');
+      const response = await call(key, model, request, left, signal);
       // Count what the quota counts, which includes a busy model's 503s:
       // on 2026-09-24 3.5 Flash ran out after one answer and a run of 503s.
       if (response.status !== 404 && response.status !== 429) usage.called(model);
@@ -102,6 +138,7 @@ async function generate(key: string, usage: Usage, request: JsonRequest, sleep =
       const detail = await errorDetail(response);
       const error = new ModelError(describe(model, response.status, detail.message));
       if (response.status === 404) {
+        onEvent?.({ model, what: 'gone' });
         lastError = new ModelError(`model ${model} is not available`);
         break;
       }
@@ -111,31 +148,41 @@ async function generate(key: string, usage: Usage, request: JsonRequest, sleep =
         const violation = quotaViolation(detail.body);
         if (violation?.daily) {
           usage.spent(model, violation.limit);
-          lastError = error;
+          onEvent?.({ model, what: 'spent' });
+          lastError = new ModelError(error.message, 'quota');
           break;
         }
         // A per-minute limit: wait it out on the same model if it is short.
         const advised = retryAfterMs(detail.body) ?? BUSY_WAIT_MS;
         if (advised > MAX_ADVISED_WAIT_MS || now() + advised >= deadline) {
-          lastError = error;
+          lastError = new ModelError(error.message, 'busy');
           break;
         }
-        await sleep(advised);
+        onEvent?.({ model, what: 'limited', waitMs: advised });
+        await sleep(advised, signal);
         continue;
       }
 
       // Busy: on to the next model after a pause, or stop.
       busyCount++;
       lastError = busy();
-      if (busyCount >= MAX_BUSY) throw lastError;
-      await sleep(BUSY_WAIT_MS);
+      if (busyCount >= maxBusy) {
+        onEvent?.({ model, what: 'busy' });
+        throw lastError;
+      }
+      onEvent?.({ model, what: 'busy', waitMs: BUSY_WAIT_MS });
+      await sleep(BUSY_WAIT_MS, signal);
       break;
     }
+  }
+  // Every model passed over: out for the day if none has requests left.
+  if (!usage.available().length) {
+    throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
   }
   throw lastError ?? new ModelError('no model to call');
 }
 
-async function call(key: string, model: string, request: JsonRequest, timeoutMs: number): Promise<Response> {
+async function call(key: string, model: string, request: JsonRequest, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   try {
     return await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
@@ -150,11 +197,12 @@ async function call(key: string, model: string, request: JsonRequest, timeoutMs:
           thinkingConfig: { thinkingLevel: request.thinking ?? 'high' },
         },
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
+    if (signal?.aborted) throw new ModelError('stopped', 'stopped');
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
-    throw new ModelError(timedOut ? 'the model took too long' : 'could not reach the model');
+    throw new ModelError(timedOut ? 'the model took too long' : 'could not reach the model', 'busy');
   }
 }
 
@@ -198,6 +246,14 @@ export function parseJson(body: unknown): unknown {
   }
 }
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** A pause that ends early when the signal aborts. */
+export function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done);
+  });
+}
 
 export const testing = { generate };

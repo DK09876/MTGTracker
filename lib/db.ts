@@ -23,6 +23,7 @@ import { Database } from 'node-sqlite3-wasm';
 
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
+import type { TagJob } from './tag-jobs';
 import type { CardTag, DeckTags, Tag, TagKind, TagStatus } from './tags';
 
 const DB_PATH = process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`;
@@ -147,6 +148,8 @@ function open(): Database {
       PRIMARY KEY (day, model)
     );
   `);
+  // The latest tagging job on each deck - see tag-jobs.ts.
+  db.run(`CREATE TABLE IF NOT EXISTS tag_jobs (listId TEXT PRIMARY KEY, job TEXT NOT NULL, updatedAt TEXT NOT NULL)`);
   // What the owner wants the deck to do, and the model's reading of it.
   if (!columns.some((c) => c.name === 'tagBrief')) {
     db.run(`ALTER TABLE lists ADD COLUMN tagBrief TEXT NOT NULL DEFAULT ''`);
@@ -319,6 +322,7 @@ export function deleteList(id: string): void {
   database.run('DELETE FROM list_cards WHERE listId = ?', [id]);
   database.run('DELETE FROM deck_card_tags WHERE listId = ?', [id]);
   database.run('DELETE FROM deck_tags WHERE listId = ?', [id]);
+  database.run('DELETE FROM tag_jobs WHERE listId = ?', [id]);
   database.run('DELETE FROM lists WHERE id = ?', [id]);
 }
 
@@ -755,6 +759,20 @@ export interface ModelUsage {
   quotaLimit: number | null;
   /** Refused for the day - its quota is spent, whatever the count says. */
   exhausted: boolean;
+}
+
+/** A deck's latest tagging job, as saved. */
+export function loadTagJob(listId: string): TagJob | null {
+  const row = open().get('SELECT job FROM tag_jobs WHERE listId = ?', [listId]) as { job: string } | null;
+  return row ? JSON.parse(row.job) as TagJob : null;
+}
+
+export function saveTagJob(job: TagJob): void {
+  open().run(
+    `INSERT INTO tag_jobs (listId, job, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(listId) DO UPDATE SET job = excluded.job, updatedAt = excluded.updatedAt`,
+    [job.listId, JSON.stringify(job), new Date().toISOString()],
+  );
 }
 
 /**

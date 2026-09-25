@@ -26,6 +26,12 @@ export const DEFAULT_LADDER: LadderModel[] = [
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
 ];
 
+/** "gemini-3.8-flash" as people say it: "Gemini 3.8 Flash". */
+export function modelLabel(model: string): string {
+  return DEFAULT_LADDER.find((m) => m.id === model)?.label
+    ?? model.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, ' Lite');
+}
+
 /** Assumed until a refusal says otherwise. */
 export const FREE_DAILY_LIMIT = 20;
 

@@ -51,7 +51,7 @@ describe('generate', () => {
     const fetch = vi.fn().mockResolvedValueOnce(fail(503)).mockResolvedValueOnce(ok({ a: 1 }));
     vi.stubGlobal('fetch', fetch);
     const { u, calls } = usage(['m1', 'm2']);
-    expect(await testing.generate('k', u, request, noWait)).toEqual({ data: { a: 1 }, model: 'm2' });
+    expect(await testing.generate('k', u, request, {}, noWait)).toEqual({ data: { a: 1 }, model: 'm2' });
     expect(calls).toEqual(['m1', 'm2']); // Gemini counts a busy 503 against the day too
   });
 
@@ -59,7 +59,7 @@ describe('generate', () => {
     const fetch = vi.fn().mockResolvedValue(fail(503));
     vi.stubGlobal('fetch', fetch);
     const { u, calls } = usage(['m1', 'm2', 'm3', 'm4']);
-    await expect(testing.generate('k', u, request, noWait)).rejects.toThrow(/overloaded right now.*3 requests/);
+    await expect(testing.generate('k', u, request, {}, noWait)).rejects.toThrow(/overloaded right now.*3 requests/);
     expect(calls).toEqual(['m1', 'm2', 'm3']);
   });
 
@@ -68,7 +68,7 @@ describe('generate', () => {
     const fetch = vi.fn().mockImplementation(async () => { clock += 100_000; return fail(503); });
     vi.stubGlobal('fetch', fetch);
     const { u } = usage(['m1', 'm2', 'm3']);
-    await expect(testing.generate('k', u, { ...request, timeoutMs: 150_000 }, noWait, () => clock)).rejects.toThrow(/overloaded/);
+    await expect(testing.generate('k', u, { ...request, timeoutMs: 150_000 }, {}, noWait, () => clock)).rejects.toThrow(/overloaded/);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -76,7 +76,7 @@ describe('generate', () => {
     const fetch = vi.fn().mockResolvedValueOnce(daily('m1')).mockResolvedValueOnce(ok({ b: 2 }));
     vi.stubGlobal('fetch', fetch);
     const { u, calls, spent } = usage(['m1', 'm2']);
-    expect(await testing.generate('k', u, request, noWait)).toEqual({ data: { b: 2 }, model: 'm2' });
+    expect(await testing.generate('k', u, request, {}, noWait)).toEqual({ data: { b: 2 }, model: 'm2' });
     expect(spent).toEqual([['m1', 20]]);
     expect(calls).toEqual(['m2']); // a refusal is not a request spent
   });
@@ -85,7 +85,7 @@ describe('generate', () => {
     const fetch = vi.fn().mockResolvedValueOnce(perMinute).mockResolvedValueOnce(ok({ c: 3 }));
     vi.stubGlobal('fetch', fetch);
     const { u, spent } = usage(['m1', 'm2']);
-    expect((await testing.generate('k', u, request, noWait)).model).toBe('m1');
+    expect((await testing.generate('k', u, request, {}, noWait)).model).toBe('m1');
     expect(spent).toEqual([]);
   });
 
@@ -94,20 +94,44 @@ describe('generate', () => {
     fetch.mockResolvedValueOnce(fail(503)).mockResolvedValueOnce(ok({ d: 4 }));
     vi.stubGlobal('fetch', fetch);
     const { u } = usage(['gone', 'busy', 'm3']);
-    expect((await testing.generate('k', u, request, noWait)).model).toBe('m3');
+    expect((await testing.generate('k', u, request, {}, noWait)).model).toBe('m3');
+  });
+
+  it('reports each refusal, and marks a busy failure as worth retrying', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(fail(503)));
+    const events: string[] = [];
+    const error = await testing.generate('k', usage(['m1', 'm2']).u, request, { maxBusy: 1, onEvent: (e) => events.push(`${e.model} ${e.what}`) }, noWait)
+      .catch((e) => e);
+    expect(error).toBeInstanceOf(ModelError);
+    expect(error.kind).toBe('busy');
+    expect(events).toEqual(['m1 busy']);
+  });
+
+  it('starts further down the ladder when asked to rotate', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ e: 5 })));
+    expect((await testing.generate('k', usage(['m1', 'm2', 'm3']).u, request, { rotate: 4 }, noWait)).model).toBe('m2');
+  });
+
+  it('does not call once stopped', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(testing.generate('k', usage(['m1']).u, request, { signal: controller.signal }, noWait)).rejects.toMatchObject({ kind: 'stopped' });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('says so when every model has used its day, without calling', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    await expect(testing.generate('k', usage([]).u, request, noWait)).rejects.toThrow(/midnight Pacific/);
+    await expect(testing.generate('k', usage([]).u, request, {}, noWait)).rejects.toThrow(/midnight Pacific/);
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('stops at once on a bad request', async () => {
     const bad = vi.fn().mockResolvedValue(fail(400));
     vi.stubGlobal('fetch', bad);
-    await expect(testing.generate('k', usage(['m1', 'm2']).u, request, noWait)).rejects.toThrow(/400/);
+    await expect(testing.generate('k', usage(['m1', 'm2']).u, request, {}, noWait)).rejects.toThrow(/400/);
     expect(bad).toHaveBeenCalledTimes(1);
   });
 });

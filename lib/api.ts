@@ -29,6 +29,7 @@ import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
+import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
@@ -285,18 +286,16 @@ export const deleteTag = (listId: string, tagId: string) =>
 export const setCardTag = (listId: string, cardKey: string, tagId: string, on: boolean) =>
   send(`lists/${listId}/tags/cards`, 'PATCH', { cardKey, tagId, on }).then(json<DeckTags>);
 
-export type ModelStep = { model: string; budget: Budget };
+export interface TagJobState { job: TagJob | null; tags: DeckTags; budget: Budget }
 
-export const proposeTags = (listId: string, instructions: string, boards: Board[]) =>
-  send(`lists/${listId}/tags/ai`, 'POST', { step: 'propose', instructions, boards }).then(json<DeckTags & ModelStep & { proposed: number }>);
+/** The deck's latest tagging job, its tags and today's budget. */
+export const tagJob = (listId: string) => fetch(url(`lists/${listId}/tags/job`)).then(json<TagJobState>);
 
-export const assignTags = (listId: string, keys: string[], boards: Board[]) =>
-  send(`lists/${listId}/tags/ai`, 'POST', { step: 'assign', keys, boards })
-    .then(json<DeckTags & ModelStep & { tagged: number; skipped: number; added: number }>);
+export const startTagJob = (listId: string, params: JobParams) =>
+  send(`lists/${listId}/tags/job`, 'POST', params).then(json<TagJobState>);
 
-export const auditTags = (listId: string, tagIds: string[], boards: Board[]) =>
-  send(`lists/${listId}/tags/ai`, 'POST', { step: 'audit', tagIds, boards })
-    .then(json<DeckTags & ModelStep & { added: number; removed: number }>);
+export const stopTagJob = (listId: string) =>
+  fetch(url(`lists/${listId}/tags/job`), { method: 'DELETE' }).then(json<TagJobState>);
 
 /** Today's free requests left on each tagging model. */
 export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);

@@ -11,16 +11,18 @@
  *      tags you kept, then rechecks each tag across the whole deck. What you
  *      set by hand - on or off - is never overridden.
  *
- * The page drives the batches, so progress shows as it goes and one failed
- * batch does not lose the rest.
+ * The model's work runs as a job on the server (lib/tag-jobs.ts), patient
+ * with a busy Gemini. The page polls it and shows every try, refusal and
+ * answer as it happens, with a Stop button.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
-import { BATCHES, requestsFor, type Budget, type Mode } from '@/lib/quota';
+import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
+import type { TagJob } from '@/lib/tag-jobs';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { TAG_COLORS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
 
@@ -32,24 +34,12 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
 }
 
-// One request at a time in free mode: when Gemini is busy, every refused
-// request still counts against the day, and two at once double that.
-const CONCURRENCY: Record<Mode, number> = { free: 1, smart: 2 };
 const MODE_KEY = 'mtg-tag-mode';
+const POLL_MS = 2_500;
 
 type Scope = 'all' | 'untagged';
 
-interface Run {
-  phase: 'assign' | 'audit' | 'done';
-  done: number;
-  total: number;
-  added: number;
-  removed: number;
-  failed: string[];
-  stopped?: boolean;
-  /** Which models answered, in order of first use. */
-  models: string[];
-}
+const isActive = (job: TagJob | null) => job?.status === 'running' || job?.status === 'waiting';
 
 const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]';
 const button = 'rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
@@ -59,12 +49,11 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [brief, setBrief] = useState<string | null>(null);
   const [instructions, setInstructions] = useState('');
   const [boards, setBoards] = useState<Board[]>(['main']);
-  const [proposing, setProposing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [audit, setAudit] = useState(true);
-  const [run, setRun] = useState<Run | null>(null);
-  const stop = useRef(false);
+  const [job, setJob] = useState<TagJob | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
   const [mode, setMode] = useState<Mode>(() => {
     try { return localStorage.getItem(MODE_KEY) === 'smart' ? 'smart' : 'free'; } catch { return 'free'; }
@@ -82,6 +71,29 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   }, []);
   const refreshBudget = useCallback(() => { api.aiBudget().then(setBudget).catch(() => {}); }, []);
 
+  // The latest job, and while one runs, how it is going - it keeps going
+  // with the page closed, so it is picked up again on opening.
+  const show = useCallback((state: api.TagJobState) => {
+    setJob(state.job);
+    setBudget(state.budget);
+    onTags(state.tags);
+  }, [onTags]);
+  const active = isActive(job);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () => api.tagJob(listId)
+      .then((state) => {
+        if (cancelled) return;
+        show(state);
+        if (isActive(state.job)) timer = setTimeout(poll, POLL_MS);
+        else setStopping(false);
+      })
+      .catch(() => { if (!cancelled) timer = setTimeout(poll, POLL_MS * 4); });
+    poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [listId, active, show]);
+
   // One entry per card, as tags see them: every printing of a card is one card.
   const cards = useMemo(() => {
     const seen = new Map<string, Entry>();
@@ -96,7 +108,8 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const rejected = tags.tags.filter((t) => t.status === 'rejected');
   const onCard = tagsByCard(tags);
   const untagged = cards.filter((e) => !onCard.has(tagKey(e.card)));
-  const running = run !== null && run.phase !== 'done';
+  const running = active;
+  const proposing = active && job?.params.kind === 'propose';
 
   const act = async (work: () => Promise<Tags & { budget?: Budget }>) => {
     setError(null);
@@ -117,86 +130,27 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
     setBrief(null);
   };
 
-  const propose = async () => {
-    setProposing(true);
+  const start = async (params: Parameters<typeof api.startTagJob>[1]) => {
+    setError(null);
     await saveBrief();
-    await act(() => api.proposeTags(listId, instructions, boards));
-    setProposing(false);
-  };
-
-  /** Step 2: tag the cards in batches, then recheck each tag across the deck. */
-  const tagCards = async () => {
-    await saveBrief();
-    stop.current = false;
-    const targets = (scope === 'all' ? cards : untagged).map((e) => tagKey(e.card));
-    const size = BATCHES[mode];
-    // Even batches: 92 cards in free mode is 46 and 46, not 50 and 42.
-    const count = Math.ceil(targets.length / size.cards);
-    const per = Math.ceil(targets.length / Math.max(1, count));
-    const batches: string[][] = [];
-    for (let i = 0; i < targets.length; i += per) batches.push(targets.slice(i, i + per));
-    const tagChunks: string[][] = [];
-    for (let i = 0; i < accepted.length; i += size.tags) tagChunks.push(accepted.slice(i, i + size.tags).map((t) => t.id));
-
-    const state: Run = { phase: 'assign', done: 0, total: targets.length, added: 0, removed: 0, failed: [], models: [] };
-    const answered = (r: api.ModelStep) => {
-      setBudget(r.budget);
-      if (!state.models.includes(r.model)) state.models.push(r.model);
-    };
-    setRun({ ...state });
-
-    const pool = async <T,>(jobs: T[], work: (job: T) => Promise<void>) => {
-      let next = 0;
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY[mode], jobs.length) }, async () => {
-        while (next < jobs.length && !stop.current) await work(jobs[next++]);
-      }));
-    };
-    // A refused batch is tried once more before it is counted as failed -
-    // unless every model is out for the day, when another try cannot help.
-    const attempt = async <R,>(call: () => Promise<R>): Promise<R> => {
-      try {
-        return await call();
-      } catch (e) {
-        if (e instanceof Error && /midnight Pacific/.test(e.message)) throw e;
-        return call();
-      }
-    };
-
-    await pool(batches, async (keys) => {
-      try {
-        const result = await attempt(() => api.assignTags(listId, keys, boards));
-        state.added += result.added;
-        answered(result);
-        onTags(result);
-      } catch (e) {
-        state.failed.push(`${keys.length} cards: ${e instanceof Error ? e.message.replace(/^The model failed: /, '') : 'failed'}`);
-      }
-      state.done += keys.length;
-      setRun({ ...state });
-    });
-
-    // Checking tags that were never applied would spend requests on nothing.
-    const assigned = state.failed.length < batches.length;
-    if (audit && assigned && !stop.current) {
-      Object.assign(state, { phase: 'audit', done: 0, total: accepted.length });
-      setRun({ ...state });
-      await pool(tagChunks, async (ids) => {
-        try {
-          const result = await attempt(() => api.auditTags(listId, ids, boards));
-          state.added += result.added;
-          state.removed += result.removed;
-          answered(result);
-          onTags(result);
-        } catch (e) {
-          state.failed.push(`checking ${ids.length} tags: ${e instanceof Error ? e.message.replace(/^The model failed: /, '') : 'failed'}`);
-        }
-        state.done += ids.length;
-        setRun({ ...state });
-      });
+    try {
+      show(await api.startTagJob(listId, params));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start that');
     }
-    setRun({ ...state, phase: 'done', stopped: stop.current });
-    refreshBudget();
   };
+  const propose = () => start({ kind: 'propose', instructions, boards });
+  const tagCards = () => start({ kind: 'tag', mode, scope, audit, boards });
+  const stopJob = async () => {
+    setStopping(true);
+    try {
+      show(await api.stopTagJob(listId));
+    } catch (e) {
+      setStopping(false);
+      setError(e instanceof Error ? e.message : 'Could not stop it');
+    }
+  };
+  const panel = job && <JobPanel job={job} stopping={stopping} onStop={stopJob} />;
 
   const targetCount = scope === 'all' ? cards.length : untagged.length;
   const needs = (m: Mode) => requestsFor(m, targetCount, accepted.length, audit);
@@ -247,7 +201,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         />
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <button onClick={propose} disabled={proposing || running} className={primary}>
-            {proposing ? 'Reading the deck…' : proposed.length ? 'Suggest again' : accepted.length ? 'Suggest more tags' : 'Suggest tags'}
+            {proposing ? 'Suggesting…' : proposed.length ? 'Suggest again' : accepted.length ? 'Suggest more tags' : 'Suggest tags'}
           </button>
           <span className="text-[var(--muted)]">1 request</span>
           <span className="text-[var(--muted)]">Include:</span>
@@ -258,7 +212,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
             </label>
           ))}
         </div>
-        {proposing && <p className="text-sm text-[var(--muted)]">This takes up to a minute — the model reads every card closely.</p>}
+        {job?.params.kind === 'propose' && panel}
         {tags.overview && (
           <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
             <p className="text-xs uppercase tracking-wide text-[var(--muted)]">How the model reads this deck</p>
@@ -434,10 +388,9 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           >
             Tag cards with {accepted.length} tag{accepted.length === 1 ? '' : 's'}
           </button>
-          {running && <button onClick={() => { stop.current = true; }} className={button}>Stop after this batch</button>}
           {!accepted.length && <span className="text-sm text-[var(--muted)]">Keep or make some tags first.</span>}
         </div>
-        {run && <Progress run={run} />}
+        {job?.params.kind === 'tag' && panel}
       </section>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -451,34 +404,90 @@ function move(tags: Tag[], i: number, by: -1 | 1): string[] {
   return ids;
 }
 
-function Progress({ run }: { run: Run }) {
-  const share = run.total ? run.done / run.total : 1;
-  const label = run.phase === 'assign'
-    ? `Tagging cards — ${run.done} of ${run.total}`
-    : run.phase === 'audit'
-      ? `Checking tags across the deck — ${run.done} of ${run.total}`
-      : run.stopped ? 'Stopped' : 'Done';
+const STATUS: Record<TagJob['status'], { icon: string; label: string; tone: string }> = {
+  running: { icon: '●', label: 'Working', tone: 'text-[var(--accent)]' },
+  waiting: { icon: '⏸', label: 'Waiting for Gemini', tone: 'text-amber-400' },
+  done: { icon: '✓', label: 'Done', tone: 'text-green-500' },
+  failed: { icon: '✕', label: 'Failed', tone: 'text-red-400' },
+  stopped: { icon: '■', label: 'Stopped', tone: 'text-[var(--muted)]' },
+  interrupted: { icon: '!', label: 'Interrupted', tone: 'text-red-400' },
+};
+const LEVEL_ICON = { info: '·', warn: '⚠', error: '✕' } as const;
+
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function countdown(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+}
+
+/** The job as it stands: what it is doing, what it has spent, every try and refusal, and a Stop button. */
+function JobPanel({ job, stopping, onStop }: { job: TagJob; stopping: boolean; onStop: () => void }) {
+  const active = isActive(job);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (job.status !== 'waiting') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [job.status]);
+
+  const status = STATUS[job.status];
+  const what = job.params.kind === 'propose'
+    ? 'Suggesting tags'
+    : job.phase === 'audit' ? `Checking tags across the deck — ${job.done} of ${job.total}` : `Tagging cards — ${job.done} of ${job.total}`;
+  const share = job.total ? job.done / job.total : 0;
+  const events = [...job.events].reverse();
+
   return (
-    <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-      <p>{label}</p>
-      {run.phase !== 'done' && (
+    <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className={`font-medium ${status.tone}`}><span aria-hidden>{status.icon}</span> {status.label}</span>
+        <span className="text-[var(--foreground)]">{what}</span>
+        {active && (
+          <button onClick={onStop} disabled={stopping} className={`${button} ml-auto`}>
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
+      </div>
+      {job.status === 'waiting' && job.nextTryAt && (
+        <p className="mt-1 text-[var(--muted)]">
+          Gemini is refusing requests right now. Next try at {timeOf(job.nextTryAt)} (in {countdown(new Date(job.nextTryAt).getTime() - now)}).
+          It keeps going with this page closed.
+        </p>
+      )}
+      {job.params.kind === 'tag' && active && (
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--background)]" role="progressbar" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${share * 100}%` }} />
         </div>
       )}
+      {job.error && <p className="mt-1 text-red-400">{job.error}</p>}
       <p className="mt-1 text-[var(--muted)]">
-        {run.added} tag{run.added === 1 ? '' : 's'} applied{run.removed > 0 && `, ${run.removed} taken off after checking`}.
-        {run.phase === 'done' && ' Group the deck by tags in the Cards tab to look them over.'}
+        {job.params.kind === 'propose'
+          ? job.status === 'done' && `${plural(job.proposed, 'tag')} suggested - review them below. `
+          : `${plural(job.added, 'tag')} applied${job.removed ? `, ${job.removed} taken off after checking` : ''}. `}
+        {plural(job.requests, 'request')} spent{job.refusals ? `, ${job.refusals} of them refused` : ''}
+        {job.models.length > 0 && ` · answered by ${job.models.map(modelLabel).join(', then ')}`}.
+        {job.params.kind === 'tag' && job.status === 'done' && ' Group the deck by tags in the Cards tab to look them over.'}
       </p>
-      {run.models.length > 0 && (
-        <p className="mt-1 text-xs text-[var(--muted)]">
-          Answered by {run.models.map(modelLabel).join(', then ')}.
+      {job.failed.length > 0 && (
+        <p className="mt-1 text-amber-400">
+          ⚠ Some batches failed — run again with &ldquo;Only cards with no tags yet&rdquo; to fill the gaps: {job.failed.join('; ')}
         </p>
       )}
-      {run.failed.length > 0 && (
-        <p className="mt-1 text-amber-400">
-          Some batches failed — run again with &ldquo;Only cards with no tags yet&rdquo; to fill the gaps: {run.failed.join('; ')}
-        </p>
+      {events.length > 0 && (
+        <details className="mt-2" open={active}>
+          <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Activity ({events.length})</summary>
+          <ol className="mt-1 max-h-48 overflow-y-auto text-xs">
+            {events.map((e, i) => (
+              <li key={`${e.at}-${i}`} className="flex gap-2 py-0.5">
+                <span className="shrink-0 tabular-nums text-[var(--muted)]">{timeOf(e.at)}</span>
+                <span aria-hidden className={`w-3 shrink-0 text-center ${e.level === 'error' ? 'text-red-400' : e.level === 'warn' ? 'text-amber-400' : 'text-[var(--muted)]'}`}>{LEVEL_ICON[e.level]}</span>
+                <span className="text-[var(--foreground)]">{e.text}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
       )}
     </div>
   );
@@ -640,7 +649,6 @@ function NewTag({ listId, onTags, onError }: { listId: string; onTags: (t: Tags)
   );
 }
 
-const modelLabel = (model: string) => model.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, ' Lite');
 
 /** "in 5 hours", "in 40 minutes". */
 function resetText(ms: number): string {
