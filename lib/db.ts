@@ -23,6 +23,8 @@ import { Database } from 'node-sqlite3-wasm';
 
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
+import type { TagJob } from './tag-jobs';
+import type { CardTag, DeckTags, Tag, TagKind, TagStatus } from './tags';
 
 const DB_PATH = process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`;
 
@@ -104,6 +106,56 @@ function open(): Database {
   // Main, sideboard or maybeboard. A card sits on one board at a time.
   if (!cardColumns.some((c) => c.name === 'board')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN board TEXT NOT NULL DEFAULT 'main'`);
+  }
+  // A deck's own tags, and which cards carry them - by oracle id, so a new
+  // printing keeps its tags. A row with isOn = 0 is the owner taking a tag
+  // off a card, kept so the model does not put it back.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS deck_tags (
+      id TEXT PRIMARY KEY,
+      listId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL,
+      kind TEXT,
+      status TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      examples TEXT NOT NULL DEFAULT '[]',
+      createdAt TEXT NOT NULL
+    );
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_deck_tags_list ON deck_tags (listId);`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS deck_card_tags (
+      listId TEXT NOT NULL,
+      cardKey TEXT NOT NULL,
+      tagId TEXT NOT NULL,
+      source TEXT NOT NULL,
+      isOn INTEGER NOT NULL DEFAULT 1,
+      reason TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (listId, cardKey, tagId)
+    );
+  `);
+  // Requests sent to each model per quota day - see modelUsage.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS model_usage (
+      day TEXT NOT NULL,
+      model TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      quotaLimit INTEGER,
+      exhausted INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, model)
+    );
+  `);
+  // The latest tagging job on each deck - see tag-jobs.ts.
+  db.run(`CREATE TABLE IF NOT EXISTS tag_jobs (listId TEXT PRIMARY KEY, job TEXT NOT NULL, updatedAt TEXT NOT NULL)`);
+  // What the owner wants the deck to do, and the model's reading of it.
+  if (!columns.some((c) => c.name === 'tagBrief')) {
+    db.run(`ALTER TABLE lists ADD COLUMN tagBrief TEXT NOT NULL DEFAULT ''`);
+  }
+  if (!columns.some((c) => c.name === 'tagOverview')) {
+    db.run(`ALTER TABLE lists ADD COLUMN tagOverview TEXT NOT NULL DEFAULT ''`);
   }
   return db;
 }
@@ -268,6 +320,9 @@ export function deleteList(id: string): void {
   // The membership rows are meaningless without the list; the cards
   // themselves stay, since other lists may hold them.
   database.run('DELETE FROM list_cards WHERE listId = ?', [id]);
+  database.run('DELETE FROM deck_card_tags WHERE listId = ?', [id]);
+  database.run('DELETE FROM deck_tags WHERE listId = ?', [id]);
+  database.run('DELETE FROM tag_jobs WHERE listId = ?', [id]);
   database.run('DELETE FROM lists WHERE id = ?', [id]);
 }
 
@@ -475,4 +530,275 @@ export function saveRoles(found: Map<string, string[]>, version: number): void {
     database.run('ROLLBACK');
     throw error;
   }
+}
+
+// --- deck tags -----------------------------------------------------------
+
+type TagRow = Omit<Tag, 'examples'> & { examples: string };
+
+/** A deck's tags, its brief, and every card's tags - on or taken off. */
+export function deckTags(listId: string): DeckTags {
+  const database = open();
+  const list = database.get('SELECT tagBrief, tagOverview FROM lists WHERE id = ?', [listId]) as { tagBrief: string; tagOverview: string } | null;
+  const tags = (database.all(
+    `SELECT id, name, description, color, kind, status, origin, position, examples
+     FROM deck_tags WHERE listId = ? ORDER BY position, createdAt`, [listId],
+  ) as unknown as TagRow[]).map((t) => ({ ...t, examples: JSON.parse(t.examples) as string[] }));
+  const cardTags = (database.all(
+    'SELECT cardKey, tagId, source, isOn, reason FROM deck_card_tags WHERE listId = ?', [listId],
+  ) as Array<{ cardKey: string; tagId: string; source: CardTag['source']; isOn: number; reason: string }>)
+    .map((r) => ({ key: r.cardKey, tagId: r.tagId, source: r.source, on: r.isOn === 1, reason: r.reason }));
+  return { brief: list?.tagBrief ?? '', overview: list?.tagOverview ?? '', tags, cardTags };
+}
+
+export function setTagBrief(listId: string, brief: string): void {
+  open().run('UPDATE lists SET tagBrief = ? WHERE id = ?', [brief, listId]);
+}
+
+export interface NewTag {
+  name: string;
+  description?: string;
+  color: string;
+  kind?: TagKind | null;
+  status: TagStatus;
+  origin: Tag['origin'];
+  examples?: string[];
+}
+
+export function createTag(listId: string, tag: NewTag): Tag {
+  const database = open();
+  const id = randomUUID();
+  const { position } = database.get('SELECT COALESCE(MAX(position), -1) + 1 AS position FROM deck_tags WHERE listId = ?', [listId]) as { position: number };
+  const row: Tag = {
+    id, name: tag.name, description: tag.description ?? '', color: tag.color, kind: tag.kind ?? null,
+    status: tag.status, origin: tag.origin, position, examples: tag.examples ?? [],
+  };
+  database.run(
+    `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, listId, row.name, row.description, row.color, row.kind, row.status, row.origin, position, JSON.stringify(row.examples), now()],
+  );
+  return row;
+}
+
+/** Change a tag's words, colour, kind or status. False if it is not this deck's. */
+export function updateTag(
+  listId: string, tagId: string,
+  change: Partial<Pick<Tag, 'name' | 'description' | 'color' | 'kind' | 'status'>>,
+): boolean {
+  const database = open();
+  if (!database.get('SELECT 1 FROM deck_tags WHERE id = ? AND listId = ?', [tagId, listId])) return false;
+  for (const field of ['name', 'description', 'color', 'kind', 'status'] as const) {
+    if (change[field] !== undefined) {
+      database.run(`UPDATE deck_tags SET ${field} = ? WHERE id = ? AND listId = ?`, [change[field] ?? null, tagId, listId]);
+    }
+  }
+  return true;
+}
+
+/** Put the deck's tags in this order; any not named keep their place after. */
+export function reorderTags(listId: string, ids: string[]): void {
+  const database = open();
+  const all = (database.all('SELECT id FROM deck_tags WHERE listId = ? ORDER BY position, createdAt', [listId]) as Array<{ id: string }>).map((r) => r.id);
+  const order = [...ids.filter((id) => all.includes(id)), ...all.filter((id) => !ids.includes(id))];
+  database.run('BEGIN');
+  try {
+    order.forEach((id, i) => database.run('UPDATE deck_tags SET position = ? WHERE id = ?', [i, id]));
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+}
+
+export function deleteTag(listId: string, tagId: string): void {
+  const database = open();
+  database.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, tagId]);
+  database.run('DELETE FROM deck_tags WHERE listId = ? AND id = ?', [listId, tagId]);
+}
+
+/**
+ * Fold one tag into another: its cards move across, and it goes. A card
+ * stays off the merged tag only if the owner had taken off both.
+ */
+export function mergeTags(listId: string, fromId: string, intoId: string): boolean {
+  const database = open();
+  const both = database.all('SELECT id FROM deck_tags WHERE listId = ? AND id IN (?, ?)', [listId, fromId, intoId]) as Array<{ id: string }>;
+  if (fromId === intoId || both.length !== 2) return false;
+  database.run('BEGIN');
+  try {
+    database.run(
+      `INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason)
+       SELECT listId, cardKey, ?, source, isOn, reason FROM deck_card_tags WHERE listId = ? AND tagId = ?
+       ON CONFLICT(listId, cardKey, tagId) DO UPDATE SET
+         isOn = MAX(isOn, excluded.isOn),
+         source = CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE source END`,
+      [intoId, listId, fromId],
+    );
+    database.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, fromId]);
+    database.run('DELETE FROM deck_tags WHERE listId = ? AND id = ?', [listId, fromId]);
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return true;
+}
+
+/**
+ * New suggestions replace the last unreviewed ones; accepted and turned-down
+ * tags stay. The overview is the model's reading of the deck that came with them.
+ */
+export function replaceProposals(listId: string, overview: string, proposals: Array<Omit<NewTag, 'status' | 'origin'>>): Tag[] {
+  const database = open();
+  database.run('BEGIN');
+  try {
+    const stale = database.all(`SELECT id FROM deck_tags WHERE listId = ? AND status = 'proposed'`, [listId]) as Array<{ id: string }>;
+    for (const { id } of stale) database.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, id]);
+    database.run(`DELETE FROM deck_tags WHERE listId = ? AND status = 'proposed'`, [listId]);
+    const created = proposals.map((p) => createTag(listId, { ...p, status: 'proposed', origin: 'ai' }));
+    database.run('UPDATE lists SET tagOverview = ? WHERE id = ?', [overview, listId]);
+    database.run('COMMIT');
+    return created;
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+}
+
+/**
+ * The owner puts a tag on a card or takes it off. Taking off a tag the
+ * model applied is remembered; taking off one the owner applied forgets it.
+ */
+export function setCardTag(listId: string, cardKey: string, tagId: string, on: boolean): boolean {
+  const database = open();
+  if (!database.get('SELECT 1 FROM deck_tags WHERE id = ? AND listId = ?', [tagId, listId])) return false;
+  const row = database.get('SELECT source FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, cardKey, tagId]) as { source: string } | null;
+  if (on) {
+    database.run(
+      `INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, 'manual', 1, '')
+       ON CONFLICT(listId, cardKey, tagId) DO UPDATE SET source = 'manual', isOn = 1`,
+      [listId, cardKey, tagId],
+    );
+  } else if (row?.source === 'ai') {
+    database.run(
+      `UPDATE deck_card_tags SET source = 'manual', isOn = 0 WHERE listId = ? AND cardKey = ? AND tagId = ?`,
+      [listId, cardKey, tagId],
+    );
+  } else {
+    database.run('DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, cardKey, tagId]);
+  }
+  return true;
+}
+
+/**
+ * The model's tags for these cards replace its earlier ones on them. What
+ * the owner set by hand - tags on and tags taken off - is left alone.
+ */
+export function applyModelTags(listId: string, cardKeys: string[], found: Array<{ key: string; tagId: string; reason: string }>): number {
+  const database = open();
+  let added = 0;
+  database.run('BEGIN');
+  try {
+    for (const key of cardKeys) {
+      database.run(`DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND source = 'ai'`, [listId, key]);
+    }
+    for (const { key, tagId, reason } of found) {
+      if (database.get('SELECT 1 FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, key, tagId])) continue;
+      database.run(
+        `INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, 'ai', 1, ?)`,
+        [listId, key, tagId, reason],
+      );
+      added++;
+    }
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return added;
+}
+
+/** An audit's findings: add where nothing is set, remove only what the model applied. */
+export function applyModelAudit(
+  listId: string, changes: Array<{ key: string; tagId: string; action: 'add' | 'remove'; reason: string }>,
+): { added: number; removed: number } {
+  const database = open();
+  let added = 0;
+  let removed = 0;
+  database.run('BEGIN');
+  try {
+    for (const { key, tagId, action, reason } of changes) {
+      if (action === 'add') {
+        if (database.get('SELECT 1 FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, key, tagId])) continue;
+        database.run(
+          `INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, 'ai', 1, ?)`,
+          [listId, key, tagId, reason],
+        );
+        added++;
+      } else {
+        if (!database.get(`SELECT 1 FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ? AND source = 'ai'`, [listId, key, tagId])) continue;
+        database.run(`DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ? AND source = 'ai'`, [listId, key, tagId]);
+        removed++;
+      }
+    }
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return { added, removed };
+}
+
+// --- model usage -----------------------------------------------------------
+
+export interface ModelUsage {
+  model: string;
+  used: number;
+  /** The daily limit the model's refusals have reported, if one has. */
+  quotaLimit: number | null;
+  /** Refused for the day - its quota is spent, whatever the count says. */
+  exhausted: boolean;
+}
+
+/** A deck's latest tagging job, as saved. */
+export function loadTagJob(listId: string): TagJob | null {
+  const row = open().get('SELECT job FROM tag_jobs WHERE listId = ?', [listId]) as { job: string } | null;
+  return row ? JSON.parse(row.job) as TagJob : null;
+}
+
+export function saveTagJob(job: TagJob): void {
+  open().run(
+    `INSERT INTO tag_jobs (listId, job, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(listId) DO UPDATE SET job = excluded.job, updatedAt = excluded.updatedAt`,
+    [job.listId, JSON.stringify(job), new Date().toISOString()],
+  );
+}
+
+/**
+ * Requests made to each model on one quota day. Gemini's free tier gives
+ * each model its own daily allowance and has no way to ask what is left,
+ * so the app counts what it sends.
+ */
+export function modelUsage(day: string): ModelUsage[] {
+  return (open().all('SELECT model, used, quotaLimit, exhausted FROM model_usage WHERE day = ?', [day]) as Array<{
+    model: string; used: number; quotaLimit: number | null; exhausted: number;
+  }>).map((r) => ({ ...r, exhausted: r.exhausted === 1 }));
+}
+
+export function recordModelCall(day: string, model: string): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used) VALUES (?, ?, 1)
+     ON CONFLICT(day, model) DO UPDATE SET used = used + 1`,
+    [day, model],
+  );
+}
+
+/** The model refused for the day; its limit, if the refusal said. */
+export function recordModelExhausted(day: string, model: string, limit: number | null): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used, quotaLimit, exhausted) VALUES (?, ?, 0, ?, 1)
+     ON CONFLICT(day, model) DO UPDATE SET exhausted = 1, quotaLimit = COALESCE(excluded.quotaLimit, quotaLimit)`,
+    [day, model, limit],
+  );
 }

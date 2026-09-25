@@ -29,6 +29,9 @@ import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
+import type { JobParams, TagJob } from './tag-jobs';
+import type { DeckTags, Tag, TagKind } from './tags';
+import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
@@ -251,3 +254,48 @@ export interface DeckInsights {
 }
 
 export const deckInsights = (listId: string) => fetch(url(`lists/${listId}/insights`)).then(json<DeckInsights>);
+
+// --- deck tags -----------------------------------------------------------
+
+const send = (path: string, method: string, body: object) =>
+  fetch(url(path), { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+export const deckTags = (listId: string) => fetch(url(`lists/${listId}/tags`)).then(json<DeckTags>);
+
+export const setTagBrief = (listId: string, brief: string) =>
+  send(`lists/${listId}/tags`, 'PUT', { brief }).then(json<DeckTags>);
+
+export const createTag = (listId: string, tag: { name: string; description?: string; color?: string; kind?: TagKind | null }) =>
+  send(`lists/${listId}/tags`, 'POST', tag).then(json<DeckTags & { created: string }>);
+
+export const updateTag = (listId: string, tagId: string, change: Partial<Pick<Tag, 'name' | 'description' | 'color' | 'kind' | 'status'>>) =>
+  send(`lists/${listId}/tags`, 'PATCH', { tagId, ...change }).then(json<DeckTags>);
+
+export const reorderTags = (listId: string, order: string[]) =>
+  send(`lists/${listId}/tags`, 'PATCH', { order }).then(json<DeckTags>);
+
+export const acceptAllTags = (listId: string) =>
+  send(`lists/${listId}/tags`, 'PATCH', { acceptAll: true }).then(json<DeckTags>);
+
+export const mergeTags = (listId: string, mergeFrom: string, mergeInto: string) =>
+  send(`lists/${listId}/tags`, 'PATCH', { mergeFrom, mergeInto }).then(json<DeckTags>);
+
+export const deleteTag = (listId: string, tagId: string) =>
+  fetch(url(`lists/${listId}/tags?tagId=${encodeURIComponent(tagId)}`), { method: 'DELETE' }).then(json<DeckTags>);
+
+export const setCardTag = (listId: string, cardKey: string, tagId: string, on: boolean) =>
+  send(`lists/${listId}/tags/cards`, 'PATCH', { cardKey, tagId, on }).then(json<DeckTags>);
+
+export interface TagJobState { job: TagJob | null; tags: DeckTags; budget: Budget }
+
+/** The deck's latest tagging job, its tags and today's budget. */
+export const tagJob = (listId: string) => fetch(url(`lists/${listId}/tags/job`)).then(json<TagJobState>);
+
+export const startTagJob = (listId: string, params: JobParams) =>
+  send(`lists/${listId}/tags/job`, 'POST', params).then(json<TagJobState>);
+
+export const stopTagJob = (listId: string) =>
+  fetch(url(`lists/${listId}/tags/job`), { method: 'DELETE' }).then(json<TagJobState>);
+
+/** Today's free requests left on each tagging model. */
+export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);

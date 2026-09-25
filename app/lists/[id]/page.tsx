@@ -8,10 +8,12 @@ import { use, useCallback, useEffect, useState } from 'react';
 import AddCardsPanel from '@/components/AddCardsPanel';
 import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
+import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
+import DeckTags from '@/components/DeckTags';
 import ImportResult from '@/components/ImportResult';
 import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
@@ -19,6 +21,7 @@ import { formatDecklist, type Board } from '@/lib/decklist';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
+import type { DeckTags as Tags } from '@/lib/tags';
 import { imageOf, priceOf, typeLineOf } from '@/lib/scryfall';
 
 export default function ListPage({ params }: { params: Promise<{ id: string }> }) {
@@ -32,7 +35,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'cards' | 'health' | 'suggestions'>('cards');
+  const [section, setSection] = useState<'cards' | 'tags' | 'health' | 'suggestions'>('cards');
+  const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -67,6 +71,15 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     })();
     return () => { cancelled = true; };
   }, [id]);
+
+  // A deck's tags load alongside it; a plain list has none.
+  const isDeck = list?.kind === 'deck';
+  useEffect(() => {
+    if (!isDeck) return;
+    let cancelled = false;
+    api.deckTags(id).then((t) => { if (!cancelled) setTags(t); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [id, isDeck]);
 
   const changeQuantity = async (cardId: string, quantity: number) => {
     // Optimistic: the round trip is fast but the grid should not flicker.
@@ -105,6 +118,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // By name, so another printing of a card still counts as "in the deck".
   const inDeck = new Map<string, Board>(entries.map((e) => [e.card.name.split(' // ')[0], e.board]));
   const selectedEntry = selected ? cards.find((c) => c.card.id === selected.id) : undefined;
+  // Tags are for anything in the deck, the commander included.
+  const selectedInDeck = !!selected && entries.some((e) => e.card.id === selected.id);
 
   const moveCard = async (cardId: string, board: Board) => {
     setCards((prev) => prev.map((c) => (c.card.id === cardId ? { ...c, board } : c)));
@@ -327,7 +342,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && (
         <div className="mt-5 inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['health', 'Deck health'], ['suggestions', 'Suggestions']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Deck health'], ['suggestions', 'Suggestions']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -341,7 +356,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
 
-      {deck && section === 'suggestions' ? (
+      {deck && section === 'tags' ? (
+        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
+      ) : deck && section === 'suggestions' ? (
         <DeckSuggestions
           listId={id}
           cards={cards}
@@ -360,7 +377,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         />
       ) : (
         <DeckCards
+          listId={id}
           entries={entries}
+          tags={deck ? tags : null}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
           onSelect={setSelected}
           onQuantity={changeQuantity}
@@ -371,21 +391,28 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <CardModal
         card={selected}
         onClose={() => setSelected(null)}
-        actions={selectedEntry && (
-          <CardEditor
-            key={selectedEntry.card.id}
-            listId={id}
-            card={selectedEntry.card}
-            finish={selectedEntry.finish}
-            board={selectedEntry.board}
-            isDeck={deck}
-            onChanged={async (printingId) => {
-              const data = await api.fetchList(id);
-              setList(data.list);
-              setCards(data.cards);
-              setSelected(data.cards.find((c) => c.card.id === printingId)?.card ?? null);
-            }}
-          />
+        actions={(selectedEntry || (deck && selectedInDeck && tags)) && (
+          <>
+            {deck && selectedInDeck && tags && selected && (
+              <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
+            )}
+            {selectedEntry && (
+              <CardEditor
+                key={selectedEntry.card.id}
+                listId={id}
+                card={selectedEntry.card}
+                finish={selectedEntry.finish}
+                board={selectedEntry.board}
+                isDeck={deck}
+                onChanged={async (printingId) => {
+                  const data = await api.fetchList(id);
+                  setList(data.list);
+                  setCards(data.cards);
+                  setSelected(data.cards.find((c) => c.card.id === printingId)?.card ?? null);
+                }}
+              />
+            )}
+          </>
         )}
       />
 

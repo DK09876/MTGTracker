@@ -6,7 +6,8 @@ network, alongside [LifeOS](https://github.com/DK09876/LifeOS).
 Card data comes from [Scryfall](https://scryfall.com) and combos from
 [Commander Spellbook](https://commanderspellbook.com). The text of a
 plain-English search goes to Gemini to be planned — only if you give it an
-API key — and, if you switch it on, a commander's name goes to EDHREC. There
+API key — as does a deck's card list and brief when you ask the model to tag
+it, and, if you switch it on, a commander's name goes to EDHREC. There
 is no account.
 
 ## What it does
@@ -67,8 +68,49 @@ any profile.
   name, always for the deck's commander. Each card has *Add* and *Maybe*.
 - **Main, maybeboard and sideboard.** Only the main board and the commander
   count towards 100.
-- **Grouped views**: visual stacks or a compact text list, grouped by type or
-  mana value, sorted by name, mana value or price.
+- **Grouped views**: visual stacks or a compact text list, grouped by type,
+  mana value, your tags or role, sorted by name, mana value or price. A card
+  with several tags or roles is listed under each.
+- **Tags** are your own categories for a deck - *Sac outlets*, *Token
+  makers*, *Win conditions* - and a card can carry several. Open any card to
+  see its tags, put one on or take it off, or make a new one. The *Tags* tab
+  manages them, and can have the model do the work in two steps you control:
+  1. **Suggest tags.** Write what the deck should do, if you like; the model
+     reads the commander and every card and suggests tags, each with a test
+     for what belongs and example cards. Keep, edit or drop each one, or ask
+     again with instructions (*split removal by what it hits*).
+  2. **Tag the cards.** The model goes through the deck in batches, weighing
+     every kept tag against each card's full text and saying why for each one
+     it applies, then checks the tags across the whole deck for cards missed
+     or wrongly included. **Free mode** reads about 50 cards per request and
+     checks every tag in one pass - three requests for a Commander deck.
+     (**Smart mode**, 12 cards and 4 tags a request, is off for now.)
+  Tags you put on or took off by hand are never changed by the model, and a
+  suggestion you dropped is not suggested again. A card is tagged by its
+  oracle id, so changing its printing keeps its tags.
+
+### The model's free requests
+
+Tagging runs on Gemini's free tier, which gives **each model 20 requests a
+day** (assumed until Gemini says otherwise), reset at midnight Pacific -
+including requests refused because the model was busy. The Tags tab shows
+what is left and what a run will cost. Gemini cannot be asked how many are
+left, so the app counts what it sends and believes a refusal over its count.
+
+**Tagging uses Gemini 3.5 Flash-Lite alone.** The Flash models (3.8 down to
+3.5) read decks a little more closely, but on 2026-09-25 they refused nearly
+every request for hours while Flash-Lite answered the same ones in seconds.
+They are commented out in `lib/quota.ts`; `GEMINI_TAG_MODELS` sets the list
+(ids, best first, comma-separated) without a code change. **Smart mode** is
+shown but off for now, since it needs about three times the requests.
+
+Suggesting and tagging run as a **job on the server**, one request per
+step. The Tags tab shows it as it goes - progress, requests spent, and an
+activity log of every answer and refusal - with a **Stop** button that also
+cuts off a request in flight; what was applied before a stop stays. A busy
+model is not waited on: the job ends with a message to try again. It keeps
+going with the page closed, and if the server restarts mid-job it shows as
+interrupted.
 - **Printing and finish**: open a card to pick any of its printings, and
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it
@@ -146,6 +188,7 @@ npm run dev          # http://localhost:3000
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
+| `GEMINI_TAG_MODELS` | 3.8, 3.7, 3.6, 3.5 Flash | the ladder of models that suggest and apply deck tags, best first, comma-separated; each thinks at `high`. Leave out aliases such as `gemini-flash-latest`, which share another model's allowance |
 | `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.
