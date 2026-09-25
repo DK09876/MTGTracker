@@ -14,7 +14,6 @@ export function currentJob(listId: string): TagJob | null {
   const job = loadTagJob(listId);
   if (job && isActive(job) && !isRunningHere(listId)) {
     job.status = 'interrupted';
-    job.nextTryAt = null;
     job.finishedAt = new Date().toISOString();
     job.events.push({ at: job.finishedAt, level: 'error', text: 'The server restarted while this was running - start it again' });
     saveTagJob(job);

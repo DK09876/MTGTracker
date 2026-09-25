@@ -15,15 +15,17 @@ describe('the quota day', () => {
 });
 
 describe('ladder', () => {
-  it('defaults to the Flash models, best first, and can be set', () => {
+  it('defaults to Flash-Lite alone, and can be set', () => {
     expect(ladder(undefined)).toBe(DEFAULT_LADDER);
+    expect(DEFAULT_LADDER.map((m) => m.id)).toEqual(['gemini-3.5-flash-lite']);
     expect(ladder(' gemini-3.6-flash , other ').map((m) => m.label)).toEqual(['Gemini 3.6 Flash', 'other']);
   });
 });
 
 describe('budgetFrom', () => {
   it('counts down from the limit, and believes a refusal over the count', () => {
-    const budget = budgetFrom(DEFAULT_LADDER, [
+    const flash = ['3.8', '3.7', '3.6', '3.5'].map((v) => ({ id: `gemini-${v}-flash`, label: v }));
+    const budget = budgetFrom(flash, [
       { model: 'gemini-3.8-flash', used: 5, quotaLimit: null, exhausted: false },
       { model: 'gemini-3.7-flash', used: 2, quotaLimit: 20, exhausted: true },
       { model: 'gemini-3.6-flash', used: 25, quotaLimit: null, exhausted: false },

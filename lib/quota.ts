@@ -7,9 +7,10 @@
  * turns over at midnight Pacific. Gemini cannot be asked what is left, so
  * the app counts what it sends and believes a refusal over its own count.
  *
- * The tagger climbs down a ladder: the smartest model with requests left
- * answers. Aliases are left off it: gemini-flash-latest is 3.8 Flash and
- * shares its allowance.
+ * The tagger could climb down a ladder of models, the smartest with requests
+ * left answering; for now the ladder is a single model (see DEFAULT_LADDER).
+ * Aliases are left off it: gemini-flash-latest is 3.8 Flash and shares its
+ * allowance.
  */
 
 import type { ModelUsage } from './db';
@@ -19,11 +20,17 @@ export interface LadderModel {
   label: string;
 }
 
+// The Flash models are off: Gemini was failing too much on them. On
+// 2026-09-25 all four refused nearly every request for hours ("high demand",
+// 503), a one-line prompt included, while 3.5 Flash-Lite answered the same
+// requests in seconds. Every refusal also counts against the free day. Put
+// them back here (or in GEMINI_TAG_MODELS) if they become dependable.
+//   { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+//   { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+//   { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+//   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
 export const DEFAULT_LADDER: LadderModel[] = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
-  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
 ];
 
 /** "gemini-3.8-flash" as people say it: "Gemini 3.8 Flash". */
@@ -39,7 +46,7 @@ export const FREE_DAILY_LIMIT = 20;
 export function ladder(env = process.env.GEMINI_TAG_MODELS): LadderModel[] {
   const ids = env?.split(',').map((s) => s.trim()).filter(Boolean);
   if (!ids?.length) return DEFAULT_LADDER;
-  return ids.map((id) => DEFAULT_LADDER.find((m) => m.id === id) ?? { id, label: id });
+  return ids.map((id) => DEFAULT_LADDER.find((m) => m.id === id) ?? { id, label: modelLabel(id) });
 }
 
 const PACIFIC = 'America/Los_Angeles';

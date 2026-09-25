@@ -52,8 +52,6 @@ export interface ModelEvent {
 export interface CallOptions {
   /** Busy refusals before giving up; three by default. */
   maxBusy?: number;
-  /** Start this many places down the ladder, wrapping: spreads retries across models. */
-  rotate?: number;
   signal?: AbortSignal;
   onEvent?: (event: ModelEvent) => void;
 }
@@ -110,13 +108,11 @@ export function taggingModel(usage: Usage = storedUsage()): JsonModel | null {
 async function generate(
   key: string, usage: Usage, request: JsonRequest, options: CallOptions = {}, sleep = wait, now = Date.now,
 ): Promise<Answer> {
-  const { maxBusy = MAX_BUSY, rotate = 0, signal, onEvent } = options;
-  const available = usage.available();
-  if (!available.length) {
+  const { maxBusy = MAX_BUSY, signal, onEvent } = options;
+  const models = usage.available();
+  if (!models.length) {
     throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
   }
-  const shift = rotate % available.length;
-  const models = [...available.slice(shift), ...available.slice(0, shift)];
   const deadline = now() + (request.timeoutMs ?? STEP_DEADLINE_MS);
   let busyCount = 0;
   const busy = () => new ModelError(

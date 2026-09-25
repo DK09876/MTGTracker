@@ -84,8 +84,7 @@ any profile.
      it applies, then checks the tags across the whole deck for cards missed
      or wrongly included. **Free mode** reads about 50 cards per request and
      checks every tag in one pass - three requests for a Commander deck.
-     **Smart mode** reads 12 cards per request and checks 4 tags per pass, for
-     closer attention at about three times the requests.
+     (**Smart mode**, 12 cards and 4 tags a request, is off for now.)
   Tags you put on or took off by hand are never changed by the model, and a
   suggestion you dropped is not suggested again. A card is tagged by its
   oracle id, so changing its printing keeps its tags.
@@ -93,32 +92,25 @@ any profile.
 ### The model's free requests
 
 Tagging runs on Gemini's free tier, which gives **each model 20 requests a
-day**, reset at midnight Pacific - including requests refused because the
-model was busy. The app climbs down a ladder: each request goes to the
-smartest model with requests left - 3.8 Flash, then 3.7, 3.6 and 3.5 -
-which makes about 80 a day, shared by everyone on the app. The Tags tab shows
-what is left on each and what a run will cost.
+day** (assumed until Gemini says otherwise), reset at midnight Pacific -
+including requests refused because the model was busy. The Tags tab shows
+what is left and what a run will cost. Gemini cannot be asked how many are
+left, so the app counts what it sends and believes a refusal over its count.
 
-Gemini cannot be asked how many requests are left, so the app counts what
-it sends, and believes a refusal over its own count: a model that says its
-day is spent is passed over until the reset.
+**Tagging uses Gemini 3.5 Flash-Lite alone.** The Flash models (3.8 down to
+3.5) read decks a little more closely, but on 2026-09-25 they refused nearly
+every request for hours while Flash-Lite answered the same ones in seconds.
+They are commented out in `lib/quota.ts`; `GEMINI_TAG_MODELS` sets the list
+(ids, best first, comma-separated) without a code change. **Smart mode** is
+shown but off for now, since it needs about three times the requests.
 
-### When Gemini is busy
-
-Gemini's Flash models go through spells of refusing most requests ("high
-demand", 503) - on 2026-09-25 for hours - and paid tiers see them too. So
-suggesting and tagging run as a **job on the server**, patient with it: a
-busy model gets one request, then the job waits a minute, two, four, up to
-fifteen between tries, each one request and on the next model down. It
-gives up after 12 refusals (about two hours), or at once when every model
-has used the day.
-
-The Tags tab shows the job as it goes - progress, requests spent and how
-many were refused, when it will try next, and an activity log of every try,
-refusal and answer - and a **Stop** button, which also cuts off a request in
-flight. What was applied before a stop stays applied. The job keeps going
-with the page closed and is picked up on opening it again; if the server
-restarts mid-job, the job shows as interrupted.
+Suggesting and tagging run as a **job on the server**, one request per
+step. The Tags tab shows it as it goes - progress, requests spent, and an
+activity log of every answer and refusal - with a **Stop** button that also
+cuts off a request in flight; what was applied before a stop stays. A busy
+model is not waited on: the job ends with a message to try again. It keeps
+going with the page closed, and if the server restarts mid-job it shows as
+interrupted.
 - **Printing and finish**: open a card to pick any of its printings, and
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it

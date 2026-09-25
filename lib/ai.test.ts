@@ -107,11 +107,6 @@ describe('generate', () => {
     expect(events).toEqual(['m1 busy']);
   });
 
-  it('starts further down the ladder when asked to rotate', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ok({ e: 5 })));
-    expect((await testing.generate('k', usage(['m1', 'm2', 'm3']).u, request, { rotate: 4 }, noWait)).model).toBe('m2');
-  });
-
   it('does not call once stopped', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);

@@ -11,9 +11,9 @@
  *      tags you kept, then rechecks each tag across the whole deck. What you
  *      set by hand - on or off - is never overridden.
  *
- * The model's work runs as a job on the server (lib/tag-jobs.ts), patient
- * with a busy Gemini. The page polls it and shows every try, refusal and
- * answer as it happens, with a Stop button.
+ * The model's work runs as a job on the server (lib/tag-jobs.ts). The page
+ * polls it and shows every answer and refusal as it happens, with a Stop
+ * button. A busy model ends the job at once rather than being waited on.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -34,12 +34,16 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
 }
 
-const MODE_KEY = 'mtg-tag-mode';
+// Smart mode is shown but off: it needs about three times the requests, and
+// with Gemini's Flash models failing too much the tagger runs on Flash-Lite
+// alone (see DEFAULT_LADDER in lib/quota.ts), whose free day is too small
+// for it. Free mode it is until that changes.
+const SMART_MODE_ON = false;
 const POLL_MS = 2_500;
 
 type Scope = 'all' | 'untagged';
 
-const isActive = (job: TagJob | null) => job?.status === 'running' || job?.status === 'waiting';
+const isActive = (job: TagJob | null) => job?.status === 'running';
 
 const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]';
 const button = 'rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
@@ -55,13 +59,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [job, setJob] = useState<TagJob | null>(null);
   const [stopping, setStopping] = useState(false);
   const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
-  const [mode, setMode] = useState<Mode>(() => {
-    try { return localStorage.getItem(MODE_KEY) === 'smart' ? 'smart' : 'free'; } catch { return 'free'; }
-  });
-  const chooseMode = (m: Mode) => {
-    setMode(m);
-    try { localStorage.setItem(MODE_KEY, m); } catch { /* not remembered, still works */ }
-  };
+  const [mode, setMode] = useState<Mode>('free');
 
   // The budget is shared by everyone on the app, so it is read fresh on opening.
   useEffect(() => {
@@ -341,15 +339,18 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
               key={m}
               role="radio"
               aria-checked={mode === m}
-              onClick={() => chooseMode(m)}
-              disabled={running}
-              className={`flex max-w-sm flex-col rounded-xl border px-3 py-2 text-left text-sm ${mode === m
+              onClick={() => setMode(m)}
+              disabled={running || (m === 'smart' && !SMART_MODE_ON)}
+              title={m === 'smart' && !SMART_MODE_ON ? 'Off for now' : undefined}
+              className={`flex max-w-sm flex-col rounded-xl border px-3 py-2 text-left text-sm disabled:cursor-not-allowed ${mode === m
                 ? 'border-[var(--accent)] bg-[var(--surface-hover)]'
-                : 'border-[var(--border)] hover:bg-[var(--surface)]'}`}
+                : 'border-[var(--border)] hover:bg-[var(--surface)] disabled:opacity-40 disabled:hover:bg-transparent'}`}
             >
               <span className="font-medium">
                 {m === 'free' ? 'Free mode' : 'Smart mode'}
-                <span className="ml-2 font-normal text-[var(--muted)]">{needs(m)} request{needs(m) === 1 ? '' : 's'}</span>
+                <span className="ml-2 font-normal text-[var(--muted)]">
+                  {m === 'smart' && !SMART_MODE_ON ? 'off for now' : `${needs(m)} request${needs(m) === 1 ? '' : 's'}`}
+                </span>
               </span>
               <span className="text-xs text-[var(--muted)]">
                 {m === 'free'
@@ -406,7 +407,6 @@ function move(tags: Tag[], i: number, by: -1 | 1): string[] {
 
 const STATUS: Record<TagJob['status'], { icon: string; label: string; tone: string }> = {
   running: { icon: '●', label: 'Working', tone: 'text-[var(--accent)]' },
-  waiting: { icon: '⏸', label: 'Waiting for Gemini', tone: 'text-amber-400' },
   done: { icon: '✓', label: 'Done', tone: 'text-green-500' },
   failed: { icon: '✕', label: 'Failed', tone: 'text-red-400' },
   stopped: { icon: '■', label: 'Stopped', tone: 'text-[var(--muted)]' },
@@ -417,20 +417,9 @@ const LEVEL_ICON = { info: '·', warn: '⚠', error: '✕' } as const;
 const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-function countdown(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
-}
-
-/** The job as it stands: what it is doing, what it has spent, every try and refusal, and a Stop button. */
+/** The job as it stands: what it is doing, what it has spent, every answer and refusal, and a Stop button. */
 function JobPanel({ job, stopping, onStop }: { job: TagJob; stopping: boolean; onStop: () => void }) {
   const active = isActive(job);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (job.status !== 'waiting') return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [job.status]);
 
   const status = STATUS[job.status];
   const what = job.params.kind === 'propose'
@@ -450,12 +439,6 @@ function JobPanel({ job, stopping, onStop }: { job: TagJob; stopping: boolean; o
           </button>
         )}
       </div>
-      {job.status === 'waiting' && job.nextTryAt && (
-        <p className="mt-1 text-[var(--muted)]">
-          Gemini is refusing requests right now. Next try at {timeOf(job.nextTryAt)} (in {countdown(new Date(job.nextTryAt).getTime() - now)}).
-          It keeps going with this page closed.
-        </p>
-      )}
       {job.params.kind === 'tag' && active && (
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--background)]" role="progressbar" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${share * 100}%` }} />
@@ -660,8 +643,7 @@ function resetText(ms: number): string {
 
 /**
  * Today's free requests, shared by everyone using the app: how many are
- * left, on which models, and when they reset. The smartest model with
- * requests left answers each request.
+ * left, on which models, and when they reset.
  */
 function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
   if (budget.configured === false) {
@@ -675,8 +657,8 @@ function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
         <span className="text-[var(--muted)]"> - shared by everyone on the app, reset {resetText(budget.resetsInMs)}.</span>
       </p>
       <p className="mt-1 text-xs text-[var(--muted)]">
-        {next ? <>Next request goes to {next.label}. </> : null}
-        {budget.models.map((m, i) => (
+        {budget.models.length === 1 ? <>Every request goes to {budget.models[0].label}.</> : next ? <>Next request goes to {next.label}. </> : null}
+        {budget.models.length > 1 && budget.models.map((m, i) => (
           <span key={m.id} className={m.remaining ? '' : 'line-through opacity-60'}>
             {i > 0 && ' › '}{m.label.replace(/^Gemini /, '')} {m.remaining}/{m.limit}
           </span>
