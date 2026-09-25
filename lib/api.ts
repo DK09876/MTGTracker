@@ -30,6 +30,7 @@ import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
@@ -284,13 +285,18 @@ export const deleteTag = (listId: string, tagId: string) =>
 export const setCardTag = (listId: string, cardKey: string, tagId: string, on: boolean) =>
   send(`lists/${listId}/tags/cards`, 'PATCH', { cardKey, tagId, on }).then(json<DeckTags>);
 
+export type ModelStep = { model: string; budget: Budget };
+
 export const proposeTags = (listId: string, instructions: string, boards: Board[]) =>
-  send(`lists/${listId}/tags/ai`, 'POST', { step: 'propose', instructions, boards }).then(json<DeckTags & { proposed: number }>);
+  send(`lists/${listId}/tags/ai`, 'POST', { step: 'propose', instructions, boards }).then(json<DeckTags & ModelStep & { proposed: number }>);
 
 export const assignTags = (listId: string, keys: string[], boards: Board[]) =>
   send(`lists/${listId}/tags/ai`, 'POST', { step: 'assign', keys, boards })
-    .then(json<DeckTags & { tagged: number; skipped: number; added: number }>);
+    .then(json<DeckTags & ModelStep & { tagged: number; skipped: number; added: number }>);
 
 export const auditTags = (listId: string, tagIds: string[], boards: Board[]) =>
   send(`lists/${listId}/tags/ai`, 'POST', { step: 'audit', tagIds, boards })
-    .then(json<DeckTags & { added: number; removed: number }>);
+    .then(json<DeckTags & ModelStep & { added: number; removed: number }>);
+
+/** Today's free requests left on each tagging model. */
+export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);

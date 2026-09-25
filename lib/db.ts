@@ -136,6 +136,17 @@ function open(): Database {
       PRIMARY KEY (listId, cardKey, tagId)
     );
   `);
+  // Requests sent to each model per quota day - see modelUsage.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS model_usage (
+      day TEXT NOT NULL,
+      model TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      quotaLimit INTEGER,
+      exhausted INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, model)
+    );
+  `);
   // What the owner wants the deck to do, and the model's reading of it.
   if (!columns.some((c) => c.name === 'tagBrief')) {
     db.run(`ALTER TABLE lists ADD COLUMN tagBrief TEXT NOT NULL DEFAULT ''`);
@@ -733,4 +744,43 @@ export function applyModelAudit(
     throw error;
   }
   return { added, removed };
+}
+
+// --- model usage -----------------------------------------------------------
+
+export interface ModelUsage {
+  model: string;
+  used: number;
+  /** The daily limit the model's refusals have reported, if one has. */
+  quotaLimit: number | null;
+  /** Refused for the day - its quota is spent, whatever the count says. */
+  exhausted: boolean;
+}
+
+/**
+ * Requests made to each model on one quota day. Gemini's free tier gives
+ * each model its own daily allowance and has no way to ask what is left,
+ * so the app counts what it sends.
+ */
+export function modelUsage(day: string): ModelUsage[] {
+  return (open().all('SELECT model, used, quotaLimit, exhausted FROM model_usage WHERE day = ?', [day]) as Array<{
+    model: string; used: number; quotaLimit: number | null; exhausted: number;
+  }>).map((r) => ({ ...r, exhausted: r.exhausted === 1 }));
+}
+
+export function recordModelCall(day: string, model: string): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used) VALUES (?, ?, 1)
+     ON CONFLICT(day, model) DO UPDATE SET used = used + 1`,
+    [day, model],
+  );
+}
+
+/** The model refused for the day; its limit, if the refusal said. */
+export function recordModelExhausted(day: string, model: string, limit: number | null): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used, quotaLimit, exhausted) VALUES (?, ?, 0, ?, 1)
+     ON CONFLICT(day, model) DO UPDATE SET exhausted = 1, quotaLimit = COALESCE(excluded.quotaLimit, quotaLimit)`,
+    [day, model, limit],
+  );
 }

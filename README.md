@@ -79,13 +79,31 @@ any profile.
      reads the commander and every card and suggests tags, each with a test
      for what belongs and example cards. Keep, edit or drop each one, or ask
      again with instructions (*split removal by what it hits*).
-  2. **Tag the cards.** The model goes through the deck in batches of twelve,
-     weighing every kept tag against each card's full text and saying why for
-     each one it applies, then takes each tag in turn and checks the whole
-     deck for cards missed or wrongly included.
+  2. **Tag the cards.** The model goes through the deck in batches, weighing
+     every kept tag against each card's full text and saying why for each one
+     it applies, then checks the tags across the whole deck for cards missed
+     or wrongly included. **Free mode** reads about 50 cards per request and
+     checks every tag in one pass - three requests for a Commander deck.
+     **Smart mode** reads 12 cards per request and checks 4 tags per pass, for
+     closer attention at about three times the requests.
   Tags you put on or took off by hand are never changed by the model, and a
   suggestion you dropped is not suggested again. A card is tagged by its
   oracle id, so changing its printing keeps its tags.
+
+### The model's free requests
+
+Tagging runs on Gemini's free tier, which gives **each model 20 requests a
+day**, reset at midnight Pacific - including requests refused because the
+model was busy. The app climbs down a ladder: each request goes to the
+smartest model with requests left - 3.8 Flash, then 3.7, 3.6 and 3.5 -
+which makes about 80 a day, shared by everyone on the app. The Tags tab shows
+what is left on each and what a run will cost.
+
+Gemini cannot be asked how many requests are left, so the app counts what
+it sends, and believes a refusal over its own count: a model that says its
+day is spent is passed over until the reset. A busy model is tried three
+times with long waits between - waiting is free, asking is not - and then
+passed over for the next.
 - **Printing and finish**: open a card to pick any of its printings, and
   foil, non-foil or etched - priced accordingly.
 - **Edit as text** opens the deck in Moxfield's export format and saves it
@@ -163,7 +181,7 @@ npm run dev          # http://localhost:3000
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
-| `GEMINI_TAG_MODEL` | `gemini-3.8-flash` | which model suggests and applies deck tags - a bigger, slower one, thinking at `high`; falls back to 3.7 Flash and `gemini-flash-latest` if it is gone |
+| `GEMINI_TAG_MODELS` | 3.8, 3.7, 3.6, 3.5 Flash | the ladder of models that suggest and apply deck tags, best first, comma-separated; each thinks at `high`. Leave out aliases such as `gemini-flash-latest`, which share another model's allowance |
 | `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.

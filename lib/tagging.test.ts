@@ -108,7 +108,7 @@ describe('parseAssignments', () => {
         { card: '[c3]', tags: [{ tag: 't2', reason: 'Makes faeries.' }] },
         { card: 'c4', tags: [{ tag: 't2', reason: 'not in the batch' }] },
       ],
-    }, tags, ['c2', 'c3']);
+    }, tags, ['c2', 'c3'], deck);
     expect(answered).toEqual(['c2', 'c3']);
     expect(assignments).toEqual([
       { key: 'c2', tagId: 'id-sac', reason: 'Sacrifice a creature: cost.' },
@@ -117,7 +117,18 @@ describe('parseAssignments', () => {
   });
 
   it('counts a card answered with no tags as answered', () => {
-    expect(parseAssignments({ cards: [{ card: 'c2', tags: [], note: 'fits nothing' }] }, tags, ['c2']).answered).toEqual(['c2']);
+    expect(parseAssignments({ cards: [{ card: 'c2', tags: [], note: 'fits nothing' }] }, tags, ['c2'], deck).answered).toEqual(['c2']);
+  });
+
+  it('reads cards and tags written by name, as the smaller models do', () => {
+    const { assignments } = parseAssignments({
+      cards: [
+        { card: 'Viscera Seer', tags: [{ tag: 'Sac Outlets', reason: 'a' }] },
+        { card: 'Delver of Secrets', tags: [{ tag: 't2 Token makers', reason: 'b' }] },
+        { card: '[c3] Bitterblossom', tags: [{ tag: 'token makers', reason: 'c' }] },
+      ],
+    }, tags, ['c2', 'c3', 'c4'], deck);
+    expect(assignments.map((a) => `${a.key}:${a.tagId}`)).toEqual(['c2:id-sac', 'c4:id-tok', 'c3:id-tok']);
   });
 });
 
@@ -138,11 +149,13 @@ describe('parseAudit', () => {
         { tag: 't2', card: 'c3', action: 'add', reason: 'not being checked' },
         { tag: 't1', card: 'c99', action: 'add', reason: 'no such card' },
         { tag: 't1', card: 'c1', action: 'remove', reason: 'not tagged' },
+        { tag: 'Sac outlets', card: 'Korvold, Fae-Cursed King', action: 'add', reason: 'by name' },
       ],
     }, input);
     expect(changes).toEqual([
       { key: 'c3', tagId: 'id-sac', action: 'add', reason: 'Faeries can be sacrificed.' },
       { key: 'c4', tagId: 'id-sac', action: 'remove', reason: 'No sacrifice text.' },
+      { key: 'c1', tagId: 'id-sac', action: 'add', reason: 'by name' },
     ]);
   });
 });

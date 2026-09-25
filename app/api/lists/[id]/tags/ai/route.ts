@@ -12,7 +12,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { ModelError, taggingModel } from '@/lib/ai';
+import { currentBudget, ModelError, taggingModel } from '@/lib/ai';
 import { applyModelAudit, applyModelTags, deckTags, replaceProposals } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 import { requireList } from '@/lib/profile-route';
@@ -54,7 +54,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const instructions = typeof b.instructions === 'string' ? b.instructions.slice(0, 4000) : '';
       const input = { ...context, instructions, accepted, rejected: current.tags.filter((t) => t.status === 'rejected') };
       const answer = await model({ system: PROPOSE_SYSTEM, user: proposeMessage(input), schema: PROPOSE_SCHEMA, temperature: 0.4 });
-      const { overview, tags } = parseProposals(answer, deck.cards, current.tags.filter((t) => t.status !== 'proposed'));
+      const { overview, tags } = parseProposals(answer.data, deck.cards, current.tags.filter((t) => t.status !== 'proposed'));
       if (!tags.length) return NextResponse.json({ error: 'The model suggested nothing new - try different instructions' }, { status: 502 });
       const used = current.tags.filter((t) => t.status === 'accepted').map((t) => t.color);
       replaceProposals(id, overview, tags.map((t) => {
@@ -62,7 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         used.push(color);
         return { ...t, color };
       }));
-      return NextResponse.json({ ...deckTags(id), proposed: tags.length });
+      return NextResponse.json({ ...deckTags(id), proposed: tags.length, model: answer.model, budget: currentBudget() });
     }
 
     if (!accepted.length) return NextResponse.json({ error: 'Accept some tags first' }, { status: 400 });
@@ -73,12 +73,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!batch.length) return NextResponse.json({ error: 'None of those cards are in the deck' }, { status: 400 });
       const input = { ...context, tags: accepted, batch };
       const answer = await model({ system: ASSIGN_SYSTEM, user: assignMessage(input), schema: ASSIGN_SCHEMA });
-      const { assignments, answered } = parseAssignments(answer, accepted, batch);
+      const { assignments, answered } = parseAssignments(answer.data, accepted, batch, deck.cards);
       // Only cards the model answered for lose their old model tags; a card it
       // skipped keeps what it had rather than being wiped.
       const added = applyModelTags(id, answered.map((r) => deck.keyOf.get(r)!),
         assignments.map((a) => ({ ...a, key: deck.keyOf.get(a.key)! })));
-      return NextResponse.json({ ...deckTags(id), tagged: answered.length, skipped: batch.length - answered.length, added });
+      return NextResponse.json({
+        ...deckTags(id), tagged: answered.length, skipped: batch.length - answered.length, added,
+        model: answer.model, budget: currentBudget(),
+      });
     }
 
     if (b.step === 'audit') {
@@ -95,16 +98,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const blocked = new Set(current.cardTags.filter((l) => !l.on).map((l) => `${l.key}:${l.tagId}`));
       const input = { ...context, tags: accepted, checking, members };
       const answer = await model({ system: AUDIT_SYSTEM, user: auditMessage(input), schema: AUDIT_SCHEMA });
-      const changes = parseAudit(answer, input)
+      const changes = parseAudit(answer.data, input)
         .map((c) => ({ ...c, key: deck.keyOf.get(c.key)! }))
         .filter((c) => !blocked.has(`${c.key}:${c.tagId}`));
       const result = applyModelAudit(id, changes);
-      return NextResponse.json({ ...deckTags(id), ...result });
+      return NextResponse.json({ ...deckTags(id), ...result, model: answer.model, budget: currentBudget() });
     }
 
     return NextResponse.json({ error: 'Unknown step' }, { status: 400 });
   } catch (error) {
-    if (error instanceof ModelError) return NextResponse.json({ error: `The model failed: ${error.message}` }, { status: 502 });
+    if (error instanceof ModelError) {
+      return NextResponse.json({ error: `The model failed: ${error.message}`, budget: currentBudget() }, { status: 502 });
+    }
     console.error('[tags] model step failed', error);
     return NextResponse.json({ error: 'Could not run that step' }, { status: 500 });
   }

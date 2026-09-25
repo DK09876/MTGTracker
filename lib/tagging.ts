@@ -14,8 +14,8 @@
  * Pure: building the messages and checking the answers. The route makes the
  * calls; everything here is tested without a network.
  *
- * Cards and tags are given short keys (c12, t3) rather than names. Asked to
- * echo a name back, a model will "correct" it; a key it cannot.
+ * Cards and tags are given short keys (c12, t3), and answers are read by
+ * key or by name: asked for keys, the smaller Flash models write names.
  */
 
 import { oracleTextOf, typeLineOf, manaCostOf, type ScryfallCard } from './scryfall';
@@ -260,7 +260,8 @@ cards, be thorough:
 For each tag you apply, give a reason: one short sentence pointing at the
 text that earns it ("Sacrifices a creature as a cost, repeatably").
 
-Return every card you were asked to tag, by its key, even with no tags.`;
+Return every card you were asked to tag, even with no tags. Identify cards
+by their key in brackets (c12) and tags by theirs (t3), not by name.`;
 
 export function assignMessage(input: AssignInput): string {
   const refs = tagRefs(input.tags);
@@ -314,26 +315,53 @@ export function tagRefs(tags: Tag[]): Map<string, string> {
   return new Map(tags.map((t, i) => [t.id, `t${i + 1}`]));
 }
 
-const byRef = (tags: Tag[]) => {
+/** A tag's id from how the model wrote it: t3, [t3], or its name. */
+function tagReader(tags: Tag[]): (written: unknown) => string | undefined {
   const refs = tagRefs(tags);
-  return new Map([...refs].map(([id, ref]) => [ref, id]));
-};
+  const lookup = new Map<string, string>();
+  for (const t of tags) {
+    lookup.set(refs.get(t.id)!, t.id);
+    lookup.set(norm(t.name), t.id);
+  }
+  return (written) => {
+    if (typeof written !== 'string') return undefined;
+    const w = written.trim().replace(/^\[|\]$/g, '');
+    return lookup.get(w) ?? lookup.get(norm(w)) ?? lookup.get(norm(w.replace(/^\[?t\d+\]?\s*/i, '')));
+  };
+}
+
+/** A card's key from how the model wrote it: c12, [c12], its name, or its front face. */
+function cardReader(cards: DeckCard[]): (written: unknown) => string | undefined {
+  const lookup = new Map<string, string>();
+  for (const c of cards) {
+    lookup.set(c.key, c.key);
+    lookup.set(norm(c.card.name), c.key);
+    lookup.set(norm(c.card.name.split(' // ')[0]), c.key);
+  }
+  return (written) => {
+    if (typeof written !== 'string') return undefined;
+    const w = written.trim().replace(/^\[|\]$/g, '');
+    return lookup.get(w) ?? lookup.get(norm(w)) ?? lookup.get(norm(w.replace(/^\[?c\d+\]?\s*/i, '')));
+  };
+}
 
 /** Only assignments to a card in the batch and a tag that exists, each once. */
-export function parseAssignments(body: unknown, tags: Tag[], batch: string[]): { assignments: Assignment[]; answered: string[] } {
-  const tagOf = byRef(tags);
+export function parseAssignments(
+  body: unknown, tags: Tag[], batch: string[], cards: DeckCard[],
+): { assignments: Assignment[]; answered: string[] } {
+  const tagOf = tagReader(tags);
+  const cardOf = cardReader(cards);
   const allowed = new Set(batch);
   const seen = new Set<string>();
   const answered = new Set<string>();
   const assignments: Assignment[] = [];
   for (const item of Array.isArray((body as { cards?: unknown })?.cards) ? (body as { cards: unknown[] }).cards : []) {
     const c = item as { card?: unknown; tags?: unknown };
-    const key = typeof c.card === 'string' ? c.card.trim().replace(/^\[|\]$/g, '') : '';
-    if (!allowed.has(key)) continue;
+    const key = cardOf(c.card);
+    if (!key || !allowed.has(key)) continue;
     answered.add(key);
     for (const t of Array.isArray(c.tags) ? c.tags : []) {
-      const ref = typeof (t as { tag?: unknown }).tag === 'string' ? (t as { tag: string }).tag.trim().replace(/^\[|\]$/g, '') : '';
-      const tagId = tagOf.get(ref);
+      const tagId = tagOf((t as { tag?: unknown }).tag);
       if (!tagId || seen.has(`${key}:${tagId}`)) continue;
       seen.add(`${key}:${tagId}`);
       const reason = (t as { reason?: unknown }).reason;
@@ -376,7 +404,8 @@ Read each card's full text, every mode and face, and judge it in this deck
 with this commander. Do not add on a stretch.
 
 Return only the changes, each with a one-sentence reason from the card's
-text. No changes is a fine answer when the tagging is right.`;
+text. Identify cards by their key (c12) and tags by theirs (t3), not by
+name. No changes is a fine answer when the tagging is right.`;
 
 export function auditMessage(input: AuditInput): string {
   const refs = tagRefs(input.tags);
@@ -429,18 +458,17 @@ export const AUDIT_SCHEMA = {
 
 /** Only changes to a tag being checked and a card in the deck; never removing an owner's tag. */
 export function parseAudit(body: unknown, input: AuditInput): AuditChange[] {
-  const tagOf = byRef(input.tags);
+  const tagOf = tagReader(input.tags);
+  const cardOf = cardReader(input.cards);
   const checking = new Set(input.checking);
-  const keys = new Set(input.cards.map((c) => c.key));
   const out: AuditChange[] = [];
   const seen = new Set<string>();
   for (const item of Array.isArray((body as { changes?: unknown })?.changes) ? (body as { changes: unknown[] }).changes : []) {
     const c = item as Record<string, unknown>;
-    const strip = (v: unknown) => (typeof v === 'string' ? v.trim().replace(/^\[|\]$/g, '') : '');
-    const tagId = tagOf.get(strip(c.tag));
-    const key = strip(c.card);
+    const tagId = tagOf(c.tag);
+    const key = cardOf(c.card);
     const action = c.action === 'add' || c.action === 'remove' ? c.action : null;
-    if (!tagId || !checking.has(tagId) || !keys.has(key) || !action || seen.has(`${key}:${tagId}`)) continue;
+    if (!tagId || !checking.has(tagId) || !key || !action || seen.has(`${key}:${tagId}`)) continue;
     const member = input.members.get(tagId)?.find((m) => m.key === key);
     if (action === 'add' && member) continue;
     if (action === 'remove' && (!member || member.manual)) continue;

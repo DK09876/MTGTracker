@@ -15,11 +15,12 @@
  * batch does not lose the rest.
  */
 
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Entry } from './DeckCards';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
+import { BATCHES, requestsFor, type Budget, type Mode } from '@/lib/quota';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { TAG_COLORS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
 
@@ -31,12 +32,10 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
 }
 
-// Small enough that the model reads each card closely; the whole deck is
-// sent with every batch as context either way.
-const ASSIGN_BATCH = 12;
-const AUDIT_BATCH = 4;
-// Gemini's free tier allows a handful of requests a minute.
-const CONCURRENCY = 2;
+// One request at a time in free mode: when Gemini is busy, every refused
+// request still counts against the day, and two at once double that.
+const CONCURRENCY: Record<Mode, number> = { free: 1, smart: 2 };
+const MODE_KEY = 'mtg-tag-mode';
 
 type Scope = 'all' | 'untagged';
 
@@ -48,6 +47,8 @@ interface Run {
   removed: number;
   failed: string[];
   stopped?: boolean;
+  /** Which models answered, in order of first use. */
+  models: string[];
 }
 
 const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]';
@@ -64,6 +65,22 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [audit, setAudit] = useState(true);
   const [run, setRun] = useState<Run | null>(null);
   const stop = useRef(false);
+  const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
+  const [mode, setMode] = useState<Mode>(() => {
+    try { return localStorage.getItem(MODE_KEY) === 'smart' ? 'smart' : 'free'; } catch { return 'free'; }
+  });
+  const chooseMode = (m: Mode) => {
+    setMode(m);
+    try { localStorage.setItem(MODE_KEY, m); } catch { /* not remembered, still works */ }
+  };
+
+  // The budget is shared by everyone on the app, so it is read fresh on opening.
+  useEffect(() => {
+    let cancelled = false;
+    api.aiBudget().then((b) => { if (!cancelled) setBudget(b); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const refreshBudget = useCallback(() => { api.aiBudget().then(setBudget).catch(() => {}); }, []);
 
   // One entry per card, as tags see them: every printing of a card is one card.
   const cards = useMemo(() => {
@@ -81,12 +98,15 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const untagged = cards.filter((e) => !onCard.has(tagKey(e.card)));
   const running = run !== null && run.phase !== 'done';
 
-  const act = async (work: () => Promise<Tags>) => {
+  const act = async (work: () => Promise<Tags & { budget?: Budget }>) => {
     setError(null);
     try {
-      onTags(await work());
+      const result = await work();
+      if (result.budget) setBudget(result.budget);
+      onTags(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
+      refreshBudget();
     }
   };
 
@@ -109,38 +129,55 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
     await saveBrief();
     stop.current = false;
     const targets = (scope === 'all' ? cards : untagged).map((e) => tagKey(e.card));
+    const size = BATCHES[mode];
+    // Even batches: 92 cards in free mode is 46 and 46, not 50 and 42.
+    const count = Math.ceil(targets.length / size.cards);
+    const per = Math.ceil(targets.length / Math.max(1, count));
     const batches: string[][] = [];
-    for (let i = 0; i < targets.length; i += ASSIGN_BATCH) batches.push(targets.slice(i, i + ASSIGN_BATCH));
+    for (let i = 0; i < targets.length; i += per) batches.push(targets.slice(i, i + per));
     const tagChunks: string[][] = [];
-    for (let i = 0; i < accepted.length; i += AUDIT_BATCH) tagChunks.push(accepted.slice(i, i + AUDIT_BATCH).map((t) => t.id));
+    for (let i = 0; i < accepted.length; i += size.tags) tagChunks.push(accepted.slice(i, i + size.tags).map((t) => t.id));
 
-    const state: Run = { phase: 'assign', done: 0, total: targets.length, added: 0, removed: 0, failed: [] };
+    const state: Run = { phase: 'assign', done: 0, total: targets.length, added: 0, removed: 0, failed: [], models: [] };
+    const answered = (r: api.ModelStep) => {
+      setBudget(r.budget);
+      if (!state.models.includes(r.model)) state.models.push(r.model);
+    };
     setRun({ ...state });
 
     const pool = async <T,>(jobs: T[], work: (job: T) => Promise<void>) => {
       let next = 0;
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY[mode], jobs.length) }, async () => {
         while (next < jobs.length && !stop.current) await work(jobs[next++]);
       }));
     };
-    // A refused batch is tried once more before it is counted as failed.
+    // A refused batch is tried once more before it is counted as failed -
+    // unless every model is out for the day, when another try cannot help.
     const attempt = async <R,>(call: () => Promise<R>): Promise<R> => {
-      try { return await call(); } catch { return call(); }
+      try {
+        return await call();
+      } catch (e) {
+        if (e instanceof Error && /midnight Pacific/.test(e.message)) throw e;
+        return call();
+      }
     };
 
     await pool(batches, async (keys) => {
       try {
         const result = await attempt(() => api.assignTags(listId, keys, boards));
         state.added += result.added;
+        answered(result);
         onTags(result);
       } catch (e) {
-        state.failed.push(`${keys.length} cards: ${e instanceof Error ? e.message : 'failed'}`);
+        state.failed.push(`${keys.length} cards: ${e instanceof Error ? e.message.replace(/^The model failed: /, '') : 'failed'}`);
       }
       state.done += keys.length;
       setRun({ ...state });
     });
 
-    if (audit && !stop.current) {
+    // Checking tags that were never applied would spend requests on nothing.
+    const assigned = state.failed.length < batches.length;
+    if (audit && assigned && !stop.current) {
       Object.assign(state, { phase: 'audit', done: 0, total: accepted.length });
       setRun({ ...state });
       await pool(tagChunks, async (ids) => {
@@ -148,16 +185,21 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           const result = await attempt(() => api.auditTags(listId, ids, boards));
           state.added += result.added;
           state.removed += result.removed;
+          answered(result);
           onTags(result);
         } catch (e) {
-          state.failed.push(`checking ${ids.length} tags: ${e instanceof Error ? e.message : 'failed'}`);
+          state.failed.push(`checking ${ids.length} tags: ${e instanceof Error ? e.message.replace(/^The model failed: /, '') : 'failed'}`);
         }
         state.done += ids.length;
         setRun({ ...state });
       });
     }
     setRun({ ...state, phase: 'done', stopped: stop.current });
+    refreshBudget();
   };
+
+  const targetCount = scope === 'all' ? cards.length : untagged.length;
+  const needs = (m: Mode) => requestsFor(m, targetCount, accepted.length, audit);
 
   const toggleBoard = (b: Board) =>
     setBoards((prev) => (prev.includes(b) ? prev.filter((x) => x !== b) : [...prev, b]));
@@ -169,6 +211,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         Cards tab, and open any card to see and change its tags. The model can help in two steps: it suggests
         tags for you to shape, then applies the ones you keep to every card.
       </p>
+      {budget && <BudgetLine budget={budget} />}
 
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">What should this deck do?</h3>
@@ -206,6 +249,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           <button onClick={propose} disabled={proposing || running} className={primary}>
             {proposing ? 'Reading the deck…' : proposed.length ? 'Suggest again' : accepted.length ? 'Suggest more tags' : 'Suggest tags'}
           </button>
+          <span className="text-[var(--muted)]">1 request</span>
           <span className="text-[var(--muted)]">Include:</span>
           {(['maybe', 'side'] as Board[]).map((b) => (
             <label key={b} className="flex items-center gap-1.5 text-[var(--muted)]">
@@ -337,6 +381,37 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           text, and says why for each tag it applies. Then it takes each tag in turn and checks the whole deck for
           cards missed or wrongly included. Tags you put on or took off by hand are never changed.
         </p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode">
+          {(['free', 'smart'] as Mode[]).map((m) => (
+            <button
+              key={m}
+              role="radio"
+              aria-checked={mode === m}
+              onClick={() => chooseMode(m)}
+              disabled={running}
+              className={`flex max-w-sm flex-col rounded-xl border px-3 py-2 text-left text-sm ${mode === m
+                ? 'border-[var(--accent)] bg-[var(--surface-hover)]'
+                : 'border-[var(--border)] hover:bg-[var(--surface)]'}`}
+            >
+              <span className="font-medium">
+                {m === 'free' ? 'Free mode' : 'Smart mode'}
+                <span className="ml-2 font-normal text-[var(--muted)]">{needs(m)} request{needs(m) === 1 ? '' : 's'}</span>
+              </span>
+              <span className="text-xs text-[var(--muted)]">
+                {m === 'free'
+                  ? `About ${BATCHES.free.cards} cards per request, and every tag checked in one pass. Good for most decks.`
+                  : `${BATCHES.smart.cards} cards per request and ${BATCHES.smart.tags} tags per check: closer attention to each card, about three times the requests.`}
+              </span>
+            </button>
+          ))}
+        </div>
+        {budget && budget.remaining < needs(mode) && (
+          <p className="text-sm text-amber-400">
+            {budget.remaining === 0
+              ? `No free requests left today - they reset ${resetText(budget.resetsInMs)}.`
+              : `Only ${budget.remaining} free request${budget.remaining === 1 ? '' : 's'} left today and this needs ${needs(mode)}. It will do what it can; finish later with "Only cards with no tags yet".`}
+          </p>
+        )}
         <div className="flex flex-col gap-1.5 text-sm">
           <label className="flex items-center gap-2">
             <input type="radio" name="scope" checked={scope === 'all'} onChange={() => setScope('all')} disabled={running} />
@@ -348,7 +423,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           </label>
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} disabled={running} />
-            Then check each tag across the whole deck (slower, more thorough)
+            Then check each tag across the whole deck for misses and mistakes
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -395,6 +470,11 @@ function Progress({ run }: { run: Run }) {
         {run.added} tag{run.added === 1 ? '' : 's'} applied{run.removed > 0 && `, ${run.removed} taken off after checking`}.
         {run.phase === 'done' && ' Group the deck by tags in the Cards tab to look them over.'}
       </p>
+      {run.models.length > 0 && (
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Answered by {run.models.map(modelLabel).join(', then ')}.
+        </p>
+      )}
       {run.failed.length > 0 && (
         <p className="mt-1 text-amber-400">
           Some batches failed — run again with &ldquo;Only cards with no tags yet&rdquo; to fill the gaps: {run.failed.join('; ')}
@@ -557,5 +637,43 @@ function NewTag({ listId, onTags, onError }: { listId: string; onTags: (t: Tags)
       />
       <button disabled={!name.trim()} className={button}>Add tag</button>
     </form>
+  );
+}
+
+const modelLabel = (model: string) => model.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, ' Lite');
+
+/** "in 5 hours", "in 40 minutes". */
+function resetText(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.round(minutes / 60);
+  return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
+/**
+ * Today's free requests, shared by everyone using the app: how many are
+ * left, on which models, and when they reset. The smartest model with
+ * requests left answers each request.
+ */
+function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
+  if (budget.configured === false) {
+    return <p className="text-sm text-amber-400">The model is off: no GEMINI_API_KEY is set on the server.</p>;
+  }
+  const next = budget.models.find((m) => m.remaining > 0);
+  return (
+    <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+      <p>
+        <span className="font-medium">{budget.remaining} free model requests left today</span>
+        <span className="text-[var(--muted)]"> - shared by everyone on the app, reset {resetText(budget.resetsInMs)}.</span>
+      </p>
+      <p className="mt-1 text-xs text-[var(--muted)]">
+        {next ? <>Next request goes to {next.label}. </> : null}
+        {budget.models.map((m, i) => (
+          <span key={m.id} className={m.remaining ? '' : 'line-through opacity-60'}>
+            {i > 0 && ' › '}{m.label.replace(/^Gemini /, '')} {m.remaining}/{m.limit}
+          </span>
+        ))}
+      </p>
+    </div>
   );
 }
