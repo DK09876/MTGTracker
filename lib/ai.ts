@@ -5,9 +5,9 @@
  *
  * Gemini over REST, as gemini.ts is. The free tier gives each model a small
  * daily allowance, so calls go to the smartest model with requests left
- * (see quota.ts) and every request is counted. A busy model (503) is waited
- * on a few times and then passed over; a model out of requests for the day
- * is passed over at once.
+ * (see quota.ts) and every request is counted. A busy model (503) is passed
+ * over for the next, and a step stops after a few refusals or four minutes;
+ * a model out of requests for the day is passed over at once.
  */
 
 import { modelUsage, recordModelCall, recordModelExhausted } from './db';
@@ -16,10 +16,16 @@ import { budgetFrom, ladder, quotaDay, quotaViolation, type Budget } from './quo
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const RETRY_STATUSES = new Set([429, 500, 503]);
-// Gemini counts a refused 503 against the day, so a busy model gets two
-// more tries with long waits - waiting is free, asking is not - and then
-// the next model is tried.
-const RETRY_WAITS_MS = [8_000, 20_000];
+// A busy model (503) is not asked again: Gemini counts each refusal against
+// the day, a refusal can take a minute to arrive, and when one Flash model is
+// busy the others usually are too. The next model gets one try after a
+// pause, and a step gives up after a few refusals rather than spending the
+// day's requests on them. On 2026-09-25 one "Suggest tags" spent 8 requests
+// and five minutes on 503s before this.
+const BUSY_WAIT_MS = 8_000;
+const MAX_BUSY = 3;
+// No step waits longer than this in all, answers included.
+const STEP_DEADLINE_MS = 240_000;
 // Longer than this and a per-minute limit is not worth waiting out.
 const MAX_ADVISED_WAIT_MS = 45_000;
 
@@ -32,6 +38,7 @@ export interface JsonRequest {
   /** Thinking depth; the tagger wants high. */
   thinking?: 'low' | 'medium' | 'high';
   temperature?: number;
+  /** The whole step, retries included; four minutes by default. */
   timeoutMs?: number;
 }
 
@@ -73,15 +80,20 @@ export function taggingModel(usage: Usage = storedUsage()): JsonModel | null {
   return (request) => generate(key, usage, request);
 }
 
-async function generate(key: string, usage: Usage, request: JsonRequest, sleep = wait): Promise<Answer> {
+async function generate(key: string, usage: Usage, request: JsonRequest, sleep = wait, now = Date.now): Promise<Answer> {
   const models = usage.available();
   if (!models.length) {
     throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific');
   }
+  const deadline = now() + (request.timeoutMs ?? STEP_DEADLINE_MS);
+  let busyCount = 0;
+  const busy = () => new ModelError(`Gemini is overloaded right now - try again in a few minutes (${busyCount} request${busyCount === 1 ? '' : 's'} spent on refusals)`);
   let lastError: ModelError | null = null;
   for (const model of models) {
-    for (let attempt = 0; ; attempt++) {
-      const response = await call(key, model, request);
+    for (;;) {
+      const left = deadline - now();
+      if (left <= 0) throw busyCount ? busy() : new ModelError('the model took too long');
+      const response = await call(key, model, request, left);
       // Count what the quota counts, which includes a busy model's 503s:
       // on 2026-09-24 3.5 Flash ran out after one answer and a run of 503s.
       if (response.status !== 404 && response.status !== 429) usage.called(model);
@@ -102,19 +114,28 @@ async function generate(key: string, usage: Usage, request: JsonRequest, sleep =
           lastError = error;
           break;
         }
+        // A per-minute limit: wait it out on the same model if it is short.
+        const advised = retryAfterMs(detail.body) ?? BUSY_WAIT_MS;
+        if (advised > MAX_ADVISED_WAIT_MS || now() + advised >= deadline) {
+          lastError = error;
+          break;
+        }
+        await sleep(advised);
+        continue;
       }
-      const advised = retryAfterMs(detail.body);
-      if (attempt >= RETRY_WAITS_MS.length || (advised !== null && advised > MAX_ADVISED_WAIT_MS)) {
-        lastError = error;
-        break;
-      }
-      await sleep(Math.max(advised ?? 0, RETRY_WAITS_MS[attempt]));
+
+      // Busy: on to the next model after a pause, or stop.
+      busyCount++;
+      lastError = busy();
+      if (busyCount >= MAX_BUSY) throw lastError;
+      await sleep(BUSY_WAIT_MS);
+      break;
     }
   }
   throw lastError ?? new ModelError('no model to call');
 }
 
-async function call(key: string, model: string, request: JsonRequest): Promise<Response> {
+async function call(key: string, model: string, request: JsonRequest, timeoutMs: number): Promise<Response> {
   try {
     return await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
@@ -129,7 +150,7 @@ async function call(key: string, model: string, request: JsonRequest): Promise<R
           thinkingConfig: { thinkingLevel: request.thinking ?? 'high' },
         },
       }),
-      signal: AbortSignal.timeout(request.timeoutMs ?? 300_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
