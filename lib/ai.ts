@@ -55,10 +55,15 @@ async function generate(key: string, models: string[], request: JsonRequest, sle
         lastError = new ModelError(`model ${model} is not available`);
         break;
       }
+      const error = new ModelError(`the model returned ${response.status}${detail.message ? `: ${detail.message}` : ''}`);
+      if (!RETRY_STATUSES.has(response.status)) throw error;
+      // Busy or out of quota: each model has its own demand and its own
+      // quota, so after a few waits - or at once, for a daily quota - the
+      // next model is worth a try.
       const advised = retryAfterMs(detail.body);
-      if (!RETRY_STATUSES.has(response.status) || attempt >= RETRY_WAITS_MS.length
-        || (advised !== null && advised > MAX_ADVISED_WAIT_MS)) {
-        throw new ModelError(`the model returned ${response.status}${detail.message ? `: ${detail.message}` : ''}`);
+      if (attempt >= RETRY_WAITS_MS.length || (advised !== null && advised > MAX_ADVISED_WAIT_MS)) {
+        lastError = error;
+        break;
       }
       await sleep(Math.max(advised ?? 0, RETRY_WAITS_MS[attempt]));
     }

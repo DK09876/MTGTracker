@@ -46,8 +46,19 @@ describe('generate', () => {
   });
 
   it('gives up on a daily quota rather than waiting it out', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(fail(429, [{ retryDelay: '3600s' }])));
+    const fetch = vi.fn().mockResolvedValue(fail(429, [{ retryDelay: '3600s' }]));
+    vi.stubGlobal('fetch', fetch);
     await expect(testing.generate('k', ['m1'], request, noWait)).rejects.toThrow(/429/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries the next model when one stays busy', async () => {
+    const fetch = vi.fn();
+    for (let i = 0; i < 5; i++) fetch.mockResolvedValueOnce(fail(503));
+    fetch.mockResolvedValueOnce(ok({ c: 3 }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await testing.generate('k', ['busy', 'm2'], request, noWait)).toEqual({ c: 3 });
+    expect(String(fetch.mock.calls[5][0])).toContain('/m2:generateContent');
   });
 
   it('gives up after a few tries, and at once on a bad request', async () => {
