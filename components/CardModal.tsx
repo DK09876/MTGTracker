@@ -35,7 +35,7 @@ export default function CardModal({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/70" onClick={onClose} aria-hidden="true" />
-      <div className="relative flex min-h-full items-start justify-center p-4 sm:items-center">
+      <div className="relative flex min-h-full items-start justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:items-center">
         <div
           role="dialog"
           aria-modal="true"
@@ -45,7 +45,7 @@ export default function CardModal({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="absolute right-3 top-3 rounded-lg px-2 py-1 text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
+            className="absolute right-2 top-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
           >
             ✕
           </button>

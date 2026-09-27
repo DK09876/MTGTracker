@@ -17,7 +17,7 @@ const url = (path: string) => {
   return `${BASE}/api/${path}${path.includes('?') ? '&' : '?'}profile=${encodeURIComponent(profile)}`;
 };
 
-import type { List, ListedCard, ListKind, Profile } from './db';
+import type { CardBefore, List, ListedCard, ListKind, Profile } from './db';
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
@@ -178,7 +178,17 @@ export const addCard = (listId: string, cardId: string, quantity = 1, board: Boa
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cardId, quantity, board }),
-  }).then(json<{ ok: true }>);
+  }).then(json<{ ok: true; before: CardBefore }>);
+
+/** Put a card back as it was before an add: gone, or its old count and board. */
+export const undoAdd = (listId: string, cardId: string, before: CardBefore) =>
+  before
+    ? fetch(url(`lists/${listId}/cards`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cardId, quantity: before.quantity, board: before.board }),
+    }).then(json<{ ok: true }>)
+    : fetch(url(`lists/${listId}/cards?cardId=${encodeURIComponent(cardId)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 /** Move a card to another board, or change its printing or finish. */
 export const updateCard = (listId: string, cardId: string, change: { board?: Board; finish?: Finish; printingId?: string }) =>

@@ -37,8 +37,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const card = await getCard(body.cardId);
-    addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(body.board));
-    return NextResponse.json({ ok: true, card });
+    const before = addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(body.board));
+    // What was there before, so the page can offer to undo the add.
+    return NextResponse.json({ ok: true, card, before });
   } catch (error) {
     if (error instanceof ScryfallError) {
       return NextResponse.json({ error: error.message }, { status: 502 });

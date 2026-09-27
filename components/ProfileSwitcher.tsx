@@ -61,7 +61,8 @@ export default function ProfileSwitcher() {
         <span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[#221c08]">
           {name.charAt(0).toUpperCase()}
         </span>
-        <span className="max-w-[8rem] truncate">{name}</span>
+        {/* Just the initial on the narrowest phones; the name is still read out. */}
+        <span className="max-w-[8rem] truncate max-[389px]:sr-only">{name}</span>
         <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden className={open ? 'rotate-180' : ''}>
           <path d="M1 1L5 5L9 1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

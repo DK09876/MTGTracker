@@ -341,14 +341,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
       {deck && (
-        <div className="mt-5 inline-flex overflow-hidden rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
+        <div className="mt-5 inline-flex max-w-full overflow-x-auto rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
           {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Deck health'], ['suggestions', 'Suggestions']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
               aria-selected={section === value}
               onClick={() => setSection(value)}
-              className={`px-4 py-1.5 ${section === value ? 'bg-[var(--surface-hover)] font-medium text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 sm:px-4 ${section === value ? 'bg-[var(--surface-hover)] font-medium text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
             >
               {label}
             </button>
