@@ -23,6 +23,7 @@ import { Database } from 'node-sqlite3-wasm';
 
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
+import type { RecentSearch, Replay } from './recent';
 import type { TagJob } from './tag-jobs';
 import type { CardTag, DeckTags, Tag, TagKind, TagStatus } from './tags';
 
@@ -146,6 +147,16 @@ function open(): Database {
       quotaLimit INTEGER,
       exhausted INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, model)
+    );
+  `);
+  // Each profile's recent searches, and how to run each again - see recent.ts.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS recent_searches (
+      profileId TEXT NOT NULL,
+      text TEXT NOT NULL,
+      replay TEXT NOT NULL,
+      at TEXT NOT NULL,
+      PRIMARY KEY (profileId, text)
     );
   `);
   // The latest tagging job on each deck - see tag-jobs.ts.
@@ -765,6 +776,38 @@ export interface ModelUsage {
   quotaLimit: number | null;
   /** Refused for the day - its quota is spent, whatever the count says. */
   exhausted: boolean;
+}
+
+// --- recent searches -----------------------------------------------------
+
+const MAX_RECENT = 30;
+
+/** A profile's recent searches, newest first. */
+export function recentSearches(profileId: string, limit = MAX_RECENT): RecentSearch[] {
+  return (open().all(
+    'SELECT text, replay, at FROM recent_searches WHERE profileId = ? ORDER BY at DESC LIMIT ?', [profileId, limit],
+  ) as Array<{ text: string; replay: string; at: string }>).map((r) => ({ ...r, replay: JSON.parse(r.replay) as Replay }));
+}
+
+/** Keep a search; searching the same thing again moves it to the top. Only the newest are kept. */
+export function saveRecentSearch(profileId: string, text: string, replay: Replay): void {
+  const database = open();
+  database.run(
+    `INSERT INTO recent_searches (profileId, text, replay, at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(profileId, text) DO UPDATE SET replay = excluded.replay, at = excluded.at`,
+    [profileId, text, JSON.stringify(replay), now()],
+  );
+  database.run(
+    `DELETE FROM recent_searches WHERE profileId = ? AND text NOT IN
+       (SELECT text FROM recent_searches WHERE profileId = ? ORDER BY at DESC LIMIT ?)`,
+    [profileId, profileId, MAX_RECENT],
+  );
+}
+
+/** Forget one search, or all of a profile's when no text is given. */
+export function forgetRecentSearch(profileId: string, text: string | null): void {
+  if (text === null) open().run('DELETE FROM recent_searches WHERE profileId = ?', [profileId]);
+  else open().run('DELETE FROM recent_searches WHERE profileId = ? AND text = ?', [profileId, text]);
 }
 
 /** A deck's latest tagging job, as saved. */

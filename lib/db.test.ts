@@ -213,3 +213,29 @@ describe('adding a card, undoably', () => {
     expect(db.cardsInList(list.id).map((c) => [c.card.id, c.quantity, c.board])).toEqual([['opt', 3, 'main']]);
   });
 });
+
+describe('recent searches', () => {
+  it('keeps each profile its own, newest first, one entry per search', async () => {
+    const db = await load();
+    db.addProfile('kevin', 'Kevin');
+    db.saveRecentSearch('dk', 'green ramp', { kind: 'query', query: 't:sorcery o:search' });
+    db.saveRecentSearch('dk', 'Opt', { kind: 'name', name: 'Opt' });
+    db.saveRecentSearch('kevin', 'combos for vivi', { kind: 'combos', commander: 'Vivi Ornitier' });
+    await new Promise((r) => setTimeout(r, 5));
+    db.saveRecentSearch('dk', 'green ramp', { kind: 'query', query: 't:sorcery o:search', sort: 'usd:asc' });
+    expect(db.recentSearches('dk').map((r) => r.text)).toEqual(['green ramp', 'Opt']);
+    expect(db.recentSearches('dk')[0].replay).toMatchObject({ sort: 'usd:asc' });
+    expect(db.recentSearches('kevin').map((r) => r.text)).toEqual(['combos for vivi']);
+    db.forgetRecentSearch('dk', 'Opt');
+    expect(db.recentSearches('dk').map((r) => r.text)).toEqual(['green ramp']);
+    db.forgetRecentSearch('dk', null);
+    expect(db.recentSearches('dk')).toEqual([]);
+    expect(db.recentSearches('kevin')).toHaveLength(1);
+  });
+
+  it('keeps only the newest thirty', async () => {
+    const db = await load();
+    for (let i = 0; i < 35; i++) db.saveRecentSearch('dk', `search ${i}`, { kind: 'name', name: `c${i}` });
+    expect(db.recentSearches('dk', 100)).toHaveLength(30);
+  });
+});

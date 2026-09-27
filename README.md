@@ -175,6 +175,15 @@ A bare word searches the name. Terms combine with AND. Anything it doesn't
 understand is reported rather than quietly ignored, since a filter that
 silently drops cards you own is worse than one that admits defeat.
 
+### Recent searches
+
+Every search is kept for its profile - on the server, so it follows you to
+the home-screen app and other devices. Clear the search box (or open the app
+fresh) to see them; tap one to run it again. A plain-English search is kept
+with what it was read as, so running it again goes straight to Scryfall
+without spending a model request. The search on screen also survives a
+reload, or iOS restarting the app: it is run again from the same record.
+
 ## On a phone
 
 Open the app in Safari on an iPhone (with Tailscale connected), tap **Share →

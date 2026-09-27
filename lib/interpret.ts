@@ -246,7 +246,7 @@ export async function interpret(
  */
 export async function runQuery(
   query: string, commanderName: string | null, deps: Deps,
-  sort: Sort | null = null, { withEdhrec = true, page = 1 } = {},
+  sort: Sort | null = null, { withEdhrec = true, page = 1, constraints }: { withEdhrec?: boolean; page?: number; constraints?: string } = {},
 ): Promise<Interpreted> {
   const trace: Step[] = [{ text: 'Ran the query without the AI' }];
   const commander = commanderName ? await findExactly(commanderName, deps) : null;
@@ -256,11 +256,13 @@ export async function runQuery(
   const { sort: used, ...result } = await runCards(filters, commander, edhrecPage, deps, trace, typed ?? sort ?? DEFAULT_SORT, page);
   // A later page of results only adds to the Scryfall tab.
   const edhrec = commander && edhrecPage && withEdhrec && page === 1
-    ? await edhrecView(filters, commander, edhrecPage, deps, trace)
+    ? await edhrecView(constraints ?? filters, commander, edhrecPage, deps, trace)
     : undefined;
+  // A search run again from the recent list narrows EDHREC as it first did.
   const interpretation: Interpretation = {
     via: 'syntax', kind: 'cards', query: filters, sort: used,
     commander: commander ? refOf(commander) : undefined,
+    ...(constraints !== undefined ? { constraints } : {}),
   };
   return { ...result, trace, interpretation, edhrec };
 }
