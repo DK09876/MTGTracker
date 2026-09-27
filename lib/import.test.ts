@@ -26,7 +26,7 @@ function fakeCollection() {
       const hit = 'set' in id
         ? known.find((c) => c.set === id.set && c.collector_number === id.collector_number)
         // By name Scryfall gives its default printing - the first here.
-        : known.find((c) => c.name === id.name);
+        : 'name' in id ? known.find((c) => c.name === id.name) : undefined;
       if (hit) cards.push(hit); else notFound.push(id);
     }
     return { cards, notFound };

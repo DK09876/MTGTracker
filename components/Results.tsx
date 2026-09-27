@@ -47,6 +47,8 @@ interface Props {
   onTab: (tab: Tab) => void;
   loading: boolean;
   inLists: Record<string, string[]>;
+  /** Copies owned of each card, by card id. */
+  owned?: Record<string, number>;
   onSort: (sort: Sort) => void;
   onLoadMore?: () => void;
   loadingMore?: boolean;
@@ -68,10 +70,10 @@ interface Props {
 const short = (name: string) => name.split(',')[0];
 
 export default function Results({
-  views, commander, tab, onTab, loading, inLists, onSort, onLoadMore, loadingMore, onSelect, onAdd, actions, dense,
+  views, commander, tab, onTab, loading, inLists, owned, onSort, onLoadMore, loadingMore, onSelect, onAdd, actions, dense,
   edhrecFull, onEdhrecFull,
 }: Props) {
-  const grid = { inLists, onSelect, onAdd, actions, dense };
+  const grid = { inLists, owned, onSelect, onAdd, actions, dense };
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = commander
     ? [
@@ -151,11 +153,11 @@ export default function Results({
   );
 }
 
-function EdhrecTab({ view, full, onFull, inLists, onSelect, onAdd, actions, dense }: {
+function EdhrecTab({ view, full, onFull, inLists, owned, onSelect, onAdd, actions, dense }: {
   view: EdhrecView;
   full?: boolean;
   onFull?: () => void;
-} & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
+} & Pick<Props, 'inLists' | 'owned' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   const byId = new Map(view.cards.map((c) => [c.id, c]));
   return (
     <div>
@@ -187,6 +189,7 @@ function EdhrecTab({ view, full, onFull, inLists, onSelect, onAdd, actions, dens
             stats={view.stats}
             commander={view.commander}
             inLists={inLists}
+            owned={owned}
             onSelect={onSelect}
             onAdd={onAdd}
             actions={actions}
@@ -198,11 +201,11 @@ function EdhrecTab({ view, full, onFull, inLists, onSelect, onAdd, actions, dens
   );
 }
 
-function CardGrid({ cards, stats, commander, inLists, onSelect, onAdd, actions, dense }: {
+function CardGrid({ cards, stats, commander, inLists, owned, onSelect, onAdd, actions, dense }: {
   cards: ScryfallCard[];
   stats?: Record<string, CardStats>;
   commander?: string;
-} & Pick<Props, 'inLists' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
+} & Pick<Props, 'inLists' | 'owned' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   return (
     <div className={`mt-3 grid gap-4 ${dense ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
       {cards.map((card) => {
@@ -212,6 +215,7 @@ function CardGrid({ cards, stats, commander, inLists, onSelect, onAdd, actions, 
             key={card.id}
             card={card}
             inLists={inLists[card.id]}
+            owned={owned?.[card.id]}
             onSelect={onSelect}
             onAdd={onAdd}
             footer={(s && commander) || actions ? (

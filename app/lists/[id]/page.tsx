@@ -11,6 +11,7 @@ import CardModal from '@/components/CardModal';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
 import DeckTags from '@/components/DeckTags';
@@ -35,7 +36,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'cards' | 'tags' | 'health' | 'suggestions'>('cards');
+  const [section, setSection] = useState<'cards' | 'tags' | 'health' | 'suggestions' | 'collection'>('cards');
   const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -342,7 +343,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && (
         <div className="mt-5 inline-flex max-w-full overflow-x-auto rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Deck health'], ['suggestions', 'Suggestions']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Deck health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -358,6 +359,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && section === 'tags' ? (
         <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
+      ) : deck && section === 'collection' ? (
+        <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
       ) : deck && section === 'suggestions' ? (
         <DeckSuggestions
           listId={id}
