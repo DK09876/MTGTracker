@@ -19,6 +19,7 @@ import { useSearch } from './useSearch';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { dismissKeyboard, steady } from '@/lib/steady-tap';
 import { looksLikeSyntax } from '@/lib/syntax';
 
 interface Props {
@@ -41,6 +42,13 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
   const [added, setAdded] = useState<Map<string, Board>>(new Map());
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const opened = useRef(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  // Ready to type with a keyboard and mouse; on a phone the on-screen
+  // keyboard would cover the suggestions the panel opens on.
+  useEffect(() => {
+    if (window.matchMedia('(pointer: fine)').matches) input.current?.focus();
+  }, []);
 
   const boardOf = (card: ScryfallCard) => added.get(front(card.name)) ?? inDeck.get(front(card.name));
 
@@ -62,6 +70,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
 
   const search = (e: React.FormEvent) => {
     e.preventDefault();
+    dismissKeyboard();
     const q = text.trim();
     if (!q) return;
     s.run(looksLikeSyntax(q) ? 'searching' : 'thinking',
@@ -99,10 +108,10 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
     }
     return (
       <div className="mt-auto flex gap-1.5">
-        <button onClick={() => add(card, 'main')} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110">
+        <button {...steady(() => add(card, 'main'))} className="flex-1 rounded-lg bg-[var(--accent)] py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110">
           + Add
         </button>
-        <button onClick={() => add(card, 'maybe')} className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs hover:bg-[var(--surface-hover)]">
+        <button {...steady(() => add(card, 'maybe'))} className="rounded-lg border border-[var(--border)] px-2 py-1.5 text-xs hover:bg-[var(--surface-hover)]">
           Maybe
         </button>
       </div>
@@ -118,18 +127,19 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
         role="dialog"
         aria-modal="true"
         aria-label="Add cards"
-        className="absolute inset-y-0 right-0 flex w-full max-w-3xl flex-col border-l border-[var(--border)] bg-[var(--background)] shadow-2xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-3xl flex-col border-l border-[var(--border)] bg-[var(--background)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl"
       >
         <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Add cards{commander ? ` for ${commander.split(',')[0]}` : ''}</h2>
-            <button onClick={onClose} aria-label="Close" className="rounded-lg px-2 py-1 text-[var(--muted)] hover:bg-[var(--surface)]">✕</button>
+            <button onClick={onClose} aria-label="Close" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface)]">✕</button>
           </div>
           <form onSubmit={search} className="mt-3 flex gap-2">
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
-              autoFocus
+              ref={input}
+              enterKeyHint="search"
               placeholder={commander ? 'Ramp that fetches lands, cheap removal, t:artifact mv<3, Sol Ring…' : 'Describe what you want, a card name, or Scryfall syntax'}
               aria-label="Find cards to add"
               className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 outline-none focus:border-[var(--accent)]"

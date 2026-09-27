@@ -198,3 +198,18 @@ describe('decks', () => {
     expect(db.cardsInList(deck.id).map((c) => [c.card.id, c.quantity])).toEqual([['forest-b', 5]]);
   });
 });
+
+describe('adding a card, undoably', () => {
+  it('says how the card sat before, so the add can be put back', async () => {
+    const db = await load();
+    const list = db.createList('dk', 'Denzilore', '');
+    expect(db.addCardToList(list.id, card('opt', 'Opt'))).toBeNull();
+    expect(db.addCardToList(list.id, card('opt', 'Opt'), 2)).toEqual({ quantity: 1, board: 'main' });
+    expect(db.addCardToList(list.id, card('opt', 'Opt'), 1, 'nonfoil', 'maybe')).toEqual({ quantity: 3, board: 'main' });
+
+    // Undo the last add: back to 3 on the main board.
+    db.setQuantity(list.id, 'opt', 3);
+    db.updateListCard(list.id, 'opt', { board: 'main' });
+    expect(db.cardsInList(list.id).map((c) => [c.card.id, c.quantity, c.board])).toEqual([['opt', 3, 'main']]);
+  });
+});

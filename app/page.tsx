@@ -14,6 +14,7 @@ import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { dismissKeyboard, steady } from '@/lib/steady-tap';
 import { exactName, looksLikeSyntax } from '@/lib/syntax';
 
 const EXAMPLES = [
@@ -50,19 +51,22 @@ export default function SearchPage() {
   const [lists, setLists] = useState<List[]>([]);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const [adding, setAdding] = useState<ScryfallCard | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
 
   useEffect(() => { api.fetchLists().then(setLists).catch(() => {}); }, []);
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2600);
+    // Long enough to read which list it went to, and to undo it.
+    const t = setTimeout(() => setToast(null), toast.undo ? 7000 : 2600);
     return () => clearTimeout(t);
   }, [toast]);
 
   const search = (text: string) => {
     const term = text.trim();
     if (!term) return;
+    // The keyboard closes now, before results come up to be tapped.
+    dismissKeyboard();
     setSearched(true);
     setThread([term]);
     setAsked({ text: term });
@@ -82,6 +86,7 @@ export default function SearchPage() {
 
   const followUp = (text: string) => {
     if (!answer) return;
+    dismissKeyboard();
     const previous = previousOf(answer, thread);
     run('thinking', () => api.followUp(text, previous), (r) => {
       setThread((t) => [...t, text]);
@@ -99,12 +104,22 @@ export default function SearchPage() {
 
   const addCard = async (listId: string, quantity: number) => {
     if (!adding) return;
-    await api.addCard(listId, adding.id, quantity);
+    const card = adding;
+    const { before } = await api.addCard(listId, card.id, quantity);
     const fresh = await api.fetchLists();
     setLists(fresh);
     const name = fresh.find((l) => l.id === listId)?.name ?? 'list';
-    s.setInLists((prev) => ({ ...prev, [adding.id]: [...new Set([...(prev[adding.id] ?? []), name])] }));
-    setToast(`Added ${quantity > 1 ? `${quantity}× ` : ''}${adding.name} to ${name}`);
+    s.setInLists((prev) => ({ ...prev, [card.id]: [...new Set([...(prev[card.id] ?? []), name])] }));
+    setToast({
+      text: `Added ${quantity > 1 ? `${quantity}× ` : ''}${card.name} to ${name}`,
+      undo: async () => {
+        await api.undoAdd(listId, card.id, before);
+        setLists(await api.fetchLists());
+        // Still in the list only if it was there before this add.
+        if (!before) s.setInLists((prev) => ({ ...prev, [card.id]: (prev[card.id] ?? []).filter((n) => n !== name) }));
+        setToast({ text: `Took ${card.name} back out of ${name}` });
+      },
+    });
   };
 
   const busy = status === 'searching' || status === 'thinking';
@@ -167,7 +182,7 @@ export default function SearchPage() {
         actions={
           selected && (
             <button
-              onClick={() => { setAdding(selected); setSelected(null); }}
+              {...steady(() => { setAdding(selected); setSelected(null); })}
               className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[#221c08]"
             >
               Add to list
@@ -191,8 +206,19 @@ export default function SearchPage() {
       )}
 
       {toast && (
-        <div className="fixed bottom-4 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[#221c08] shadow-lg">
-          {toast}
+        <div
+          role="status"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[70] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-[#221c08] shadow-lg"
+        >
+          <span className="min-w-0 flex-1">{toast.text}</span>
+          {toast.undo && (
+            <button
+              {...steady(() => { const undo = toast.undo!; setToast(null); undo().catch(() => setToast({ text: 'Could not undo that - remove it from the list' })); })}
+              className="min-h-9 shrink-0 rounded-lg bg-[#221c08]/15 px-3 font-semibold"
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>

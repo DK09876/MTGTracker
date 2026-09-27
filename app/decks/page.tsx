@@ -141,7 +141,7 @@ export default function DecksPage() {
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {decks.map((deck) => {
           const art = deck.commander ? deck.commander.image_uris?.art_crop ?? deck.commander.card_faces?.[0]?.image_uris?.art_crop ?? imageOf(deck.commander, 'normal') : null;
-          const total = deck.totalCards + (deck.commander ? 1 : 0);
+          const total = deck.totalCards;
           return (
             <Link
               key={deck.id}

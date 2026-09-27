@@ -356,11 +356,16 @@ function storeCard(card: ScryfallCard): void {
 }
 
 /** Store (or refresh) a card, then put it in a list. */
+/** How a card sat in a list before an add, so the add can be undone; null if it was not there. */
+export type CardBefore = { quantity: number; board: Board } | null;
+
 export function addCardToList(
   listId: string, card: ScryfallCard, quantity = 1, finish: Finish = 'nonfoil', board: Board = 'main',
-): void {
+): CardBefore {
   const database = open();
   storeCard(card);
+  const before = database.get('SELECT quantity, board FROM list_cards WHERE listId = ? AND cardId = ?', [listId, card.id]) as
+    { quantity: number; board: Board } | null;
 
   // Adding a card already in the list adds a copy rather than erroring -
   // wanting a second Lightning Bolt is the common case, not a mistake.
@@ -375,6 +380,7 @@ export function addCardToList(
     [listId, card.id, quantity, finish, board, now()],
   );
   database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+  return before ? { quantity: before.quantity, board: before.board } : null;
 }
 
 export function setQuantity(listId: string, cardId: string, quantity: number): void {

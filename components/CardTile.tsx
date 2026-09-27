@@ -14,6 +14,7 @@ import ManaCost from './ManaCost';
 import { RarityBadge } from './CardDetail';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf } from '@/lib/scryfall';
+import { steady } from '@/lib/steady-tap';
 
 interface Props {
   card: ScryfallCard;
@@ -81,7 +82,7 @@ export default function CardTile({ card, inLists, onSelect, onAdd, footer, finis
 
         {onAdd && (
           <button
-            onClick={() => onAdd(card)}
+            {...steady(() => onAdd(card))}
             className="mt-auto rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110"
           >
             Add to list

@@ -175,6 +175,31 @@ A bare word searches the name. Terms combine with AND. Anything it doesn't
 understand is reported rather than quietly ignored, since a filter that
 silently drops cards you own is worse than one that admits defeat.
 
+## On a phone
+
+Open the app in Safari on an iPhone (with Tailscale connected), tap **Share →
+Add to Home Screen**, and it installs as an app called **MTG**: full screen,
+its own icon, clear of the notch and home bar. If the server cannot be
+reached - Tailscale off, no signal - it shows a page saying so with **Try
+again**, not Safari's error. Only that page is kept offline; decks and search
+always come fresh. The home-screen app keeps its own storage, so it asks
+*Who's using this?* once.
+
+Adding cards is built to survive a phone:
+- **A tap only counts if it began on the button it ends on.** Closing the
+  keyboard resizes the page, and a window centred in it jumps; on 2026-09-26
+  that sent 13 cards meant for one list into two decks, each tap landing a row
+  or two up. The keyboard now closes when a search runs and when a window
+  opens, and a click that lands on a row the finger never pressed is dropped.
+- **"Add to list" opens at the bottom of the screen, with the list used last
+  first** as one large button, and every row says whether it is a deck and
+  whose.
+- **Every add from search can be undone** from the message that says where it
+  went.
+
+Form fields are 16px on touch screens (iOS zooms into anything smaller and
+stays zoomed), and taps do not wait for a double-tap zoom.
+
 ## Running it
 
 ```bash
