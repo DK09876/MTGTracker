@@ -79,6 +79,11 @@ export default function AddToCollection({ locations, location, onLocation, card:
   };
 
   const printing = printings?.find((p) => p.id === chosen) ?? null;
+  // The printing that was read or picked comes first, where it can be seen.
+  const [firstId] = useState(given?.id ?? null);
+  const shown = printings && firstId
+    ? [...printings.filter((p) => p.id === firstId), ...printings.filter((p) => p.id !== firstId)]
+    : printings;
   const finishes = (printing?.finishes ?? base?.finishes ?? ['nonfoil']) as Finish[];
   const shownFinish = finishes.includes(finish) ? finish : finishes[0] ?? 'nonfoil';
 
@@ -133,7 +138,7 @@ export default function AddToCollection({ locations, location, onLocation, card:
             {!printings && <p className="text-[var(--muted)]">Loading printings…</p>}
             {printings && (
               <div className="flex gap-2 overflow-x-auto pb-1">
-                {printings.map((p) => (
+                {(shown ?? []).map((p) => (
                   <button
                     key={p.id}
                     {...steady(() => setChosen(p.id))}
