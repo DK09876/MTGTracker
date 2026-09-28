@@ -13,7 +13,10 @@ import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
+import { getProfile } from '@/lib/profile';
+import { replayOf, type RecentSearch, type Replay } from '@/lib/recent';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { parseSortKey } from '@/lib/sort';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
 import { exactName, looksLikeSyntax } from '@/lib/syntax';
 
@@ -38,6 +41,28 @@ function previousOf(answer: api.AskResponse, thread: string[]): Previous {
   };
 }
 
+/**
+ * The search on screen, kept on this device so a reload - or iOS reopening
+ * the home-screen app from scratch - brings it back. Only how to run it
+ * again is kept, not the results: they come fresh from Scryfall.
+ */
+const currentKey = () => `mtg-search:${getProfile()}`;
+
+function saveCurrent(text: string, replay: Replay): void {
+  try { localStorage.setItem(currentKey(), JSON.stringify({ text, replay })); } catch { /* not kept; still works */ }
+}
+
+function loadCurrent(): { text: string; replay: Replay } | null {
+  try {
+    const saved = localStorage.getItem(currentKey());
+    return saved ? JSON.parse(saved) as { text: string; replay: Replay } : null;
+  } catch {
+    return null;
+  }
+}
+
+const THREAD = ' › ';
+
 export default function SearchPage() {
   const s = useSearch();
   const { answer, views, status, run, showAnswer } = s;
@@ -52,6 +77,8 @@ export default function SearchPage() {
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const [adding, setAdding] = useState<ScryfallCard | null>(null);
   const [toast, setToast] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
+
+  const [recent, setRecent] = useState<RecentSearch[]>([]);
 
   useEffect(() => { api.fetchLists().then(setLists).catch(() => {}); }, []);
 
@@ -70,10 +97,13 @@ export default function SearchPage() {
     setSearched(true);
     setThread([term]);
     setAsked({ text: term });
-    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => api.ask(term), showAnswer);
+    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => api.ask(term), (r) => {
+      showAnswer(r);
+      remember(term, replayOf(r));
+    });
   };
 
-  const pickName = (name: string) => {
+  const pickName = (name: string, keep = true) => {
     setQuery(name);
     setSearched(true);
     setThread([]);
@@ -81,8 +111,61 @@ export default function SearchPage() {
       s.setAnswer(null);
       s.setViews({ cards: { cards: r.cards, total: r.totalCards } });
       s.setTab('cards');
+      if (keep) remember(name, { kind: 'name', name });
     });
   };
+
+  /** Keep a search: on this device as the one on screen, and in the profile's recent list. */
+  const remember = (text: string, replay: Replay | null) => {
+    if (!replay) return;
+    saveCurrent(text, replay);
+    api.rememberSearch(text, replay).then(setRecent).catch(() => {});
+  };
+
+  /** Run a recent search again: straight to Scryfall, as it was read the first time. */
+  const replay = (text: string, r: Replay, keep = true) => {
+    dismissKeyboard();
+    if (r.kind === 'name') {
+      pickName(r.name, keep);
+      return;
+    }
+    const parts = text.split(THREAD);
+    setQuery(parts[0]);
+    setSearched(true);
+    setThread(parts);
+    setAsked(null);
+    const done = (result: api.AskResponse) => {
+      showAnswer({
+        ...result,
+        interpretation: {
+          ...result.interpretation,
+          ...(r.explanation ? { explanation: r.explanation } : {}),
+          ...(r.kind === 'combos' && r.note ? { note: r.note } : {}),
+        },
+      });
+      if (keep) remember(text, r);
+    };
+    if (r.kind === 'combos') {
+      run('searching', () => api.combosFor(r.commander), done);
+    } else {
+      run('searching', () => api.runQuery(r.query, {
+        commander: r.commander, sort: parseSortKey(r.sort ?? null) ?? undefined, constraints: r.constraints,
+      }), done);
+    }
+  };
+
+  // On opening: the recent list, and the search that was on screen.
+  useEffect(() => {
+    api.recentSearches().then(setRecent).catch(() => {});
+    const current = loadCurrent();
+    // After this render, not in it; cancelled if the page goes before then.
+    const timer = current ? setTimeout(() => replay(current.text, current.replay, false), 0) : undefined;
+    return () => clearTimeout(timer);
+    // Once, on opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const forget = (text: string | null) => { api.forgetSearch(text).then(setRecent).catch(() => {}); };
 
   const followUp = (text: string) => {
     if (!answer) return;
@@ -92,6 +175,7 @@ export default function SearchPage() {
       setThread((t) => [...t, text]);
       setAsked({ text, previous });
       showAnswer(r);
+      remember([...thread, text].join(THREAD), replayOf(r));
     });
   };
 
@@ -99,7 +183,10 @@ export default function SearchPage() {
   const pickCommander = (name: string) => {
     if (!answer?.plan || !asked) return;
     const plan = answer.plan;
-    run('thinking', () => api.resume(asked.text, asked.previous, plan, name), showAnswer);
+    run('thinking', () => api.resume(asked.text, asked.previous, plan, name), (r) => {
+      showAnswer(r);
+      remember(thread.join(THREAD) || asked.text, replayOf(r));
+    });
   };
 
   const addCard = async (listId: string, quantity: number) => {
@@ -127,7 +214,46 @@ export default function SearchPage() {
 
   return (
     <div>
-      <SearchBox value={query} onChange={setQuery} onSubmit={search} onPickName={pickName} />
+      <SearchBox
+        value={query}
+        onChange={setQuery}
+        onSubmit={search}
+        onPickName={(name) => pickName(name)}
+        recent={recent.map((r) => r.text)}
+        onPickRecent={(text) => { const r = recent.find((x) => x.text === text); if (r) replay(r.text, r.replay); }}
+      />
+
+      {!searched && recent.length > 0 && (
+        <section className="mt-4" aria-label="Recent searches">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--muted)]">Recent</h2>
+            <button onClick={() => forget(null)} className="min-h-9 px-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Clear all</button>
+          </div>
+          <ul className="mt-1 flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {recent.slice(0, 8).map((r) => (
+              <li key={r.text} className="flex items-center">
+                <button
+                  {...steady(() => replay(r.text, r.replay))}
+                  className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface)]"
+                >
+                  <span aria-hidden className="text-[var(--muted)]">↺</span>
+                  <span className="truncate">{r.text}</span>
+                  {r.replay.kind !== 'name' && r.replay.commander && (
+                    <span className="ml-auto hidden shrink-0 text-xs text-[var(--muted)] sm:inline">{r.replay.commander.split(',')[0]}</span>
+                  )}
+                </button>
+                <button
+                  onClick={() => forget(r.text)}
+                  aria-label={`Forget "${r.text}"`}
+                  className="flex min-h-11 min-w-11 items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)]"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {!searched && (
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">

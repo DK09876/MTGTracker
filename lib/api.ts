@@ -25,6 +25,7 @@ import type { Board } from './decklist';
 import type { BracketFloor } from './bracket';
 import type { CutGroup } from './cuts';
 import type { Health } from './health';
+import type { RecentSearch, Replay } from './recent';
 import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
@@ -82,18 +83,30 @@ export const resume = (q: string, previous: Previous | undefined, plan: Translat
  * scoped to the same commander. `edhrec: false` skips rebuilding the EDHREC
  * tab, for a change that only affects the Scryfall one.
  */
-export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean; page?: number } = {}) =>
+export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean; page?: number; constraints?: string } = {}) =>
   fetch(url(`ask?${new URLSearchParams({
     query,
     ...(opts.commander ? { commander: opts.commander } : {}),
     ...(opts.sort ? { sort: sortKey(opts.sort) } : {}),
     ...(opts.edhrec === false ? { edhrec: '0' } : {}),
     ...(opts.page && opts.page > 1 ? { page: String(opts.page) } : {}),
+    ...(opts.constraints !== undefined ? { constraints: opts.constraints } : {}),
   })}`)).then(json<AskResponse>);
 
 /** A commander's combos, for the Combos tab. */
 export const combosFor = (commander: string) =>
   fetch(url(`ask?combosFor=${encodeURIComponent(commander)}`)).then(json<AskResponse>);
+
+// --- recent searches -----------------------------------------------------
+
+export const recentSearches = () => fetch(url('recent')).then(json<{ recent: RecentSearch[] }>).then((b) => b.recent);
+
+export const rememberSearch = (text: string, replay: Replay) =>
+  send('recent', 'POST', { text, replay }).then(json<{ recent: RecentSearch[] }>).then((b) => b.recent);
+
+export const forgetSearch = (text: string | null) =>
+  fetch(url(text === null ? 'recent' : `recent?text=${encodeURIComponent(text)}`), { method: 'DELETE' })
+    .then(json<{ recent: RecentSearch[] }>).then((b) => b.recent);
 
 export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })

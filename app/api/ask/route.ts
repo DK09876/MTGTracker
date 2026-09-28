@@ -66,6 +66,7 @@ export async function GET(request: Request) {
     return respond(request, () => runQuery(query, params.get('commander') || null, deps(), parseSortKey(params.get('sort')), {
       withEdhrec: params.get('edhrec') !== '0',
       page: Math.max(1, Number(params.get('page')) || 1),
+      constraints: params.get('constraints') ?? undefined,
     }));
   }
 

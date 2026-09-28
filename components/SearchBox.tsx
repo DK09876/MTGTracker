@@ -26,6 +26,9 @@ interface Props {
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onPickName: (name: string) => void;
+  /** Recent searches, newest first, offered when the box is empty. */
+  recent?: string[];
+  onPickRecent?: (text: string) => void;
 }
 
 const wantsSuggestions = (text: string) => {
@@ -35,7 +38,7 @@ const wantsSuggestions = (text: string) => {
     && !looksLikeSyntax(trimmed);
 };
 
-export default function SearchBox({ value, onChange, onSubmit, onPickName }: Props) {
+export default function SearchBox({ value, onChange, onSubmit, onPickName, recent = [], onPickRecent }: Props) {
   const [names, setNames] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -54,11 +57,14 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName }: Pro
     return () => { clearTimeout(timer); controller.abort(); };
   }, [value]);
 
-  const visible = open && wantsSuggestions(value) ? names : [];
+  // An empty box offers recent searches; typing a name offers card names.
+  const showingRecent = open && !value.trim() && recent.length > 0 && !!onPickRecent;
+  const visible = showingRecent ? recent.slice(0, 8) : open && wantsSuggestions(value) ? names : [];
 
-  const pick = (name: string) => {
+  const pick = (item: string) => {
     setOpen(false);
-    onPickName(name);
+    if (showingRecent) onPickRecent?.(item);
+    else onPickName(item);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -95,14 +101,30 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName }: Pro
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-          className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-base outline-none focus:border-[var(--accent)]"
+          enterKeyHint="search"
+          className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 pl-4 pr-11 text-base outline-none focus:border-[var(--accent)]"
         />
+        {value && (
+          <button
+            type="button"
+            aria-label="Clear the search box"
+            // Keeps focus in the box, so the recent searches show at once.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { onChange(''); setOpen(true); }}
+            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--muted)] hover:text-[var(--foreground)]"
+          >
+            ✕
+          </button>
+        )}
         {visible.length > 0 && (
           <ul
             id={listId}
             role="listbox"
             className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg"
           >
+            {showingRecent && (
+              <li role="presentation" className="px-4 pb-1 pt-2 text-xs uppercase tracking-wide text-[var(--muted)]">Recent</li>
+            )}
             {visible.map((name, i) => (
               <li
                 key={name}
@@ -113,8 +135,9 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName }: Pro
                 // has already closed the list.
                 onMouseDown={(e) => { e.preventDefault(); pick(name); }}
                 onMouseEnter={() => setActive(i)}
-                className={`cursor-pointer px-4 py-2 text-sm ${i === active ? 'bg-[var(--surface-hover)]' : ''}`}
+                className={`cursor-pointer truncate px-4 py-2.5 text-sm ${i === active ? 'bg-[var(--surface-hover)]' : ''}`}
               >
+                {showingRecent && <span aria-hidden className="mr-2 text-[var(--muted)]">↺</span>}
                 {name}
               </li>
             ))}
