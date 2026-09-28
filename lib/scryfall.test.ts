@@ -110,4 +110,38 @@ describe('throttle', () => {
     for (let i = 1; i < starts.length; i++) expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(MIN_GAP_MS - 5);
     expect(elapsed).toBeLessThan(700);
   });
+
+  it('keeps search, named and collection to two a second between them, as Scryfall requires', async () => {
+    vi.resetModules();
+    delete (globalThis as { __scryfallPace?: unknown }).__scryfallPace;
+    const { throttle, SLOW_GAP_MS, MIN_GAP_MS } = await import('./scryfall');
+    const at: Array<[string, number]> = [];
+    const t0 = Date.now();
+    const run = (path: string) => throttle(async () => { at.push([path, Date.now() - t0]); }, path);
+    await Promise.all([run('/cards/search?q=a'), run('/cards/search?q=b'), run('/cards/abc'), run('/cards/named?fuzzy=x')]);
+    const when = (p: string) => at.filter(([x]) => x.startsWith(p)).map(([, t]) => t);
+    const [s1, s2] = when('/cards/search');
+    expect(s2 - s1).toBeGreaterThanOrEqual(SLOW_GAP_MS - 5);
+    // Named shares search's two a second; a lookup by id only keeps the overall ten.
+    expect(when('/cards/named')[0] - s2).toBeGreaterThanOrEqual(SLOW_GAP_MS - 5);
+    expect(when('/cards/abc')[0] - s1).toBeGreaterThanOrEqual(MIN_GAP_MS - 5);
+    expect(when('/cards/abc')[0] - s1).toBeLessThan(SLOW_GAP_MS);
+  });
+
+  it('stops asking for thirty seconds after a 429, in every copy of the module', async () => {
+    vi.resetModules();
+    delete (globalThis as { __scryfallPace?: unknown }).__scryfallPace;
+    const fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 429 }));
+    vi.stubGlobal('fetch', fetch);
+    const { getCard, ScryfallError } = await import('./scryfall');
+    await expect(getCard('x')).rejects.toBeInstanceOf(ScryfallError);
+    await expect(getCard('y')).rejects.toThrow(/slow down/);
+    // A second copy - as another route's bundle has - is held back too.
+    vi.resetModules();
+    const again = await import('./scryfall');
+    await expect(again.getCard('z')).rejects.toThrow(/slow down/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    delete (globalThis as { __scryfallPace?: unknown }).__scryfallPace;
+    vi.unstubAllGlobals();
+  });
 });

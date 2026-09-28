@@ -23,23 +23,45 @@ const HEADERS = {
 };
 
 /**
- * Scryfall ask for 50-100ms between requests. Each request is given the
- * next free start time, 100ms after the last, so no burst can slip past -
- * about ten a second at most, which is their limit.
+ * Scryfall's hard rate limits (scryfall.com/docs/api/rate-limits, read
+ * 2026-09-28): search, named, random and collection 2 a second - kept here
+ * as 2 a second between them all - and everything else 10 a second. A 429 locks the client out for 30 seconds,
+ * and carrying on "may result in a temporary or permanent ban".
  *
- * Starts are spaced, not whole requests: waiting for each to finish before
- * starting the next made twenty role lookups take eighteen seconds, since a
- * search can take the best part of one.
+ * Each request is given the next free start time - in its endpoint's lane
+ * and in the overall one - so no burst can slip past. Starts are spaced,
+ * not whole requests: waiting for each to finish made twenty role lookups
+ * take eighteen seconds.
  */
-export const MIN_GAP_MS = 100;
-let nextStart = 0;
+export const MIN_GAP_MS = 110;
+export const SLOW_GAP_MS = 550;
+// One lane for all four, not one each: Scryfall answered 429 to a search and
+// a named lookup each 520 ms after their own kind but interleaved (2026-09-28).
+const SLOW = /^\/cards\/(?:search|named|random|collection)\b/;
+// Kept on globalThis: Next builds this module into each route's server
+// chunk separately, and a throttle per copy let a dozen routes send at once
+// (found 2026-09-28, when Scryfall answered 429). One pace per process.
+const pace = ((globalThis as { __scryfallPace?: { laneNext: Map<string, number>; booked: number[]; coolUntil: number } })
+  .__scryfallPace ??= { laneNext: new Map(), booked: [], coolUntil: 0 });
+const { laneNext } = pace;
 
-export function throttle<T>(work: () => Promise<T>): Promise<T> {
+export function throttle<T>(work: () => Promise<T>, path = ''): Promise<T> {
   const now = Date.now();
-  const start = Math.max(now, nextStart);
-  nextStart = start + MIN_GAP_MS;
+  const lane = SLOW.test(path) ? 'slow' : undefined;
+  pace.booked = pace.booked.filter((t) => t > now - MIN_GAP_MS);
+  // The earliest start at or after the lane allows that is clear of the others:
+  // a search waiting its turn does not hold up a lookup by id behind it.
+  let start = Math.max(now, lane ? laneNext.get(lane) ?? 0 : 0);
+  for (const t of [...pace.booked].sort((a, b) => a - b)) {
+    if (Math.abs(t - start) < MIN_GAP_MS) start = t + MIN_GAP_MS;
+  }
+  pace.booked.push(start);
+  if (lane) laneNext.set(lane, start + SLOW_GAP_MS);
   return new Promise((resolve) => setTimeout(resolve, start - now)).then(work);
 }
+
+// After a 429, nothing is sent until Scryfall's lockout is over (pace.coolUntil).
+const COOL_MS = 30_000;
 
 export interface ScryfallCard {
   id: string;
@@ -98,9 +120,23 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await throttle(() => fetch(`${API}${path}`, body === undefined
-    ? { headers: HEADERS }
-    : { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+  const cooling = () => new ScryfallError(
+    `Scryfall asked us to slow down - try again in ${Math.ceil((pace.coolUntil - Date.now()) / 1000)} seconds`, 429,
+  );
+  if (Date.now() < pace.coolUntil) throw cooling();
+  const response = await throttle(() => (Date.now() < pace.coolUntil
+    ? Promise.reject(cooling())
+    // MTG_DEBUG_SCRYFALL=1 logs each request's start, to check the pacing.
+    : (process.env.MTG_DEBUG_SCRYFALL && console.log(`[scryfall] ${Date.now() % 100000} ${path.slice(0, 60)}`),
+    fetch(`${API}${path}`, body === undefined
+      ? { headers: HEADERS }
+      : { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))), path);
+  if (response.status === 429) {
+    const after = Number(response.headers.get('retry-after'));
+    pace.coolUntil = Date.now() + (Number.isFinite(after) && after > 0 ? after * 1000 : COOL_MS);
+    console.warn('[scryfall] rate-limited; pausing requests until', new Date(pace.coolUntil).toISOString());
+    throw cooling();
+  }
   if (!response.ok) {
     // Scryfall puts a human-readable reason in the body; pass it through so
     // "no cards matched" does not surface as a bare 404.
@@ -177,9 +213,19 @@ export async function autocomplete(prefix: string): Promise<string[]> {
  * so this is only safe as a last resort, never as a first guess at what a
  * sentence meant. Too many matches and no match are both null.
  */
-export async function findCardNamed(fuzzy: string): Promise<ScryfallCard | null> {
+export async function findCardNamed(fuzzy: string, set?: string): Promise<ScryfallCard | null> {
   try {
-    return await get<ScryfallCard>(`/cards/named?fuzzy=${encodeURIComponent(fuzzy.trim())}`);
+    return await get<ScryfallCard>(`/cards/named?fuzzy=${encodeURIComponent(fuzzy.trim())}${set ? `&set=${encodeURIComponent(set)}` : ''}`);
+  } catch (error) {
+    if (error instanceof ScryfallError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** The printing with this set code and collector number, or null. */
+export async function cardAt(set: string, number: string): Promise<ScryfallCard | null> {
+  try {
+    return await get<ScryfallCard>(`/cards/${encodeURIComponent(set.toLowerCase())}/${encodeURIComponent(number)}`);
   } catch (error) {
     if (error instanceof ScryfallError && error.status === 404) return null;
     throw error;

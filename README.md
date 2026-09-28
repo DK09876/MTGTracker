@@ -197,6 +197,22 @@ how many - in **boxes and binders** (or Unsorted), the way Mythic Tools does.
   came from.
 - Search results show **✓ Own 2** on cards you have.
 
+**Scanning** (Collection → Scan): hold a card in the guide and the phone
+reads it - on the phone, with Tesseract, no model requests. It reads two
+strips: the name bar, and the bottom-left small print where cards since 2015
+print the collector number and set code ("263/281 U · C21 • EN"). With both,
+the exact printing is found and shown with ✓; with only a name, the card is
+matched by name and you pick the printing. A card is never proposed unless
+the name read agrees with it - OCR misreads a digit into another real card
+often enough - and a name-only match waits for two readings in a row. Pick
+foil, how many and which box, and Add; each add can be undone. A photo from
+the library works too, read as the card or as a card-shaped middle of it.
+
+Measured on 16 cards across frames (Alpha to 2025, a Mystical Archive, a
+double-faced card): 12 of 16 identified from a camera-sized crop, 8 of those
+to the exact printing; 11 of 16 from a loose photo of the card on a table;
+none misidentified. Old frames without a set code are the weak spot.
+
 ### Recent searches
 
 Every search is kept for its profile - on the server, so it follows you to
@@ -377,6 +393,15 @@ every commander search is always there, since a person following a link is
 how the site is meant to be used.
 
 ## Being a good Scryfall citizen
+
+Scryfall's hard limits (scryfall.com/docs/api/rate-limits, 2026-09-28):
+**search, named, random and collection at 2 a second, everything else at 10**;
+a 429 locks the client out for 30 seconds and repeated overloads can get it
+banned. The app spaces request starts - 550 ms apart for those four between
+them, 110 ms for everything - in one pace shared by every route in the
+process (Next compiles the module into each route's bundle; a pace per copy
+once let a dozen routes send at once). After a 429 it sends nothing until the
+lockout is over and says so. `MTG_DEBUG_SCRYFALL=1` logs each request's start.
 
 Their API is free, unauthenticated and donation-funded. Their docs ask for
 three things, and all three are honoured in `lib/scryfall.ts`: a descriptive

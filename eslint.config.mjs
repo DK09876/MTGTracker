@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     // Operator scripts are CommonJS run directly by node, not bundled app
     // code, so require() is correct in them.
     "scripts/**",
+    // Tesseract's worker and engine, copied in from node_modules at build.
+    "public/tesseract/**",
   ]),
   {
     rules: {
