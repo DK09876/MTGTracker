@@ -383,3 +383,15 @@ export type DeckCollectionAction =
 
 export const deckCollection = (listId: string, act: DeckCollectionAction) =>
   send(`lists/${listId}/collection`, 'POST', act).then(json<DeckOwnership>);
+
+// --- scanning ----------------------------------------------------------------
+
+export interface ScanMatch {
+  card: ScryfallCard | null;
+  /** 'printing': set and number read and the name agreed. 'name': matched by name only. */
+  match?: 'printing' | 'name';
+  read: { title: string; set: string; number: string };
+}
+
+export const identifyScan = (read: { title: string; set?: string; number?: string }) =>
+  send('scan', 'POST', read).then(json<ScanMatch>);
