@@ -175,6 +175,28 @@ A bare word searches the name. Terms combine with AND. Anything it doesn't
 understand is reported rather than quietly ignored, since a filter that
 silently drops cards you own is worse than one that admits defeat.
 
+### Collection
+
+The **Collection** tab keeps every card a profile owns - printing, finish,
+how many - in **boxes and binders** (or Unsorted), the way Mythic Tools does.
+
+- **Add** by name (pick the printing in hand, foil or not, how many, which
+  box), **scan** with the camera, or **import** a CSV from ManaBox, Moxfield,
+  Deckbox or TCGplayer, or a plain list. ManaBox binders become boxes. A
+  line whose set and number turn out to be a different card is added by name
+  and flagged, not imported as the wrong card. **Export** as CSV.
+- **Decks take copies out of the collection.** A copy is in one place: a box,
+  or the deck that pulled it. A deck's **Collection** tab shows each card as
+  in the deck, in a box (Pull), held by another deck (Take it from there),
+  to buy (with the cost to finish), or a proxy; *Pull all* fills the deck
+  from the boxes, and there are lists of what to fetch from which box and
+  what to buy. Any printing satisfies a deck, the one it lists first.
+- **Nothing owned gets lost.** Cutting a card, lowering its count, moving it
+  to the maybeboard, changing the commander, pasting over the list or
+  deleting the deck puts the copies it no longer needs back in the box they
+  came from.
+- Search results show **✓ Own 2** on cards you have.
+
 ### Recent searches
 
 Every search is kept for its profile - on the server, so it follows you to

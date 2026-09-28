@@ -36,17 +36,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--background)]/95 pt-[env(safe-area-inset-top)] backdrop-blur">
           <nav className="safe-x mx-auto flex max-w-6xl items-center gap-2 py-3 sm:gap-4">
             <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">
-              <span className="text-[var(--accent)]">MTG</span> Tracker
+              <span className="text-[var(--accent)]">MTG</span><span className="max-[419px]:hidden"> Tracker</span>
             </Link>
-            <div className="ml-auto flex items-center gap-0.5 text-sm sm:gap-1">
-              <Link href="/" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
+            <div className="ml-auto flex items-center gap-0 text-sm sm:gap-1">
+              <Link href="/" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Search
               </Link>
-              <Link href="/decks" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
+              <Link href="/decks" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Decks
               </Link>
-              <Link href="/lists" className="rounded-lg px-2 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
+              <Link href="/lists" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
                 Lists
+              </Link>
+              <Link href="/collection" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
+                Collection
               </Link>
               <ProfileSwitcher />
             </div>

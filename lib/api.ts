@@ -17,6 +17,7 @@ const url = (path: string) => {
   return `${BASE}/api/${path}${path.includes('?') ? '&' : '?'}profile=${encodeURIComponent(profile)}`;
 };
 
+import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
 import type { CardBefore, List, ListedCard, ListKind, Profile } from './db';
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
@@ -49,6 +50,8 @@ export interface SearchResponse {
   totalCards: number;
   hasMore: boolean;
   inLists: Record<string, string[]>;
+  /** Copies the profile owns of each card (any printing), by card id. */
+  owned?: Record<string, number>;
 }
 
 export const search = (q: string, page = 1) =>
@@ -322,3 +325,61 @@ export const stopTagJob = (listId: string) =>
 
 /** Today's free requests left on each tagging model. */
 export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);
+
+// --- collection ------------------------------------------------------------
+
+export type CollectionState = {
+  boxes: BoxCopies[];
+  decks: DeckCopies[];
+  locations: Location[];
+  totals: { copies: number; unique: number; inDecks: number; value: number };
+};
+
+export const collection = () => fetch(url('collection')).then(json<CollectionState>);
+
+export const addToCollection = (cardId: string, opts: { quantity?: number; finish?: Finish; location?: string } = {}) =>
+  send('collection', 'POST', { cardId, ...opts }).then(json<{ ok: true; count: number; card: ScryfallCard }>);
+
+export const setCollectionCount = (cardId: string, finish: Finish, location: string, quantity: number) =>
+  send('collection', 'PATCH', { cardId, finish, location, quantity }).then(json<CollectionState>);
+
+export const moveCopies = (cardId: string, finish: Finish, location: string, move: { location?: string; finish?: Finish; quantity: number }) =>
+  send('collection', 'PATCH', { cardId, finish, location, move }).then(json<CollectionState>);
+
+export interface CollectionImport {
+  format: string;
+  copies: number;
+  unique: number;
+  missing: string[];
+  /** Lines whose set and number were a different card: found by name instead. */
+  byName: string[];
+  unreadable: string[];
+}
+
+export const importCollection = (text: string, location: string) =>
+  send('collection/import', 'POST', { text, location }).then(json<CollectionImport>);
+
+export const collectionExportUrl = () => url('collection/export');
+
+export const addLocation = (name: string, kind: LocationKind = 'box') =>
+  send('collection/locations', 'POST', { name, kind }).then(json<{ locations: Location[] }>);
+
+export const renameLocation = (from: string, to: string, kind?: LocationKind) =>
+  send('collection/locations', 'PATCH', { from, to, kind }).then(json<{ locations: Location[] }>);
+
+export const deleteLocation = (name: string) =>
+  fetch(url(`collection/locations?name=${encodeURIComponent(name)}`), { method: 'DELETE' }).then(json<{ locations: Location[] }>);
+
+export type DeckOwnership = Ownership & { fetch: string; buy: string; moved?: number };
+
+export const deckOwnership = (listId: string) => fetch(url(`lists/${listId}/collection`)).then(json<DeckOwnership>);
+
+export type DeckCollectionAction =
+  | { action: 'pull'; key: string; quantity?: number; from?: { cardId: string; finish: Finish; location: string } }
+  | { action: 'pullAll' }
+  | { action: 'take'; fromListId: string; key: string; quantity?: number }
+  | { action: 'return'; key?: string; quantity?: number; to?: string }
+  | { action: 'proxies'; cardId: string; proxies: number };
+
+export const deckCollection = (listId: string, act: DeckCollectionAction) =>
+  send(`lists/${listId}/collection`, 'POST', act).then(json<DeckOwnership>);

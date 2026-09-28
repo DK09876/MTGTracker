@@ -291,6 +291,7 @@ export default function SearchPage() {
           onTab={s.openTab}
           loading={s.tabLoading}
           inLists={s.inLists}
+          owned={s.owned}
           onSort={s.resort}
           onLoadMore={answer ? s.loadMore : undefined}
           loadingMore={s.loadingMore}

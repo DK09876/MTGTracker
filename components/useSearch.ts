@@ -41,6 +41,8 @@ export function useSearch() {
   const [tabLoading, setTabLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [inLists, setInLists] = useState<Record<string, string[]>>({});
+  // Copies the profile owns of each card shown, by card id.
+  const [owned, setOwned] = useState<Record<string, number>>({});
   const [status, setStatus] = useState<Status>('idle');
   // The EDHREC tab narrows by what was asked for; it can be switched to the
   // whole search, and back.
@@ -62,6 +64,7 @@ export function useSearch() {
       const result = await request();
       if (id !== runId.current) return;
       setInLists((prev) => ({ ...prev, ...result.inLists }));
+      setOwned((prev) => ({ ...prev, ...result.owned }));
       show(result);
       setStatus('idle');
     } catch (e) {
@@ -96,6 +99,7 @@ export function useSearch() {
       if (id !== runId.current) return;
       statedEdhrec.current = views.edhrec;
       setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setOwned((prev) => ({ ...prev, ...r.owned }));
       setViews((v) => ({ ...v, edhrec: r.edhrec ?? null }));
       setEdhrecFull(true);
     } catch (e) {
@@ -143,6 +147,7 @@ export function useSearch() {
       });
       if (id !== runId.current) return;
       setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setOwned((prev) => ({ ...prev, ...r.owned }));
       setViews((v) => {
         if (!v.cards) return v;
         const seen = new Set(v.cards.cards.map((c) => c.id));
@@ -179,12 +184,14 @@ export function useSearch() {
         const r = await api.combosFor(commander);
         if (id !== runId.current) return;
         setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setOwned((prev) => ({ ...prev, ...r.owned }));
         setViews((v) => ({ ...v, combos: { combos: r.combos ?? [], cards: r.cards, note: r.interpretation.note } }));
       } else {
         // Came from a combo search: fetch "everything for this commander".
         const r = await api.runQuery('', { commander });
         if (id !== runId.current) return;
         setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setOwned((prev) => ({ ...prev, ...r.owned }));
         setViews((v) => ({
           ...v,
           cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
@@ -199,7 +206,7 @@ export function useSearch() {
   };
 
   return {
-    answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists,
+    answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists, owned,
     status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull,
   };
 }

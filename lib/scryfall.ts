@@ -241,7 +241,7 @@ export async function findCommanders(mention: string): Promise<ScryfallCard[]> {
 const COLLECTION_MAX = 75;
 
 /** A way to name one card to Scryfall's collection endpoint. */
-export type Identifier = { name: string } | { set: string; collector_number: string };
+export type Identifier = { id: string } | { name: string } | { set: string; collector_number: string };
 
 /**
  * Many cards in as few requests as Scryfall allows. What it cannot find is

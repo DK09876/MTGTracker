@@ -104,7 +104,7 @@ async function lookUp(entries: Entry[], collection: Collection, printings: boole
   const out = new Map<Entry, ScryfallCard>();
   entries.forEach((entry, i) => {
     const id = identifiers[i];
-    const card = 'set' in id ? byPrinting.get(printingKey(id.set, id.collector_number)) : byName.get(front(id.name));
+    const card = 'set' in id ? byPrinting.get(printingKey(id.set, id.collector_number)) : 'name' in id ? byName.get(front(id.name)) : undefined;
     if (card) out.set(entry, card);
   });
   return out;

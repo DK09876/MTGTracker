@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { ownedCounts } from '@/lib/collection';
 import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { searchCards, ScryfallError } from '@/lib/scryfall';
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
   const page = Number(params.get('page') ?? '1') || 1;
 
   if (!query.trim()) {
-    return NextResponse.json({ cards: [], totalCards: 0, hasMore: false, inLists: {} });
+    return NextResponse.json({ cards: [], totalCards: 0, hasMore: false, inLists: {}, owned: {} });
   }
 
   try {
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ...result,
       inLists: listsHolding(result.cards.map((c) => c.id), profileOf(request)),
+      owned: ownedCounts(profileOf(request), result.cards),
     });
   } catch (error) {
     if (error instanceof ScryfallError) {

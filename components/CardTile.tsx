@@ -19,6 +19,8 @@ import { steady } from '@/lib/steady-tap';
 interface Props {
   card: ScryfallCard;
   inLists?: string[];
+  /** Copies owned, any printing. */
+  owned?: number;
   onSelect: (card: ScryfallCard) => void;
   onAdd?: (card: ScryfallCard) => void;
   footer?: React.ReactNode;
@@ -26,7 +28,7 @@ interface Props {
   finish?: Finish;
 }
 
-export default function CardTile({ card, inLists, onSelect, onAdd, footer, finish = 'nonfoil' }: Props) {
+export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer, finish = 'nonfoil' }: Props) {
   const image = imageOf(card, 'normal');
   const usd = priceOf(card, finish);
 
@@ -59,6 +61,11 @@ export default function CardTile({ card, inLists, onSelect, onAdd, footer, finis
             in {inLists.length === 1 ? inLists[0] : `${inLists.length} lists`}
           </span>
         )}
+        {owned ? (
+          <span className="absolute bottom-2 left-2 rounded-full bg-[#14120f]/85 px-2 py-0.5 text-[11px] font-semibold text-[var(--foreground)] ring-1 ring-[var(--border)]" title="In your collection, any printing">
+            ✓ Own {owned}
+          </span>
+        ) : null}
       </button>
 
       <div className="flex flex-1 flex-col gap-2 p-3">

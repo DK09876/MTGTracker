@@ -21,6 +21,7 @@ import { dirname } from 'path';
 
 import { Database } from 'node-sqlite3-wasm';
 
+import { giveBack, settle } from './collection';
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
 import type { RecentSearch, Replay } from './recent';
@@ -149,6 +150,43 @@ function open(): Database {
       PRIMARY KEY (day, model)
     );
   `);
+  // What each profile owns, where it is kept, and which copies decks have
+  // taken - see collection.ts. A copy is in a box or in a deck, never both.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS collection_cards (
+      profileId TEXT NOT NULL,
+      cardId TEXT NOT NULL,
+      finish TEXT NOT NULL DEFAULT 'nonfoil',
+      location TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL,
+      addedAt TEXT NOT NULL,
+      PRIMARY KEY (profileId, cardId, finish, location)
+    );
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS collection_locations (
+      profileId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'box',
+      createdAt TEXT NOT NULL,
+      PRIMARY KEY (profileId, name)
+    );
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS deck_pulls (
+      listId TEXT NOT NULL,
+      cardId TEXT NOT NULL,
+      finish TEXT NOT NULL DEFAULT 'nonfoil',
+      fromLocation TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL,
+      PRIMARY KEY (listId, cardId, finish, fromLocation)
+    );
+  `);
+  // How many of a deck row's copies are proxies: they fill the slot without
+  // coming from the collection.
+  if (!cardColumns.some((c) => c.name === 'proxies')) {
+    db.run(`ALTER TABLE list_cards ADD COLUMN proxies INTEGER NOT NULL DEFAULT 0`);
+  }
   // Each profile's recent searches, and how to run each again - see recent.ts.
   db.run(`
     CREATE TABLE IF NOT EXISTS recent_searches (
@@ -315,6 +353,8 @@ export function setCommander(listId: string, commander: ScryfallCard | null, fin
   if (commander) storeCard(commander);
   open().run('UPDATE lists SET commanderId = ?, commanderFinish = ?, updatedAt = ? WHERE id = ?',
     [commander?.id ?? null, finish, now(), listId]);
+  // The old commander's copy goes back to its box.
+  settle(listId);
 }
 
 export function renameList(id: string, name: string, note?: string): void {
@@ -328,6 +368,9 @@ export function renameList(id: string, name: string, note?: string): void {
 
 export function deleteList(id: string): void {
   const database = open();
+  // Copies the deck took go back to the boxes they came from first.
+  giveBack(id);
+  database.run('DELETE FROM deck_pulls WHERE listId = ?', [id]);
   // The membership rows are meaningless without the list; the cards
   // themselves stay, since other lists may hold them.
   database.run('DELETE FROM list_cards WHERE listId = ?', [id]);
@@ -352,8 +395,11 @@ export interface ListedCard {
   addedAt: string;
 }
 
+/** The open database, for modules that keep their own tables here (collection.ts). */
+export const database = (): Database => open();
+
 /** Store (or refresh) a card's whole Scryfall record. */
-function storeCard(card: ScryfallCard): void {
+export function storeCard(card: ScryfallCard): void {
   const usd = card.prices?.usd ?? card.prices?.usd_foil ?? null;
   open().run(
     `INSERT INTO cards (id, name, setCode, rarity, usd, data, fetchedAt)
@@ -399,10 +445,11 @@ export function setQuantity(listId: string, cardId: string, quantity: number): v
   if (quantity <= 0) {
     database.run('DELETE FROM list_cards WHERE listId = ? AND cardId = ?', [listId, cardId]);
   } else {
-    database.run('UPDATE list_cards SET quantity = ? WHERE listId = ? AND cardId = ?',
-      [quantity, listId, cardId]);
+    database.run('UPDATE list_cards SET quantity = ?, proxies = MIN(proxies, ?) WHERE listId = ? AND cardId = ?',
+      [quantity, quantity, listId, cardId]);
   }
   database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+  settle(listId);
 }
 
 /**
@@ -425,6 +472,7 @@ export function replaceListCards(
       );
     }
     database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+    settle(listId);
     database.run('COMMIT');
   } catch (error) {
     database.run('ROLLBACK');
@@ -459,6 +507,8 @@ export function updateListCard(
       }
     }
     database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+    // A card moved to the maybeboard gives its copies back.
+    settle(listId);
     database.run('COMMIT');
   } catch (error) {
     database.run('ROLLBACK');

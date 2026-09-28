@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { ownedCounts } from '@/lib/collection';
 import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
@@ -44,8 +45,13 @@ function deps(): Deps {
 async function respond(request: Request, work: () => Promise<Interpreted>) {
   try {
     const result = await work();
-    const ids = [...result.cards, ...(result.edhrec?.cards ?? [])].map((c) => c.id);
-    return NextResponse.json({ ...result, inLists: listsHolding([...new Set(ids)], profileOf(request)) });
+    const cards = [...result.cards, ...(result.edhrec?.cards ?? [])];
+    const profile = profileOf(request);
+    return NextResponse.json({
+      ...result,
+      inLists: listsHolding([...new Set(cards.map((c) => c.id))], profile),
+      owned: ownedCounts(profile, cards),
+    });
   } catch (error) {
     if (error instanceof ScryfallError || error instanceof SpellbookError) {
       // 400 usually means the query syntax is wrong, which is worth showing.
