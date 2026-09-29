@@ -26,7 +26,7 @@ import type { Board } from './decklist';
 import type { BracketFloor } from './bracket';
 import type { CutGroup } from './cuts';
 import type { Health } from './health';
-import type { RecentSearch, Replay } from './recent';
+import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
@@ -110,6 +110,19 @@ export const rememberSearch = (text: string, replay: Replay) =>
 export const forgetSearch = (text: string | null) =>
   fetch(url(text === null ? 'recent' : `recent?text=${encodeURIComponent(text)}`), { method: 'DELETE' })
     .then(json<{ recent: RecentSearch[] }>).then((b) => b.recent);
+
+// --- saved searches --------------------------------------------------------------
+
+export const savedSearches = () => fetch(url('saved')).then(json<{ saved: SavedSearch[] }>).then((b) => b.saved);
+
+export const saveSearch = (name: string, session: Session) =>
+  send('saved', 'POST', { name, session }).then(json<{ id: string; saved: SavedSearch[] }>);
+
+export const updateSavedSearch = (id: string, change: { name?: string; session?: Session }) =>
+  send('saved', 'PATCH', { id, ...change }).then(json<{ saved: SavedSearch[] }>).then((b) => b.saved);
+
+export const forgetSavedSearch = (id: string) =>
+  fetch(url(`saved?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ saved: SavedSearch[] }>).then((b) => b.saved);
 
 export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })

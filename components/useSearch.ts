@@ -169,6 +169,69 @@ export function useSearch() {
     }
   };
 
+  /**
+   * Put a search back as it was left: the pages of the Scryfall view that
+   * were loaded, the EDHREC tab matched to the full search, and the tab that
+   * was open. Takes the answer just shown, since state has not caught up yet.
+   */
+  const resumeView = async (result: api.AskResponse, left: { tab?: Tab; pages?: number; edhrecFull?: boolean }) => {
+    const id = runId.current;
+    const { query, commander, sort, constraints, kind } = result.interpretation;
+    const name = commander?.name;
+    const merge = (r: api.SearchResponse) => {
+      setInLists((prev) => ({ ...prev, ...r.inLists }));
+      setOwned((prev) => ({ ...prev, ...r.owned }));
+    };
+    try {
+      if (kind !== 'combos' && left.pages && left.pages > 1 && result.hasMore) {
+        let cards = result.cards;
+        let stats = { ...result.stats };
+        let hasMore: boolean = result.hasMore;
+        let page = 1;
+        for (let next = 2; next <= left.pages && hasMore; next++) {
+          const r = await api.runQuery(query, { commander: name, sort, edhrec: false, page: next });
+          if (id !== runId.current) return;
+          merge(r);
+          const seen = new Set(cards.map((c) => c.id));
+          cards = [...cards, ...r.cards.filter((c) => !seen.has(c.id))];
+          stats = { ...stats, ...r.stats };
+          hasMore = r.hasMore;
+          page = next;
+        }
+        setViews((v) => (v.cards ? { ...v, cards: { ...v.cards, cards, stats, page, hasMore } } : v));
+      }
+      if (left.edhrecFull && name && constraints !== undefined && constraints !== query) {
+        const r = await api.runQuery(query, { commander: name, sort });
+        if (id !== runId.current) return;
+        merge(r);
+        statedEdhrec.current = viewsOf(result).edhrec;
+        setViews((v) => ({ ...v, edhrec: r.edhrec ?? null }));
+        setEdhrecFull(true);
+      }
+      if (left.tab && name) {
+        const have = viewsOf(result);
+        if (left.tab === 'combos' && !have.combos) {
+          const r = await api.combosFor(name);
+          if (id !== runId.current) return;
+          merge(r);
+          setViews((v) => ({ ...v, combos: { combos: r.combos ?? [], cards: r.cards, note: r.interpretation.note } }));
+        } else if (left.tab !== 'combos' && !have.cards) {
+          const r = await api.runQuery('', { commander: name });
+          if (id !== runId.current) return;
+          merge(r);
+          setViews((v) => ({
+            ...v,
+            cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
+            edhrec: r.edhrec ?? null,
+          }));
+        }
+      }
+      if (left.tab && id === runId.current) setTab(left.tab);
+    } catch {
+      // What could not be put back stays as the search first showed it.
+    }
+  };
+
   /** Open a tab, fetching its view the first time. */
   const openTab = async (next: Tab) => {
     setTab(next);
@@ -207,6 +270,6 @@ export function useSearch() {
 
   return {
     answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists, owned,
-    status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull,
+    status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull, resumeView,
   };
 }

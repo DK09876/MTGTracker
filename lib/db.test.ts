@@ -239,3 +239,21 @@ describe('recent searches', () => {
     expect(db.recentSearches('dk', 100)).toHaveLength(30);
   });
 });
+
+describe('saved searches', () => {
+  const session = { thread: ['green ramp for omnath'], replay: { kind: 'query' as const, query: 't:sorcery' } };
+
+  it('keeps each profile its own, renames, updates and forgets', async () => {
+    const db = await load();
+    const id = db.saveSearch('dk', 'Omnath ramp', session)!;
+    db.saveSearch('kevin', 'Vivi combos', { thread: ['combos for vivi'], replay: { kind: 'combos', commander: 'Vivi Ornitier' } });
+    expect(db.savedSearches('dk').map((s) => s.name)).toEqual(['Omnath ramp']);
+    expect(db.updateSavedSearch('kevin', id, { name: 'stolen' })).toBe(false);
+    db.updateSavedSearch('dk', id, { name: 'Omnath ramp, instants', session: { ...session, thread: ['green ramp for omnath', 'only instants'] } });
+    expect(db.savedSearches('dk')[0]).toMatchObject({ name: 'Omnath ramp, instants', session: { thread: ['green ramp for omnath', 'only instants'] } });
+    db.deleteSavedSearch('kevin', id);
+    expect(db.savedSearches('dk')).toHaveLength(1);
+    db.deleteSavedSearch('dk', id);
+    expect(db.savedSearches('dk')).toEqual([]);
+  });
+});

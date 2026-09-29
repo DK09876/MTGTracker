@@ -213,6 +213,21 @@ double-faced card): 12 of 16 identified from a camera-sized crop, 8 of those
 to the exact printing; 11 of 16 from a loose photo of the card on a table;
 none misidentified. Old frames without a set code are the weak spot.
 
+### Saved searches
+
+**Save search** keeps a search under a name to carry on later, as it was
+left: the request and every refinement (so refining again builds on all of
+it), the tab, the order, how many pages were loaded, and the EDHREC tab's
+narrowing. Saved searches are listed first on the empty Search page and in
+the empty search box; open one and it comes back as it was - results fresh
+from Scryfall, no model requests - with **Save changes** if it has moved on.
+They can be renamed or forgotten (with undo). **New search** leaves the one
+on screen for the lists.
+
+The search on screen is kept the same way on each device, where it was
+scrolled to included, so a reload or iOS restarting the app lands exactly
+where it was.
+
 ### Recent searches
 
 Every search is kept for its profile - on the server, so it follows you to
