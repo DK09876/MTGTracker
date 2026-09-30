@@ -124,13 +124,21 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
     `Scryfall asked us to slow down - try again in ${Math.ceil((pace.coolUntil - Date.now()) / 1000)} seconds`, 429,
   );
   if (Date.now() < pace.coolUntil) throw cooling();
-  const response = await throttle(() => (Date.now() < pace.coolUntil
-    ? Promise.reject(cooling())
-    // MTG_DEBUG_SCRYFALL=1 logs each request's start, to check the pacing.
-    : (process.env.MTG_DEBUG_SCRYFALL && console.log(`[scryfall] ${Date.now() % 100000} ${path.slice(0, 60)}`),
-    fetch(`${API}${path}`, body === undefined
-      ? { headers: HEADERS }
-      : { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))), path);
+  let response: Response;
+  try {
+    response = await throttle(() => (Date.now() < pace.coolUntil
+      ? Promise.reject(cooling())
+      // MTG_DEBUG_SCRYFALL=1 logs each request's start, to check the pacing.
+      : (process.env.MTG_DEBUG_SCRYFALL && console.log(`[scryfall] ${Date.now() % 100000} ${path.slice(0, 60)}`),
+      // Never wait forever on Scryfall: a stalled request fails, and the page says so.
+      fetch(`${API}${path}`, body === undefined
+        ? { headers: HEADERS, signal: AbortSignal.timeout(20_000) }
+        : { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) }))), path);
+  } catch (error) {
+    if (error instanceof ScryfallError) throw error;
+    const slow = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+    throw new ScryfallError(slow ? 'Scryfall did not answer in time - try again' : 'Could not reach Scryfall', slow ? 504 : 502);
+  }
   if (response.status === 429) {
     const after = Number(response.headers.get('retry-after'));
     pace.coolUntil = Date.now() + (Number.isFinite(after) && after > 0 ? after * 1000 : COOL_MS);

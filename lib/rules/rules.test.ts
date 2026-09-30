@@ -128,6 +128,15 @@ describe('askRules', () => {
     expect(r.turn.answer.citations).toEqual([{ id: 'R1', why: '' }, { id: 'C1', why: '' }]);
   });
 
+  it('takes a follow-up\'s "kratos" as the Kratos already in the conversation, without asking', async () => {
+    const model = vi.fn().mockResolvedValue({ data: answer, model: 'test' });
+    const first = await askRules({ question: 'blade of selves on kratos', picks: { kratos: 'Kratos, Stoic Father' } }, deps(model));
+    if (!('turn' in first)) throw new Error('expected an answer');
+    const next = await askRules({ question: 'Can I choose which Kratos token stays?', earlier: [first.turn] }, deps(model));
+    expect('turn' in next).toBe(true);
+    if ('turn' in next) expect(next.turn.cards).toContain('Kratos, Stoic Father');
+  });
+
   it('keeps the conversation\'s cards for a follow-up that does not name them', async () => {
     const model = vi.fn().mockResolvedValue({ data: answer, model: 'test' });
     const first = await askRules({ question: 'blade of selves on kratos, stoic father' }, deps(model));
