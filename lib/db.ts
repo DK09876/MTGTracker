@@ -24,7 +24,7 @@ import { Database } from 'node-sqlite3-wasm';
 import { giveBack, settle } from './collection';
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
-import type { RecentSearch, Replay } from './recent';
+import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { TagJob } from './tag-jobs';
 import type { CardTag, DeckTags, Tag, TagKind, TagStatus } from './tags';
 
@@ -187,6 +187,17 @@ function open(): Database {
   if (!cardColumns.some((c) => c.name === 'proxies')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN proxies INTEGER NOT NULL DEFAULT 0`);
   }
+  // Searches kept under a name to carry on later - see recent.ts (Session).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS saved_searches (
+      id TEXT PRIMARY KEY,
+      profileId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      session TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+  `);
   // Each profile's recent searches, and how to run each again - see recent.ts.
   db.run(`
     CREATE TABLE IF NOT EXISTS recent_searches (
@@ -858,6 +869,46 @@ export function saveRecentSearch(profileId: string, text: string, replay: Replay
 export function forgetRecentSearch(profileId: string, text: string | null): void {
   if (text === null) open().run('DELETE FROM recent_searches WHERE profileId = ?', [profileId]);
   else open().run('DELETE FROM recent_searches WHERE profileId = ? AND text = ?', [profileId, text]);
+}
+
+// --- saved searches --------------------------------------------------------
+
+const MAX_SAVED = 100;
+
+/** A profile's saved searches, most recently touched first. */
+export function savedSearches(profileId: string): SavedSearch[] {
+  return (open().all(
+    'SELECT id, name, session, createdAt, updatedAt FROM saved_searches WHERE profileId = ? ORDER BY updatedAt DESC', [profileId],
+  ) as Array<{ id: string; name: string; session: string; createdAt: string; updatedAt: string }>)
+    .map((r) => ({ ...r, session: JSON.parse(r.session) as Session }));
+}
+
+/** Keep a search under a name. Answers its id, or null past the limit. */
+export function saveSearch(profileId: string, name: string, session: Session): string | null {
+  const database = open();
+  const count = (database.get('SELECT COUNT(*) AS n FROM saved_searches WHERE profileId = ?', [profileId]) as { n: number }).n;
+  if (count >= MAX_SAVED) return null;
+  const id = randomUUID();
+  const stamp = now();
+  database.run(
+    'INSERT INTO saved_searches (id, profileId, name, session, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, profileId, name, JSON.stringify(session), stamp, stamp],
+  );
+  return id;
+}
+
+/** Rename a saved search, or save where it has got to. Answers false if it is not this profile's. */
+export function updateSavedSearch(profileId: string, id: string, change: { name?: string; session?: Session }): boolean {
+  const database = open();
+  const row = database.get('SELECT 1 FROM saved_searches WHERE id = ? AND profileId = ?', [id, profileId]);
+  if (!row) return false;
+  if (change.name) database.run('UPDATE saved_searches SET name = ?, updatedAt = ? WHERE id = ?', [change.name, now(), id]);
+  if (change.session) database.run('UPDATE saved_searches SET session = ?, updatedAt = ? WHERE id = ?', [JSON.stringify(change.session), now(), id]);
+  return true;
+}
+
+export function deleteSavedSearch(profileId: string, id: string): void {
+  open().run('DELETE FROM saved_searches WHERE id = ? AND profileId = ?', [id, profileId]);
 }
 
 /** A deck's latest tagging job, as saved. */

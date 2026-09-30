@@ -26,9 +26,9 @@ interface Props {
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onPickName: (name: string) => void;
-  /** Recent searches, newest first, offered when the box is empty. */
-  recent?: string[];
-  onPickRecent?: (text: string) => void;
+  /** Saved searches then recent ones, offered when the box is empty. */
+  recent?: Array<{ text: string; saved?: boolean }>;
+  onPickRecent?: (text: string, saved: boolean) => void;
 }
 
 const wantsSuggestions = (text: string) => {
@@ -59,11 +59,12 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
 
   // An empty box offers recent searches; typing a name offers card names.
   const showingRecent = open && !value.trim() && recent.length > 0 && !!onPickRecent;
-  const visible = showingRecent ? recent.slice(0, 8) : open && wantsSuggestions(value) ? names : [];
+  const offered = showingRecent ? recent.slice(0, 10) : [];
+  const visible = showingRecent ? offered.map((r) => r.text) : open && wantsSuggestions(value) ? names : [];
 
-  const pick = (item: string) => {
+  const pick = (item: string, i: number) => {
     setOpen(false);
-    if (showingRecent) onPickRecent?.(item);
+    if (showingRecent) onPickRecent?.(item, !!offered[i]?.saved);
     else onPickName(item);
   };
 
@@ -78,7 +79,7 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
       setOpen(false);
     } else if (e.key === 'Enter' && active >= 0 && visible[active]) {
       e.preventDefault();
-      pick(visible[active]);
+      pick(visible[active], active);
     }
   };
 
@@ -123,21 +124,23 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
             className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-lg"
           >
             {showingRecent && (
-              <li role="presentation" className="px-4 pb-1 pt-2 text-xs uppercase tracking-wide text-[var(--muted)]">Recent</li>
+              <li role="presentation" className="px-4 pb-1 pt-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                {offered.some((r) => r.saved) ? 'Saved and recent' : 'Recent'}
+              </li>
             )}
             {visible.map((name, i) => (
               <li
-                key={name}
+                key={`${i}:${name}`}
                 id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === active}
                 // mousedown, not click: click fires after the input's blur
                 // has already closed the list.
-                onMouseDown={(e) => { e.preventDefault(); pick(name); }}
+                onMouseDown={(e) => { e.preventDefault(); pick(name, i); }}
                 onMouseEnter={() => setActive(i)}
                 className={`cursor-pointer truncate px-4 py-2.5 text-sm ${i === active ? 'bg-[var(--surface-hover)]' : ''}`}
               >
-                {showingRecent && <span aria-hidden className="mr-2 text-[var(--muted)]">↺</span>}
+                {showingRecent && <span aria-hidden className={`mr-2 ${offered[i]?.saved ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}`}>{offered[i]?.saved ? '★' : '↺'}</span>}
                 {name}
               </li>
             ))}

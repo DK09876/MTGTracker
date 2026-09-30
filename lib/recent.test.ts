@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { cleanText, parseReplay, replayOf } from './recent';
+import { cleanText, parseReplay, parseSession, replayOf, sameSession } from './recent';
 
 const interpretation = {
   via: 'ai' as const, kind: 'cards' as const, query: 't:enchantment',
@@ -41,5 +41,28 @@ describe('cleanText', () => {
     expect(cleanText('  green   ramp ')).toBe('green ramp');
     expect(cleanText('   ')).toBeNull();
     expect(cleanText(3)).toBeNull();
+  });
+});
+
+describe('sessions', () => {
+  const replay = { kind: 'query' as const, query: 't:instant', commander: 'Omnath, Locus of Rage' };
+
+  it('keeps what was asked and what was on screen, and checks it', () => {
+    expect(parseSession({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3, edhrecFull: true, junk: 1 }))
+      .toEqual({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3, edhrecFull: true });
+    expect(parseSession({ thread: ['x'], replay, tab: 'nope', pages: 999 })).toEqual({ thread: ['x'], replay, pages: 10 });
+    expect(parseSession({ thread: ['x'] })).toBeNull();
+  });
+
+  it('marks a card search, so it comes back as one', () => {
+    expect(replayOf({ interpretation: { via: 'ai', kind: 'card', query: '!"Opt"' } } as never)).toMatchObject({ card: true });
+  });
+
+  it('tells a changed session from the same one, scroll aside', () => {
+    const a = { thread: ['a'], replay, tab: 'cards' as const, scrollY: 100 };
+    expect(sameSession(a, { ...a, scrollY: 900 })).toBe(true);
+    expect(sameSession(a, { ...a, tab: 'edhrec' })).toBe(false);
+    expect(sameSession(a, { ...a, thread: ['a', 'b'] })).toBe(false);
+    expect(sameSession(a, { ...a, pages: 1 })).toBe(true);
   });
 });
