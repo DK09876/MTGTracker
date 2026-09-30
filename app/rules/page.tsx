@@ -1,0 +1,272 @@
+'use client';
+
+/**
+ * Rules: ask how cards interact, or how a rule works, and get an answer drawn
+ * from the official sources - each card's Oracle text and Wizards' rulings,
+ * the Comprehensive Rules, and the MTG Wiki for mechanics - with each claim
+ * numbered to the source it rests on.
+ *
+ * Like search: a word that could be several cards ("kratos") is asked about
+ * first; follow-ups carry the conversation's cards; every conversation is
+ * kept (Recent), and can be starred to keep for good (Saved). Answers are
+ * stored with their sources, so opening one again costs no model request.
+ */
+
+import Image from 'next/image';
+import { useCallback, useEffect, useState } from 'react';
+
+import RulesAnswer from '@/components/RulesAnswer';
+import * as api from '@/lib/api';
+import type { RulesThread, RulesThreadSummary } from '@/lib/db';
+import { getProfile } from '@/lib/profile';
+import type { Budget } from '@/lib/quota';
+import { dismissKeyboard, steady } from '@/lib/steady-tap';
+
+const EXAMPLES = [
+  'How does Blade of Selves interact with Kratos?',
+  'Do "when a creature dies" abilities trigger when the whole board is wiped with Blasphemous Act?',
+  'Does the legend rule apply to token copies?',
+  'Can I respond to a spell that says it can\'t be countered?',
+];
+
+const input = 'w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-base outline-none focus:border-[var(--accent)]';
+const button = 'min-h-10 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
+const primary = 'min-h-11 rounded-xl bg-[var(--accent)] px-5 font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
+
+const currentKey = () => `mtg-rules:${getProfile()}`;
+
+export default function RulesPage() {
+  const [threads, setThreads] = useState<RulesThreadSummary[]>([]);
+  const [budget, setBudget] = useState<Budget | null>(null);
+  const [thread, setThread] = useState<RulesThread | null>(null);
+  const [question, setQuestion] = useState('');
+  const [followUp, setFollowUp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Waiting on "which card did you mean?": the question, and the choices.
+  const [choosing, setChoosing] = useState<{ question: string; choice: api.RulesChoice[]; picks: Record<string, string> } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+
+  const refresh = useCallback(() => api.rulesThreads().then((r) => { setThreads(r.threads); setBudget(r.budget); }).catch(() => {}), []);
+
+  const open = useCallback(async (id: string | null) => {
+    setError(null);
+    setChoosing(null);
+    try { if (id) localStorage.setItem(currentKey(), id); else localStorage.removeItem(currentKey()); } catch { /* not remembered */ }
+    if (!id) { setThread(null); return; }
+    try {
+      setThread(await api.rulesThread(id));
+      window.scrollTo(0, 0);
+    } catch {
+      setThread(null);
+    }
+  }, []);
+
+  // On opening: the lists, and the conversation that was open.
+  useEffect(() => {
+    refresh();
+    let id: string | null = null;
+    try { id = localStorage.getItem(currentKey()); } catch { /* none */ }
+    const timer = id ? setTimeout(() => open(id), 0) : undefined;
+    return () => clearTimeout(timer);
+  }, [refresh, open]);
+
+  const ask = async (text: string, picks: Record<string, string> = {}, inThread = thread) => {
+    const q = text.trim();
+    if (!q || busy) return;
+    dismissKeyboard();
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await api.askRules(q, { threadId: inThread?.id, picks });
+      if (r.budget) setBudget(r.budget);
+      if (r.choice) {
+        setChoosing({ question: q, choice: r.choice, picks });
+      } else if (r.thread) {
+        setChoosing(null);
+        setThread(r.thread);
+        setQuestion('');
+        setFollowUp('');
+        try { localStorage.setItem(currentKey(), r.thread.id); } catch { /* not remembered */ }
+        refresh();
+        // The new answer, at the bottom of the conversation.
+        setTimeout(() => document.getElementById(`turn-${r.thread!.turns.length - 1}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not answer that');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = (mention: string, name: string) => {
+    if (!choosing) return;
+    const picks = { ...choosing.picks, [mention]: name };
+    const rest = choosing.choice.filter((c) => !picks[c.mention]);
+    if (rest.length) setChoosing({ ...choosing, picks });
+    else ask(choosing.question, picks);
+  };
+
+  const star = async (t: RulesThread) => {
+    const r = await api.updateRulesThread(t.id, { starred: !t.starred });
+    setThread(r.thread);
+    setThreads(r.threads);
+  };
+  const rename = async (t: RulesThread, title: string) => {
+    const r = await api.updateRulesThread(t.id, { title });
+    setThread(r.thread);
+    setThreads(r.threads);
+    setRenaming(null);
+  };
+  const forget = async (id: string) => {
+    setThreads(await api.forgetRulesThread(id));
+    if (thread?.id === id) open(null);
+  };
+
+  const left = budget?.remaining;
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-semibold">Rules</h1>
+        {thread && <button onClick={() => open(null)} className={button}>New question</button>}
+      </div>
+      <p className="mt-1 text-sm text-[var(--muted)]">
+        How cards interact, or how a rule works. Answers come from the cards&apos; official rulings, the Comprehensive Rules and the MTG Wiki, with every claim linked to its source.
+        {left !== undefined && <> {' '}One AI request per question · {left} left today.</>}
+      </p>
+
+      {!thread && (
+        <form className="mt-4 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(question, {}, null); }}>
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(question, {}, null); } }}
+            rows={3}
+            maxLength={600}
+            placeholder="How does Blade of Selves interact with Kratos?"
+            aria-label="Rules question"
+            enterKeyHint="send"
+            className={input}
+          />
+          <button disabled={busy || !question.trim()} className={`${primary} self-end`}>{busy ? 'Reading the rules…' : 'Ask'}</button>
+        </form>
+      )}
+
+      {busy && (
+        <p className="mt-4 text-center text-sm text-[var(--muted)]" role="status">
+          Finding the cards, their rulings and the rules that apply, then working it out - about ten seconds.
+        </p>
+      )}
+      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+
+      {choosing && !busy && (
+        <section className="mt-5 flex flex-col gap-5" aria-label="Which card?">
+          {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
+            <div key={c.mention}>
+              <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {c.options.map((o) => (
+                  <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
+                    {o.image && <Image src={o.image} alt="" width={244} height={340} className="w-full rounded-lg" unoptimized />}
+                    <span>{o.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>
+        </section>
+      )}
+
+      {!thread && !choosing && !busy && (
+        <>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+            <span>Try:</span>
+            {EXAMPLES.map((q) => (
+              <button key={q} onClick={() => { setQuestion(q); ask(q, {}, null); }} className="rounded-lg border border-[var(--border)] px-2 py-1 text-left text-xs hover:bg-[var(--surface)]">{q}</button>
+            ))}
+          </div>
+          <ThreadList title="Saved" threads={threads.filter((t) => t.starred)} onOpen={open} onForget={forget} />
+          <ThreadList title="Recent" threads={threads.filter((t) => !t.starred)} onOpen={open} onForget={forget} />
+        </>
+      )}
+
+      {thread && (
+        <div className="mt-4 flex flex-col gap-5">
+          <div className="flex flex-wrap items-center gap-2">
+            {renaming === null ? (
+              <>
+                <h2 className="min-w-0 flex-1 text-lg font-medium">{thread.title}</h2>
+                <button onClick={() => star(thread)} className={button} aria-pressed={thread.starred}>
+                  <span aria-hidden className={thread.starred ? 'text-[var(--accent)]' : ''}>{thread.starred ? '★' : '☆'}</span> {thread.starred ? 'Saved' : 'Save'}
+                </button>
+                <button onClick={() => setRenaming(thread.title)} className={button} aria-label="Rename">✎</button>
+              </>
+            ) : (
+              <form className="flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); if (renaming.trim()) rename(thread, renaming.trim()); }}>
+                <input value={renaming} onChange={(e) => setRenaming(e.target.value)} autoFocus maxLength={120} aria-label="Name" className={`${input} py-2`} />
+                <button className={button}>Save</button>
+                <button type="button" onClick={() => setRenaming(null)} className={button}>Cancel</button>
+              </form>
+            )}
+          </div>
+
+          {thread.turns.map((t, i) => (
+            <section key={i} id={`turn-${i}`} className="scroll-mt-20">
+              <p className="mb-2 ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-[var(--surface-hover)] px-4 py-2 text-sm">{t.question}</p>
+              {t.cards.length > 0 && (
+                <p className="mb-2 text-xs text-[var(--muted)]">About: {t.cards.join(', ')}</p>
+              )}
+              <RulesAnswer turn={t} index={i} onAsk={(q) => ask(q)} />
+            </section>
+          ))}
+
+          <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(followUp); }}>
+            <textarea
+              value={followUp}
+              onChange={(e) => setFollowUp(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(followUp); } }}
+              rows={2}
+              maxLength={600}
+              placeholder="Ask a follow-up - the cards above stay in the conversation"
+              aria-label="Follow-up question"
+              enterKeyHint="send"
+              className={input}
+            />
+            <button disabled={busy || !followUp.trim()} className={`${primary} self-end`}>{busy ? 'Reading the rules…' : 'Ask'}</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThreadList({ title, threads, onOpen, onForget }: {
+  title: string;
+  threads: RulesThreadSummary[];
+  onOpen: (id: string) => void;
+  onForget: (id: string) => void;
+}) {
+  if (!threads.length) return null;
+  return (
+    <section className="mt-5" aria-label={`${title} rules questions`}>
+      <h2 className="text-xs uppercase tracking-wide text-[var(--muted)]">{title}</h2>
+      <ul className="mt-1 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+        {threads.slice(0, 12).map((t) => (
+          <li key={t.id} className="flex items-center">
+            <button {...steady(() => onOpen(t.id))} className="flex min-h-12 min-w-0 flex-1 flex-col px-3 py-2 text-left hover:bg-[var(--surface)]">
+              <span className="truncate text-sm">
+                {t.starred && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{t.title}
+              </span>
+              <span className="truncate text-xs text-[var(--muted)]">
+                {t.questions > 1 ? `${t.questions} questions · ` : ''}{t.lastVerdict}
+              </span>
+            </button>
+            <button onClick={() => onForget(t.id)} aria-label={`Forget "${t.title}"`} className="flex min-h-11 min-w-11 items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)]">✕</button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

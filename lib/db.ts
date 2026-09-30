@@ -25,6 +25,7 @@ import { giveBack, settle } from './collection';
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
+import type { Turn } from './rules/answer';
 import type { TagJob } from './tag-jobs';
 import type { CardTag, DeckTags, Tag, TagKind, TagStatus } from './tags';
 
@@ -187,6 +188,19 @@ function open(): Database {
   if (!cardColumns.some((c) => c.name === 'proxies')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN proxies INTEGER NOT NULL DEFAULT 0`);
   }
+  // Rules conversations: each question and its answer with the sources it
+  // cited - see lib/rules. Starred ones are kept; the rest are recent.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rules_threads (
+      id TEXT PRIMARY KEY,
+      profileId TEXT NOT NULL,
+      title TEXT NOT NULL,
+      starred INTEGER NOT NULL DEFAULT 0,
+      turns TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+  `);
   // Searches kept under a name to carry on later - see recent.ts (Session).
   db.run(`
     CREATE TABLE IF NOT EXISTS saved_searches (
@@ -869,6 +883,83 @@ export function saveRecentSearch(profileId: string, text: string, replay: Replay
 export function forgetRecentSearch(profileId: string, text: string | null): void {
   if (text === null) open().run('DELETE FROM recent_searches WHERE profileId = ?', [profileId]);
   else open().run('DELETE FROM recent_searches WHERE profileId = ? AND text = ?', [profileId, text]);
+}
+
+// --- rules conversations ----------------------------------------------------
+
+export interface RulesThread {
+  id: string;
+  title: string;
+  starred: boolean;
+  turns: Turn[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RulesThreadSummary {
+  id: string;
+  title: string;
+  starred: boolean;
+  questions: number;
+  lastVerdict: string;
+  cards: string[];
+  updatedAt: string;
+}
+
+// Unstarred conversations beyond this are forgotten, oldest first.
+const MAX_RECENT_THREADS = 50;
+
+type ThreadRow = { id: string; title: string; starred: number; turns: string; createdAt: string; updatedAt: string };
+const toThread = (r: ThreadRow): RulesThread => ({ ...r, starred: r.starred === 1, turns: JSON.parse(r.turns) as Turn[] });
+
+export function rulesThreads(profileId: string): RulesThreadSummary[] {
+  return (open().all(
+    'SELECT id, title, starred, turns, createdAt, updatedAt FROM rules_threads WHERE profileId = ? ORDER BY updatedAt DESC', [profileId],
+  ) as ThreadRow[]).map(toThread).map((t) => ({
+    id: t.id, title: t.title, starred: t.starred, questions: t.turns.length, updatedAt: t.updatedAt,
+    lastVerdict: t.turns.at(-1)?.answer.verdict ?? '', cards: [...new Set(t.turns.flatMap((x) => x.cards))],
+  }));
+}
+
+export function rulesThread(profileId: string, id: string): RulesThread | null {
+  const row = open().get('SELECT id, title, starred, turns, createdAt, updatedAt FROM rules_threads WHERE id = ? AND profileId = ?', [id, profileId]) as ThreadRow | null;
+  return row ? toThread(row) : null;
+}
+
+/** A new conversation from its first answer; its question is its title until renamed. */
+export function startRulesThread(profileId: string, turn: Turn): string {
+  const database = open();
+  const id = randomUUID();
+  const stamp = now();
+  database.run(
+    'INSERT INTO rules_threads (id, profileId, title, starred, turns, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?, ?)',
+    [id, profileId, turn.question.slice(0, 120), JSON.stringify([turn]), stamp, stamp],
+  );
+  database.run(
+    `DELETE FROM rules_threads WHERE profileId = ? AND starred = 0 AND id NOT IN
+       (SELECT id FROM rules_threads WHERE profileId = ? AND starred = 0 ORDER BY updatedAt DESC LIMIT ?)`,
+    [profileId, profileId, MAX_RECENT_THREADS],
+  );
+  return id;
+}
+
+export function addRulesTurn(profileId: string, id: string, turn: Turn): boolean {
+  const thread = rulesThread(profileId, id);
+  if (!thread) return false;
+  open().run('UPDATE rules_threads SET turns = ?, updatedAt = ? WHERE id = ?', [JSON.stringify([...thread.turns, turn]), now(), id]);
+  return true;
+}
+
+export function updateRulesThread(profileId: string, id: string, change: { title?: string; starred?: boolean }): boolean {
+  const database = open();
+  if (!rulesThread(profileId, id)) return false;
+  if (change.title) database.run('UPDATE rules_threads SET title = ? WHERE id = ?', [change.title, id]);
+  if (change.starred !== undefined) database.run('UPDATE rules_threads SET starred = ? WHERE id = ?', [change.starred ? 1 : 0, id]);
+  return true;
+}
+
+export function deleteRulesThread(profileId: string, id: string): void {
+  open().run('DELETE FROM rules_threads WHERE id = ? AND profileId = ?', [id, profileId]);
 }
 
 // --- saved searches --------------------------------------------------------

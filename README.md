@@ -213,6 +213,40 @@ double-faced card): 12 of 16 identified from a camera-sized crop, 8 of those
 to the exact printing; 11 of 16 from a loose photo of the card on a table;
 none misidentified. Old frames without a set code are the weak spot.
 
+### Rules
+
+The **Rules** tab answers rules questions - "how does Blade of Selves
+interact with Kratos?", "do dies triggers happen when Blasphemous Act wipes
+the board?" - from the sources that decide them, and shows its working:
+
+- **Cards** named in the question are found without a model, against every
+  card name Scryfall knows; a word that could be several ("kratos") is asked
+  about first, with pictures. The game's own words ("clone", "stop") are only
+  a card when written with a capital.
+- **Evidence**, each with an id the answer cites:
+  - each card's **Oracle text** and **official rulings** (Wizards, via Scryfall),
+  - the **Comprehensive Rules** - the current text from magic.wizards.com,
+    fetched weekly and searched on the server, with glossary entries and the
+    rules they point to; a keyword's rules only when it is in play (myriad,
+    not Partner), and the legend rule when a legendary creature is copied,
+  - **MTG Wiki** pages (mtg.wiki, the active wiki) for keyword abilities -
+    read as pages, since the wiki asks tools to keep off its API; its text
+    is CC BY-NC-SA and is credited and linked.
+- **One model request** answers from that evidence alone: a verdict, the
+  steps, how sure (certain / likely / unsure), and numbered citations. A
+  citation to anything it was not given is dropped, and nothing is
+  "certain" without one.
+- **How it was worked out** is part of every answer: what was checked, the
+  rules edition, and each cited source quoted with a link to it - the rule
+  in the hyperlinked Comprehensive Rules (yawgatog.com, anchored to the
+  rule), the card's rulings on Scryfall, the wiki page.
+- Follow-ups keep the conversation's cards. Every conversation is kept
+  (Recent, the last 50); ★ Save keeps one for good, and it can be renamed.
+  Answers are stored, so opening one again costs nothing.
+
+On phones the sections are a tab bar along the bottom (Search, Rules, Decks,
+Lists, Collection); wider screens keep them in the header.
+
 ### Saved searches
 
 **Save search** keeps a search under a name to carry on later, as it was
