@@ -180,13 +180,20 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   const [{ vocab }, names] = await Promise.all([deps.rules(), deps.names()]);
   const found = findMentions(question, names, vocab);
 
-  const picks = input.picks ?? {};
+  // A follow-up that says "Kratos" means the Kratos already in the
+  // conversation; only a word the conversation cannot settle is asked about.
+  const previous = earlier.flatMap((t) => t.cards);
+  const picks = { ...input.picks };
+  for (const a of found.ambiguous) {
+    if (picks[a.mention]) continue;
+    const known = a.options.filter((o) => previous.includes(o) || found.cards.includes(o));
+    if (known.length === 1) picks[a.mention] = known[0];
+  }
   const unanswered = found.ambiguous.filter((a) => !picks[a.mention] || !a.options.includes(picks[a.mention]));
   if (unanswered.length) return { choice: unanswered };
 
   // The conversation's cards stay in play for a follow-up that does not name them.
   const named = [...found.cards, ...found.ambiguous.map((a) => picks[a.mention])];
-  const previous = earlier.flatMap((t) => t.cards);
   const wanted = [...new Set([...named, ...previous])].slice(0, 6);
   const cards = wanted.length ? await deps.cards(wanted) : [];
 

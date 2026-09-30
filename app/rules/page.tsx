@@ -78,7 +78,11 @@ export default function RulesPage() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.askRules(q, { threadId: inThread?.id, picks });
+      // Never spin forever: the server gives up well before this.
+      const r = await Promise.race([
+        api.askRules(q, { threadId: inThread?.id, picks }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 150_000)),
+      ]);
       if (r.budget) setBudget(r.budget);
       if (r.choice) {
         setChoosing({ question: q, choice: r.choice, picks });
@@ -125,6 +129,32 @@ export default function RulesPage() {
 
   const left = budget?.remaining;
 
+  // "Which card did you mean?" - shown where the question was asked: under the
+  // question box, or above the follow-up box in a conversation.
+  const choicePanel = choosing && !busy && (
+        <section id="which-card" className="mt-5 flex scroll-mt-20 flex-col gap-5 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Which card?">
+          {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
+            <div key={c.mention}>
+              <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
+              <p className="text-sm text-[var(--muted)]">For: {choosing.question}</p>
+              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {c.options.map((o) => (
+                  <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
+                    {o.image && <Image src={o.image} alt="" width={244} height={340} className="w-full rounded-lg" unoptimized />}
+                    <span>{o.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>
+        </section>
+        );
+  // Bring it into view: it may appear far from where the Ask button was.
+  useEffect(() => {
+    if (choosing) setTimeout(() => document.getElementById('which-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  }, [choosing]);
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
@@ -160,24 +190,7 @@ export default function RulesPage() {
       )}
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
-      {choosing && !busy && (
-        <section className="mt-5 flex flex-col gap-5" aria-label="Which card?">
-          {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
-            <div key={c.mention}>
-              <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {c.options.map((o) => (
-                  <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
-                    {o.image && <Image src={o.image} alt="" width={244} height={340} className="w-full rounded-lg" unoptimized />}
-                    <span>{o.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>
-        </section>
-      )}
+      {!thread && choicePanel}
 
       {!thread && !choosing && !busy && (
         <>
@@ -222,6 +235,7 @@ export default function RulesPage() {
             </section>
           ))}
 
+          {choicePanel}
           <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(followUp); }}>
             <textarea
               value={followUp}
