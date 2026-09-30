@@ -45,6 +45,10 @@ export async function callOpenAI(
     messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }],
     temperature: request.temperature ?? 0.2,
     response_format: { type: 'json_schema', json_schema: { name: 'answer', schema, strict } },
+    // Room to think and to write a worked answer: left to the default, Groq
+    // cut a rules answer off mid-working (2026-09-30). Only what is written
+    // counts against the per-minute allowance, not this ceiling.
+    max_completion_tokens: request.maxOutputTokens ?? 12_000,
   };
   // GPT-OSS takes an effort level for its reasoning; keep it moderate on
   // Groq's free tier, whose token-a-minute cap counts the thinking too.

@@ -77,11 +77,11 @@ describe('parseAnswer', () => {
   const sources = [{ id: 'C1', kind: 'rule', label: 'CR 603.10a', text: '' }, { id: 'R1', kind: 'ruling', label: 'Ruling', text: '' }] as Source[];
   it('keeps citations to sources given and drops made-up ones', () => {
     const a = parseAnswer({
-      verdict: 'Yes: they all trigger [C1][X9].', explanation: '1. They die together [C1]. 2. Rule 999 says so [C7].',
+      verdict: 'Yes: they all trigger [C1][X9].', summary: 'They die together [C1]. Rule 999 says so [C7].',
       confidence: 'certain', citations: [{ id: 'C1', why: 'look back in time' }, { id: 'C7', why: 'made up' }], followUps: ['a', 'b', 'c', 'd'],
     }, sources);
     expect(a.verdict).toBe('Yes: they all trigger [C1].');
-    expect(a.explanation).not.toContain('[C7]');
+    expect(a.summary).not.toContain('[C7]');
     expect(a.citations).toEqual([{ id: 'C1', role: 'supporting', why: 'look back in time' }]);
     expect(a.followUps).toHaveLength(3);
   });
@@ -107,23 +107,36 @@ describe('parseAnswer', () => {
     expect(noKey.confidence).toBe('likely');
   });
 
-  it('flags a worksheet that let tokens die without checking them, as on Kratos with Blade of Selves', () => {
+  const event = (what: string, triggers: object[]) => ({ what, board: '', checks: '', triggers, notes: '' });
+  const working = (events: object[]) => ({ asked: 'how many', setup: '', objects: [], abilities: [], concepts: [], start: '', events, count: '' });
+
+  it('flags a working that let tokens die without checking them, as on Kratos with Blade of Selves', () => {
     const all = [{ id: 'C1', kind: 'rule', label: '', text: '' }] as Source[];
     const kratos = parseAnswer({
-      worksheet: [
-        { event: 'Kratos is declared as an attacker', checks: [{ object: 'Kratos (original)', ability: 'attack', triggers: true, times: 1, why: '' }] },
-        { event: 'The Legend Rule puts two Kratos tokens into the graveyard', checks: [{ object: 'Kratos (surviving)', ability: 'God dies', triggers: true, times: 2, why: '' }] },
-      ],
-      verdict: 'Three [C1].', explanation: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [],
+      working: working([
+        event('Kratos is declared as an attacker', [{ object: 'Kratos (original)', ability: 'attack', triggers: true, times: 1, why: '' }]),
+        event('The Legend Rule puts two Kratos tokens into the graveyard', [{ object: 'Kratos (surviving)', ability: 'God dies', triggers: true, times: 2, why: '' }]),
+      ]),
+      verdict: 'Three [C1].', summary: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [],
     }, all);
     expect(kratos.confidence).toBe('unsure');
     expect(kratos.looseEnds?.[0]).toMatch(/603\.10a/);
     const checked = parseAnswer({
-      worksheet: [{ event: 'The Legend Rule puts two Kratos tokens into the graveyard', checks: [{ object: 'Kratos token 1', ability: 'God dies', triggers: true, times: 2, why: '' }] }],
+      working: working([event('The Legend Rule puts two Kratos tokens into the graveyard', [{ object: 'Kratos token 1', ability: 'God dies', triggers: true, times: 2, why: '' }])]),
       verdict: 'Seven [C1].', explanation: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [],
     }, all);
     expect(checked.looseEnds).toBeUndefined();
     expect(checked.confidence).toBe('likely');
+  });
+
+  it('keeps the working and assumptions, and counts a concept\'s source as cited', () => {
+    const a = parseAnswer({
+      working: { ...working([]), concepts: [{ concept: 'legend rule', source: '[C1]', says: 'keep one' }, { concept: 'made up', source: 'C9', says: '' }] },
+      verdict: 'Seven.', summary: 'Two die.', assumptions: ['four players', ''], confidence: 'likely', citations: [], followUps: [],
+    }, sources);
+    expect(a.working?.concepts).toEqual([{ concept: 'legend rule', source: 'C1', says: 'keep one' }, { concept: 'made up', source: '', says: '' }]);
+    expect(a.citations.map((c) => c.id)).toEqual(['C1']);
+    expect(a.assumptions).toEqual(['four players']);
   });
 
   it('is not certain of anything it cannot cite', () => {
@@ -200,6 +213,57 @@ describe('askRules', () => {
     const next = await askRules({ question: 'and if an opponent kills one of the tokens?', earlier: [first.turn] }, deps(model));
     if (!('turn' in next)) throw new Error('expected an answer');
     expect(next.turn.cards).toEqual(['Blade of Selves', 'Kratos, Stoic Father']);
-    expect(model.mock.calls[1][0].user).toMatch(/CONVERSATION SO FAR:\nQ1: blade of selves on kratos/);
+    // The last question comes with its answer and working, and what it cited is carried.
+    expect(model.mock.calls[1][0].user).toMatch(/THE LAST QUESTION: blade of selves on kratos[\s\S]*ITS ANSWER: The copies meet the legend rule/);
+    expect(next.turn.sources.filter((x) => x.label === 'Ruling: Blade of Selves')).toHaveLength(1);
+  });
+
+  it('looks up the concepts the helper names, and asks the player when the answer turns on something left open', async () => {
+    const model = vi.fn().mockResolvedValue({ data: answer, model: 'test' });
+    const helper = vi.fn()
+      .mockResolvedValueOnce({ data: { kind: 'first', concepts: ['legend rule'], clarify: [{ question: 'Whose turn is it?', options: ['Mine', 'An opponent\'s'] }] }, model: 'small' })
+      .mockResolvedValueOnce({ data: { kind: 'first', concepts: ['legend rule'], clarify: [{ question: 'Whose turn is it?', options: [] }] }, model: 'small' });
+    const q = { question: 'blade of selves on kratos, stoic father' };
+    const asked = await askRules(q, { ...deps(model), helper });
+    expect(asked).toEqual({ clarify: [{ question: 'Whose turn is it?', options: ['Mine', 'An opponent\'s'] }] });
+    expect(model).not.toHaveBeenCalled();
+    // Answered: it does not ask again, and the answer is told what was said.
+    const r = await askRules({ ...q, clarifications: [{ question: 'Whose turn is it?', answer: 'Mine' }] }, { ...deps(model), helper });
+    if (!('turn' in r)) throw new Error('expected an answer');
+    expect(r.turn.clarifications).toEqual([{ question: 'Whose turn is it?', answer: 'Mine' }]);
+    expect(model.mock.calls[0][0].user).toContain('THE PLAYER CLARIFIED:\n- Whose turn is it? Mine');
+    const legend = r.turn.sources.find((x) => x.label === 'CR 704.5j');
+    expect(legend?.text).toContain('[Included because: legend rule]');
+  });
+
+  it('answers without the helper when it fails', async () => {
+    const model = vi.fn().mockResolvedValue({ data: answer, model: 'test' });
+    const helper = vi.fn().mockRejectedValue(new Error('busy'));
+    const r = await askRules({ question: 'blade of selves on kratos, stoic father' }, { ...deps(model), helper });
+    expect('turn' in r).toBe(true);
+  });
+
+  it('fits the sources to the model\'s size, and sends less when told it is too big', async () => {
+    const tooBig = Object.assign(new Error('too long'), { kind: 'too-big' });
+    Object.setPrototypeOf(tooBig, (await import('../ai')).ModelError.prototype);
+    const model = vi.fn().mockRejectedValueOnce(tooBig).mockResolvedValue({ data: answer, model: 'test' });
+    const r = await askRules({ question: 'blade of selves on kratos, stoic father' }, { ...deps(model), inputTokens: 2_900 });
+    if (!('turn' in r)) throw new Error('expected an answer');
+    const [first, second] = model.mock.calls.map((c) => c[0].user as string);
+    expect(second.length).toBeLessThan(first.length);
+    // Card text always goes; the wiki is the first to go.
+    expect(second).toContain('[O1] Blade of Selves');
+    expect(second).not.toContain('MTG Wiki');
+  });
+});
+
+describe('fitSources', () => {
+  it('keeps the most important that fit, in their order, and card text always', async () => {
+    const { fitSources } = await import('./ask');
+    const src = (id: string, kind: Source['kind'], n: number) => ({ id, kind, label: id, text: 'x'.repeat(n) });
+    const sources = [src('O1', 'oracle', 500), src('C1', 'rule', 100), src('W1', 'wiki', 100), src('C2', 'rule', 100)];
+    const priority = new Map<string, 0 | 1 | 2 | 3 | 4 | 5 | 6>([['O1', 0], ['C1', 4], ['W1', 6], ['C2', 2]]);
+    expect(fitSources({ sources, priority }, 750).map((x) => x.id)).toEqual(['O1', 'C1', 'C2']);
+    expect(fitSources({ sources, priority }, 10).map((x) => x.id)).toEqual(['O1']);
   });
 });

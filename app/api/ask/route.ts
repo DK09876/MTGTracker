@@ -30,12 +30,15 @@ import { searchCombos, SpellbookError } from '@/lib/spellbook';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** Search plans come from the model chosen in Settings; Gemini's translator when that is Gemini, or as its fallback. */
+/**
+ * Search plans come from the model chosen in Settings - Gemini's own
+ * translator when that is Gemini. Another provider's model is asked again
+ * when it refuses (lib/ai.ts) rather than handed over to Gemini.
+ */
 function translator() {
-  const gemini = geminiTranslator();
-  if (chosenModel().startsWith('gemini')) return gemini;
+  if (chosenModel().startsWith('gemini')) return geminiTranslator();
   const model = modelById(chosenModel());
-  return model ? modelTranslator(model, gemini) : gemini;
+  return model ? modelTranslator(model, null) : geminiTranslator();
 }
 
 function deps(): Deps {

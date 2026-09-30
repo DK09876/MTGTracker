@@ -5,6 +5,12 @@
  * and answers from those alone, citing them. Claims it cannot cite are the
  * model's own reasoning, and it says how sure it is.
  *
+ * It works the question out in written steps first - read the question,
+ * gather the objects, break down their abilities, find the rule for each
+ * concept, walk the game event by event, check the count a second way - and
+ * that "working" is kept and shown (collapsed) under a short answer. It also
+ * says what it assumed.
+ *
  * Pure: the prompt, the schema, and checking the answer - every citation
  * must be to a source it was given; others are dropped.
  */
@@ -32,30 +38,57 @@ export interface Citation {
   why: string;
 }
 
-export interface WorksheetEntry {
-  event: string;
-  checks: Array<{ object: string; ability: string; triggers: boolean; times: number; why: string }>;
+/** A trigger check: one object, one ability, at one event. */
+export interface TriggerCheck { object: string; ability: string; triggers: boolean; times: number; why: string }
+
+/** The worked steps behind an answer (see ANSWER_SYSTEM's method). */
+export interface Working {
+  /** Step 1: what is asked, and the setup taken. */
+  asked: string;
+  setup: string;
+  /** Step 2: every object, including tokens and copies that will exist. */
+  objects: Array<{ name: string; what: string; abilities: string }>;
+  /** Step 3: each ability taken apart. */
+  abilities: Array<{ object: string; ability: string; breakdown: string }>;
+  /** Step 4: each rules concept and the source that governs it ("C3", or "" for none). */
+  concepts: Array<{ concept: string; source: string; says: string }>;
+  /** Step 5: the starting state. */
+  start: string;
+  /** Step 6: the game, one event at a time. */
+  events: Array<{ what: string; board: string; checks: string; triggers: TriggerCheck[]; notes: string }>;
+  /** Step 7: the count, and the second way of checking it. */
+  count: string;
 }
 
+/** Answers saved before the working existed. */
+export interface WorksheetEntry { event: string; checks: TriggerCheck[] }
+
 export interface RulesAnswer {
-  /** The model's check of each event and object, done before answering. */
+  working?: Working;
+  /** Older answers: the trigger worksheet that came before the working. */
   worksheet?: WorksheetEntry[];
   /** One or two sentences that answer the question directly. */
   verdict: string;
-  /** How it works, step by step, citing sources as [C1], [R2]. */
-  explanation: string;
+  /** Two or three plain sentences: the reason, for a player. */
+  summary?: string;
+  /** Older answers: the numbered walk-through. */
+  explanation?: string;
+  /** What the answer took for granted that the question did not say. */
+  assumptions?: string[];
   confidence: Confidence;
   /** The sources cited, most important first: the key ones, then official
    * rulings and rules before card text and the wiki. */
   citations: Citation[];
   /** Questions worth asking next. */
   followUps: string[];
-  /** Gaps the app spotted in the worksheet, shown as warnings. */
+  /** Gaps the app spotted in the working, shown as warnings. */
   looseEnds?: string[];
 }
 
 export interface Turn {
   question: string;
+  /** What the player said when asked to clarify. */
+  clarifications?: Array<{ question: string; answer: string }>;
   answer: RulesAnswer;
   sources: Source[];
   /** The cards this turn was about, by name. */
@@ -72,116 +105,191 @@ export const ANSWER_SYSTEM = `\
 You are a Magic: The Gathering rules expert - answer like a Level 2 judge
 explaining a ruling to a player at a Commander table.
 
-You are given the question, and SOURCES, each with an id:
-- O#: a card's Oracle text (its official current wording)
-- R#: an official ruling on a card, published by Wizards of the Coast
-- C#: a rule from the Comprehensive Rules ("[Included because: ...]" says
-  why it was picked for these cards - such rules usually matter)
-- G#: a Comprehensive Rules glossary entry
-- W#: an excerpt from the MTG Wiki (a fan wiki: good for explaining, not authoritative)
+You get the question, perhaps an EARLIER part of the conversation, and
+SOURCES, each with an id: card Oracle text (O#), official rulings (R#),
+Comprehensive Rules (C#), glossary entries (G#), MTG Wiki excerpts (W#, a fan
+wiki: good for explaining, not authoritative). Every claim about the rules
+must rest on a source, cited by id like [C3] or [R1][C4]. Your memory of the
+rules is only a guide to what to look for in SOURCES.
 
-Work it out like a judge before answering:
-A. Walk through the game in order: each event (casting, attacking, a trigger
-   resolving, tokens entering, state-based actions, creatures dying).
-B. After EVERY event, check EVERY object for abilities that trigger or
-   apply - the cards named, token copies (a copy has the original's
-   abilities, rule 707.2), and objects leaving the battlefield in that same
-   event (leaves-the-battlefield and "dies" abilities look back in time, rule
-   603.10a, so a creature dying alongside others sees them all die). One
-   event with several deaths triggers once per death (603.2c).
-C. Write this down in "worksheet" before anything else: one entry per event,
-   and in it one check per object that could trigger or apply - naming each
-   object separately ("Kratos (original)", "Kratos token 1", "Kratos token 2",
-   never just "Kratos"), with its ability, whether it triggers, how many
-   times, and why. Include objects that leave the battlefield in that event.
-D. Only then count from the worksheet, and write the verdict. Recount.
+HOW TO WORK IT OUT - write each step into "working":
 
-Rules for answering:
-1. Answer from the SOURCES. Every rules claim cites the source it rests on,
-   as [C2] or [R1][C4], right after the claim. Prefer official rulings (R)
-   and the Comprehensive Rules (C, G) over the wiki (W).
-2. Never cite an id that is not in SOURCES, and never quote rule numbers that
-   are not in SOURCES.
-3. confidence:
-   - "certain" only when a key official ruling or rule states the conclusion
-     itself.
-   - "likely" when it follows from the sources by steps - any answer built
-     by counting or chaining several rules is at most "likely".
-   - "unsure" when the sources do not settle it: say what is missing and
-     give your best reading as reasoning.
-4. verdict: the direct answer in one or two sentences. For a yes-or-no
-   question start "Yes:", "No:" or "It depends:"; for "how does X work with
-   Y", say what happens; for "how many", give the number. No hedging filler.
-5. explanation: the walk-through from A-C as short numbered steps, in game
-   order, naming the cards and saying for each step what triggers and why;
-   about 3-8 steps. Plain words.
-6. citations: every source cited, most decisive first. role "key" for the
-   one to three sources that settle the answer; "supporting" for the rest.
-7. If the question is ambiguous (which ability, whose turn, how many
-   opponents), answer the usual case - a four-player Commander game - and say
-   what changes otherwise.
-8. followUps: up to three short, natural follow-up questions a player might
-   ask next about these cards.`;
+Step 1 - Read the question (asked, setup).
+  What is asked: yes/no, a number, "what happens", "which rule says".
+  The setup: players (default four-player Commander), who controls what,
+  whose turn. If something matters and is not said, take the usual case
+  and add it to "assumptions".
+  A follow-up that only asks ABOUT the earlier answer (why, which rule,
+  explain a step): answer from the EARLIER working and sources; keep the
+  working short (asked, concepts, count) and leave the rest empty.
 
-// Filled in first, so the model reasons object by object before it concludes:
-// asked about Kratos with Blade of Selves, it counted one Kratos where there
-// were three (the original and two token copies), until it had to list them.
-const WORKSHEET = {
-  type: 'ARRAY',
-  items: {
-    type: 'OBJECT',
-    properties: {
-      event: { type: 'STRING' },
-      checks: {
-        type: 'ARRAY',
-        items: {
-          type: 'OBJECT',
-          properties: {
-            object: { type: 'STRING' },
-            ability: { type: 'STRING' },
-            triggers: { type: 'BOOLEAN' },
-            times: { type: 'INTEGER' },
-            why: { type: 'STRING' },
-          },
-          required: ['object', 'ability', 'triggers', 'times', 'why'],
-          propertyOrdering: ['object', 'ability', 'triggers', 'times', 'why'],
-        },
-      },
-    },
-    required: ['event', 'checks'],
-    propertyOrdering: ['event', 'checks'],
-  },
-};
+Step 2 - Gather every object (objects).
+  Each card named: its type line and its abilities, word for word. Then
+  every object that WILL exist: tokens, copies, emblems - find in SOURCES
+  what each one has; never assume what a copy or token inherits. A keyword
+  is a rule of its own: read it, not your memory of it.
 
-export const ANSWER_SCHEMA = {
+Step 3 - Take each ability apart (abilities).
+  Triggered: the event; which objects it watches (any / yours / "another"
+  never sees itself); once per event or once per object; the effect.
+  Static: what it changes, for which objects.
+  Replacement ("instead", "as ... enters", "skip"): which event it changes -
+  it applies before the event, and does not trigger.
+  Every copy has its own copy of each ability.
+
+Step 4 - Find the rule for every concept in play (concepts).
+  Each rules concept the situation touches, with the SOURCE id that governs
+  it and what it says. No source: leave the id empty and lower confidence.
+  Look hard at: things happening at the same moment (do they see each
+  other?); automatic checks between events (state-based actions); things
+  PUT somewhere rather than cast, declared or played; narrowing words
+  ("another", "you control", "nontoken", "once each turn").
+
+Step 5 - The starting state (start): each relevant permanent and controller.
+
+Step 6 - Walk the game one event at a time (events). For EACH event:
+  a. Before it: does a replacement effect change it?
+  b. What happens, and the board right after (board). Objects leaving in
+     this event are still checked if a source says they "look back".
+  c. Automatic checks (checks): any state-based action now? It is the next event.
+  d. Trigger scan (triggers): EVERY object on the battlefield or leaving
+     now, against EVERY ability from Step 3. Write the "no"s too, with why.
+  e. What a player might expect that does NOT happen, and why (notes).
+  f. Several triggers at once: who controls each, and their order.
+  g. Each trigger or spell resolving is its own event: go round again.
+  Skip this step only when the question is just what a rule means.
+
+Step 7 - Check it a second way (count). A number: add up from the events,
+  then recount by multiplying (objects that saw it x times it happened).
+  Yes/no: name the source that settles it. If they disagree, find out why.
+
+WORKED EXAMPLE - the method, not an answer to reuse. (A real answer cites
+each rule by its SOURCES id.)
+Question: "Blade of Selves is on Kratos, Stoic Father and Kratos attacks in
+a four-player game. How many experience counters do I get?"
+1. Asked: a number of experience counters. Setup: four players - the
+   defending player and two other opponents.
+2. Objects: Kratos, Stoic Father - Legendary Creature - God Warrior -
+   "Whenever you attack with one or more Gods and whenever a God dies, you
+   get an experience counter." Blade of Selves - Equipment - equipped
+   creature has myriad. Will exist: Kratos token 1 and token 2 (one per
+   other opponent). The copy rule: each is a copy - legendary God, same
+   ability.
+3. Kratos's ability, on each of the three: A "you attack with one or more
+   Gods" - once per attack, not per God. B "a God dies" - any God, itself
+   included (no "another"), once per God that dies.
+4. Concepts: copying (copy rule); myriad (its keyword rule); tokens put
+   onto the battlefield attacking (never declared as attackers); the legend
+   rule; leaves-the-battlefield abilities look back in time.
+5. Start: Kratos (original), equipped.
+6. Declare attackers - Kratos attacks. Triggers: Kratos (original) A x1;
+   myriad x1. A resolves: 1 counter.
+   Myriad resolves - board: Kratos (original), token 1, token 2, all
+   attacking. Triggers: token 1 A no, token 2 A no (never declared as
+   attackers). Checks: three legendary permanents with the same name, one
+   controller - the legend rule is next.
+   Legend rule - keep one; the other two go to the graveyard together. Say
+   both tokens die. Board after: Kratos (original); leaving, still checked:
+   token 1, token 2. Triggers, B, two Gods died: Kratos (original) sees
+   both - x2. Token 1 looks back, sees itself and token 2 - x2. Token 2
+   likewise - x2. Notes: keeping a token instead changes nothing.
+   The six resolve: 6 counters (they are on the player, not the creatures).
+7. Count: 1 + 6 = 7. Check: A 1 attack x 1 = 1; B 3 Kratos x 2 deaths = 6.
+
+ANSWERING:
+1. verdict: the direct answer in one or two sentences. Yes-or-no: start
+   "Yes:", "No:" or "It depends:". "How many": the number.
+2. summary: two or three plain sentences a player can follow - the reason,
+   citing the key sources.
+3. assumptions: each thing you took for granted that the question did not
+   say (player count, whose turn, a choice the player made). Empty if none.
+4. Never cite an id that is not in SOURCES, and never quote rule numbers
+   that are not in SOURCES.
+5. confidence: "certain" only when a key official ruling or rule states the
+   conclusion itself; "likely" when it follows by steps - any count built
+   from several rules is at most "likely"; "unsure" when a needed source is
+   missing - say what.
+6. citations: every source cited, most decisive first; role "key" for the
+   one to three that settle it, "supporting" for the rest.
+7. followUps: up to three short, natural questions a player might ask next.`;
+
+const TRIGGER_CHECK = {
   type: 'OBJECT',
   properties: {
-    worksheet: WORKSHEET,
-    verdict: { type: 'STRING' },
-    explanation: { type: 'STRING' },
-    confidence: { type: 'STRING', enum: ['certain', 'likely', 'unsure'] },
-    citations: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: { id: { type: 'STRING' }, role: { type: 'STRING', enum: ['key', 'supporting'] }, why: { type: 'STRING' } },
-        required: ['id', 'role', 'why'],
-        propertyOrdering: ['id', 'role', 'why'],
-      },
-    },
-    followUps: { type: 'ARRAY', items: { type: 'STRING' } },
+    object: { type: 'STRING' }, ability: { type: 'STRING' }, triggers: { type: 'BOOLEAN' }, times: { type: 'INTEGER' }, why: { type: 'STRING' },
   },
-  required: ['worksheet', 'verdict', 'explanation', 'confidence', 'citations', 'followUps'],
-  propertyOrdering: ['worksheet', 'verdict', 'explanation', 'confidence', 'citations', 'followUps'],
+  required: ['object', 'ability', 'triggers', 'times', 'why'],
+  propertyOrdering: ['object', 'ability', 'triggers', 'times', 'why'],
 };
 
-/** The message: the conversation so far, the question, then the sources. */
-export function answerMessage(question: string, earlier: Array<{ question: string; verdict: string }>, sources: Source[]): string {
-  const history = earlier.length
-    ? `CONVERSATION SO FAR:\n${earlier.map((t, i) => `Q${i + 1}: ${t.question}\nA${i + 1}: ${t.verdict}`).join('\n')}\n\n`
-    : '';
-  const body = sources.map((s) => `[${s.id}] ${s.label}${s.date ? ` (${s.date})` : ''}\n${s.text}`).join('\n\n');
-  return `${history}QUESTION: ${question}\n\nSOURCES:\n${body}`;
+const object = (props: Record<string, object>) => ({
+  type: 'OBJECT', properties: props, required: Object.keys(props), propertyOrdering: Object.keys(props),
+});
+const text = { type: 'STRING' };
+
+// Written first, so the model works it out before it concludes: asked about
+// Kratos with Blade of Selves, it counted one Kratos where there were three,
+// until it had to list them - and missed the dying tokens' own triggers
+// until it had to scan every object at every event.
+const WORKING = object({
+  asked: text,
+  setup: text,
+  objects: { type: 'ARRAY', items: object({ name: text, what: text, abilities: text }) },
+  abilities: { type: 'ARRAY', items: object({ object: text, ability: text, breakdown: text }) },
+  concepts: { type: 'ARRAY', items: object({ concept: text, source: text, says: text }) },
+  start: text,
+  events: { type: 'ARRAY', items: object({ what: text, board: text, checks: text, triggers: { type: 'ARRAY', items: TRIGGER_CHECK }, notes: text }) },
+  count: text,
+});
+
+export const ANSWER_SCHEMA = object({
+  working: WORKING,
+  verdict: text,
+  summary: text,
+  assumptions: { type: 'ARRAY', items: text },
+  confidence: { type: 'STRING', enum: ['certain', 'likely', 'unsure'] },
+  citations: { type: 'ARRAY', items: object({ id: text, role: { type: 'STRING', enum: ['key', 'supporting'] }, why: text }) },
+  followUps: { type: 'ARRAY', items: text },
+});
+
+/** What a follow-up carries from the conversation. */
+export interface Earlier {
+  /** Older turns, briefly: the question, the answer and its key sources. */
+  older: Array<{ question: string; verdict: string; key: string[] }>;
+  /** The last turn: its question, answer and working, compactly. */
+  last: { question: string; verdict: string; working: string } | null;
+}
+
+/** The last answer's working, compact: enough to answer "why" and "which rule" without redoing it. */
+export function compactWorking(answer: RulesAnswer, idToLabel: (id: string) => string): string {
+  const w = answer.working;
+  if (!w) return answer.explanation ?? answer.summary ?? '';
+  const lines = [
+    `Asked: ${w.asked} Setup: ${w.setup}`,
+    w.objects.length ? `Objects: ${w.objects.map((o) => `${o.name} (${o.what})`).join('; ')}` : '',
+    w.concepts.length ? `Rules used: ${w.concepts.map((c) => `${c.concept} - ${c.source ? idToLabel(c.source) : 'no source'}${c.says ? `: ${c.says}` : ''}`).join('; ')}` : '',
+    ...w.events.map((e, i) => `Event ${i + 1}: ${e.what}${e.triggers.some((t) => t.triggers) ? ` - triggers: ${e.triggers.filter((t) => t.triggers).map((t) => `${t.object} x${t.times}`).join(', ')}` : ''}`),
+    w.count ? `Count: ${w.count}` : '',
+    answer.assumptions?.length ? `Assumed: ${answer.assumptions.join('; ')}` : '',
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+
+/** The message: what the conversation carries, the question, what the player clarified, then the sources. */
+export function answerMessage(
+  question: string, earlier: Earlier | null, sources: Source[], clarifications: Array<{ question: string; answer: string }> = [],
+): string {
+  const parts: string[] = [];
+  if (earlier?.older.length) {
+    parts.push(`EARLIER IN THIS CONVERSATION:\n${earlier.older.map((t, i) => `Q${i + 1}: ${t.question}\nA${i + 1}: ${t.verdict}${t.key.length ? ` (key sources: ${t.key.join(', ')})` : ''}`).join('\n')}`);
+  }
+  if (earlier?.last) {
+    parts.push(`THE LAST QUESTION: ${earlier.last.question}\nITS ANSWER: ${earlier.last.verdict}\nITS WORKING:\n${earlier.last.working}`);
+  }
+  parts.push(`QUESTION: ${question}`);
+  if (clarifications.length) parts.push(`THE PLAYER CLARIFIED:\n${clarifications.map((c) => `- ${c.question} ${c.answer}`).join('\n')}`);
+  parts.push(`SOURCES:\n${sources.map((s) => `[${s.id}] ${s.label}${s.date ? ` (${s.date})` : ''}\n${s.text}`).join('\n\n')}`);
+  return parts.join('\n\n');
 }
 
 const CONFIDENCE = new Set<Confidence>(['certain', 'likely', 'unsure']);
@@ -199,47 +307,75 @@ export function rankCitations(citations: Citation[], kindOf: Map<string, SourceK
     .map((x) => x.c);
 }
 
+const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+const list = (v: unknown, max: number) => (Array.isArray(v) ? v : []).slice(0, max) as unknown[];
+const rec = (v: unknown) => (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+
+function parseWorking(v: unknown, clean: (t: string) => string): Working | undefined {
+  const w = rec(v);
+  const working: Working = {
+    asked: clean(str(w.asked)),
+    setup: clean(str(w.setup)),
+    objects: list(w.objects, 12).map(rec).map((o) => ({ name: str(o.name), what: str(o.what), abilities: clean(str(o.abilities)) })).filter((o) => o.name),
+    abilities: list(w.abilities, 16).map(rec).map((a) => ({ object: str(a.object), ability: str(a.ability), breakdown: clean(str(a.breakdown)) })).filter((a) => a.object || a.ability),
+    concepts: list(w.concepts, 12).map(rec).map((c) => ({ concept: str(c.concept), source: str(c.source).replace(/[[\]]/g, ''), says: clean(str(c.says)) })).filter((c) => c.concept),
+    start: clean(str(w.start)),
+    events: list(w.events, 14).map(rec).map((e) => ({
+      what: clean(str(e.what)),
+      board: clean(str(e.board)),
+      checks: clean(str(e.checks)),
+      triggers: list(e.triggers, 14).map(rec).map((t) => ({
+        object: str(t.object), ability: str(t.ability), triggers: t.triggers === true,
+        times: Math.max(0, Math.trunc(Number(t.times) || 0)), why: clean(str(t.why)),
+      })),
+      notes: clean(str(e.notes)),
+    })).filter((e) => e.what),
+    count: clean(str(w.count)),
+  };
+  const empty = !working.asked && !working.objects.length && !working.events.length && !working.count;
+  return empty ? undefined : working;
+}
+
 /**
  * The model's answer, checked: citations only to sources given (ids in the
  * text to unknown sources are removed), and no "certain" without a citation.
  */
 export function parseAnswer(data: unknown, sources: Source[]): RulesAnswer {
-  const d = (data ?? {}) as Record<string, unknown>;
+  const d = rec(data);
   const known = new Set(sources.map((s) => s.id));
-  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-  const clean = (text: string) => text.replace(/\[([A-Z]\d+)\]/g, (m, id: string) => (known.has(id) ? m : '')).replace(/[ \t]{2,}/g, ' ');
+  const clean = (t: string) => t.replace(/\[([A-Z]\d+)\]/g, (m, id: string) => (known.has(id) ? m : '')).replace(/[ \t]{2,}/g, ' ');
   const verdict = clean(str(d.verdict));
-  const explanation = clean(str(d.explanation));
   if (!verdict) throw new Error('The model gave no answer');
-  const cited = new Set([...`${verdict} ${explanation}`.matchAll(/\[([A-Z]\d+)\]/g)].map((m) => m[1]));
+  const summary = clean(str(d.summary)) || clean(str(d.explanation));
+  const working = parseWorking(d.working, clean);
+  for (const c of working?.concepts ?? []) if (c.source && !known.has(c.source)) c.source = '';
+  const everything = JSON.stringify({ verdict, summary, working });
+  const cited = new Set([...everything.matchAll(/\[([A-Z]\d+)\]/g)].map((m) => m[1]));
+  for (const c of working?.concepts ?? []) if (c.source) cited.add(c.source);
   const kindOf = new Map(sources.map((x) => [x.id, x.kind]));
   const listed: Citation[] = [];
-  for (const c of Array.isArray(d.citations) ? d.citations : []) {
-    const id = str((c as { id?: unknown }).id);
+  for (const c of list(d.citations, 20).map(rec)) {
+    const id = str(c.id).replace(/[[\]]/g, '');
     if (!known.has(id) || listed.some((x) => x.id === id)) continue;
-    listed.push({ id, role: (c as { role?: unknown }).role === 'key' ? 'key' : 'supporting', why: str((c as { why?: unknown }).why) });
+    listed.push({ id, role: c.role === 'key' ? 'key' : 'supporting', why: str(c.why) });
   }
-  for (const id of cited) if (!listed.some((c) => c.id === id)) listed.push({ id, role: 'supporting', why: '' });
+  for (const id of cited) if (known.has(id) && !listed.some((c) => c.id === id)) listed.push({ id, role: 'supporting', why: '' });
   const citations = rankCitations(listed, kindOf);
   let confidence = CONFIDENCE.has(d.confidence as Confidence) ? d.confidence as Confidence : 'unsure';
   // Certain only on the word of an official ruling or rule that settles it.
   const settled = citations.some((c) => c.role === 'key' && ['ruling', 'rule', 'glossary'].includes(kindOf.get(c.id) ?? ''));
   if (!citations.length) confidence = 'unsure';
   else if (confidence === 'certain' && !settled) confidence = 'likely';
-  const followUps = (Array.isArray(d.followUps) ? d.followUps : []).map(str).filter(Boolean).slice(0, 3);
-  const worksheet = (Array.isArray(d.worksheet) ? d.worksheet : []).slice(0, 12).map((e) => {
-    const entry = e as { event?: unknown; checks?: unknown };
-    return {
-      event: str(entry.event),
-      checks: (Array.isArray(entry.checks) ? entry.checks : []).slice(0, 12).map((c) => {
-        const x = c as Record<string, unknown>;
-        return { object: str(x.object), ability: str(x.ability), triggers: x.triggers === true, times: Math.max(0, Math.trunc(Number(x.times) || 0)), why: str(x.why) };
-      }),
-    };
-  }).filter((e) => e.event);
-  const looseEnds = findLooseEnds(worksheet);
+  const followUps = list(d.followUps, 3).map(str).filter(Boolean);
+  const assumptions = list(d.assumptions, 6).map(str).filter(Boolean);
+  const looseEnds = working ? findLooseEnds(working.events.map((e) => ({ event: `${e.what} ${e.board}`, checks: e.triggers }))) : [];
   if (looseEnds.length) confidence = 'unsure';
-  return { ...(worksheet.length ? { worksheet } : {}), verdict, explanation, confidence, citations, followUps, ...(looseEnds.length ? { looseEnds } : {}) };
+  return {
+    ...(working ? { working } : {}),
+    verdict, summary, confidence, citations, followUps,
+    ...(assumptions.length ? { assumptions } : {}),
+    ...(looseEnds.length ? { looseEnds } : {}),
+  };
 }
 
 // --- the second check ------------------------------------------------------------
@@ -247,19 +383,19 @@ export function parseAnswer(data: unknown, sources: Source[]): RulesAnswer {
 export const CHECK_SYSTEM = `\
 You are a Level 3 Magic: The Gathering judge reviewing another judge's
 answer before it is given to a player. You get the question, the SOURCES
-(same ids as the answer cites), and the DRAFT answer.
+(same ids as the answer cites), and the DRAFT answer with its working.
 
-Check the draft hard, especially for what first drafts miss:
-- a triggered or static ability that was not considered - on token copies
-  (a copy has the original's abilities, 707.2), or on permanents leaving the
-  battlefield in the same event ("dies" and leaves-the-battlefield abilities
-  look back in time, 603.10a, and see everything that died with them;
-  several deaths in one event trigger once each, 603.2c);
-- a wrong count, or a count that forgot the question's setup (players,
-  opponents, who controls what);
+Check the working step by step, especially for what first drafts miss:
+- an object not gathered (a token or copy), or what a copy has assumed
+  rather than looked up;
+- an event not walked - above all the automatic checks (state-based
+  actions) between events;
+- an object not scanned at an event - including objects leaving the
+  battlefield in that same event, when a source says they look back;
+- a wrong count, or a count that forgot the setup (players, who controls what);
 - a claim the cited source does not support, or a better source not cited;
-- confidence that is too high ("certain" needs a key official ruling or
-  rule that states the conclusion itself).
+- an assumption not stated, or confidence too high ("certain" needs a key
+  official ruling or rule that states the conclusion itself).
 
 Return the corrected answer in full, in the same form and with the same
 rules for citing (ids only from SOURCES), and in "changes" say in one
@@ -272,12 +408,14 @@ export const CHECK_SCHEMA = {
   propertyOrdering: ['changes', ...ANSWER_SCHEMA.propertyOrdering],
 };
 
-export function checkMessage(question: string, earlier: Array<{ question: string; verdict: string }>, sources: Source[], draft: RulesAnswer): string {
-  return `${answerMessage(question, earlier, sources)}\n\nDRAFT ANSWER:\n${JSON.stringify(draft, null, 1)}`;
+export function checkMessage(
+  question: string, earlier: Earlier | null, sources: Source[], draft: RulesAnswer, clarifications: Array<{ question: string; answer: string }> = [],
+): string {
+  return `${answerMessage(question, earlier, sources, clarifications)}\n\nDRAFT ANSWER:\n${JSON.stringify(draft)}`;
 }
 
 /**
- * Gaps a worksheet shows: an event where tokens leave the battlefield (die,
+ * Gaps a working shows: an event where tokens leave the battlefield (die,
  * go to the graveyard, the legend rule) but no token was checked for
  * abilities of its own. Dying objects look back in time and see each other
  * die (603.10a) - the step the model skipped on Kratos with Blade of Selves.
@@ -289,7 +427,7 @@ export function findLooseEnds(worksheet: WorksheetEntry[]): string[] {
     const tokens = /\btokens?\b|\bcop(y|ies)\b/i.test(e.event);
     const checkedTokens = e.checks.some((c) => /\btokens?\b|\bcop(y|ies)\b/i.test(c.object));
     if (leaving && tokens && !checkedTokens) {
-      out.push(`"${e.event}": the tokens leaving the battlefield were not checked. Anything leaving at the same moment looks back in time and sees the others (and itself) leave - including token copies, which have the copied abilities (CR 603.10a, 707.2).`);
+      out.push(`"${e.event.slice(0, 120)}": the tokens leaving the battlefield were not checked. Anything leaving at the same moment looks back in time and sees the others (and itself) leave - including token copies, which have the copied abilities (CR 603.10a, 707.2).`);
     }
   }
   return out;

@@ -7,7 +7,9 @@
  * numbered to the source it rests on.
  *
  * Like search: a word that could be several cards ("kratos") is asked about
- * first; follow-ups carry the conversation's cards; every conversation is
+ * first, and so is anything the answer turns on that the question left open
+ * ("whose turn is it?"); follow-ups carry the conversation's cards and the
+ * last answer's working; every conversation is
  * kept (Recent), and can be starred to keep for good (Saved). Answers are
  * stored with their sources, so opening one again costs no model request.
  */
@@ -48,6 +50,10 @@ export default function RulesPage() {
   // Waiting on "which card did you mean?": the question, and the choices.
   const [choosing, setChoosing] = useState<{ question: string; choice: api.RulesChoice[]; picks: Record<string, string> } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Waiting on "before I answer...": the question, what was asked, and the answers so far.
+  const [clarifying, setClarifying] = useState<{
+    question: string; picks: Record<string, string>; items: api.RulesClarify[]; answers: Record<string, string>;
+  } | null>(null);
   const [secondCheck, setSecondCheck] = useSetting('rules-second-check');
 
   const refresh = useCallback(() => api.rulesThreads().then((r) => { setThreads(r.threads); setBudget(r.budget); }).catch(() => {}), []);
@@ -55,6 +61,7 @@ export default function RulesPage() {
   const open = useCallback(async (id: string | null) => {
     setError(null);
     setChoosing(null);
+    setClarifying(null);
     try { if (id) localStorage.setItem(currentKey(), id); else localStorage.removeItem(currentKey()); } catch { /* not remembered */ }
     if (!id) { setThread(null); return; }
     try {
@@ -74,7 +81,7 @@ export default function RulesPage() {
     return () => clearTimeout(timer);
   }, [refresh, open]);
 
-  const ask = async (text: string, picks: Record<string, string> = {}, inThread = thread) => {
+  const ask = async (text: string, picks: Record<string, string> = {}, inThread = thread, clarifications: Array<{ question: string; answer: string }> = []) => {
     const q = text.trim();
     if (!q || busy) return;
     dismissKeyboard();
@@ -83,14 +90,18 @@ export default function RulesPage() {
     try {
       // Never spin forever: the server gives up well before this.
       const r = await Promise.race([
-        api.askRules(q, { threadId: inThread?.id, picks, secondCheck }),
+        api.askRules(q, { threadId: inThread?.id, picks, secondCheck, clarifications }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 150_000)),
       ]);
       if (r.budget) setBudget(r.budget);
       if (r.choice) {
         setChoosing({ question: q, choice: r.choice, picks });
+      } else if (r.clarify) {
+        setChoosing(null);
+        setClarifying({ question: q, picks, items: r.clarify, answers: {} });
       } else if (r.thread) {
         setChoosing(null);
+        setClarifying(null);
         setThread(r.thread);
         setQuestion('');
         setFollowUp('');
@@ -112,6 +123,15 @@ export default function RulesPage() {
     const rest = choosing.choice.filter((c) => !picks[c.mention]);
     if (rest.length) setChoosing({ ...choosing, picks });
     else ask(choosing.question, picks);
+  };
+
+  const answerClarify = (assume = false) => {
+    if (!clarifying) return;
+    const clarifications = clarifying.items.map((c) => ({
+      question: c.question,
+      answer: assume || !clarifying.answers[c.question]?.trim() ? 'Not said - assume the usual case, and say so.' : clarifying.answers[c.question].trim(),
+    }));
+    ask(clarifying.question, clarifying.picks, thread, clarifications);
   };
 
   const star = async (t: RulesThread) => {
@@ -157,6 +177,44 @@ export default function RulesPage() {
   useEffect(() => {
     if (choosing) setTimeout(() => document.getElementById('which-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
   }, [choosing]);
+  useEffect(() => {
+    if (clarifying) setTimeout(() => document.getElementById('clarify')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  }, [clarifying]);
+
+  // "Before I answer...": what the answer turns on that the question left open.
+  const clarifyPanel = clarifying && !busy && (
+    <section id="clarify" className="mt-5 flex scroll-mt-20 flex-col gap-4 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Before I answer">
+      <div>
+        <h2 className="font-medium">Before I answer…</h2>
+        <p className="text-sm text-[var(--muted)]">The answer depends on {clarifying.items.length === 1 ? 'this' : 'these'}. For: {clarifying.question}</p>
+      </div>
+      {clarifying.items.map((c) => {
+        const value = clarifying.answers[c.question] ?? '';
+        const set = (v: string) => setClarifying({ ...clarifying, answers: { ...clarifying.answers, [c.question]: v } });
+        return (
+          <div key={c.question} className="flex flex-col gap-2">
+            <p className="text-sm">{c.question}</p>
+            {c.options.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {c.options.map((o) => (
+                  <button key={o} {...steady(() => set(o))} aria-pressed={value === o}
+                    className={`rounded-lg border px-3 py-1.5 text-left text-sm ${value === o ? 'border-[var(--accent)] bg-[var(--surface)]' : 'border-[var(--border)] hover:border-[var(--accent)]'}`}>
+                    {o}
+                  </button>
+                ))}
+              </div>
+            )}
+            <input value={c.options.includes(value) ? '' : value} onChange={(e) => set(e.target.value)} placeholder="Or say it in your own words" aria-label={c.question} className={`${input} py-2 text-sm`} />
+          </div>
+        );
+      })}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => answerClarify()} disabled={clarifying.items.some((c) => !clarifying.answers[c.question]?.trim())} className={primary}>Answer</button>
+        <button onClick={() => answerClarify(true)} className={button}>Just assume the usual case</button>
+        <button onClick={() => setClarifying(null)} className={button}>Cancel</button>
+      </div>
+    </section>
+  );
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -206,14 +264,15 @@ export default function RulesPage() {
 
       {busy && (
         <p className="mt-4 text-center text-sm text-[var(--muted)]" role="status">
-          Finding the cards, their rulings and the rules that apply, then working it out{secondCheck ? ', then checking it' : ''} - {secondCheck ? 'about twenty seconds' : 'about ten seconds'}.
+          Looking up what the question needs, then the cards, their rulings and the rules, then working it out step by step{secondCheck ? ', then checking it' : ''} - {secondCheck ? 'up to a minute or two' : 'about fifteen seconds, longer if the model is busy'}.
         </p>
       )}
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
       {!thread && choicePanel}
+      {!thread && clarifyPanel}
 
-      {!thread && !choosing && !busy && (
+      {!thread && !choosing && !clarifying && !busy && (
         <>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
             <span>Try:</span>
@@ -257,6 +316,7 @@ export default function RulesPage() {
           ))}
 
           {choicePanel}
+          {clarifyPanel}
           <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(followUp); }}>
             <textarea
               value={followUp}

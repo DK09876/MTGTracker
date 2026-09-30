@@ -1,0 +1,128 @@
+[
+  {
+    "id": "teysa-zulaport-wrath",
+    "question": "I control Teysa Karlov, Zulaport Cutthroat, and three other creatures (two of them tokens). I cast Wrath of God and everything dies, Teysa included. How much life does each opponent lose?",
+    "cards": ["Teysa Karlov", "Zulaport Cutthroat", "Wrath of God"],
+    "answer": "10 each: five creatures die, and Zulaport triggers twice for each of them.",
+    "why": "Leaves-the-battlefield triggers look back in time (603.10a). So Zulaport Cutthroat triggers for itself and for every creature that dies at the same time, tokens included (a token does go to the graveyard, which counts as dying). Teysa's effect is also taken from the game state just before the event, so it still doubles those triggers even though Teysa dies at the same moment (603.2d, and the official Teysa ruling). Five deaths, each triggering twice, makes 10 triggers of 1 life loss each.",
+    "source": ["https://scryfall.com/card/rna/212/teysa-karlov", "https://scryfall.com/search?q=%21%22Zulaport+Cutthroat%22", "https://yawgatog.com/resources/magic-rules/#R60310a"],
+    "ambiguous": false
+  },
+  {
+    "id": "hardened-scales-doubling-season-ballista",
+    "question": "I cast Walking Ballista for X=1 while I control both Hardened Scales and Doubling Season. How many +1/+1 counters does it enter with?",
+    "cards": ["Walking Ballista", "Hardened Scales", "Doubling Season"],
+    "answer": "4, if I apply Hardened Scales first and then Doubling Season. The other order gives 3, and I get to choose.",
+    "why": "'Enters with counters' is a replacement effect (614.1c), and both enchantments modify that same event. The controller of the affected object picks the order in which the replacement effects apply (616.1, 616.1e, 616.1f). Scales first gives 1+1=2, then doubling gives 4. Doubling first gives 2, then +1 gives 3.",
+    "source": ["https://scryfall.com/search?q=%21%22Hardened+Scales%22", "https://www.mtgsalvation.com/forums/magic-fundamentals/magic-rulings/magic-rulings-archives/573650-hardened-scales-and-doubling-season", "https://yawgatog.com/resources/magic-rules/#R6161"],
+    "ambiguous": false
+  },
+  {
+    "id": "hero-bladehold-hellrider-token-doublers",
+    "question": "I control Hellrider, Anointed Procession, and Doubling Season, and I attack with only Hero of Bladehold. How many Soldier tokens do I get, and how many times does Hellrider deal damage?",
+    "cards": ["Hero of Bladehold", "Hellrider", "Anointed Procession", "Doubling Season"],
+    "answer": "8 Soldiers, all tapped and attacking, but Hellrider triggers only once (for Hero).",
+    "why": "Anointed Procession and Doubling Season each double the tokens: 2, then 4, then 8 (616.1f applies the replacement effects one after another). The extra tokens are also created tapped and attacking. However, a creature put onto the battlefield attacking was never declared as an attacker, so it never 'attacked' for trigger purposes (508.4). Hellrider's 'whenever a creature you control attacks' therefore triggers only for Hero of Bladehold. Hellrider itself did not attack in this scenario.",
+    "source": ["https://scryfall.com/card/moc/188/hero-of-bladehold", "https://www.mtgsalvation.com/forums/magic-fundamentals/magic-rulings/magic-rulings-archives/302127-hero-of-bladehold-and-hellrider", "https://yawgatog.com/resources/magic-rules/#R5084"],
+    "ambiguous": false
+  },
+  {
+    "id": "spark-double-copies-ballista",
+    "question": "My Walking Ballista has five +1/+1 counters on it. If I cast Spark Double copying it, how many counters does the Spark Double have?",
+    "cards": ["Spark Double", "Walking Ballista"],
+    "answer": "1 counter. It's a 1/1 Ballista copy.",
+    "why": "A copy takes only the copiable values, meaning the printed text. Counters are not copied (707.2). X in the copied mana cost is 0, so Ballista's 'enters with X counters' gives 0, and Spark Double's own exception adds one +1/+1 counter. Spark Double's official rulings confirm both points (counters are not copied, and X is 0).",
+    "source": ["https://scryfall.com/card/war/68/spark-double", "https://yawgatog.com/resources/magic-rules/#R7072"],
+    "ambiguous": false
+  },
+  {
+    "id": "helm-of-host-commander-token-damage",
+    "question": "Helm of the Host is equipped to my commander, so every combat I get a hasty token copy of it. Do those tokens count toward commander damage, and do I have to sacrifice them to the legend rule?",
+    "cards": ["Helm of the Host"],
+    "answer": "No to both. The tokens aren't legendary, so I keep them all, and they aren't commanders, so their combat damage isn't commander damage.",
+    "why": "Being a commander is an attribute of the physical card, not a copiable characteristic (903.3). A copy of a commander is therefore not a commander, and only damage from a commander counts toward the 21 (903.10a, 704.6c). Helm of the Host's 'except the token isn't legendary' is part of the copy effect, so the legend rule (704.5j) never applies to these tokens.",
+    "source": ["https://scryfall.com/search?q=%21%22Helm+of+the+Host%22", "https://www.mtgsalvation.com/forums/magic-fundamentals/magic-rulings/818913-making-commander-copies-commander-damage", "https://yawgatog.com/resources/magic-rules/#R9033"],
+    "ambiguous": false
+  },
+  {
+    "id": "stolen-commander-damage-to-owner",
+    "question": "I put Control Magic on my opponent's commander and attack that same opponent with it. Does the damage count as commander damage against them, and does it add to the damage their commander already dealt them?",
+    "cards": ["Control Magic"],
+    "answer": "Yes. It's combat damage from that commander, and it adds to any earlier commander damage that commander dealt that player, no matter who controlled it at the time.",
+    "why": "The rule tracks combat damage dealt 'by the same commander' (903.10a). It doesn't care who controls the commander or who owns it. The commander keeps its commander status under any controller (903.3), so a player can lose to 21 combat damage from their own commander.",
+    "source": ["https://yawgatog.com/resources/magic-rules/#R90310a", "https://cardgamebase.com/commander-damage/"],
+    "ambiguous": false
+  },
+  {
+    "id": "young-pyromancer-twincast",
+    "question": "I control Young Pyromancer. I cast Lightning Bolt, then cast Twincast copying it. How many Elemental tokens do I get?",
+    "cards": ["Young Pyromancer", "Twincast", "Lightning Bolt"],
+    "answer": "2: one for casting Lightning Bolt and one for casting Twincast. The copy doesn't trigger it.",
+    "why": "A copy of a spell is put onto the stack, not cast (707.10). 'Whenever you cast' abilities only trigger at 601.2i, when a spell is actually cast. Twincast's official ruling says the same. Only a real cast, or an effect that says 'cast a copy' (707.12), would trigger Young Pyromancer.",
+    "source": ["https://scryfall.com/search?q=%21%22Twincast%22", "https://yawgatog.com/resources/magic-rules/#R70710"],
+    "ambiguous": false
+  },
+  {
+    "id": "felidar-sovereign-intervening-if",
+    "question": "I start my upkeep at 41 life with Felidar Sovereign out, so its win trigger goes on the stack. In response my opponent hits me with Lightning Bolt. Do I still win?",
+    "cards": ["Felidar Sovereign", "Lightning Bolt"],
+    "answer": "No. I'm at 38 when the trigger resolves, so it does nothing.",
+    "why": "'At the beginning of your upkeep, if you have 40 or more life' is an intervening-if clause. The condition is checked when the ability would trigger and again when it resolves (603.4), and it fails the second check. Felidar Sovereign's official ruling says exactly this.",
+    "source": ["https://scryfall.com/search?q=%21%22Felidar+Sovereign%22", "https://yawgatog.com/resources/magic-rules/#R6034"],
+    "ambiguous": false
+  },
+  {
+    "id": "blood-moon-urborg",
+    "question": "My opponent has Blood Moon, and I play Urborg, Tomb of Yawgmoth afterward. Are my basic Forests also Swamps now, and what can Urborg tap for?",
+    "cards": ["Blood Moon", "Urborg, Tomb of Yawgmoth"],
+    "answer": "No. Urborg is just a Mountain that taps for {R} and makes nothing a Swamp, whichever card came first.",
+    "why": "Both are type-changing effects in layer 4 (613.1d). Blood Moon sets Urborg's land type to Mountain, which removes its rules-text abilities (305.7). That changes whether Urborg's effect exists at all, so Urborg's effect depends on Blood Moon's (613.8a). The dependency means Blood Moon applies first regardless of timestamps (613.8b), and Urborg's ability is gone. Urborg's official ruling confirms this 'no matter in what order those effects started to apply'.",
+    "source": ["https://scryfall.com/card/plc/165/urborg-tomb-of-yawgmoth", "https://blogs.magicjudges.org/searegion/2019/01/24/blood-moon-progenitor-of-dependency/", "https://yawgatog.com/resources/magic-rules/#R6138a"],
+    "ambiguous": false
+  },
+  {
+    "id": "humility-opalescence-timestamps",
+    "question": "I have Humility and Opalescence on the battlefield. How big is Humility, and is Opalescence a creature?",
+    "cards": ["Humility", "Opalescence"],
+    "answer": "It depends on which entered first. Humility has no abilities and is either 1/1 or 4/4. Opalescence is never a creature here.",
+    "why": "Opalescence makes Humility a creature in layer 4. Humility then removes its own ability in layer 6, but Humility's effect had already started applying, so it keeps applying in later layers anyway (613.6). In layer 7b, Humility's 'base 1/1' and Opalescence's 'base P/T equal to mana value (4)' both apply in timestamp order (613.7), and whichever applies last wins. Opalescence says 'each other', so it doesn't animate itself. The official Humility/Opalescence rulings walk through both orders.",
+    "source": ["https://scryfall.com/search?q=%21%22Humility%22", "https://scryfall.com/search?q=%21%22Opalescence%22", "https://yawgatog.com/resources/magic-rules/#R6136"],
+    "ambiguous": {
+      "needs": "Which enchantment has the later timestamp (which one entered the battlefield most recently)?",
+      "answers": {
+        "Opalescence entered first, Humility later": "Humility is a 1/1 creature with no abilities, and all other creatures are 1/1 with no abilities.",
+        "Humility entered first, Opalescence later": "Humility is a 4/4 creature with no abilities. Other creatures are still 1/1 with no abilities, and other animated non-Aura enchantments are P/T equal to their mana value."
+      }
+    }
+  },
+  {
+    "id": "commander-tax-after-bounce",
+    "question": "I've cast my commander from the command zone twice this game. My opponent just returned it with an overloaded Cyclonic Rift. How much extra does it cost me to cast it now?",
+    "cards": ["Cyclonic Rift"],
+    "answer": "It depends where the owner put it: {0} extra if it went to hand, or {4} extra if they moved it to the command zone.",
+    "why": "When a commander would go to its owner's hand, the owner may put it into the command zone instead (903.9b). Commander tax is {2} for each previous cast from the command zone (903.8). A cast from hand pays no tax and does not add to the count, so the count stays at 2 for the next time the commander is cast from the command zone.",
+    "source": ["https://yawgatog.com/resources/magic-rules/#R9038", "https://yawgatog.com/resources/magic-rules/#R9039b", "https://www.mtgsalvation.com/forums/the-game/commander-edh/201213-commander-tax-and-bounce"],
+    "ambiguous": {
+      "needs": "Did the owner let the commander go to their hand, or use the replacement to put it in the command zone?",
+      "answers": {
+        "went to hand": "Casting it from hand costs its normal mana cost with no tax, and the command-zone count stays at 2, so a later command-zone cast still costs {4} extra.",
+        "moved to command zone": "Casting it costs {4} extra (third cast from the command zone)."
+      }
+    }
+  },
+  {
+    "id": "falkenrath-noble-apnap-race",
+    "question": "My opponent and I each control a Falkenrath Noble, and we're both at 1 life. A creature dies and both Nobles trigger, each of us targeting the other. Who wins?",
+    "cards": ["Falkenrath Noble"],
+    "answer": "The non-active player wins, because their trigger resolves first. The answer depends on whose turn it is.",
+    "why": "Simultaneous triggers go on the stack in APNAP order: the active player's first, then the non-active player's on top (603.3b, 101.4). The top of the stack resolves first (405.5), so the non-active player's Noble makes the active player lose 1 and go to 0. State-based actions are checked before the other trigger resolves, and the active player loses the game (704.5a).",
+    "source": ["https://scryfall.com/search?q=%21%22Falkenrath+Noble%22", "https://yawgatog.com/resources/magic-rules/#R6033b", "https://yawgatog.com/resources/magic-rules/#R1014"],
+    "ambiguous": {
+      "needs": "Whose turn is it? (In multiplayer, also where each player sits in turn order.)",
+      "answers": {
+        "it's my turn": "I lose. My opponent's trigger is on top and resolves first.",
+        "it's my opponent's turn": "I win. My trigger resolves first and my opponent goes to 0."
+      }
+    }
+  }
+]

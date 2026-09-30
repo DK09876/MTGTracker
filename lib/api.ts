@@ -418,8 +418,12 @@ export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: Rules
 
 export const rulesThread = (id: string) => fetch(url(`rules?id=${encodeURIComponent(id)}`)).then(json<{ thread: RulesThread }>).then((b) => b.thread);
 
-export const askRules = (question: string, opts: { threadId?: string; picks?: Record<string, string>; secondCheck?: boolean } = {}) =>
-  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; budget?: Budget }>);
+export interface RulesClarify { question: string; options: string[] }
+
+export const askRules = (question: string, opts: {
+  threadId?: string; picks?: Record<string, string>; secondCheck?: boolean; clarifications?: Array<{ question: string; answer: string }>;
+} = {}) =>
+  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; clarify?: RulesClarify[]; budget?: Budget }>);
 
 export const updateRulesThread = (id: string, change: { title?: string; starred?: boolean }) =>
   send('rules', 'PATCH', { id, ...change }).then(json<{ thread: RulesThread; threads: RulesThreadSummary[] }>);

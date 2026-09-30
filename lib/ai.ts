@@ -11,9 +11,9 @@
  * a model out of requests for the day is passed over at once.
  */
 
-import { getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, setSetting } from './db';
+import { getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, setSetting } from './db';
 import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
-import { DEFAULT_MODEL, ENV_KEY, FALLBACK_MODEL, MODELS, modelInfo, providerOf, type Provider } from './models';
+import { DEFAULT_MODEL, ENV_KEY, FALLBACK_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf, type Provider } from './models';
 import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -34,12 +34,16 @@ const STEP_DEADLINE_MS = 240_000;
 const FALL_BACK_AFTER_MS = 45_000;
 // Longer than this and a per-minute limit is not worth waiting out.
 const MAX_ADVISED_WAIT_MS = 45_000;
+// Asking a non-Gemini model again after a refusal or a timeout.
+const SAME_MODEL_RETRIES = 2;
+const RETRY_WAIT_MS = 3_000;
 
 /**
  * Why a call failed: `busy` is worth trying again later, `quota` means
- * every model has used the day, `stopped` is the owner's doing.
+ * every model has used the day, `stopped` is the owner's doing, `too-big`
+ * means the request is over the model's per-minute allowance - send less.
  */
-export type FailureKind = 'busy' | 'quota' | 'stopped' | 'other';
+export type FailureKind = 'busy' | 'quota' | 'stopped' | 'too-big' | 'other';
 
 export class ModelError extends Error {
   constructor(message: string, readonly kind: FailureKind = 'other') {
@@ -73,6 +77,8 @@ export interface JsonRequest {
   temperature?: number;
   /** The whole step, retries included; four minutes by default. */
   timeoutMs?: number;
+  /** The most the answer may be, thinking included (OpenAI-style providers). */
+  maxOutputTokens?: number;
 }
 
 export interface Answer {
@@ -90,7 +96,11 @@ export interface Usage {
   called: (model: string) => void;
   /** The model is out of requests for the day. */
   spent: (model: string, limit: number | null) => void;
+  /** Tokens a request used, sent and written. */
+  tokens?: (model: string, count: number) => void;
 }
+
+const tokensRecorded = (model: string, count: number) => recordModelTokens(quotaDay(), model, count);
 
 /** Usage kept in the database, by quota day, over a list of models. */
 export function storedUsage(models = ladder()): Usage {
@@ -98,6 +108,7 @@ export function storedUsage(models = ladder()): Usage {
     available: () => budgetFrom(models, modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
     called: (model) => recordModelCall(quotaDay(), model),
     spent: (model, limit) => recordModelExhausted(quotaDay(), model, limit),
+    tokens: tokensRecorded,
   };
 }
 
@@ -118,17 +129,34 @@ export function chosenModel(): string {
 }
 
 export function chooseModel(id: string): void {
-  if (!modelInfo(id)) throw new ModelError(`Unknown model ${id}`);
+  if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
   if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
   setSetting(MODEL_SETTING, id);
 }
 
 const hasKey = (id: string) => !!process.env[ENV_KEY[providerOf(id)]];
 
-/** The chosen model, then Flash-Lite to fall back on when it refuses. */
+/**
+ * The chosen model, and for a Gemini one, Flash-Lite to fall back on when it
+ * refuses. Another provider's model is not swapped for Gemini's: a request
+ * that Groq turns away is asked again on Groq (see generate), since a
+ * different model answering changes the answers.
+ */
 function appModels(): string[] {
   const chosen = chosenModel();
-  return hasKey(FALLBACK_MODEL) && chosen !== FALLBACK_MODEL ? [chosen, FALLBACK_MODEL] : [chosen];
+  const gemini = providerOf(chosen) === 'gemini';
+  return gemini && hasKey(FALLBACK_MODEL) && chosen !== FALLBACK_MODEL ? [chosen, FALLBACK_MODEL] : [chosen];
+}
+
+/** The chosen model's own size limit for a request, in tokens. */
+export function inputTokens(): number {
+  return modelInfo(chosenModel())?.inputTokens ?? 30_000;
+}
+
+/** A small model on the chosen model's provider, for preparatory jobs; null without a key. */
+export function helperModel(): JsonModel | null {
+  const helper = HELPER_MODEL[providerOf(chosenModel())];
+  return modelById(helper);
 }
 
 /**
@@ -164,9 +192,12 @@ async function generate(
   );
   const stopped = () => new ModelError('stopped', 'stopped');
   let lastError: ModelError | null = null;
-  const badShape = new Set<string>();
   for (const [index, model] of models.entries()) {
     const fallback = index < models.length - 1;
+    // Groq and Mistral do not count a refusal against the day as Gemini does,
+    // so a model with nothing to fall back on is asked again, a few times.
+    let retries = providerOf(model) !== 'gemini' && !fallback ? SAME_MODEL_RETRIES : 0;
+    let badShape = 0;
     for (;;) {
       if (signal?.aborted) throw stopped();
       const left = deadline - now();
@@ -179,9 +210,18 @@ async function generate(
         break;
       }
       try {
-        response = await call(provider, apiKey, model, request, fallback ? Math.min(left, FALL_BACK_AFTER_MS) : left, signal);
+        response = await call(provider, apiKey, model, request, fallback || retries > 0 ? Math.min(left, FALL_BACK_AFTER_MS) : left, signal);
       } catch (error) {
-        // Too slow, or unreachable: with another model to try, try it.
+        // Too slow, or unreachable: with another model to try, try it; with
+        // none, ask this one again if it may be.
+        if (error instanceof ModelError && error.kind === 'busy' && !fallback && retries > 0) {
+          retries--;
+          usage.called(model);
+          onOutcome?.(model, false, error.message);
+          onEvent?.({ model, what: 'busy', waitMs: RETRY_WAIT_MS });
+          await sleep(RETRY_WAIT_MS, signal);
+          continue;
+        }
         if (!(error instanceof ModelError) || error.kind !== 'busy' || !fallback) throw error;
         usage.called(model);
         onOutcome?.(model, false, error.message);
@@ -197,6 +237,7 @@ async function generate(
       if (response.ok) {
         onOutcome?.(model, true, 'answered');
         const body = await response.json();
+        usage.tokens?.(model, tokensIn(body));
         if (provider === 'gemini') return { data: parseJson(body), model };
         try {
           return { data: parseOpenAIJson(body), model };
@@ -214,21 +255,29 @@ async function generate(
         break;
       }
       // Too big for the model's per-minute token allowance (Groq's free tier): the next model may take it.
-      if (response.status === 413 && fallback) {
-        lastError = new ModelError(`${modelLabel(model)}: the question is too long for its free tier`, 'busy');
-        break;
+      if (response.status === 413) {
+        lastError = new ModelError(`${modelLabel(model)}: the request is too long for its free tier`, 'too-big');
+        if (fallback) break;
+        throw lastError;
       }
       // Groq checks the model's JSON against the schema and refuses a miss
       // (GPT-OSS once wrote a count as "1"; 2026-09-30). A fresh try usually
       // passes: once more on the same model, then the next.
       if (response.status === 400 && /does not match the expected schema|failed to validate json|json_validate_failed/i.test(detail.message)) {
         lastError = new ModelError(`${modelLabel(model)} wrote an answer in the wrong shape`);
-        if (!badShape.has(model)) { badShape.add(model); continue; }
+        if (badShape++ < (providerOf(model) === 'gemini' ? 1 : 2)) continue;
         break;
       }
       if (!RETRY_STATUSES.has(response.status)) throw error;
 
       if (response.status === 429) {
+        // Groq's free tier also caps tokens (and requests) a day, refilling as
+        // the day goes on: say so, and when there will be room again.
+        const daily = provider !== 'gemini' ? /(tokens|requests) per day[\s\S]*?Limit (\d+)[\s\S]*?try again in ([\dhms.]+)/i.exec(detail.message + ' ' + JSON.stringify(detail.body)) : null;
+        if (daily) {
+          const what = daily[1].toLowerCase() === 'tokens' ? `${Number(daily[2]).toLocaleString('en-US')} free tokens` : `${Number(daily[2]).toLocaleString('en-US')} free requests`;
+          throw new ModelError(`${modelLabel(model)} has used its ${what} for today - there is room again in about ${roughly(daily[3])}. Or pick another model in Settings.`, 'quota');
+        }
         const violation = provider === 'gemini' ? quotaViolation(detail.body) : null;
         if (violation?.daily) {
           usage.spent(model, violation.limit);
@@ -247,6 +296,13 @@ async function generate(
         continue;
       }
 
+      // Busy, with nothing to fall back on: ask the same model again.
+      if (retries > 0) {
+        retries--;
+        onEvent?.({ model, what: 'busy', waitMs: RETRY_WAIT_MS });
+        await sleep(RETRY_WAIT_MS, signal);
+        continue;
+      }
       // Busy: on to the next model after a pause, or stop.
       busyCount++;
       lastError = busy();
@@ -308,6 +364,22 @@ function describe(model: string, status: number, message: string): string {
   return `${name} returned ${status}${message ? `: ${message}` : ''}`;
 }
 
+/** Tokens a reply says it used: Gemini's usageMetadata, or an OpenAI-style usage. */
+export function tokensIn(body: unknown): number {
+  const b = body as { usageMetadata?: { totalTokenCount?: number }; usage?: { total_tokens?: number } };
+  return Number(b?.usageMetadata?.totalTokenCount ?? b?.usage?.total_tokens ?? 0) || 0;
+}
+
+/** "9m31.968s" as "10 minutes", "1h2m" as "an hour". */
+export function roughly(wait: string): string {
+  const [, h = '0', m = '0', s = '0'] = /(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/.exec(wait) ?? [];
+  const minutes = Math.ceil(Number(h) * 60 + Number(m) + Number(s) / 60);
+  if (minutes <= 1) return 'a minute';
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? 'an hour' : `${hours} hours`;
+}
+
 /** Gemini's advised wait, from the RetryInfo detail of a 429 ("23s"). */
 export function retryAfterMs(body: unknown): number | null {
   const details = (body as { error?: { details?: Array<{ retryDelay?: string }> } })?.error?.details ?? [];
@@ -357,20 +429,25 @@ export interface ModelStatus {
   used: number;
   remaining: number;
   limit: number;
+  /** Tokens used today, and the free tier's daily token cap where that is what binds (Groq). */
+  tokens: number;
+  dailyTokens: number | null;
   /** The last time it was asked, and whether it answered. */
   health: { ok: boolean; detail: string; at: string } | null;
 }
 
 export function modelStatuses(): ModelStatus[] {
-  const budget = budgetFrom(MODELS, modelUsage(quotaDay()));
+  const usage = modelUsage(quotaDay());
+  const budget = budgetFrom(MODELS, usage);
   const chosen = chosenModel();
-  return MODELS.map((m) => {
+  return MODELS.filter((m) => !m.helper).map((m) => {
     const b = budget.models.find((x) => x.id === m.id);
     const h = modelHealth(m.id);
     return {
       id: m.id, label: m.label, provider: m.provider, note: m.note, reasoning: m.reasoning,
       hasKey: hasKey(m.id), chosen: m.id === chosen,
       used: b?.used ?? 0, remaining: b?.remaining ?? m.dailyLimit, limit: b?.limit ?? m.dailyLimit,
+      tokens: usage.find((u) => u.model === m.id)?.tokens ?? 0, dailyTokens: m.dailyTokens ?? null,
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
@@ -409,6 +486,7 @@ export function modelById(id: string, fallbacks: string[] = []): JsonModel | nul
     available: () => budgetFrom(list, modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
     called: (m) => recordModelCall(quotaDay(), m),
     spent: (m, limit) => recordModelExhausted(quotaDay(), m, limit),
+    tokens: tokensRecorded,
   };
   const key = process.env.GEMINI_API_KEY ?? '';
   return (request, options) => generate(key, usage, request, {

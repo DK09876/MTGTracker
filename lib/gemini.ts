@@ -84,9 +84,8 @@ export class GeminiError extends Error {}
 
 /**
  * A translator over the model chosen in Settings (lib/ai.ts), when that is
- * not Gemini's own: the same prompt and schema, answered as JSON. If it
- * fails, the Gemini translator answers instead, so search never hangs on
- * another provider's bad minute.
+ * not Gemini's own: the same prompt and schema, answered as JSON. A
+ * fallback translator, if given, answers when it fails.
  */
 export function modelTranslator(model: JsonModel, fallback: Translator | null): Translator {
   return async (request, context) => {

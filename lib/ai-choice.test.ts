@@ -37,13 +37,17 @@ describe('chosenModel', () => {
     ai.chooseModel('openai/gpt-oss-120b');
     expect(ai.chosenModel()).toBe('openai/gpt-oss-120b');
     expect(ai.modelStatuses().find((m) => m.chosen)?.id).toBe('openai/gpt-oss-120b');
-    expect(ai.currentBudget().models.map((m) => m.id)).toEqual(['openai/gpt-oss-120b', 'gemini-3.5-flash-lite']);
+    // Groq is not swapped for Gemini; a Gemini Flash model still falls back on Flash-Lite.
+    expect(ai.currentBudget().models.map((m) => m.id)).toEqual(['openai/gpt-oss-120b']);
+    ai.chooseModel('gemini-3.8-flash');
+    expect(ai.currentBudget().models.map((m) => m.id)).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
   });
 
   it('refuses a model without a key or unknown, and forgets one whose key is gone', async () => {
     const ai = await import('./ai');
     expect(() => ai.chooseModel('mistral-medium-latest')).toThrow(/MISTRAL_API_KEY/);
     expect(() => ai.chooseModel('made-up')).toThrow(/Unknown/);
+    expect(() => ai.chooseModel('openai/gpt-oss-20b')).toThrow(/Unknown/); // a helper, not offered
     ai.chooseModel('openai/gpt-oss-120b');
     vi.stubEnv('GROQ_API_KEY', '');
     expect(ai.chosenModel()).toBe('gemini-3.5-flash-lite');

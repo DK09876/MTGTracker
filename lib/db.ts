@@ -97,6 +97,11 @@ function open(): Database {
   if (!cardColumns.some((c) => c.name === 'finish')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'nonfoil'`);
   }
+  // Tokens each model used per day: Groq's free tier caps tokens a day, not only requests.
+  const usageColumns = db.all('PRAGMA table_info(model_usage)') as Array<{ name: string }>;
+  if (usageColumns.length && !usageColumns.some((c) => c.name === 'tokens')) {
+    db.run('ALTER TABLE model_usage ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0');
+  }
   // What each card does - ramp, removal... - from Scryfall's tags, by
   // oracle id so every printing shares the answer. `checkedAt` records that
   // a card was looked up, so one with no roles is not looked up again.
@@ -148,6 +153,7 @@ function open(): Database {
       used INTEGER NOT NULL DEFAULT 0,
       quotaLimit INTEGER,
       exhausted INTEGER NOT NULL DEFAULT 0,
+      tokens INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, model)
     );
   `);
@@ -855,6 +861,8 @@ export interface ModelUsage {
   quotaLimit: number | null;
   /** Refused for the day - its quota is spent, whatever the count says. */
   exhausted: boolean;
+  /** Tokens sent and written that day. */
+  tokens?: number;
 }
 
 // --- recent searches -----------------------------------------------------
@@ -1051,8 +1059,8 @@ export function modelHealth(model: string): ModelHealth | null {
  * so the app counts what it sends.
  */
 export function modelUsage(day: string): ModelUsage[] {
-  return (open().all('SELECT model, used, quotaLimit, exhausted FROM model_usage WHERE day = ?', [day]) as Array<{
-    model: string; used: number; quotaLimit: number | null; exhausted: number;
+  return (open().all('SELECT model, used, quotaLimit, exhausted, tokens FROM model_usage WHERE day = ?', [day]) as Array<{
+    model: string; used: number; quotaLimit: number | null; exhausted: number; tokens: number;
   }>).map((r) => ({ ...r, exhausted: r.exhausted === 1 }));
 }
 
@@ -1061,6 +1069,14 @@ export function recordModelCall(day: string, model: string): void {
     `INSERT INTO model_usage (day, model, used) VALUES (?, ?, 1)
      ON CONFLICT(day, model) DO UPDATE SET used = used + 1`,
     [day, model],
+  );
+}
+
+export function recordModelTokens(day: string, model: string, tokens: number): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used, tokens) VALUES (?, ?, 0, ?)
+     ON CONFLICT(day, model) DO UPDATE SET tokens = tokens + excluded.tokens`,
+    [day, model, Math.max(0, Math.round(tokens))],
   );
 }
 

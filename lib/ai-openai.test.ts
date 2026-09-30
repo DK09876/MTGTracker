@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { testing, type Usage } from './ai';
+import { roughly, testing, tokensIn, type Usage } from './ai';
 import { parseOpenAIJson, toJsonSchema } from './ai-openai';
 import { providerOf } from './models';
 
@@ -64,6 +64,44 @@ describe('generate across providers', () => {
     const answer = await testing.generate('', usage(['openai/gpt-oss-120b']), { system: 's', user: 'u', schema: {} }, {}, noWait);
     expect(answer.data).toEqual({ ok: true });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks Groq again after a busy refusal rather than giving up', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'groq-key');
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('{"error":{"message":"over capacity"}}', { status: 503 }))
+      .mockResolvedValueOnce(chat('{"ok":true}'));
+    vi.stubGlobal('fetch', fetch);
+    const answer = await testing.generate('', usage(['openai/gpt-oss-120b']), { system: 's', user: 'u', schema: {} }, {}, noWait);
+    expect(answer.model).toBe('openai/gpt-oss-120b');
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('says a request is too big for the free tier, so the caller can send less', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'groq-key');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":{"message":"Request too large"}}', { status: 413 })));
+    await expect(testing.generate('', usage(['openai/gpt-oss-120b']), { system: 's', user: 'u', schema: {} }, {}, noWait))
+      .rejects.toMatchObject({ kind: 'too-big' });
+  });
+
+  it('says plainly when Groq\'s daily token cap is used up, and records tokens used', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'groq-key');
+    const tpd = { error: { message: 'Rate limit reached for model `openai/gpt-oss-120b` on tokens per day (TPD): Limit 200000, Used 196229, Requested 5095. Please try again in 9m31.968s.', code: 'rate_limit_exceeded' } };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(tpd), { status: 429, headers: { 'retry-after': '572' } })));
+    await expect(testing.generate('', usage(['openai/gpt-oss-120b']), { system: 's', user: 'u', schema: {} }, {}, noWait))
+      .rejects.toMatchObject({ kind: 'quota', message: expect.stringMatching(/200,000 free tokens for today - there is room again in about 10 minutes/) });
+    const counted: number[] = [];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }], usage: { total_tokens: 6431 } }))));
+    await testing.generate('', { ...usage(['openai/gpt-oss-120b']), tokens: (_m, n) => counted.push(n) }, { system: 's', user: 'u', schema: {} }, {}, noWait);
+    expect(counted).toEqual([6431]);
+  });
+
+  it('reads token counts and waits in plain words', () => {
+    expect(tokensIn({ usageMetadata: { totalTokenCount: 812 } })).toBe(812);
+    expect(tokensIn({})).toBe(0);
+    expect(roughly('45s')).toBe('a minute');
+    expect(roughly('1h2m3s')).toBe('an hour');
+    expect(roughly('5h')).toBe('5 hours');
   });
 
   it('falls back to Gemini when the chosen provider is rate limited', async () => {

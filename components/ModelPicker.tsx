@@ -68,7 +68,11 @@ export default function ModelPicker() {
             {!m.hasKey
               ? <span>No key on the server</span>
               : <>
-                <span>{m.used} of about {m.limit} used today</span>
+                <span>
+                  {m.dailyTokens
+                    ? `${Math.round(m.tokens / 1000)}K of ${Math.round(m.dailyTokens / 1000)}K tokens used today`
+                    : `${m.used} of about ${m.limit} used today`}
+                </span>
                 <span className={m.health ? (m.health.ok ? 'text-emerald-400' : 'text-amber-400') : ''}>
                   {!m.health ? 'Not tried yet' : m.health.ok ? `✓ Answered ${when(m.health.at)}` : `✗ ${m.health.detail} (${when(m.health.at)})`}
                 </span>
