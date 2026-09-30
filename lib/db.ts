@@ -201,6 +201,8 @@ function open(): Database {
       updatedAt TEXT NOT NULL
     );
   `);
+  // Whether each smarter model answered the last time it was asked - see ai.ts.
+  db.run(`CREATE TABLE IF NOT EXISTS model_health (model TEXT PRIMARY KEY, ok INTEGER NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL)`);
   // Searches kept under a name to carry on later - see recent.ts (Session).
   db.run(`
     CREATE TABLE IF NOT EXISTS saved_searches (
@@ -1014,6 +1016,22 @@ export function saveTagJob(job: TagJob): void {
      ON CONFLICT(listId) DO UPDATE SET job = excluded.job, updatedAt = excluded.updatedAt`,
     [job.listId, JSON.stringify(job), new Date().toISOString()],
   );
+}
+
+export interface ModelHealth { model: string; ok: boolean; detail: string; at: string }
+
+export function recordModelHealth(model: string, ok: boolean, detail: string): void {
+  open().run(
+    `INSERT INTO model_health (model, ok, detail, at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(model) DO UPDATE SET ok = excluded.ok, detail = excluded.detail, at = excluded.at`,
+    [model, ok ? 1 : 0, detail.slice(0, 200), now()],
+  );
+}
+
+export function modelHealth(model: string): ModelHealth | null {
+  const row = open().get('SELECT model, ok, detail, at FROM model_health WHERE model = ?', [model]) as
+    { model: string; ok: number; detail: string; at: string } | null;
+  return row ? { ...row, ok: row.ok === 1 } : null;
 }
 
 /**

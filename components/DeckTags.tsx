@@ -19,6 +19,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
+import SmarterModelSetting from './SmarterModelSetting';
+import { useSmarter } from '@/lib/ai-settings';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
@@ -58,6 +60,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [audit, setAudit] = useState(true);
   const [job, setJob] = useState<TagJob | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [smarter] = useSmarter();
   const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
   const [mode, setMode] = useState<Mode>('free');
 
@@ -137,8 +140,8 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       setError(e instanceof Error ? e.message : 'Could not start that');
     }
   };
-  const propose = () => start({ kind: 'propose', instructions, boards });
-  const tagCards = () => start({ kind: 'tag', mode, scope, audit, boards });
+  const propose = () => start({ kind: 'propose', instructions, boards, smarter });
+  const tagCards = () => start({ kind: 'tag', mode, scope, audit, boards, smarter });
   const stopJob = async () => {
     setStopping(true);
     try {
@@ -164,6 +167,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         tags for you to shape, then applies the ones you keep to every card.
       </p>
       {budget && <BudgetLine budget={budget} />}
+      <SmarterModelSetting />
 
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">What should this deck do?</h3>

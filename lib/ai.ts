@@ -10,8 +10,8 @@
  * a model out of requests for the day is passed over at once.
  */
 
-import { modelUsage, recordModelCall, recordModelExhausted } from './db';
-import { budgetFrom, ladder, quotaDay, quotaViolation, type Budget } from './quota';
+import { modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth } from './db';
+import { budgetFrom, ladder, ladderFor, quotaDay, quotaViolation, SMARTER_MODELS, type AiMode, type Budget } from './quota';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -26,6 +26,9 @@ const BUSY_WAIT_MS = 8_000;
 const MAX_BUSY = 3;
 // No step waits longer than this in all, answers included.
 const STEP_DEADLINE_MS = 240_000;
+// With a model to fall back on, one that has not answered by now is passed
+// over rather than waited on: a busy Flash can take minutes to refuse.
+const FALL_BACK_AFTER_MS = 45_000;
 // Longer than this and a per-minute limit is not worth waiting out.
 const MAX_ADVISED_WAIT_MS = 45_000;
 
@@ -54,6 +57,8 @@ export interface CallOptions {
   maxBusy?: number;
   signal?: AbortSignal;
   onEvent?: (event: ModelEvent) => void;
+  /** Told whether each model answered, for tracking whether the smarter ones work. */
+  onOutcome?: (model: string, ok: boolean, detail: string) => void;
 }
 
 export interface JsonRequest {
@@ -84,10 +89,10 @@ export interface Usage {
   spent: (model: string, limit: number | null) => void;
 }
 
-/** Usage kept in the database, by quota day. */
-export function storedUsage(): Usage {
+/** Usage kept in the database, by quota day, over the models of a mode. */
+export function storedUsage(mode: AiMode = 'standard'): Usage {
   return {
-    available: () => budgetFrom(ladder(), modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
+    available: () => budgetFrom(ladderFor(mode), modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
     called: (model) => recordModelCall(quotaDay(), model),
     spent: (model, limit) => recordModelExhausted(quotaDay(), model, limit),
   };
@@ -98,17 +103,38 @@ export function currentBudget(): Budget {
   return budgetFrom(ladder(), modelUsage(quotaDay()));
 }
 
-/** The tagging model, or null when no API key is configured. */
-export function taggingModel(usage: Usage = storedUsage()): JsonModel | null {
+/**
+ * The model for a feature, in standard or smarter mode, or null when no API
+ * key is configured. Smarter mode tries the smarter models first and falls
+ * back to the standard one quickly, and records whether they answered.
+ */
+export function modelFor(mode: AiMode = 'standard'): JsonModel | null {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
+  const usage = storedUsage(mode);
+  const smarter = new Set(SMARTER_MODELS.map((m) => m.id));
+  return (request, options) => generate(key, usage, request, {
+    ...options,
+    ...(mode === 'smarter' ? { maxBusy: Math.max(2, options?.maxBusy ?? 2) } : {}),
+    onOutcome: (model, ok, detail) => {
+      if (smarter.has(model)) recordModelHealth(model, ok, detail);
+      options?.onOutcome?.(model, ok, detail);
+    },
+  });
+}
+
+/** The tagging model (standard), or null when no API key is configured. */
+export function taggingModel(usage?: Usage): JsonModel | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  if (!usage) return modelFor('standard');
   return (request, options) => generate(key, usage, request, options);
 }
 
 async function generate(
   key: string, usage: Usage, request: JsonRequest, options: CallOptions = {}, sleep = wait, now = Date.now,
 ): Promise<Answer> {
-  const { maxBusy = MAX_BUSY, signal, onEvent } = options;
+  const { maxBusy = MAX_BUSY, signal, onEvent, onOutcome } = options;
   const models = usage.available();
   if (!models.length) {
     throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
@@ -120,16 +146,34 @@ async function generate(
   );
   const stopped = () => new ModelError('stopped', 'stopped');
   let lastError: ModelError | null = null;
-  for (const model of models) {
+  for (const [index, model] of models.entries()) {
+    const fallback = index < models.length - 1;
     for (;;) {
       if (signal?.aborted) throw stopped();
       const left = deadline - now();
       if (left <= 0) throw busyCount ? busy() : new ModelError('the model took too long', 'busy');
-      const response = await call(key, model, request, left, signal);
+      let response: Response;
+      try {
+        response = await call(key, model, request, fallback ? Math.min(left, FALL_BACK_AFTER_MS) : left, signal);
+      } catch (error) {
+        // Too slow, or unreachable: with another model to try, try it.
+        if (!(error instanceof ModelError) || error.kind !== 'busy' || !fallback) throw error;
+        usage.called(model);
+        onOutcome?.(model, false, error.message);
+        busyCount++;
+        lastError = error;
+        if (busyCount >= maxBusy) throw busy();
+        onEvent?.({ model, what: 'busy' });
+        break;
+      }
       // Count what the quota counts, which includes a busy model's 503s:
       // on 2026-09-24 3.5 Flash ran out after one answer and a run of 503s.
       if (response.status !== 404 && response.status !== 429) usage.called(model);
-      if (response.ok) return { data: parseJson(await response.json()), model };
+      if (response.ok) {
+        onOutcome?.(model, true, 'answered');
+        return { data: parseJson(await response.json()), model };
+      }
+      onOutcome?.(model, false, `refused (${response.status})`);
 
       const detail = await errorDetail(response);
       const error = new ModelError(describe(model, response.status, detail.message));
@@ -253,3 +297,57 @@ export function wait(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export const testing = { generate };
+
+// --- smarter mode --------------------------------------------------------------
+
+// How recently a smarter model must have answered to be offered.
+const SMARTER_FRESH_MS = 6 * 60 * 60 * 1000;
+
+export interface SmarterStatus {
+  model: string;
+  label: string;
+  /** It answered its last request, recently: smarter mode can be turned on. */
+  available: boolean;
+  /** When it was last asked, and what happened. */
+  checkedAt: string | null;
+  detail: string;
+}
+
+export function smarterStatus(): SmarterStatus {
+  const { id, label } = SMARTER_MODELS[0];
+  const h = modelHealth(id);
+  const fresh = !!h && Date.now() - Date.parse(h.at) < SMARTER_FRESH_MS;
+  return {
+    model: id, label,
+    available: !!h?.ok && fresh,
+    checkedAt: h?.at ?? null,
+    detail: !h ? 'Not checked yet' : h.ok ? (fresh ? 'Answering' : 'Answered, but not recently - check again') : `Not answering: ${h.detail}`,
+  };
+}
+
+/** Standard or smarter, as asked - smarter only while it has been answering. */
+export function resolveMode(wantSmarter: unknown): AiMode {
+  return wantSmarter === true && smarterStatus().available ? 'smarter' : 'standard';
+}
+
+/** Ask the smarter model something tiny, to see whether it answers. One request of its own allowance. */
+export async function checkSmarter(): Promise<SmarterStatus> {
+  const key = process.env.GEMINI_API_KEY;
+  const { id } = SMARTER_MODELS[0];
+  if (!key) return { ...smarterStatus(), detail: 'No GEMINI_API_KEY on the server' };
+  const usage: Usage = {
+    available: () => (budgetFrom(SMARTER_MODELS, modelUsage(quotaDay())).models[0].remaining > 0 ? [id] : []),
+    called: (m) => recordModelCall(quotaDay(), m),
+    spent: (m, limit) => recordModelExhausted(quotaDay(), m, limit),
+  };
+  try {
+    await generate(key, usage, {
+      system: 'Answer with JSON.', user: 'Reply {"ok": true}.',
+      schema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' } }, required: ['ok'] },
+      thinking: 'low', timeoutMs: FALL_BACK_AFTER_MS,
+    }, { maxBusy: 1, onOutcome: (m, ok, detail) => recordModelHealth(m, ok, detail) });
+  } catch (error) {
+    recordModelHealth(id, false, error instanceof Error ? error.message : 'failed');
+  }
+  return smarterStatus();
+}

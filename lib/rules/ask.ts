@@ -16,7 +16,8 @@
 
 import type { CallOptions, JsonModel } from '../ai';
 import type { Ruling, ScryfallCard } from '../scryfall';
-import { ANSWER_SCHEMA, ANSWER_SYSTEM, answerMessage, parseAnswer, type Source, type Turn } from './answer';
+import { anchorRules } from './anchors';
+import { ANSWER_SCHEMA, ANSWER_SYSTEM, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, parseAnswer, type Source, type Turn } from './answer';
 import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRules, tokens, type RulesIndex } from './cr';
 import { findMentions, type NameIndex } from './names';
 import type { WikiPage } from './sources';
@@ -38,6 +39,8 @@ export interface AskInput {
   earlier?: Turn[];
   /** Answers to "which card?": mention -> the card's name. */
   picks?: Record<string, string>;
+  /** Have the answer checked by a second request before it is given. */
+  secondCheck?: boolean;
 }
 
 export type AskResult =
@@ -161,9 +164,14 @@ export async function gatherSources(question: string, cards: ScryfallCard[], dep
     const entry = index.glossary.get(g)!;
     sources.push({ id: next('G'), kind: 'glossary', label: `Glossary: ${entry.term}`, url: glossaryUrl(entry.term), text: entry.text });
   }
-  for (const r of rules.slice(0, 14)) {
+  // The rules the cards' own words call for come first (anchors.ts), then
+  // what the search found, up to eighteen in all.
+  const anchors = anchorRules(question, cards).filter((a) => index.rules.has(a.rule));
+  const ordered = [...anchors.map((a) => a.rule), ...rules.filter((r) => !anchors.some((a) => a.rule === r))].slice(0, 18);
+  for (const r of ordered) {
     const text = ruleWithContext(index, r);
-    if (text) sources.push({ id: next('C'), kind: 'rule', label: `CR ${r}`, url: ruleUrl(r), text });
+    const why = anchors.find((a) => a.rule === r)?.why;
+    if (text) sources.push({ id: next('C'), kind: 'rule', label: `CR ${r}`, url: ruleUrl(r), text: why ? `${text}\n[Included because: ${why}]` : text });
   }
 
   // The wiki explains keyword abilities well (myriad, equip); everyday keyword
@@ -207,10 +215,28 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
     temperature: 0.2,
     timeoutMs: 90_000,
   }, options);
+  let final = parseAnswer(answer.data, sources);
+  let check: Turn['check'];
+  if (input.secondCheck) {
+    const history = earlier.map((t) => ({ question: t.question, verdict: t.answer.verdict }));
+    try {
+      const checked = await deps.model({
+        system: CHECK_SYSTEM, user: checkMessage(question, history, sources, final), schema: CHECK_SCHEMA,
+        thinking: 'high', temperature: 0.1, timeoutMs: 90_000,
+      }, options);
+      const changes = String((checked.data as { changes?: unknown }).changes ?? '').trim() || 'No changes';
+      final = parseAnswer(checked.data, sources);
+      check = { changes, model: checked.model };
+    } catch (error) {
+      // The first answer still stands; the page says the check did not run.
+      check = { failed: error instanceof Error ? error.message : 'The second check failed' };
+    }
+  }
   return {
     turn: {
       question,
-      answer: parseAnswer(answer.data, sources),
+      answer: final,
+      ...(check ? { check } : {}),
       sources,
       cards: cards.map((c) => c.name),
       model: answer.model,

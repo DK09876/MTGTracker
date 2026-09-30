@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let b: { kind?: unknown; instructions?: unknown; boards?: unknown; mode?: unknown; scope?: unknown; audit?: unknown };
+  let b: { kind?: unknown; instructions?: unknown; boards?: unknown; mode?: unknown; scope?: unknown; audit?: unknown; smarter?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -44,13 +44,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (b.kind !== 'propose' && b.kind !== 'tag') return NextResponse.json({ error: 'Unknown kind' }, { status: 400 });
   const boards = Array.isArray(b.boards) ? b.boards.filter((x): x is Board => BOARDS.has(x as Board)) : [];
   const job: JobParams = b.kind === 'propose'
-    ? { kind: 'propose', boards: boards.length ? boards : ['main'], instructions: typeof b.instructions === 'string' ? b.instructions.slice(0, 4000) : '' }
+    ? { kind: 'propose', boards: boards.length ? boards : ['main'], instructions: typeof b.instructions === 'string' ? b.instructions.slice(0, 4000) : '', smarter: b.smarter === true }
     : {
       kind: 'tag',
       boards: boards.length ? boards : ['main'],
       mode: b.mode === 'smart' ? 'smart' : 'free',
       scope: b.scope === 'untagged' ? 'untagged' : 'all',
       audit: b.audit !== false,
+      smarter: b.smarter === true,
     };
   try {
     startJob(owned.list, job);

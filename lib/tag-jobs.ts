@@ -31,6 +31,8 @@ export interface JobParams {
   mode?: Mode;
   scope?: 'all' | 'untagged';
   audit?: boolean;
+  /** Use the smarter model if it has been answering (lib/ai.ts). */
+  smarter?: boolean;
 }
 
 export interface JobEvent {

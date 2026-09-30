@@ -22,6 +22,8 @@ const KIND_LABEL: Record<Source['kind'], string> = {
   ruling: 'Official ruling', rule: 'Comprehensive Rules', glossary: 'Rules glossary', oracle: 'Card text', wiki: 'MTG Wiki',
 };
 
+const modelName = (id: string) => id.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, '-Lite');
+
 const LINK_LABEL: Record<Source['kind'], string> = {
   ruling: 'On Scryfall', oracle: 'On Scryfall', rule: 'Read the rule', glossary: 'In the glossary', wiki: 'MTG Wiki',
 };
@@ -49,10 +51,10 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
   const [showAll, setShowAll] = useState(false);
   const { answer, sources } = turn;
   const byId = new Map(sources.map((s) => [s.id, s]));
-  // Citations numbered in the order they first appear.
-  const order: string[] = [];
+  // Citations numbered by importance: the answer ranks them, key sources first.
+  const order: string[] = answer.citations.map((c) => c.id);
   for (const m of `${answer.verdict} ${answer.explanation}`.matchAll(/\[([A-Z]\d+)\]/g)) if (!order.includes(m[1])) order.push(m[1]);
-  for (const c of answer.citations) if (!order.includes(c.id)) order.push(c.id);
+  const key = new Set(answer.citations.filter((c) => c.role === 'key').map((c) => c.id));
   const numberOf = (id: string) => order.indexOf(id) + 1;
   const anchor = (id: string) => `t${index}-${id}`;
 
@@ -77,6 +79,20 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
         <span aria-hidden>{conf.icon}</span> {conf.label} <span className="font-normal text-[var(--muted)]">· {conf.hint}</span>
       </p>
       <p className="mt-2 text-base font-medium leading-snug">{withMarks(answer.verdict)}</p>
+      {answer.looseEnds?.map((l, i) => (
+        <p key={i} className="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-[var(--foreground)]">
+          <span aria-hidden className="text-amber-400">⚠</span> This answer may have missed something - {l}
+        </p>
+      ))}
+      {turn.check && (
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          {'failed' in turn.check
+            ? <><span aria-hidden className="text-amber-400">⚠</span> Second check did not run: {turn.check.failed}</>
+            : /^no changes/i.test(turn.check.changes)
+              ? <><span aria-hidden className="text-green-500">✓</span> Second check: no changes</>
+              : <><span aria-hidden className="text-[var(--accent)]">↻</span> Second check corrected it: {turn.check.changes}</>}
+        </p>
+      )}
       <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-[var(--foreground)]">
         {steps(answer.explanation).map((s, i) => <li key={i}>{withMarks(s)}</li>)}
       </ol>
@@ -84,15 +100,38 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
       <section className="mt-4 border-t border-[var(--border)] pt-3">
         <h3 className="text-sm font-medium">How this was worked out</h3>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          Checked {summary(sources)}{turn.rulesEdition ? `, from the Comprehensive Rules effective ${turn.rulesEdition}` : ''}.
+          Checked {summary(sources)}{turn.rulesEdition ? `, from the Comprehensive Rules effective ${turn.rulesEdition}` : ''}. Answered by {modelName(turn.model)}.
           {cited.length > 0 ? ' The numbered sources below are what the answer rests on - open each to read it where it comes from.' : ' None of them settled it outright.'}
         </p>
       </section>
+      {answer.worksheet && answer.worksheet.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Trigger worksheet - every event, and every object checked</summary>
+          <ol className="mt-2 space-y-2 text-xs">
+            {answer.worksheet.map((e, i) => (
+              <li key={i} className="rounded-lg bg-[var(--background)] px-3 py-2">
+                <p className="font-medium">{i + 1}. {e.event}</p>
+                <ul className="mt-1 space-y-0.5">
+                  {e.checks.map((c, j) => (
+                    <li key={j} className="flex gap-2">
+                      <span aria-hidden className={c.triggers ? 'text-green-500' : 'text-[var(--muted)]'}>{c.triggers ? '✓' : '–'}</span>
+                      <span>
+                        <span className="text-[var(--foreground)]">{c.object}</span>
+                        <span className="text-[var(--muted)]"> · {c.ability}{c.triggers ? ` · ${c.times}×` : ' · does not trigger'} - {c.why}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       {cited.length > 0 && (
         <section className="mt-3">
-          <h3 className="text-xs uppercase tracking-wide text-[var(--muted)]">Sources cited</h3>
+          <h3 className="text-xs uppercase tracking-wide text-[var(--muted)]">Sources cited, most important first</h3>
           <ol className="mt-2 space-y-2">
-            {cited.map((s) => <SourceItem key={s.id} id={anchor(s.id)} n={numberOf(s.id)} source={s} why={why.get(s.id)} />)}
+            {cited.map((s) => <SourceItem key={s.id} id={anchor(s.id)} n={numberOf(s.id)} source={s} why={why.get(s.id)} isKey={key.has(s.id)} />)}
           </ol>
         </section>
       )}
@@ -122,11 +161,12 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
   );
 }
 
-function SourceItem({ id, n, source, why }: { id: string; n?: number; source: Source; why?: string }) {
+function SourceItem({ id, n, source, why, isKey }: { id: string; n?: number; source: Source; why?: string; isKey?: boolean }) {
   return (
-    <li id={id} className="scroll-mt-24 rounded-lg bg-[var(--background)] px-3 py-2 text-sm">
+    <li id={id} className={`scroll-mt-24 rounded-lg bg-[var(--background)] px-3 py-2 text-sm ${isKey ? 'ring-1 ring-[var(--accent)]/60' : ''}`}>
       <p className="flex flex-wrap items-baseline gap-x-2">
         {n !== undefined && <span className="text-xs font-semibold text-[var(--accent)]">{n}</span>}
+        {isKey && <span className="rounded bg-[var(--accent)] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[#221c08]">Key</span>}
         <span className="font-medium">{source.label}</span>
         <span className="text-xs text-[var(--muted)]">{KIND_LABEL[source.kind]}{source.date ? ` · ${source.date}` : ''}</span>
         {source.url && (

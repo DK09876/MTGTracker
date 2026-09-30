@@ -33,9 +33,27 @@ export const DEFAULT_LADDER: LadderModel[] = [
   { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
 ];
 
+/**
+ * The smarter models, tried before the standard one when "Smarter model" is
+ * on (lib/ai-mode). 3.8 Flash reasons better than Flash-Lite, but on the free
+ * tier it refused for hours at a time in September 2026 - so it is only
+ * offered while it has been answering, and Flash-Lite answers when it will not.
+ */
+export const SMARTER_MODELS: LadderModel[] = [
+  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+];
+
+export type AiMode = 'standard' | 'smarter';
+
+/** The models a call tries, best first: the smarter ones only in smarter mode, and always the standard ones after. */
+export function ladderFor(mode: AiMode, env = process.env.GEMINI_TAG_MODELS): LadderModel[] {
+  const standard = ladder(env);
+  return mode === 'smarter' ? [...SMARTER_MODELS.filter((m) => !standard.some((x) => x.id === m.id)), ...standard] : standard;
+}
+
 /** "gemini-3.8-flash" as people say it: "Gemini 3.8 Flash". */
 export function modelLabel(model: string): string {
-  return DEFAULT_LADDER.find((m) => m.id === model)?.label
+  return [...DEFAULT_LADDER, ...SMARTER_MODELS].find((m) => m.id === model)?.label
     ?? model.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, ' Lite');
 }
 

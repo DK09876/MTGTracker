@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ScryfallCard } from '../scryfall';
 import { parseAnswer, type Source } from './answer';
+import { anchorRules } from './anchors';
 import { askRules, type AskDeps } from './ask';
 import { keywordRules, parseRules, placeWeight, referencedRules, ruleWithContext, searchRules } from './cr';
 import { nameIndex } from './names';
@@ -81,11 +82,66 @@ describe('parseAnswer', () => {
     }, sources);
     expect(a.verdict).toBe('Yes: they all trigger [C1].');
     expect(a.explanation).not.toContain('[C7]');
-    expect(a.citations).toEqual([{ id: 'C1', why: 'look back in time' }]);
+    expect(a.citations).toEqual([{ id: 'C1', role: 'supporting', why: 'look back in time' }]);
     expect(a.followUps).toHaveLength(3);
   });
+  it('ranks key sources first, then official word before card text and the wiki', () => {
+    const all = [
+      { id: 'O1', kind: 'oracle', label: '', text: '' }, { id: 'W1', kind: 'wiki', label: '', text: '' },
+      { id: 'C1', kind: 'rule', label: '', text: '' }, { id: 'R1', kind: 'ruling', label: '', text: '' },
+    ] as Source[];
+    const a = parseAnswer({
+      verdict: 'Seven [O1].', explanation: '1. x [W1] [C1] [R1]', confidence: 'certain',
+      citations: [{ id: 'O1', role: 'supporting', why: '' }, { id: 'W1', role: 'supporting', why: '' }, { id: 'C1', role: 'key', why: '' }, { id: 'R1', role: 'supporting', why: '' }],
+      followUps: [],
+    }, all);
+    expect(a.citations.map((c) => c.id)).toEqual(['C1', 'R1', 'O1', 'W1']);
+    expect(a.confidence).toBe('certain');
+  });
+
+  it('is only certain on a key official ruling or rule', () => {
+    const all = [{ id: 'O1', kind: 'oracle', label: '', text: '' }, { id: 'C1', kind: 'rule', label: '', text: '' }] as Source[];
+    const onCardText = parseAnswer({ verdict: 'Seven [O1].', explanation: '', confidence: 'certain', citations: [{ id: 'O1', role: 'key', why: '' }], followUps: [] }, all);
+    expect(onCardText.confidence).toBe('likely');
+    const noKey = parseAnswer({ verdict: 'Seven [C1].', explanation: '', confidence: 'certain', citations: [{ id: 'C1', role: 'supporting', why: '' }], followUps: [] }, all);
+    expect(noKey.confidence).toBe('likely');
+  });
+
+  it('flags a worksheet that let tokens die without checking them, as on Kratos with Blade of Selves', () => {
+    const all = [{ id: 'C1', kind: 'rule', label: '', text: '' }] as Source[];
+    const kratos = parseAnswer({
+      worksheet: [
+        { event: 'Kratos is declared as an attacker', checks: [{ object: 'Kratos (original)', ability: 'attack', triggers: true, times: 1, why: '' }] },
+        { event: 'The Legend Rule puts two Kratos tokens into the graveyard', checks: [{ object: 'Kratos (surviving)', ability: 'God dies', triggers: true, times: 2, why: '' }] },
+      ],
+      verdict: 'Three [C1].', explanation: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [],
+    }, all);
+    expect(kratos.confidence).toBe('unsure');
+    expect(kratos.looseEnds?.[0]).toMatch(/603\.10a/);
+    const checked = parseAnswer({
+      worksheet: [{ event: 'The Legend Rule puts two Kratos tokens into the graveyard', checks: [{ object: 'Kratos token 1', ability: 'God dies', triggers: true, times: 2, why: '' }] }],
+      verdict: 'Seven [C1].', explanation: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [],
+    }, all);
+    expect(checked.looseEnds).toBeUndefined();
+    expect(checked.confidence).toBe('likely');
+  });
+
   it('is not certain of anything it cannot cite', () => {
     expect(parseAnswer({ verdict: 'Probably.', explanation: '', confidence: 'certain', citations: [], followUps: [] }, sources).confidence).toBe('unsure');
+  });
+});
+
+describe('anchorRules', () => {
+  const card = (name: string, type: string, text: string) => ({ id: name, name, type_line: type, oracle_text: text }) as ScryfallCard;
+  it('brings the look-back-in-time rules for a dies trigger, and the legend rule for legendary copies', () => {
+    const rules = anchorRules('how does blade of selves interact with kratos', [
+      card('Blade of Selves', 'Artifact — Equipment', 'Equipped creature has myriad.'),
+      card('Kratos, Stoic Father', 'Legendary Creature — God Warrior', 'Whenever you attack with one or more Gods and whenever a God dies, you get an experience counter.'),
+    ]).map((a) => a.rule);
+    expect(rules).toEqual(expect.arrayContaining(['603.10a', '603.2c', '700.4', '707.2', '704.5j', '508.4', '122.1']));
+  });
+  it('brings nothing it has no call for, and does not take "counter target spell" for counters', () => {
+    expect(anchorRules('can this be countered?', [card('Counterspell', 'Instant', 'Counter target spell.')])).toEqual([]);
   });
 });
 
@@ -125,7 +181,7 @@ describe('askRules', () => {
     expect(labels).not.toContain('CR 702.124a');
     expect(model.mock.calls[0][0].user).toContain('QUESTION: how does blade of selves interact with kratos');
     // Cited in the list, and inline in the explanation.
-    expect(r.turn.answer.citations).toEqual([{ id: 'R1', why: '' }, { id: 'C1', why: '' }]);
+    expect(r.turn.answer.citations.map((c) => c.id)).toEqual(['R1', 'C1']);
   });
 
   it('takes a follow-up\'s "kratos" as the Kratos already in the conversation, without asking', async () => {

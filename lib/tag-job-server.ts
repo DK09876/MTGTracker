@@ -3,7 +3,7 @@
  * stop it, and read how it stands. Server only.
  */
 
-import { taggingModel } from './ai';
+import { modelFor, resolveMode } from './ai';
 import { deckTags, loadTagJob, saveTagJob, type List } from './db';
 import { taggingDeck } from './tag-deck';
 import { isActive, isRunningHere, launch, newJob, stop, type JobParams, type TagJob } from './tag-jobs';
@@ -23,7 +23,7 @@ export function currentJob(listId: string): TagJob | null {
 
 export function startJob(list: List, params: JobParams): TagJob {
   if (isActive(currentJob(list.id))) throw new StepError('A tagging job is already running on this deck - stop it first');
-  const model = taggingModel();
+  const model = modelFor(resolveMode(params.smarter));
   if (!model) throw new StepError('No GEMINI_API_KEY is set on the server, so the model is off');
   const at = { list, boards: params.boards };
   if (params.kind === 'tag' && !deckTags(list.id).tags.some((t) => t.status === 'accepted')) {

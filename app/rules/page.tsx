@@ -16,6 +16,8 @@ import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
 import RulesAnswer from '@/components/RulesAnswer';
+import SmarterModelSetting from '@/components/SmarterModelSetting';
+import { useSetting, useSmarter } from '@/lib/ai-settings';
 import * as api from '@/lib/api';
 import type { RulesThread, RulesThreadSummary } from '@/lib/db';
 import { getProfile } from '@/lib/profile';
@@ -46,6 +48,8 @@ export default function RulesPage() {
   // Waiting on "which card did you mean?": the question, and the choices.
   const [choosing, setChoosing] = useState<{ question: string; choice: api.RulesChoice[]; picks: Record<string, string> } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [smarter] = useSmarter();
+  const [secondCheck, setSecondCheck] = useSetting('rules-second-check');
 
   const refresh = useCallback(() => api.rulesThreads().then((r) => { setThreads(r.threads); setBudget(r.budget); }).catch(() => {}), []);
 
@@ -80,7 +84,7 @@ export default function RulesPage() {
     try {
       // Never spin forever: the server gives up well before this.
       const r = await Promise.race([
-        api.askRules(q, { threadId: inThread?.id, picks }),
+        api.askRules(q, { threadId: inThread?.id, picks, smarter, secondCheck }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 150_000)),
       ]);
       if (r.budget) setBudget(r.budget);
@@ -163,8 +167,26 @@ export default function RulesPage() {
       </div>
       <p className="mt-1 text-sm text-[var(--muted)]">
         How cards interact, or how a rule works. Answers come from the cards&apos; official rulings, the Comprehensive Rules and the MTG Wiki, with every claim linked to its source.
-        {left !== undefined && <> {' '}One AI request per question · {left} left today.</>}
+        {left !== undefined && <> {' '}{secondCheck ? 'Two AI requests' : 'One AI request'} per question · {left} left today.</>}
       </p>
+
+      <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-2">
+        <summary className="cursor-pointer text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+          Settings{secondCheck || smarter ? ` · ${[secondCheck && 'second check', smarter && 'smarter model'].filter(Boolean).join(', ')}` : ''}
+        </summary>
+        <div className="mt-3 flex flex-col gap-4 pb-2">
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input type="checkbox" role="switch" checked={secondCheck} onChange={(e) => setSecondCheck(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[var(--accent)]" />
+            <span>
+              <span className="font-medium">Second check</span>
+              <span className="block text-xs text-[var(--muted)]">
+                A second request reviews each answer before you see it - for abilities it missed (token copies, creatures dying together), wrong counts and too much confidence - and corrects it. Slower, and two requests a question.
+              </span>
+            </span>
+          </label>
+          <SmarterModelSetting />
+        </div>
+      </details>
 
       {!thread && (
         <form className="mt-4 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(question, {}, null); }}>
@@ -185,7 +207,7 @@ export default function RulesPage() {
 
       {busy && (
         <p className="mt-4 text-center text-sm text-[var(--muted)]" role="status">
-          Finding the cards, their rulings and the rules that apply, then working it out - about ten seconds.
+          Finding the cards, their rulings and the rules that apply, then working it out{secondCheck ? ', then checking it' : ''} - {secondCheck ? 'about twenty seconds' : 'about ten seconds'}.
         </p>
       )}
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
