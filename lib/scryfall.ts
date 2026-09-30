@@ -222,6 +222,23 @@ export async function findCardNamed(fuzzy: string, set?: string): Promise<Scryfa
   }
 }
 
+/** Every card name Scryfall knows (about 35,000), for finding cards named in a sentence. */
+export async function cardNameCatalog(): Promise<string[]> {
+  return (await get<{ data: string[] }>('/catalog/card-names')).data;
+}
+
+export interface Ruling {
+  /** 'wotc': an official Wizards ruling; 'scryfall': a note by Scryfall. */
+  source: string;
+  published_at: string;
+  comment: string;
+}
+
+/** A card's rulings - the official ones from Wizards, and Scryfall's notes. */
+export async function rulingsFor(cardId: string): Promise<Ruling[]> {
+  return (await get<{ data: Ruling[] }>(`/cards/${encodeURIComponent(cardId)}/rulings`)).data;
+}
+
 /** The printing with this set code and collector number, or null. */
 export async function cardAt(set: string, number: string): Promise<ScryfallCard | null> {
   try {

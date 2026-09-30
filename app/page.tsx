@@ -482,7 +482,7 @@ export default function SearchPage() {
       {toast && (
         <div
           role="status"
-          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[70] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-[#221c08] shadow-lg"
+          className="fixed bottom-[calc(var(--nav-h)+0.75rem)] sm:bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[70] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-[#221c08] shadow-lg"
         >
           <span className="min-w-0 flex-1">{toast.text}</span>
           {toast.undo && (

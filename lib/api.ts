@@ -18,7 +18,7 @@ const url = (path: string) => {
 };
 
 import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
-import type { CardBefore, List, ListedCard, ListKind, Profile } from './db';
+import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, RulesThreadSummary } from './db';
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
@@ -408,3 +408,20 @@ export interface ScanMatch {
 
 export const identifyScan = (read: { title: string; set?: string; number?: string }) =>
   send('scan', 'POST', read).then(json<ScanMatch>);
+
+// --- rules ------------------------------------------------------------------------
+
+export interface RulesChoice { mention: string; options: Array<{ name: string; image: string | null }> }
+
+export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: RulesThreadSummary[]; budget: Budget }>);
+
+export const rulesThread = (id: string) => fetch(url(`rules?id=${encodeURIComponent(id)}`)).then(json<{ thread: RulesThread }>).then((b) => b.thread);
+
+export const askRules = (question: string, opts: { threadId?: string; picks?: Record<string, string> } = {}) =>
+  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; budget?: Budget }>);
+
+export const updateRulesThread = (id: string, change: { title?: string; starred?: boolean }) =>
+  send('rules', 'PATCH', { id, ...change }).then(json<{ thread: RulesThread; threads: RulesThreadSummary[] }>);
+
+export const forgetRulesThread = (id: string) =>
+  fetch(url(`rules?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ threads: RulesThreadSummary[] }>).then((b) => b.threads);

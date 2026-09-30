@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
+import { TabBar, TopLinks } from '@/components/Nav';
 import ServiceWorker from '@/components/ServiceWorker';
 
 import './globals.css';
@@ -36,33 +37,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--background)]/95 pt-[env(safe-area-inset-top)] backdrop-blur">
           <nav className="safe-x mx-auto flex max-w-6xl items-center gap-2 py-3 sm:gap-4">
             <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">
-              <span className="text-[var(--accent)]">MTG</span><span className="max-[419px]:hidden"> Tracker</span>
+              <span className="text-[var(--accent)]">MTG</span> Tracker
             </Link>
-            <div className="ml-auto flex items-center gap-0 text-sm sm:gap-1">
-              <Link href="/" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
-                Search
-              </Link>
-              <Link href="/decks" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
-                Decks
-              </Link>
-              <Link href="/lists" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
-                Lists
-              </Link>
-              <Link href="/collection" className="rounded-lg px-1.5 py-1.5 text-[var(--muted)] min-[400px]:px-2 hover:bg-[var(--surface)] hover:text-[var(--foreground)] sm:px-3">
-                Collection
-              </Link>
+            <div className="ml-auto flex items-center gap-1 text-sm">
+              <TopLinks />
               <ProfileSwitcher />
             </div>
           </nav>
         </header>
         <main className="safe-x mx-auto max-w-6xl py-6"><ProfileGate>{children}</ProfileGate></main>
-        <footer className="safe-x mx-auto max-w-6xl pb-[max(2rem,env(safe-area-inset-bottom))] pt-4 text-xs text-[var(--muted)]">
+        <footer className="safe-x mx-auto max-w-6xl pb-[calc(var(--nav-h)+max(2rem,env(safe-area-inset-bottom)))] pt-4 text-xs text-[var(--muted)]">
           Card data and images from{' '}
           <a href="https://scryfall.com" className="underline hover:text-[var(--foreground)]" target="_blank" rel="noreferrer">
             Scryfall
           </a>
           . Not affiliated with Wizards of the Coast.
         </footer>
+        <TabBar />
         <ServiceWorker />
       </body>
     </html>

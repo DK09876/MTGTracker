@@ -62,7 +62,7 @@ export default function ProfileSwitcher() {
           {name.charAt(0).toUpperCase()}
         </span>
         {/* Just the initial on the narrowest phones; the name is still read out. */}
-        <span className="max-w-[8rem] truncate max-[439px]:sr-only">{name}</span>
+        <span className="max-w-[8rem] truncate max-[359px]:sr-only">{name}</span>
         <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden className={open ? 'rotate-180' : ''}>
           <path d="M1 1L5 5L9 1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

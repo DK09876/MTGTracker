@@ -25,6 +25,13 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* The phone tab bar's height (components/Nav), for anything fixed to the
+   bottom of the screen to sit above it. None on wider screens. */
+:root { --nav-h: 0px; }
+@media (max-width: 639px) {
+  :root { --nav-h: calc(3.5rem + env(safe-area-inset-bottom)); }
+}
+
 /* Page gutters that clear the notch in landscape: 1rem, or more where the
    screen's corners need it. Used by the header, main and footer. */
 .safe-x {
