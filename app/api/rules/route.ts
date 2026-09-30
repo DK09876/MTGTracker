@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { currentBudget, ModelError, modelFor, resolveMode } from '@/lib/ai';
+import { appModel, currentBudget, ModelError } from '@/lib/ai';
 import {
   addRulesTurn, deleteRulesThread, rulesThread, rulesThreads, startRulesThread, updateRulesThread,
 } from '@/lib/db';
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
-  const b = await request.json().catch(() => ({})) as { question?: unknown; threadId?: unknown; picks?: unknown; smarter?: unknown; secondCheck?: unknown };
+  const b = await request.json().catch(() => ({})) as { question?: unknown; threadId?: unknown; picks?: unknown; secondCheck?: unknown };
   const question = typeof b.question === 'string' ? b.question.trim().slice(0, 600) : '';
   if (!question) return NextResponse.json({ error: 'Ask a question' }, { status: 400 });
   const threadId = typeof b.threadId === 'string' ? b.threadId : null;
@@ -46,9 +46,9 @@ export async function POST(request: Request) {
     ? Object.fromEntries(Object.entries(b.picks as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>
     : {};
 
-  // Smarter only while the smarter model has been answering (lib/ai.ts).
-  const model = modelFor(resolveMode(b.smarter));
-  if (!model) return NextResponse.json({ error: 'No GEMINI_API_KEY is set on the server, so rules answers are off' }, { status: 503 });
+  // The model chosen in Settings (lib/ai.ts).
+  const model = appModel();
+  if (!model) return NextResponse.json({ error: 'No model API key is set on the server, so rules answers are off' }, { status: 503 });
   try {
     const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true }, {
       rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model,

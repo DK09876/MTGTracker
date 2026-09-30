@@ -201,7 +201,9 @@ function open(): Database {
       updatedAt TEXT NOT NULL
     );
   `);
-  // Whether each smarter model answered the last time it was asked - see ai.ts.
+  // App-wide settings, like the model every AI feature uses - see ai.ts (chosenModel).
+  db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  // Whether each model answered the last time it was asked - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS model_health (model TEXT PRIMARY KEY, ok INTEGER NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL)`);
   // Searches kept under a name to carry on later - see recent.ts (Session).
   db.run(`
@@ -1016,6 +1018,15 @@ export function saveTagJob(job: TagJob): void {
      ON CONFLICT(listId) DO UPDATE SET job = excluded.job, updatedAt = excluded.updatedAt`,
     [job.listId, JSON.stringify(job), new Date().toISOString()],
   );
+}
+
+export function getSetting(key: string): string | null {
+  const row = open().get('SELECT value FROM settings WHERE key = ?', [key]) as { value: string } | null;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  open().run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]);
 }
 
 export interface ModelHealth { model: string; ok: boolean; detail: string; at: string }

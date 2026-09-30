@@ -41,6 +41,8 @@ export interface AskInput {
   picks?: Record<string, string>;
   /** Have the answer checked by a second request before it is given. */
   secondCheck?: boolean;
+  /** Add the rules the cards' own words call for (anchors.ts). On unless turned off, as for testing without them. */
+  anchors?: boolean;
 }
 
 export type AskResult =
@@ -76,7 +78,7 @@ function keywordsInPlay(question: string, cards: ScryfallCard[], index: RulesInd
 }
 
 /** How much each word or phrase counts in the rules search. */
-function searchTerms(question: string, cards: ScryfallCard[], keywords: Map<string, string>): Map<string, number> {
+function searchTerms(question: string, cards: ScryfallCard[], keywords: Map<string, string>, handPicked = true): Map<string, number> {
   const terms = new Map<string, number>();
   const add = (t: string, w: number) => terms.set(t, Math.max(terms.get(t) ?? 0, w));
   const q = question.toLowerCase();
@@ -91,7 +93,7 @@ function searchTerms(question: string, cards: ScryfallCard[], keywords: Map<stri
   // A legendary creature that gets copied meets the legend rule.
   const legendary = cards.some((c) => /legendary/i.test(c.type_line ?? ''));
   const copies = /\b(cop(y|ies)|token|myriad|clone|populate|embalm|eternalize|encore)\b/i.test(`${q} ${oracle}`);
-  if (legendary && copies) { add('legend rule', 3.5); add('legendary', 2); }
+  if (handPicked && legendary && copies) { add('legend rule', 3.5); add('legendary', 2); }
   // Supertypes and types that have rules of their own.
   for (const c of cards) {
     const type = (c.type_line ?? '').toLowerCase();
@@ -125,7 +127,9 @@ const ruleUrl = (number: string) => `${RULES_SITE}#R${number.replace(/\./g, '')}
 const glossaryUrl = (term: string) => `${RULES_SITE}#${term.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`;
 
 /** Everything the answer may draw on, each with an id to cite. */
-export async function gatherSources(question: string, cards: ScryfallCard[], deps: Pick<AskDeps, 'rules' | 'rulings' | 'wiki'>): Promise<Source[]> {
+export async function gatherSources(
+  question: string, cards: ScryfallCard[], deps: Pick<AskDeps, 'rules' | 'rulings' | 'wiki'>, { anchors: useAnchors = true } = {},
+): Promise<Source[]> {
   const sources: Source[] = [];
   let n = { O: 0, R: 0, C: 0, G: 0, W: 0 };
   const next = (k: keyof typeof n) => { n = { ...n, [k]: n[k] + 1 }; return `${k}${n[k]}`; };
@@ -148,7 +152,7 @@ export async function gatherSources(question: string, cards: ScryfallCard[], dep
   const inPlay = new Set(keywords.values());
   const allKeywords = keywordRules(index);
   // A keyword's glossary entry counts only when the keyword is in play, like its rules.
-  const hits = searchRules(index, searchTerms(question, cards, keywords), 14,
+  const hits = searchRules(index, searchTerms(question, cards, keywords, useAnchors), 14,
     (id) => (id.startsWith('g:') ? (keywords.has(id.slice(2)) || !allKeywords.has(id.slice(2)) ? 1 : 0.3) : placeWeight(id, inPlay)));
   const rules: string[] = [];
   const glossary: string[] = [];
@@ -166,7 +170,7 @@ export async function gatherSources(question: string, cards: ScryfallCard[], dep
   }
   // The rules the cards' own words call for come first (anchors.ts), then
   // what the search found, up to eighteen in all.
-  const anchors = anchorRules(question, cards).filter((a) => index.rules.has(a.rule));
+  const anchors = useAnchors ? anchorRules(question, cards).filter((a) => index.rules.has(a.rule)) : [];
   const ordered = [...anchors.map((a) => a.rule), ...rules.filter((r) => !anchors.some((a) => a.rule === r))].slice(0, 18);
   for (const r of ordered) {
     const text = ruleWithContext(index, r);
@@ -205,7 +209,7 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   const wanted = [...new Set([...named, ...previous])].slice(0, 6);
   const cards = wanted.length ? await deps.cards(wanted) : [];
 
-  const sources = await gatherSources(question, cards, deps);
+  const sources = await gatherSources(question, cards, deps, { anchors: input.anchors !== false });
   const { index } = await deps.rules();
   const answer = await deps.model({
     system: ANSWER_SYSTEM,

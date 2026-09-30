@@ -10,6 +10,8 @@
  * can produce a bad search, but never a card or a combo that does not exist.
  */
 
+import type { JsonModel } from './ai';
+
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // The same default pantry measured as fastest on this Pi. Translation is a
@@ -79,6 +81,27 @@ export interface Context {
 export type Translator = (request: string, context?: Context) => Promise<Translation>;
 
 export class GeminiError extends Error {}
+
+/**
+ * A translator over the model chosen in Settings (lib/ai.ts), when that is
+ * not Gemini's own: the same prompt and schema, answered as JSON. If it
+ * fails, the Gemini translator answers instead, so search never hangs on
+ * another provider's bad minute.
+ */
+export function modelTranslator(model: JsonModel, fallback: Translator | null): Translator {
+  return async (request, context) => {
+    try {
+      const { data } = await model({
+        system: SYSTEM_PROMPT, user: userMessage(request, context), schema: RESPONSE_SCHEMA,
+        temperature: 0.2, thinking: 'low', timeoutMs: TIMEOUT_MS,
+      }, { maxBusy: 1 });
+      return planFrom(data);
+    } catch (error) {
+      if (!fallback) throw error instanceof GeminiError ? error : new GeminiError(error instanceof Error ? error.message : 'the model failed');
+      return fallback(request, context);
+    }
+  };
+}
 
 /** A translator, or null when no API key is configured. */
 export function geminiTranslator(): Translator | null {
@@ -178,6 +201,13 @@ export function parseTranslation(body: unknown): Translation {
   } catch {
     throw new GeminiError('the model returned something other than JSON');
   }
+  return planFrom(parsed);
+}
+
+/** The plan in a model's parsed answer, held to what each route needs. */
+export function planFrom(answer: unknown): Translation {
+  if (!answer || typeof answer !== 'object') throw new GeminiError('the model returned nothing');
+  const parsed = answer as Record<string, unknown>;
 
   const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
   const cardName = clean(parsed.cardName) || null;

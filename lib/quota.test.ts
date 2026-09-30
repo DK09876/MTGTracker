@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { budgetFrom, DEFAULT_LADDER, ladder, ladderFor, msUntilReset, quotaDay, quotaViolation, requestsFor } from './quota';
+import { budgetFrom, DEFAULT_LADDER, ladder, msUntilReset, quotaDay, quotaViolation, requestsFor } from './quota';
 
 describe('the quota day', () => {
   it('is the date in Pacific time', () => {
@@ -19,13 +19,6 @@ describe('ladder', () => {
     expect(ladder(undefined)).toBe(DEFAULT_LADDER);
     expect(DEFAULT_LADDER.map((m) => m.id)).toEqual(['gemini-3.5-flash-lite']);
     expect(ladder(' gemini-3.6-flash , other ').map((m) => m.label)).toEqual(['Gemini 3.6 Flash', 'other']);
-  });
-});
-
-describe('ladderFor', () => {
-  it('tries the smarter model first in smarter mode, and always ends on the standard one', () => {
-    expect(ladderFor('standard', undefined).map((m) => m.id)).toEqual(['gemini-3.5-flash-lite']);
-    expect(ladderFor('smarter', undefined).map((m) => m.id)).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
   });
 });
 

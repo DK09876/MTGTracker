@@ -19,8 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
-import SmarterModelSetting from './SmarterModelSetting';
-import { useSmarter } from '@/lib/ai-settings';
+import ModelLine from './ModelLine';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
@@ -60,7 +59,6 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [audit, setAudit] = useState(true);
   const [job, setJob] = useState<TagJob | null>(null);
   const [stopping, setStopping] = useState(false);
-  const [smarter] = useSmarter();
   const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
   const [mode, setMode] = useState<Mode>('free');
 
@@ -140,8 +138,8 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       setError(e instanceof Error ? e.message : 'Could not start that');
     }
   };
-  const propose = () => start({ kind: 'propose', instructions, boards, smarter });
-  const tagCards = () => start({ kind: 'tag', mode, scope, audit, boards, smarter });
+  const propose = () => start({ kind: 'propose', instructions, boards });
+  const tagCards = () => start({ kind: 'tag', mode, scope, audit, boards });
   const stopJob = async () => {
     setStopping(true);
     try {
@@ -167,7 +165,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         tags for you to shape, then applies the ones you keep to every card.
       </p>
       {budget && <BudgetLine budget={budget} />}
-      <SmarterModelSetting />
+      <ModelLine />
 
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">What should this deck do?</h3>
@@ -651,7 +649,7 @@ function resetText(ms: number): string {
  */
 function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
   if (budget.configured === false) {
-    return <p className="text-sm text-amber-400">The model is off: no GEMINI_API_KEY is set on the server.</p>;
+    return <p className="text-sm text-amber-400">The model is off: no model API key is set on the server.</p>;
   }
   const next = budget.models.find((m) => m.remaining > 0);
   return (

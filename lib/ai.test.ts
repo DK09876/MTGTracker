@@ -131,7 +131,7 @@ describe('generate', () => {
   it('says so when every model has used its day, without calling', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    await expect(testing.generate('k', usage([]).u, request, {}, noWait)).rejects.toThrow(/midnight Pacific/);
+    await expect(testing.generate('k', usage([]).u, request, {}, noWait)).rejects.toThrow(/try again tomorrow/);
     expect(fetch).not.toHaveBeenCalled();
   });
 

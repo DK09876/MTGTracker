@@ -1,8 +1,7 @@
 /**
- * AI settings kept on this device, shared by every feature that uses the
- * model: whether to use the smarter model, and per-feature switches like the
- * rules' second check. Requests carry them; the server decides whether
- * smarter mode is actually possible (lib/ai.ts, resolveMode).
+ * AI switches kept on this device, like the rules' second check. Requests
+ * carry them. The model itself is one setting for the whole app, kept on
+ * the server (Settings, lib/ai.ts chosenModel).
  */
 
 import { useSyncExternalStore } from 'react';
@@ -35,6 +34,3 @@ export function useSetting(name: string): [boolean, (on: boolean) => void] {
   const on = useSyncExternalStore(subscribe, () => read(key), () => false);
   return [on, (next: boolean) => write(key, next)];
 }
-
-/** Whether this device asked for the smarter model. */
-export const useSmarter = () => useSetting('smarter');

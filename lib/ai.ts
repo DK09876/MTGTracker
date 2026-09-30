@@ -3,15 +3,18 @@
  * schema in, parsed JSON out, and which model answered. For the deck
  * tagger, which asks for more thought than search does.
  *
- * Gemini over REST, as gemini.ts is. The free tier gives each model a small
- * daily allowance, so calls go to the smartest model with requests left
- * (see quota.ts) and every request is counted. A busy model (503) is passed
+ * Gemini over REST, as gemini.ts is, or Mistral and Groq over their
+ * OpenAI-style APIs (ai-openai.ts) - the model chosen in Settings, with
+ * Flash-Lite behind it. Every free plan has a daily allowance, so calls go to
+ * the first model with requests left (see quota.ts) and every request is counted. A busy model (503) is passed
  * over for the next, and a step stops after a few refusals or four minutes;
  * a model out of requests for the day is passed over at once.
  */
 
-import { modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth } from './db';
-import { budgetFrom, ladder, ladderFor, quotaDay, quotaViolation, SMARTER_MODELS, type AiMode, type Budget } from './quota';
+import { getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, setSetting } from './db';
+import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
+import { DEFAULT_MODEL, ENV_KEY, FALLBACK_MODEL, MODELS, modelInfo, providerOf, type Provider } from './models';
+import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -89,45 +92,60 @@ export interface Usage {
   spent: (model: string, limit: number | null) => void;
 }
 
-/** Usage kept in the database, by quota day, over the models of a mode. */
-export function storedUsage(mode: AiMode = 'standard'): Usage {
+/** Usage kept in the database, by quota day, over a list of models. */
+export function storedUsage(models = ladder()): Usage {
   return {
-    available: () => budgetFrom(ladderFor(mode), modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
+    available: () => budgetFrom(models, modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
     called: (model) => recordModelCall(quotaDay(), model),
     spent: (model, limit) => recordModelExhausted(quotaDay(), model, limit),
   };
 }
 
-/** Today's requests left on each model of the ladder. */
+/** Today's requests left on the models the app is using: the chosen one, then Flash-Lite. */
 export function currentBudget(): Budget {
-  return budgetFrom(ladder(), modelUsage(quotaDay()));
+  return budgetFrom(appModels().map((id) => ({ id, label: modelLabel(id) })), modelUsage(quotaDay()));
+}
+
+// --- the model the app uses ----------------------------------------------------
+
+const MODEL_SETTING = 'ai.model';
+
+/** The model chosen in Settings, or the default - only one whose provider has a key - or else Flash-Lite. */
+export function chosenModel(): string {
+  const id = getSetting(MODEL_SETTING);
+  if (id && modelInfo(id) && hasKey(id)) return id;
+  return hasKey(DEFAULT_MODEL) ? DEFAULT_MODEL : FALLBACK_MODEL;
+}
+
+export function chooseModel(id: string): void {
+  if (!modelInfo(id)) throw new ModelError(`Unknown model ${id}`);
+  if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
+  setSetting(MODEL_SETTING, id);
+}
+
+const hasKey = (id: string) => !!process.env[ENV_KEY[providerOf(id)]];
+
+/** The chosen model, then Flash-Lite to fall back on when it refuses. */
+function appModels(): string[] {
+  const chosen = chosenModel();
+  return hasKey(FALLBACK_MODEL) && chosen !== FALLBACK_MODEL ? [chosen, FALLBACK_MODEL] : [chosen];
 }
 
 /**
- * The model for a feature, in standard or smarter mode, or null when no API
- * key is configured. Smarter mode tries the smarter models first and falls
- * back to the standard one quickly, and records whether they answered.
+ * The model every AI feature uses (rules answers, deck tagging, search): the
+ * one chosen in Settings, falling back on Flash-Lite. Null when no provider
+ * has a key.
  */
-export function modelFor(mode: AiMode = 'standard'): JsonModel | null {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
-  const usage = storedUsage(mode);
-  const smarter = new Set(SMARTER_MODELS.map((m) => m.id));
-  return (request, options) => generate(key, usage, request, {
-    ...options,
-    ...(mode === 'smarter' ? { maxBusy: Math.max(2, options?.maxBusy ?? 2) } : {}),
-    onOutcome: (model, ok, detail) => {
-      if (smarter.has(model)) recordModelHealth(model, ok, detail);
-      options?.onOutcome?.(model, ok, detail);
-    },
-  });
+export function appModel(): JsonModel | null {
+  const [id, ...fallbacks] = appModels();
+  return modelById(id, fallbacks);
 }
 
-/** The tagging model (standard), or null when no API key is configured. */
+/** The app model with a caller's own usage record (tests). */
 export function taggingModel(usage?: Usage): JsonModel | null {
+  if (!usage) return appModel();
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-  if (!usage) return modelFor('standard');
   return (request, options) => generate(key, usage, request, options);
 }
 
@@ -137,15 +155,16 @@ async function generate(
   const { maxBusy = MAX_BUSY, signal, onEvent, onOutcome } = options;
   const models = usage.available();
   if (!models.length) {
-    throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
+    throw new ModelError('every model has used today\'s free requests - try again tomorrow, or pick another model in Settings', 'quota');
   }
   const deadline = now() + (request.timeoutMs ?? STEP_DEADLINE_MS);
   let busyCount = 0;
   const busy = () => new ModelError(
-    `Gemini is overloaded right now - try again in a few minutes (${busyCount} request${busyCount === 1 ? '' : 's'} spent on refusals)`, 'busy',
+    `the model is overloaded right now - try again in a few minutes (${busyCount} request${busyCount === 1 ? '' : 's'} spent on refusals)`, 'busy',
   );
   const stopped = () => new ModelError('stopped', 'stopped');
   let lastError: ModelError | null = null;
+  const badShape = new Set<string>();
   for (const [index, model] of models.entries()) {
     const fallback = index < models.length - 1;
     for (;;) {
@@ -153,8 +172,14 @@ async function generate(
       const left = deadline - now();
       if (left <= 0) throw busyCount ? busy() : new ModelError('the model took too long', 'busy');
       let response: Response;
+      const provider = providerOf(model);
+      const apiKey = provider === 'gemini' ? key : process.env[ENV_KEY[provider]];
+      if (!apiKey) {
+        lastError = new ModelError(`no ${ENV_KEY[provider]} is set on the server for ${modelLabel(model)}`);
+        break;
+      }
       try {
-        response = await call(key, model, request, fallback ? Math.min(left, FALL_BACK_AFTER_MS) : left, signal);
+        response = await call(provider, apiKey, model, request, fallback ? Math.min(left, FALL_BACK_AFTER_MS) : left, signal);
       } catch (error) {
         // Too slow, or unreachable: with another model to try, try it.
         if (!(error instanceof ModelError) || error.kind !== 'busy' || !fallback) throw error;
@@ -171,7 +196,13 @@ async function generate(
       if (response.status !== 404 && response.status !== 429) usage.called(model);
       if (response.ok) {
         onOutcome?.(model, true, 'answered');
-        return { data: parseJson(await response.json()), model };
+        const body = await response.json();
+        if (provider === 'gemini') return { data: parseJson(body), model };
+        try {
+          return { data: parseOpenAIJson(body), model };
+        } catch {
+          throw new ModelError('the model returned something other than JSON');
+        }
       }
       onOutcome?.(model, false, `refused (${response.status})`);
 
@@ -182,10 +213,23 @@ async function generate(
         lastError = new ModelError(`model ${model} is not available`);
         break;
       }
+      // Too big for the model's per-minute token allowance (Groq's free tier): the next model may take it.
+      if (response.status === 413 && fallback) {
+        lastError = new ModelError(`${modelLabel(model)}: the question is too long for its free tier`, 'busy');
+        break;
+      }
+      // Groq checks the model's JSON against the schema and refuses a miss
+      // (GPT-OSS once wrote a count as "1"; 2026-09-30). A fresh try usually
+      // passes: once more on the same model, then the next.
+      if (response.status === 400 && /does not match the expected schema|failed to validate json|json_validate_failed/i.test(detail.message)) {
+        lastError = new ModelError(`${modelLabel(model)} wrote an answer in the wrong shape`);
+        if (!badShape.has(model)) { badShape.add(model); continue; }
+        break;
+      }
       if (!RETRY_STATUSES.has(response.status)) throw error;
 
       if (response.status === 429) {
-        const violation = quotaViolation(detail.body);
+        const violation = provider === 'gemini' ? quotaViolation(detail.body) : null;
         if (violation?.daily) {
           usage.spent(model, violation.limit);
           onEvent?.({ model, what: 'spent' });
@@ -193,7 +237,7 @@ async function generate(
           break;
         }
         // A per-minute limit: wait it out on the same model if it is short.
-        const advised = retryAfterMs(detail.body) ?? BUSY_WAIT_MS;
+        const advised = retryAfterMs(detail.body) ?? retryAfterHeader(response) ?? BUSY_WAIT_MS;
         if (advised > MAX_ADVISED_WAIT_MS || now() + advised >= deadline) {
           lastError = new ModelError(error.message, 'busy');
           break;
@@ -217,13 +261,14 @@ async function generate(
   }
   // Every model passed over: out for the day if none has requests left.
   if (!usage.available().length) {
-    throw new ModelError('every model has used today\'s free requests - they reset at midnight Pacific', 'quota');
+    throw new ModelError('every model has used today\'s free requests - try again tomorrow, or pick another model in Settings', 'quota');
   }
   throw lastError ?? new ModelError('no model to call');
 }
 
-async function call(key: string, model: string, request: JsonRequest, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
+async function call(provider: Provider, key: string, model: string, request: JsonRequest, timeoutMs: number, signal?: AbortSignal): Promise<Response> {
   try {
+    if (provider !== 'gemini') return await callOpenAI(provider, key, model, request, timeoutMs, signal);
     return await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
@@ -257,7 +302,7 @@ async function errorDetail(response: Response): Promise<{ message: string; body:
 
 /** A refusal in words someone at the table can act on. */
 function describe(model: string, status: number, message: string): string {
-  const name = model.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash');
+  const name = modelLabel(model);
   if (status === 429) return `${name} is out of free requests for now`;
   if (status >= 500) return `${name} is overloaded right now - try again in a few minutes`;
   return `${name} returned ${status}${message ? `: ${message}` : ''}`;
@@ -298,56 +343,77 @@ export function wait(ms: number, signal?: AbortSignal): Promise<void> {
 
 export const testing = { generate };
 
-// --- smarter mode --------------------------------------------------------------
+// --- model status, for Settings ------------------------------------------------
 
-// How recently a smarter model must have answered to be offered.
-const SMARTER_FRESH_MS = 6 * 60 * 60 * 1000;
-
-export interface SmarterStatus {
-  model: string;
+export interface ModelStatus {
+  id: string;
   label: string;
-  /** It answered its last request, recently: smarter mode can be turned on. */
-  available: boolean;
-  /** When it was last asked, and what happened. */
-  checkedAt: string | null;
-  detail: string;
+  provider: Provider;
+  note: string;
+  reasoning: boolean;
+  /** The server has this provider's key. */
+  hasKey: boolean;
+  chosen: boolean;
+  used: number;
+  remaining: number;
+  limit: number;
+  /** The last time it was asked, and whether it answered. */
+  health: { ok: boolean; detail: string; at: string } | null;
 }
 
-export function smarterStatus(): SmarterStatus {
-  const { id, label } = SMARTER_MODELS[0];
-  const h = modelHealth(id);
-  const fresh = !!h && Date.now() - Date.parse(h.at) < SMARTER_FRESH_MS;
-  return {
-    model: id, label,
-    available: !!h?.ok && fresh,
-    checkedAt: h?.at ?? null,
-    detail: !h ? 'Not checked yet' : h.ok ? (fresh ? 'Answering' : 'Answered, but not recently - check again') : `Not answering: ${h.detail}`,
-  };
+export function modelStatuses(): ModelStatus[] {
+  const budget = budgetFrom(MODELS, modelUsage(quotaDay()));
+  const chosen = chosenModel();
+  return MODELS.map((m) => {
+    const b = budget.models.find((x) => x.id === m.id);
+    const h = modelHealth(m.id);
+    return {
+      id: m.id, label: m.label, provider: m.provider, note: m.note, reasoning: m.reasoning,
+      hasKey: hasKey(m.id), chosen: m.id === chosen,
+      used: b?.used ?? 0, remaining: b?.remaining ?? m.dailyLimit, limit: b?.limit ?? m.dailyLimit,
+      health: h && { ok: h.ok, detail: h.detail, at: h.at },
+    };
+  });
 }
 
-/** Standard or smarter, as asked - smarter only while it has been answering. */
-export function resolveMode(wantSmarter: unknown): AiMode {
-  return wantSmarter === true && smarterStatus().available ? 'smarter' : 'standard';
-}
-
-/** Ask the smarter model something tiny, to see whether it answers. One request of its own allowance. */
-export async function checkSmarter(): Promise<SmarterStatus> {
-  const key = process.env.GEMINI_API_KEY;
-  const { id } = SMARTER_MODELS[0];
-  if (!key) return { ...smarterStatus(), detail: 'No GEMINI_API_KEY on the server' };
-  const usage: Usage = {
-    available: () => (budgetFrom(SMARTER_MODELS, modelUsage(quotaDay())).models[0].remaining > 0 ? [id] : []),
-    called: (m) => recordModelCall(quotaDay(), m),
-    spent: (m, limit) => recordModelExhausted(quotaDay(), m, limit),
-  };
+/** Ask one model something tiny, to see whether it answers. One of its requests. */
+export async function testModel(id: string): Promise<ModelStatus[]> {
+  if (!modelInfo(id)) throw new ModelError(`Unknown model ${id}`);
+  const model = modelById(id);
+  if (!model) {
+    recordModelHealth(id, false, `No ${ENV_KEY[providerOf(id)]} on the server`);
+    return modelStatuses();
+  }
   try {
-    await generate(key, usage, {
+    await model({
       system: 'Answer with JSON.', user: 'Reply {"ok": true}.',
       schema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' } }, required: ['ok'] },
       thinking: 'low', timeoutMs: FALL_BACK_AFTER_MS,
-    }, { maxBusy: 1, onOutcome: (m, ok, detail) => recordModelHealth(m, ok, detail) });
+    }, { maxBusy: 1 });
   } catch (error) {
     recordModelHealth(id, false, error instanceof Error ? error.message : 'failed');
   }
-  return smarterStatus();
+  return modelStatuses();
+}
+
+/**
+ * A model by id, then any fallbacks in order - for the model chosen in
+ * Settings, or to test one exactly (no fallbacks). Null if the first model's
+ * provider has no key on the server.
+ */
+export function modelById(id: string, fallbacks: string[] = []): JsonModel | null {
+  const ids = [id, ...fallbacks.filter((f) => f !== id)];
+  if (!process.env[ENV_KEY[providerOf(id)]]) return null;
+  const list = ids.map((m) => ({ id: m, label: modelLabel(m) }));
+  const usage: Usage = {
+    available: () => budgetFrom(list, modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),
+    called: (m) => recordModelCall(quotaDay(), m),
+    spent: (m, limit) => recordModelExhausted(quotaDay(), m, limit),
+  };
+  const key = process.env.GEMINI_API_KEY ?? '';
+  return (request, options) => generate(key, usage, request, {
+    ...options,
+    maxBusy: Math.max(ids.length, options?.maxBusy ?? 1),
+    onOutcome: (m, ok, detail) => { recordModelHealth(m, ok, detail); options?.onOutcome?.(m, ok, detail); },
+  });
 }

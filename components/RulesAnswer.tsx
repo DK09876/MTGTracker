@@ -11,6 +11,7 @@
 import { useState } from 'react';
 
 import type { Confidence, Source, Turn } from '@/lib/rules/answer';
+import { modelInfo } from '@/lib/models';
 
 const CONFIDENCE: Record<Confidence, { icon: string; label: string; tone: string; hint: string }> = {
   certain: { icon: '✓', label: 'Certain', tone: 'text-green-500', hint: 'An official ruling or rule says so outright.' },
@@ -22,7 +23,7 @@ const KIND_LABEL: Record<Source['kind'], string> = {
   ruling: 'Official ruling', rule: 'Comprehensive Rules', glossary: 'Rules glossary', oracle: 'Card text', wiki: 'MTG Wiki',
 };
 
-const modelName = (id: string) => id.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, '-Lite');
+const modelName = (id: string) => modelInfo(id)?.label ?? id.replace(/^gemini-/, 'Gemini ').replace(/-flash/, ' Flash').replace(/-lite/, '-Lite');
 
 const LINK_LABEL: Record<Source['kind'], string> = {
   ruling: 'On Scryfall', oracle: 'On Scryfall', rule: 'Read the rule', glossary: 'In the glossary', wiki: 'MTG Wiki',

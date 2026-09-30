@@ -17,10 +17,11 @@
 import { NextResponse } from 'next/server';
 
 import { ownedCounts } from '@/lib/collection';
+import { chosenModel, modelById } from '@/lib/ai';
 import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
-import { geminiTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
+import { geminiTranslator, modelTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
 import { cardsNamed, findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
 import { parseSortKey } from '@/lib/sort';
@@ -28,6 +29,14 @@ import { searchCombos, SpellbookError } from '@/lib/spellbook';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/** Search plans come from the model chosen in Settings; Gemini's translator when that is Gemini, or as its fallback. */
+function translator() {
+  const gemini = geminiTranslator();
+  if (chosenModel().startsWith('gemini')) return gemini;
+  const model = modelById(chosenModel());
+  return model ? modelTranslator(model, gemini) : gemini;
+}
 
 function deps(): Deps {
   return {
@@ -37,7 +46,7 @@ function deps(): Deps {
     cardsNamed,
     searchCombos,
     edhrec: edhrecEnabled() ? commanderPage : null,
-    translate: geminiTranslator(),
+    translate: translator(),
   };
 }
 

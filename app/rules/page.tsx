@@ -16,8 +16,8 @@ import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
 import RulesAnswer from '@/components/RulesAnswer';
-import SmarterModelSetting from '@/components/SmarterModelSetting';
-import { useSetting, useSmarter } from '@/lib/ai-settings';
+import ModelLine from '@/components/ModelLine';
+import { useSetting } from '@/lib/ai-settings';
 import * as api from '@/lib/api';
 import type { RulesThread, RulesThreadSummary } from '@/lib/db';
 import { getProfile } from '@/lib/profile';
@@ -48,7 +48,6 @@ export default function RulesPage() {
   // Waiting on "which card did you mean?": the question, and the choices.
   const [choosing, setChoosing] = useState<{ question: string; choice: api.RulesChoice[]; picks: Record<string, string> } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [smarter] = useSmarter();
   const [secondCheck, setSecondCheck] = useSetting('rules-second-check');
 
   const refresh = useCallback(() => api.rulesThreads().then((r) => { setThreads(r.threads); setBudget(r.budget); }).catch(() => {}), []);
@@ -84,7 +83,7 @@ export default function RulesPage() {
     try {
       // Never spin forever: the server gives up well before this.
       const r = await Promise.race([
-        api.askRules(q, { threadId: inThread?.id, picks, smarter, secondCheck }),
+        api.askRules(q, { threadId: inThread?.id, picks, secondCheck }),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 150_000)),
       ]);
       if (r.budget) setBudget(r.budget);
@@ -172,7 +171,7 @@ export default function RulesPage() {
 
       <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-2">
         <summary className="cursor-pointer text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
-          Settings{secondCheck || smarter ? ` · ${[secondCheck && 'second check', smarter && 'smarter model'].filter(Boolean).join(', ')}` : ''}
+          Settings{secondCheck ? ' · second check' : ''}
         </summary>
         <div className="mt-3 flex flex-col gap-4 pb-2">
           <label className="flex cursor-pointer items-start gap-3 text-sm">
@@ -184,7 +183,7 @@ export default function RulesPage() {
               </span>
             </span>
           </label>
-          <SmarterModelSetting />
+          <ModelLine />
         </div>
       </details>
 

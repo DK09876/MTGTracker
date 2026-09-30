@@ -6,6 +6,7 @@ const names = [
   'Blade of Selves', 'Kratos, God of War', 'Kratos, Stoic Father', 'Blasphemous Act', 'Opt', 'Fog', 'Counterspell',
   'Response // Resurgence', 'Stop Cold', 'Stop That', 'Does Machines', 'Clone', 'Hearthhull, the Worldseed',
   'Atraxa, Grand Unifier', "Atraxa, Praetors' Voice", 'Delver of Secrets // Insectile Aberration',
+  "Can't Quite Recall", "Can't Stay Away",
 ];
 const idx = nameIndex(names);
 // The rules' own words, as vocabulary() gives them.
@@ -13,6 +14,10 @@ const ordinary = new Set(['stop', 'response', 'clone', 'damage', 'trample', 'cre
 const find = (q: string) => findMentions(q, idx, ordinary);
 
 describe('findMentions', () => {
+  it('reads a contraction as English, not the start of a name', () => {
+    expect(find("Can I counter a spell that can't be countered?")).toEqual({ cards: [], ambiguous: [] });
+  });
+
   it('finds full names, with or without the comma', () => {
     expect(find('how does blade of selves interact with kratos, stoic father').cards).toEqual(['Blade of Selves', 'Kratos, Stoic Father']);
     expect(find('does blasphemous act kill it').cards).toEqual(['Blasphemous Act']);

@@ -97,7 +97,35 @@ including requests refused because the model was busy. The Tags tab shows
 what is left and what a run will cost. Gemini cannot be asked how many are
 left, so the app counts what it sends and believes a refusal over its count.
 
-**Tagging uses Gemini 3.5 Flash-Lite alone.** The Flash models (3.8 down to
+**Which model: Settings (the gear in the header).** One choice for the
+whole app - rules answers, deck tagging and search - kept on the server.
+Each model shows whether the server has its provider's key, today's
+requests, and whether it answered last time; **Test** asks it something
+tiny. If the chosen model refuses or runs out, Gemini 3.5 Flash-Lite
+answers instead (and search falls back to Gemini's own translator).
+
+| Provider | Key | Free plan |
+|---|---|---|
+| Groq | `GROQ_API_KEY` | 1,000 requests a day per model, but 8,000 tokens a minute - about one rules question a minute |
+| Google Gemini | `GEMINI_API_KEY` | about 20 requests a day per model; Flash often refuses on the free tier |
+| Mistral | `MISTRAL_API_KEY` | $10 of credits a month; the key needs the free plan activated in the Mistral console first |
+
+**The default is GPT-OSS 120B on Groq.** On 2026-09-30 GPT-OSS and Qwen 3.8
+(both on Groq) were asked seven rules questions with known answers, each
+with and without the rule table in `lib/rules/anchors.ts`:
+
+| | Without the table | With it | Time a question |
+|---|---|---|---|
+| GPT-OSS 120B | 6 / 7 | 6 / 7 | 3-9 s |
+| Qwen 3.8 27B | 5 / 7 (wrong on "can't be countered") | 6 / 7 | 2-36 s |
+| Gemini 3.5 Flash-Lite (earlier runs) | - | Kratos wrong, the others right | 20-60 s |
+
+All of them got Kratos + Blade of Selves wrong (7 experience counters: they
+said 1, or 3 with the table), each marking it "certain". GPT-OSS was as
+right as anything free and the fastest, with fifty times Flash-Lite's
+daily requests. The table still helps the weaker models, so it stays on.
+
+**Tagging used Gemini 3.5 Flash-Lite alone** before models could be chosen. The Flash models (3.8 down to
 3.5) read decks a little more closely, but on 2026-09-25 they refused nearly
 every request for hours while Flash-Lite answered the same ones in seconds.
 They are commented out in `lib/quota.ts`; `GEMINI_TAG_MODELS` sets the list
@@ -308,6 +336,8 @@ npm run dev          # http://localhost:3000
 | `MTG_DB_PATH` | `./data/mtg.db` | where the SQLite file lives |
 | `MTG_BASE_PATH` | *(none)* | subpath to serve under, e.g. `/mtg` |
 | `GEMINI_API_KEY` | *(none)* | turns on plain-English search; without it, text is searched as a card name |
+| `GROQ_API_KEY` | *(none)* | Groq's models (GPT-OSS, Qwen) in Settings; GPT-OSS is the default when this is set |
+| `MISTRAL_API_KEY` | *(none)* | Mistral's models in Settings |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
 | `GEMINI_TAG_MODELS` | 3.8, 3.7, 3.6, 3.5 Flash | the ladder of models that suggest and apply deck tags, best first, comma-separated; each thinks at `high`. Leave out aliases such as `gemini-flash-latest`, which share another model's allowance |
 | `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
