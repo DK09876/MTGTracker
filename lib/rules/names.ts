@@ -100,6 +100,8 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
     if (used[i] || w.length < 4 || /^\d+$/.test(w)) continue;
     // Plain English never begins a name here; the game's words only with a capital.
     if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
+    // A type before "token" or "creature" is the type: "Soldier tokens" are not Soldier of Fortune (2026-09-30).
+    if (ordinary.has(w) && /^(tokens?|creatures?|cards?|spells?|permanents?)$/.test(words[i + 1] ?? '')) continue;
     const options = index.first.get(w);
     if (!options?.length || options.length > 12) continue;
     if (options.length === 1) cards.push(options[0]);

@@ -57,5 +57,5 @@ for (const c of CASES) {
   writeFileSync(out, JSON.stringify(rows, null, 1));
   console.log(`${c.id.padEnd(42)} ${String(row.seconds).padStart(3)}s ${row.asked ? '[ASKED] ' : ''}${row.error ? `ERR ${row.error}` : `${row.confidence} | ${String(row.verdict).slice(0, 150)}`}`);
   console.log(`${' '.repeat(47)}expected: ${c.answer.slice(0, 110)}`);
-  await new Promise((res) => setTimeout(res, 20_000));
+  await new Promise((res) => setTimeout(res, Number(process.env.RULES_EVAL_PACE_MS ?? 20_000)));
 }
