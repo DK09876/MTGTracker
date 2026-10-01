@@ -38,6 +38,28 @@ export interface Citation {
   why: string;
 }
 
+/**
+ * The game's automatic checks (state-based actions), gone through after every
+ * event. A fixed list the answer must fill in, each yes or no: asked to
+ * "check for state-based actions", GPT-OSS left the line empty and missed the
+ * legend rule on Syr Konrad's token copies, and a player at 0 life between
+ * two triggers on Falkenrath Noble (2026-09-30).
+ */
+export const AUTO_CHECKS = [
+  { key: 'zeroLife', label: 'A player at 0 or less life loses' },
+  { key: 'emptyLibrary', label: 'A player who drew from an empty library loses' },
+  { key: 'poisonOrCommanderDamage', label: 'A player with 10 poison counters, or 21 combat damage from one commander, loses' },
+  { key: 'zeroToughness', label: 'A creature with 0 or less toughness goes to the graveyard' },
+  { key: 'lethalDamage', label: 'A creature with lethal damage, or any damage from deathtouch, is destroyed' },
+  { key: 'zeroLoyaltyOrDefense', label: 'A planeswalker with 0 loyalty, or a battle with 0 defense, goes to the graveyard' },
+  { key: 'legendRule', label: 'Legend rule: a player with two or more legendary permanents of the same name keeps one' },
+  { key: 'illegalAttachment', label: 'An Aura or Equipment attached illegally falls off or goes to the graveyard' },
+  { key: 'countersCancel', label: '+1/+1 and -1/-1 counters on one permanent cancel out' },
+  { key: 'outOfPlace', label: 'A token or a copy of a spell where it cannot be ceases to exist; a finished Saga is sacrificed' },
+] as const;
+
+export interface AutoCheck { label: string; applies: boolean; note: string }
+
 /** A trigger check: one object, one ability, at one event. */
 export interface TriggerCheck { object: string; ability: string; triggers: boolean; times: number; why: string }
 
@@ -55,7 +77,8 @@ export interface Working {
   /** Step 5: the starting state. */
   start: string;
   /** Step 6: the game, one event at a time. */
-  events: Array<{ what: string; board: string; checks: string; triggers: TriggerCheck[]; notes: string }>;
+  /** checks: the automatic checks, each yes or no (older answers: a line of text). */
+  events: Array<{ what: string; board: string; checks: AutoCheck[] | string; triggers: TriggerCheck[]; notes: string }>;
   /** Step 7: the count, and the second way of checking it. */
   count: string;
 }
@@ -151,7 +174,10 @@ Step 6 - Walk the game one event at a time (events). For EACH event:
   a. Before it: does a replacement effect change it?
   b. What happens, and the board right after (board). Objects leaving in
      this event are still checked if a source says they "look back".
-  c. Automatic checks (checks): any state-based action now? It is the next event.
+  c. Automatic checks (checks): after EVERY event the game makes its
+     automatic checks. Go through each one in "checks" - applies true or
+     false, and if true what happens. One that applies is the next event,
+     and everything leaving in it is checked for triggers like any other.
   d. Trigger scan (triggers): EVERY object on the battlefield or leaving
      now, against EVERY ability from Step 3. Write the "no"s too, with why.
   e. What a player might expect that does NOT happen, and why (notes).
@@ -186,8 +212,9 @@ a four-player game. How many experience counters do I get?"
    myriad x1. A resolves: 1 counter.
    Myriad resolves - board: Kratos (original), token 1, token 2, all
    attacking. Triggers: token 1 A no, token 2 A no (never declared as
-   attackers). Checks: three legendary permanents with the same name, one
-   controller - the legend rule is next.
+   attackers). Checks: legend rule - true: three legendary permanents named
+   Kratos, Stoic Father, one controller - keep one, so it is the next event;
+   every other check false.
    Legend rule - keep one; the other two go to the graveyard together. Say
    both tokens die. Board after: Kratos (original); leaving, still checked:
    token 1, token 2. Triggers, B, two Gods died: Kratos (original) sees
@@ -238,7 +265,16 @@ const WORKING = object({
   abilities: { type: 'ARRAY', items: object({ object: text, ability: text, breakdown: text }) },
   concepts: { type: 'ARRAY', items: object({ concept: text, source: text, says: text }) },
   start: text,
-  events: { type: 'ARRAY', items: object({ what: text, board: text, checks: text, triggers: { type: 'ARRAY', items: TRIGGER_CHECK }, notes: text }) },
+  events: {
+    type: 'ARRAY',
+    items: object({
+      what: text,
+      board: text,
+      checks: object(Object.fromEntries(AUTO_CHECKS.map((c) => [c.key, object({ applies: { type: 'BOOLEAN' }, note: text })]))),
+      triggers: { type: 'ARRAY', items: TRIGGER_CHECK },
+      notes: text,
+    }),
+  },
   count: text,
 });
 
@@ -268,7 +304,11 @@ export function compactWorking(answer: RulesAnswer, idToLabel: (id: string) => s
     `Asked: ${w.asked} Setup: ${w.setup}`,
     w.objects.length ? `Objects: ${w.objects.map((o) => `${o.name} (${o.what})`).join('; ')}` : '',
     w.concepts.length ? `Rules used: ${w.concepts.map((c) => `${c.concept} - ${c.source ? idToLabel(c.source) : 'no source'}${c.says ? `: ${c.says}` : ''}`).join('; ')}` : '',
-    ...w.events.map((e, i) => `Event ${i + 1}: ${e.what}${e.triggers.some((t) => t.triggers) ? ` - triggers: ${e.triggers.filter((t) => t.triggers).map((t) => `${t.object} x${t.times}`).join(', ')}` : ''}`),
+    ...w.events.map((e, i) => {
+      const applied = typeof e.checks === 'string' ? e.checks : e.checks.filter((c) => c.applies).map((c) => c.note || c.label).join('; ');
+      const fired = e.triggers.filter((t) => t.triggers).map((t) => `${t.object} x${t.times}`).join(', ');
+      return `Event ${i + 1}: ${e.what}${applied ? ` - automatic: ${applied}` : ''}${fired ? ` - triggers: ${fired}` : ''}`;
+    }),
     w.count ? `Count: ${w.count}` : '',
     answer.assumptions?.length ? `Assumed: ${answer.assumptions.join('; ')}` : '',
   ];
@@ -323,7 +363,10 @@ function parseWorking(v: unknown, clean: (t: string) => string): Working | undef
     events: list(w.events, 14).map(rec).map((e) => ({
       what: clean(str(e.what)),
       board: clean(str(e.board)),
-      checks: clean(str(e.checks)),
+      checks: typeof e.checks === 'string' ? clean(e.checks) : AUTO_CHECKS.map((c) => {
+        const x = rec(rec(e.checks)[c.key]);
+        return { label: c.label, applies: x.applies === true, note: clean(str(x.note)) };
+      }),
       triggers: list(e.triggers, 14).map(rec).map((t) => ({
         object: str(t.object), ability: str(t.ability), triggers: t.triggers === true,
         times: Math.max(0, Math.trunc(Number(t.times) || 0)), why: clean(str(t.why)),

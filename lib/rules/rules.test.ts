@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ScryfallCard } from '../scryfall';
-import { parseAnswer, type Source } from './answer';
+import { ANSWER_SCHEMA, ANSWER_SYSTEM, AUTO_CHECKS, parseAnswer, type Source } from './answer';
 import { anchorRules } from './anchors';
 import { askRules, type AskDeps } from './ask';
 import { keywordRules, parseRules, placeWeight, referencedRules, ruleWithContext, searchRules } from './cr';
@@ -129,6 +129,17 @@ describe('parseAnswer', () => {
     expect(checked.confidence).toBe('likely');
   });
 
+  it('reads every automatic check as yes or no, and older answers\' line of text', () => {
+    const all = [{ id: 'C1', kind: 'rule', label: '', text: '' }] as Source[];
+    const checks = Object.fromEntries(AUTO_CHECKS.map((c) => [c.key, { applies: c.key === 'legendRule', note: c.key === 'legendRule' ? 'three Konrads, keep one' : '' }]));
+    const a = parseAnswer({ working: working([{ what: 'Myriad resolves', board: '', checks, triggers: [], notes: '' }]), verdict: 'Four [C1].', summary: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [] }, all);
+    const parsed = a.working?.events[0].checks;
+    expect(Array.isArray(parsed) && parsed.length).toBe(AUTO_CHECKS.length);
+    expect(Array.isArray(parsed) && parsed.filter((c) => c.applies).map((c) => c.note)).toEqual(['three Konrads, keep one']);
+    const old = parseAnswer({ working: working([event('Legend rule', [])]), verdict: 'x [C1]', summary: '', confidence: 'likely', citations: [{ id: 'C1', role: 'key', why: '' }], followUps: [] }, all);
+    expect(old.working?.events[0].checks).toBe('');
+  });
+
   it('keeps the working and assumptions, and counts a concept\'s source as cited', () => {
     const a = parseAnswer({
       working: { ...working([]), concepts: [{ concept: 'legend rule', source: '[C1]', says: 'keep one' }, { concept: 'made up', source: 'C9', says: '' }] },
@@ -247,7 +258,7 @@ describe('askRules', () => {
     const tooBig = Object.assign(new Error('too long'), { kind: 'too-big' });
     Object.setPrototypeOf(tooBig, (await import('../ai')).ModelError.prototype);
     const model = vi.fn().mockRejectedValueOnce(tooBig).mockResolvedValue({ data: answer, model: 'test' });
-    const r = await askRules({ question: 'blade of selves on kratos, stoic father' }, { ...deps(model), inputTokens: 2_900 });
+    const r = await askRules({ question: 'blade of selves on kratos, stoic father' }, { ...deps(model), inputTokens: Math.ceil((ANSWER_SYSTEM.length + JSON.stringify(ANSWER_SCHEMA).length + 900) / 3.4) });
     if (!('turn' in r)) throw new Error('expected an answer');
     const [first, second] = model.mock.calls.map((c) => c[0].user as string);
     expect(second.length).toBeLessThan(first.length);

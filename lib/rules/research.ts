@@ -105,6 +105,23 @@ export function researchMessage({ question, earlier, clarifications, oracle }: R
 
 const KINDS = new Set<FollowUpKind>(['first', 'about-earlier', 'new-situation']);
 
+/**
+ * Questions never worth asking, whatever the helper says: the answer assumes
+ * these and says so. Told not to, the small model still asked "Which
+ * opponent is the defending player?" and "Do you choose to create the
+ * tokens?" about Syr Konrad, and "How many opponents?" about Teysa
+ * (2026-09-30).
+ */
+const NEVER_ASK = [
+  /\bhow many (players|opponents)\b/i,
+  /\bnumber of (players|opponents)\b/i,
+  /\b(which|what) (opponent|player)\b.*\b(defend|attack|target)/i,
+  /\bdefending player\b/i,
+  /\b(do|does|did|will|would) (you|i|the (controller|player|owner))\b.*\b(choose|want|decide|elect|opt)\b/i,
+  /\b(you|i) (choose|decide) (to|whether)\b/i,
+  /\bwho controls\b/i,
+];
+
 /** The reply, held to its limits; a follow-up is never "first", and a first question never a follow-up. */
 export function parseResearch(data: unknown, isFollowUp: boolean, alreadyAsked: boolean): Research {
   const d = (data ?? {}) as Record<string, unknown>;
@@ -117,6 +134,6 @@ export function parseResearch(data: unknown, isFollowUp: boolean, alreadyAsked: 
   const clarify = alreadyAsked ? [] : (Array.isArray(d.clarify) ? d.clarify : []).slice(0, 2).map((c) => {
     const x = (c ?? {}) as Record<string, unknown>;
     return { question: str(x.question), options: (Array.isArray(x.options) ? x.options : []).map(str).filter(Boolean).slice(0, 4) };
-  }).filter((c) => c.question);
+  }).filter((c) => c.question && !NEVER_ASK.some((r) => r.test(c.question)));
   return { kind, concepts, clarify };
 }

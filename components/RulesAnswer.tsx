@@ -192,6 +192,27 @@ function Triggers({ checks, marks }: { checks: Working['events'][number]['trigge
   );
 }
 
+/** The game's automatic checks after an event: the ones that applied, and that the rest were gone through. */
+function AutoChecks({ checks, marks }: { checks: Working['events'][number]['checks']; marks: Marks }) {
+  if (typeof checks === 'string') {
+    return checks ? <p><span className="text-[var(--muted)]">Automatic checks:</span> {marks(checks)}</p> : null;
+  }
+  const applied = checks.filter((c) => c.applies);
+  return (
+    <div>
+      <p className="text-[var(--muted)]">
+        Automatic checks: {applied.length ? `${applied.length} of ${checks.length} applied` : `all ${checks.length} checked, none applied`}
+      </p>
+      {applied.map((c, i) => (
+        <p key={i} className="flex gap-2">
+          <span aria-hidden className="text-amber-400">!</span>
+          <span><span className="text-[var(--foreground)]">{c.label}</span>{c.note && <span className="text-[var(--muted)]"> - {marks(c.note)}</span>}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** The steps the answer was worked out in, laid out as the method has them. */
 function WorkingSteps({ working: w, marks }: { working: Working; marks: Marks }) {
   const step = (n: number, title: string, body: React.ReactNode) => (
@@ -236,7 +257,7 @@ function WorkingSteps({ working: w, marks }: { working: Working; marks: Marks })
             <li key={i} className="border-l-2 border-[var(--border)] pl-2">
               <p className="font-medium">{i + 1}. {marks(e.what)}</p>
               {e.board && <p><span className="text-[var(--muted)]">Board:</span> {marks(e.board)}</p>}
-              {e.checks && <p><span className="text-[var(--muted)]">Automatic checks:</span> {marks(e.checks)}</p>}
+              <AutoChecks checks={e.checks} marks={marks} />
               <Triggers checks={e.triggers} marks={marks} />
               {e.notes && <p className="text-[var(--muted)]">Note: {marks(e.notes)}</p>}
             </li>
