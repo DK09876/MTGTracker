@@ -261,9 +261,17 @@ async function generate(
         throw lastError;
       }
       // Groq checks the model's JSON against the schema and refuses a miss
-      // (GPT-OSS once wrote a count as "1"; 2026-09-30). A fresh try usually
-      // passes: once more on the same model, then the next.
+      // (GPT-OSS once wrote a count as "1"; 2026-09-30). The refusal carries
+      // what it wrote: if that is whole JSON, the callers' own parsing copes
+      // with such slips, and asking again would cost another minute of Groq's
+      // per-minute allowance. Cut-off or broken JSON is asked for again: once
+      // more on the same model, then the next.
       if (response.status === 400 && /does not match the expected schema|failed to validate json|json_validate_failed/i.test(detail.message)) {
+        const written = failedGeneration(detail.body);
+        if (written !== undefined) {
+          onOutcome?.(model, true, 'answered (slightly off the schema)');
+          return { data: written, model };
+        }
         lastError = new ModelError(`${modelLabel(model)} wrote an answer in the wrong shape`);
         if (badShape++ < (providerOf(model) === 'gemini' ? 1 : 2)) continue;
         break;
@@ -344,6 +352,18 @@ async function call(provider: Provider, key: string, model: string, request: Jso
     if (signal?.aborted) throw new ModelError('stopped', 'stopped');
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     throw new ModelError(timedOut ? 'the model took too long' : 'could not reach the model', 'busy');
+  }
+}
+
+/** The JSON a provider refused for missing the schema (Groq's failed_generation), if it is whole JSON. */
+export function failedGeneration(body: unknown): unknown {
+  const text = (body as { error?: { failed_generation?: unknown } })?.error?.failed_generation;
+  if (typeof text !== 'string' || !text.trim()) return undefined;
+  try {
+    const data = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, ''));
+    return data && typeof data === 'object' ? data : undefined;
+  } catch {
+    return undefined;
   }
 }
 

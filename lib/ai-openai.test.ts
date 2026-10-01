@@ -56,6 +56,16 @@ describe('generate across providers', () => {
     expect(body.response_format.json_schema.strict).toBe(true);
   });
 
+  it('takes the answer Groq refused for a slip in the schema, rather than paying for another', async () => {
+    vi.stubEnv('GROQ_API_KEY', 'groq-key');
+    const slip = { error: { message: 'Generated JSON does not match the expected schema.', code: 'json_validate_failed', failed_generation: '{"times":"1","ok":true}' } };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(slip), { status: 400 }));
+    vi.stubGlobal('fetch', fetch);
+    const answer = await testing.generate('', usage(['openai/gpt-oss-120b']), { system: 's', user: 'u', schema: {} }, {}, noWait);
+    expect(answer.data).toEqual({ times: '1', ok: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('asks again once when Groq refuses the model\'s JSON for missing the schema', async () => {
     vi.stubEnv('GROQ_API_KEY', 'groq-key');
     const shape = () => new Response(JSON.stringify({ error: { message: 'Generated JSON does not match the expected schema. Please adjust your prompt.', code: 'json_validate_failed' } }), { status: 400 });

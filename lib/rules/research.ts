@@ -50,16 +50,20 @@ concepts: 3 to 8 rules concepts a judge would look up to answer, in the
   raise what each one sees; a copied spell raises whether it was cast. No
   rule numbers. For "about-earlier", only concepts the earlier answer lacked.
 
-clarify: questions for the player, ONLY when the answer depends on
-  something the question leaves open AND there is no usual default.
-  Assume instead of asking: a four-player Commander game; the player asking
-  controls the cards they name; it is their turn if they are attacking or
-  casting a sorcery; they make the choices that are best for them.
-  Worth asking: an order or choice that changes the result and was not said
-  (which entered first, where a card was moved), whose turn it is when that
-  decides it and nothing implies it. At most two questions, each with two
-  to four short answers to pick from. Never ask again what the player
-  already answered. Usually this is empty.`;
+clarify: questions for the player, ONLY when the question can be read two
+  plausible ways that give DIFFERENT final answers, and nothing in it says
+  which. Test each one: if every reading gives the same answer, do not ask.
+  Never ask about - assume instead: how many players or opponents (a
+  four-player Commander game); which opponent is attacked or defending;
+  who controls the cards named (the player asking); choices the player
+  makes (the best ones for them, and say so); details that do not change
+  the answer.
+  Worth asking: which of two permanents entered first when timestamps
+  decide it; where a card was moved when that changes the result (hand or
+  command zone); whose turn it is when the order of triggers decides who
+  wins. At most two questions, each with two to four short answers to pick
+  from. Never ask again what the player already answered. Usually this is
+  empty.`;
 
 export const RESEARCH_SCHEMA = {
   type: 'OBJECT',

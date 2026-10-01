@@ -343,7 +343,8 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
         schema: ANSWER_SCHEMA,
         thinking: 'high',
         temperature: 0.2,
-        timeoutMs: 90_000,
+        // Room for a wait on a per-minute limit (Groq's free tier) as well as the answer.
+        timeoutMs: 150_000,
       }, options);
       break;
     } catch (error) {

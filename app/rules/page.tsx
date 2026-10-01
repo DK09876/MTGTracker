@@ -91,7 +91,7 @@ export default function RulesPage() {
       // Never spin forever: the server gives up well before this.
       const r = await Promise.race([
         api.askRules(q, { threadId: inThread?.id, picks, secondCheck, clarifications }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 150_000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('That took too long - try asking again')), 240_000)),
       ]);
       if (r.budget) setBudget(r.budget);
       if (r.choice) {

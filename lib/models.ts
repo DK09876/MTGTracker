@@ -27,7 +27,8 @@ export interface ModelInfo {
   /**
    * The most a request should send, in tokens (about 3.6 characters each),
    * leaving room for the answer. Groq's free tier counts everything sent and
-   * written against 8,000 tokens a minute, so its models get about 6,000.
+   * written against 8,000 tokens a minute; a worked rules answer writes 2-3K,
+   * so GPT-OSS 120B gets 5,000 - more, and each question waits a minute.
    */
   inputTokens: number;
   /** Only a helper for another model's work (the rules lookup), not offered in Settings. */
@@ -47,7 +48,7 @@ export const MODELS: ModelInfo[] = [
     note: 'Mistral\'s reasoning model, same $10 a month. Slower; thinks step by step.' },
   { id: 'mistral-small-latest', provider: 'mistral', label: 'Mistral Small', dailyLimit: 1000, reasoning: false, inputTokens: 30_000,
     note: 'Mistral, small and cheap; stretches the $10 furthest.' },
-  { id: 'openai/gpt-oss-120b', provider: 'groq', label: 'GPT-OSS 120B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, dailyTokens: 200_000,
+  { id: 'openai/gpt-oss-120b', provider: 'groq', label: 'GPT-OSS 120B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 5_000, dailyTokens: 200_000,
     note: 'OpenAI\'s open reasoning model on Groq, free: 200,000 tokens a day (about 25 rules questions, or many more searches) and 8,000 a minute. Very fast; the default.' },
   { id: 'qwen/qwen3.8-27b', provider: 'groq', label: 'Qwen 3.8 27B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, dailyTokens: 200_000,
     note: 'Alibaba\'s Qwen on Groq, free: same limits. Fast, but miscounted and was sure of wrong answers in testing.' },
