@@ -33,6 +33,7 @@ import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { ModelStatus } from './ai';
 import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
@@ -417,11 +418,21 @@ export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: Rules
 
 export const rulesThread = (id: string) => fetch(url(`rules?id=${encodeURIComponent(id)}`)).then(json<{ thread: RulesThread }>).then((b) => b.thread);
 
-export const askRules = (question: string, opts: { threadId?: string; picks?: Record<string, string> } = {}) =>
-  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; budget?: Budget }>);
+export interface RulesClarify { question: string; options: string[] }
+
+export const askRules = (question: string, opts: {
+  threadId?: string; picks?: Record<string, string>; secondCheck?: boolean; clarifications?: Array<{ question: string; answer: string }>;
+} = {}) =>
+  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; clarify?: RulesClarify[]; budget?: Budget }>);
 
 export const updateRulesThread = (id: string, change: { title?: string; starred?: boolean }) =>
   send('rules', 'PATCH', { id, ...change }).then(json<{ thread: RulesThread; threads: RulesThreadSummary[] }>);
 
 export const forgetRulesThread = (id: string) =>
   fetch(url(`rules?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ threads: RulesThreadSummary[] }>).then((b) => b.threads);
+
+// --- the app's model ------------------------------------------------------------
+
+export const modelStatuses = () => fetch(url('ai/models')).then(json<{ models: ModelStatus[] }>).then((b) => b.models);
+export const chooseModel = (model: string) => send('ai/models', 'PUT', { model }).then(json<{ models: ModelStatus[] }>).then((b) => b.models);
+export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<{ models: ModelStatus[] }>).then((b) => b.models);

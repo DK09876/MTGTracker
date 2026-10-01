@@ -107,6 +107,18 @@ describe('generate', () => {
     expect(events).toEqual(['m1 busy']);
   });
 
+  it('hands over to the next model when one is too slow, and says how each did', async () => {
+    const slow = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    const fetch = vi.fn().mockRejectedValueOnce(slow).mockResolvedValueOnce(ok({ f: 6 }));
+    vi.stubGlobal('fetch', fetch);
+    const outcomes: string[] = [];
+    const { u, calls } = usage(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
+    const r = await testing.generate('k', u, request, { maxBusy: 2, onOutcome: (m, ok) => outcomes.push(`${m} ${ok}`) }, noWait);
+    expect(r.model).toBe('gemini-3.5-flash-lite');
+    expect(outcomes).toEqual(['gemini-3.8-flash false', 'gemini-3.5-flash-lite true']);
+    expect(calls).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
+  });
+
   it('does not call once stopped', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
@@ -119,7 +131,7 @@ describe('generate', () => {
   it('says so when every model has used its day, without calling', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
-    await expect(testing.generate('k', usage([]).u, request, {}, noWait)).rejects.toThrow(/midnight Pacific/);
+    await expect(testing.generate('k', usage([]).u, request, {}, noWait)).rejects.toThrow(/try again tomorrow/);
     expect(fetch).not.toHaveBeenCalled();
   });
 

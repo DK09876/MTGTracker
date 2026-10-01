@@ -29,6 +29,7 @@ import { edhrecUrl, type CardStats, type CommanderPage } from './edhrec';
 import type { Context, Kind, Previous, Translation, Translator } from './gemini';
 import type { ScryfallCard, SearchResult } from './scryfall';
 import { imageOf, manaCostOf, oracleTextOf, ScryfallError, typeLineOf } from './scryfall';
+import { canPartner, mergePair, splitPair, type Commander } from './partners';
 import { DEFAULT_SORT, sortKey, sortLabel, splitSort, type Sort } from './sort';
 import { SpellbookError, type Combo } from './spellbook';
 import { exactName, looksLikeSyntax } from './syntax';
@@ -602,7 +603,7 @@ export function scoped(query: string, commander: ScryfallCard | null): string {
     /\bor\b/i.test(filters) ? `(${filters})` : filters,
     `id<=${identityOf(commander).toLowerCase() || 'c'}`,
     /(^|[\s(])-?(f|format|legal):/i.test(filters) ? '' : 'f:commander',
-    `-${exactName(commander.name)}`,
+    ...((commander as Commander).pair ?? [commander]).map((c) => `-${exactName(c.name)}`),
     ...display.map((d) => d.trim()),
   ].filter(Boolean).join(' ');
 }
@@ -639,6 +640,11 @@ const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 async function lookUpCommander(
   mention: string, deps: Deps, trace: Step[],
 ): Promise<ScryfallCard | { choices: ScryfallCard[] } | null> {
+  const pair = await findPair(mention, deps);
+  if (pair) {
+    trace.push({ text: `Looked up the partner commanders “${mention}” on Scryfall → ${pair.name} (${colours(identityOf(pair)) || 'colourless'})` });
+    return pair;
+  }
   const picked = pickCommander(mention, await deps.findCommanders(mention));
   if (picked && 'choices' in picked) {
     trace.push({ text: `“${mention}” could be ${picked.choices.length} commanders, so this asks which` });
@@ -653,8 +659,27 @@ async function lookUpCommander(
   return card;
 }
 
+/**
+ * Two commanders named together - "Kratos and Atreus" - when they can lead a
+ * deck together, as one (partners.ts). A word that could be several cards is
+ * settled by which of them can partner with the other.
+ */
+async function findPair(mention: string, deps: Deps): Promise<Commander | null> {
+  const names = splitPair(mention);
+  if (!names) return null;
+  const found = await Promise.all(names.map((n) => deps.findCommanders(n)));
+  const options = names.map((n, i) => {
+    const picked = pickCommander(n, found[i]);
+    return picked ? ('card' in picked ? [picked.card] : picked.choices) : [];
+  });
+  for (const a of options[0]) for (const b of options[1]) if (canPartner(a, b)) return mergePair(a, b);
+  return null;
+}
+
 /** A commander named in full - one already picked or kept - without asking again. */
 async function findExactly(name: string, deps: Deps): Promise<ScryfallCard | null> {
+  const pair = await findPair(name, deps);
+  if (pair) return pair;
   const picked = pickCommander(name, await deps.findCommanders(name));
   if (!picked) return null;
   return 'card' in picked ? picked.card : picked.choices[0];

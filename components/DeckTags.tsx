@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
+import ModelLine from './ModelLine';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
@@ -164,6 +165,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         tags for you to shape, then applies the ones you keep to every card.
       </p>
       {budget && <BudgetLine budget={budget} />}
+      <ModelLine />
 
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">What should this deck do?</h3>
@@ -647,7 +649,7 @@ function resetText(ms: number): string {
  */
 function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
   if (budget.configured === false) {
-    return <p className="text-sm text-amber-400">The model is off: no GEMINI_API_KEY is set on the server.</p>;
+    return <p className="text-sm text-amber-400">The model is off: no model API key is set on the server.</p>;
   }
   const next = budget.models.find((m) => m.remaining > 0);
   return (

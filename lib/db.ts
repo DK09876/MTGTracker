@@ -97,6 +97,11 @@ function open(): Database {
   if (!cardColumns.some((c) => c.name === 'finish')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN finish TEXT NOT NULL DEFAULT 'nonfoil'`);
   }
+  // Tokens each model used per day: Groq's free tier caps tokens a day, not only requests.
+  const usageColumns = db.all('PRAGMA table_info(model_usage)') as Array<{ name: string }>;
+  if (usageColumns.length && !usageColumns.some((c) => c.name === 'tokens')) {
+    db.run('ALTER TABLE model_usage ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0');
+  }
   // What each card does - ramp, removal... - from Scryfall's tags, by
   // oracle id so every printing shares the answer. `checkedAt` records that
   // a card was looked up, so one with no roles is not looked up again.
@@ -148,6 +153,7 @@ function open(): Database {
       used INTEGER NOT NULL DEFAULT 0,
       quotaLimit INTEGER,
       exhausted INTEGER NOT NULL DEFAULT 0,
+      tokens INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, model)
     );
   `);
@@ -201,6 +207,10 @@ function open(): Database {
       updatedAt TEXT NOT NULL
     );
   `);
+  // App-wide settings, like the model every AI feature uses - see ai.ts (chosenModel).
+  db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  // Whether each model answered the last time it was asked - see ai.ts.
+  db.run(`CREATE TABLE IF NOT EXISTS model_health (model TEXT PRIMARY KEY, ok INTEGER NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL)`);
   // Searches kept under a name to carry on later - see recent.ts (Session).
   db.run(`
     CREATE TABLE IF NOT EXISTS saved_searches (
@@ -851,6 +861,8 @@ export interface ModelUsage {
   quotaLimit: number | null;
   /** Refused for the day - its quota is spent, whatever the count says. */
   exhausted: boolean;
+  /** Tokens sent and written that day. */
+  tokens?: number;
 }
 
 // --- recent searches -----------------------------------------------------
@@ -1016,14 +1028,39 @@ export function saveTagJob(job: TagJob): void {
   );
 }
 
+export function getSetting(key: string): string | null {
+  const row = open().get('SELECT value FROM settings WHERE key = ?', [key]) as { value: string } | null;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  open().run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]);
+}
+
+export interface ModelHealth { model: string; ok: boolean; detail: string; at: string }
+
+export function recordModelHealth(model: string, ok: boolean, detail: string): void {
+  open().run(
+    `INSERT INTO model_health (model, ok, detail, at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(model) DO UPDATE SET ok = excluded.ok, detail = excluded.detail, at = excluded.at`,
+    [model, ok ? 1 : 0, detail.slice(0, 200), now()],
+  );
+}
+
+export function modelHealth(model: string): ModelHealth | null {
+  const row = open().get('SELECT model, ok, detail, at FROM model_health WHERE model = ?', [model]) as
+    { model: string; ok: number; detail: string; at: string } | null;
+  return row ? { ...row, ok: row.ok === 1 } : null;
+}
+
 /**
  * Requests made to each model on one quota day. Gemini's free tier gives
  * each model its own daily allowance and has no way to ask what is left,
  * so the app counts what it sends.
  */
 export function modelUsage(day: string): ModelUsage[] {
-  return (open().all('SELECT model, used, quotaLimit, exhausted FROM model_usage WHERE day = ?', [day]) as Array<{
-    model: string; used: number; quotaLimit: number | null; exhausted: number;
+  return (open().all('SELECT model, used, quotaLimit, exhausted, tokens FROM model_usage WHERE day = ?', [day]) as Array<{
+    model: string; used: number; quotaLimit: number | null; exhausted: number; tokens: number;
   }>).map((r) => ({ ...r, exhausted: r.exhausted === 1 }));
 }
 
@@ -1032,6 +1069,14 @@ export function recordModelCall(day: string, model: string): void {
     `INSERT INTO model_usage (day, model, used) VALUES (?, ?, 1)
      ON CONFLICT(day, model) DO UPDATE SET used = used + 1`,
     [day, model],
+  );
+}
+
+export function recordModelTokens(day: string, model: string, tokens: number): void {
+  open().run(
+    `INSERT INTO model_usage (day, model, used, tokens) VALUES (?, ?, 0, ?)
+     ON CONFLICT(day, model) DO UPDATE SET tokens = tokens + excluded.tokens`,
+    [day, model, Math.max(0, Math.round(tokens))],
   );
 }
 
