@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
 
+import ModelMenu from '@/components/ModelMenu';
 import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
-import { TabBar, TopLinks } from '@/components/Nav';
+import { SettingsLink, TabBar, TopLinks } from '@/components/Nav';
 import ServiceWorker from '@/components/ServiceWorker';
 
 import './globals.css';
@@ -41,6 +42,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <div className="ml-auto flex items-center gap-1 text-sm">
               <TopLinks />
+              <ModelMenu />
+              <SettingsLink />
               <ProfileSwitcher />
             </div>
           </nav>

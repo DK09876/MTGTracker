@@ -31,7 +31,9 @@ const COMMON = new Set((
   + 'damage life dies die dying death dead kill killed stack priority phase step upkeep end beginning control controller '
   + 'owner hand library zone first strike double flying haste trample deathtouch lifelink vigilance reach hexproof shroud '
   + 'indestructible ward protection fog shock opt act storm cascade flash flashback kicker fight fights fear doom rampage '
-  + 'time day night light dark fire water earth wind wild life death blood gold silver iron stone bone shadow spirit'
+  + 'time day night light dark fire water earth wind wild life death blood gold silver iron stone bone shadow spirit '
+  // Contractions: "can't" began Can't Quite Recall and Can't Stay Away, and asked which (2026-09-30).
+  + "can't cannot don't doesn't didn't won't isn't aren't wasn't weren't couldn't shouldn't wouldn't it's i'm i've that's what's there's"
 ).split(' '));
 
 const normalise = (s: string) => s.toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -98,6 +100,8 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
     if (used[i] || w.length < 4 || /^\d+$/.test(w)) continue;
     // Plain English never begins a name here; the game's words only with a capital.
     if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
+    // A type before "token" or "creature" is the type: "Soldier tokens" are not Soldier of Fortune (2026-09-30).
+    if (ordinary.has(w) && /^(tokens?|creatures?|cards?|spells?|permanents?)$/.test(words[i + 1] ?? '')) continue;
     const options = index.first.get(w);
     if (!options?.length || options.length > 12) continue;
     if (options.length === 1) cards.push(options[0]);

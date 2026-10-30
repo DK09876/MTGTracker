@@ -22,13 +22,13 @@ export const dynamic = 'force-dynamic';
 
 const BOARDS = new Set<Board>(['main', 'side', 'maybe']);
 
-const state = (id: string) => ({ job: currentJob(id), tags: deckTags(id), budget: currentBudget() });
+const state = (id: string, profile: string) => ({ job: currentJob(id), tags: deckTags(id), budget: currentBudget(profile, 'tagging') });
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  return NextResponse.json(state(id));
+  return NextResponse.json(state(id, owned.profile));
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -53,12 +53,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       audit: b.audit !== false,
     };
   try {
-    startJob(owned.list, job);
+    startJob(owned.list, job, owned.profile);
   } catch (error) {
     if (error instanceof StepError) return NextResponse.json({ error: error.message }, { status: 409 });
     throw error;
   }
-  return NextResponse.json(state(id));
+  return NextResponse.json(state(id, owned.profile));
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -67,5 +67,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (owned instanceof NextResponse) return owned;
   stopJob(id);
   // The job settles as stopped a moment later; the page keeps polling until it does.
-  return NextResponse.json(state(id));
+  return NextResponse.json(state(id, owned.profile));
 }

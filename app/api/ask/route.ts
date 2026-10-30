@@ -17,10 +17,11 @@
 import { NextResponse } from 'next/server';
 
 import { ownedCounts } from '@/lib/collection';
+import { modelById, modelFor } from '@/lib/ai';
 import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
-import { geminiTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
+import { geminiTranslator, modelTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
 import { cardsNamed, findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
 import { parseSortKey } from '@/lib/sort';
@@ -29,7 +30,20 @@ import { searchCombos, SpellbookError } from '@/lib/spellbook';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function deps(): Deps {
+/**
+ * Search plans come from the profile's search model (Settings) - Gemini's
+ * own translator when that is Gemini. Another provider's model is not
+ * handed over to Gemini when it refuses (lib/ai.ts); a Claude one is charged
+ * to the profile.
+ */
+function translator(profile: string | null) {
+  const id = modelFor(profile, 'search');
+  if (id.startsWith('gemini')) return geminiTranslator();
+  const model = modelById(id, [], { profile, feature: 'search' });
+  return model ? modelTranslator(model, null) : geminiTranslator();
+}
+
+function deps(request: Request): Deps {
   return {
     search: (q, sort, page) => searchCards(q, page ?? 1, sort),
     findCardNamed,
@@ -37,7 +51,7 @@ function deps(): Deps {
     cardsNamed,
     searchCombos,
     edhrec: edhrecEnabled() ? commanderPage : null,
-    translate: geminiTranslator(),
+    translate: translator(profileOf(request)),
   };
 }
 
@@ -65,18 +79,18 @@ async function respond(request: Request, work: () => Promise<Interpreted>) {
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const combosFor = params.get('combosFor');
-  if (combosFor) return respond(request, () => runCombos(combosFor, deps()));
+  if (combosFor) return respond(request, () => runCombos(combosFor, deps(request)));
 
   const query = params.get('query');
   if (query !== null) {
-    return respond(request, () => runQuery(query, params.get('commander') || null, deps(), parseSortKey(params.get('sort')), {
+    return respond(request, () => runQuery(query, params.get('commander') || null, deps(request), parseSortKey(params.get('sort')), {
       withEdhrec: params.get('edhrec') !== '0',
       page: Math.max(1, Number(params.get('page')) || 1),
       constraints: params.get('constraints') ?? undefined,
     }));
   }
 
-  return respond(request, () => interpret(params.get('q') ?? '', deps()));
+  return respond(request, () => interpret(params.get('q') ?? '', deps(request)));
 }
 
 const KINDS = new Set<Kind>(['cards', 'card', 'combos']);
@@ -118,6 +132,6 @@ export async function POST(request: Request) {
     : undefined;
   const deckCommander = text(body.forDeck?.commander);
   return respond(request, () => interpret(
-    text(body.q) ?? '', deps(), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
+    text(body.q) ?? '', deps(request), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
   ));
 }

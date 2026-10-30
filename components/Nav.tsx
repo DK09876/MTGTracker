@@ -37,6 +37,24 @@ export function TopLinks() {
   );
 }
 
+const GEAR = 'M10.3 2h3.4l.5 2.6c.6.2 1.2.5 1.7.9l2.5-.9 1.7 2.9-2 1.7a7 7 0 0 1 0 2l2 1.7-1.7 2.9-2.5-.9c-.5.4-1.1.7-1.7.9l-.5 2.6h-3.4l-.5-2.6a7 7 0 0 1-1.7-.9l-2.5.9-1.7-2.9 2-1.7a7 7 0 0 1 0-2l-2-1.7 1.7-2.9 2.5.9c.5-.4 1.1-.7 1.7-.9l.5-2.6ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z';
+
+/** Settings (the AI model), as a gear in the header on every screen. */
+export function SettingsLink() {
+  const path = usePathname();
+  const on = path === '/settings';
+  return (
+    <Link
+      href="/settings"
+      aria-label="Settings"
+      aria-current={on ? 'page' : undefined}
+      className={`rounded-lg p-1.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)] ${on ? 'text-[var(--foreground)]' : 'text-[var(--muted)]'}`}
+    >
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden fill="currentColor"><path d={GEAR} fillRule="evenodd" /></svg>
+    </Link>
+  );
+}
+
 export function TabBar() {
   const path = usePathname();
   return (

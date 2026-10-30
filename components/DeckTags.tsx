@@ -19,9 +19,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
+import ModelLine from './ModelLine';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
+import { dollars } from '@/lib/spend';
 import type { TagJob } from '@/lib/tag-jobs';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { TAG_COLORS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
@@ -164,6 +166,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
         tags for you to shape, then applies the ones you keep to every card.
       </p>
       {budget && <BudgetLine budget={budget} />}
+      <ModelLine feature="tagging" />
 
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">What should this deck do?</h3>
@@ -647,7 +650,22 @@ function resetText(ms: number): string {
  */
 function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
   if (budget.configured === false) {
-    return <p className="text-sm text-amber-400">The model is off: no GEMINI_API_KEY is set on the server.</p>;
+    return <p className="text-sm text-amber-400">The model is off: no model API key is set on the server.</p>;
+  }
+  if (budget.spend) {
+    const s = budget.spend;
+    return (
+      <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+        <p>
+          <span className="font-medium">{dollars(s.left)} of today&apos;s AI budget left for you</span>
+          <span className="text-[var(--muted)]"> - resets {resetText(s.resetsInMs)}.</span>
+        </p>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          Tagging runs on {budget.models[0]?.label}, paid by the token: a Commander deck takes about three requests, usually well under a dollar.
+          You have spent {dollars(s.profileToday)} of {dollars(s.caps.perProfile)} today; everyone {dollars(s.today)} of {dollars(s.caps.daily)}.
+        </p>
+      </div>
+    );
   }
   const next = budget.models.find((m) => m.remaining > 0);
   return (

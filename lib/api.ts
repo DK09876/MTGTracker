@@ -33,9 +33,19 @@ import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { AiState } from './ai';
+import type { Effort, Feature } from './models';
+import type { Caps } from './spend';
 import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
+
+/** Told when a request may have spent on a model, so the header's budget is read again. */
+export const AI_SPENT = 'mtg-ai-spent';
+
+function spending<T>(work: Promise<T>): Promise<T> {
+  return work.finally(() => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(AI_SPENT)); });
+}
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
@@ -61,14 +71,14 @@ export type AskResponse = SearchResponse & Omit<Interpreted, keyof SearchRespons
 
 /** Search from anything typed - syntax, a name, or plain English. */
 export const ask = (q: string) =>
-  fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>);
+  spending(fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>));
 
 const post = (body: object) =>
-  fetch(url('ask'), {
+  spending(fetch(url('ask'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }).then(json<AskResponse>);
+  }).then(json<AskResponse>));
 
 /** A follow-up that refines the search before it. */
 export const followUp = (q: string, previous: Previous) => post({ q, previous });
@@ -336,7 +346,7 @@ export const startTagJob = (listId: string, params: JobParams) =>
 export const stopTagJob = (listId: string) =>
   fetch(url(`lists/${listId}/tags/job`), { method: 'DELETE' }).then(json<TagJobState>);
 
-/** Today's free requests left on each tagging model. */
+/** Today's requests left on the tagging model - and, for Claude, today's spending. */
 export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);
 
 // --- collection ------------------------------------------------------------
@@ -417,11 +427,32 @@ export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: Rules
 
 export const rulesThread = (id: string) => fetch(url(`rules?id=${encodeURIComponent(id)}`)).then(json<{ thread: RulesThread }>).then((b) => b.thread);
 
-export const askRules = (question: string, opts: { threadId?: string; picks?: Record<string, string> } = {}) =>
-  send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; budget?: Budget }>);
+export interface RulesClarify { question: string; options: string[] }
+
+export const askRules = (question: string, opts: {
+  threadId?: string; picks?: Record<string, string>; secondCheck?: boolean; clarifications?: Array<{ question: string; answer: string }>;
+} = {}) =>
+  spending(send('rules', 'POST', { question, ...opts }).then(json<{ thread?: RulesThread; choice?: RulesChoice[]; clarify?: RulesClarify[]; budget?: Budget }>));
 
 export const updateRulesThread = (id: string, change: { title?: string; starred?: boolean }) =>
   send('rules', 'PATCH', { id, ...change }).then(json<{ thread: RulesThread; threads: RulesThreadSummary[] }>);
 
 export const forgetRulesThread = (id: string) =>
   fetch(url(`rules?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ threads: RulesThreadSummary[] }>).then((b) => b.threads);
+
+// --- the profile's models ------------------------------------------------------
+
+/** Told when a model, effort or cap changes, so every picker shows it. */
+export const AI_CHANGED = 'mtg-ai-changed';
+
+const changed = (state: AiState) => {
+  window.dispatchEvent(new Event(AI_CHANGED));
+  return state;
+};
+
+export const aiState = () => fetch(url('ai/models')).then(json<AiState>);
+export const chooseModel = (model: string, features: Feature[]) =>
+  send('ai/models', 'PUT', { model, features }).then(json<AiState>).then(changed);
+export const chooseEffort = (effort: Effort) => send('ai/models', 'PUT', { effort }).then(json<AiState>).then(changed);
+export const setCaps = (caps: Partial<Caps>) => send('ai/models', 'PUT', { caps }).then(json<AiState>).then(changed);
+export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);

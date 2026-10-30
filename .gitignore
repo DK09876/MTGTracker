@@ -8,3 +8,4 @@ data
 .DS_Store
 public/tesseract
 *.traineddata
+scripts/rules-eval/results-*.json

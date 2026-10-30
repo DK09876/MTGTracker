@@ -10,7 +10,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { currentBudget, ModelError, taggingModel } from '@/lib/ai';
+import { appModel, currentBudget, helperModel, inputTokens, ModelError, modelFor } from '@/lib/ai';
+import { providerOf } from '@/lib/models';
 import {
   addRulesTurn, deleteRulesThread, rulesThread, rulesThreads, startRulesThread, updateRulesThread,
 } from '@/lib/db';
@@ -30,13 +31,13 @@ export async function GET(request: Request) {
     const thread = rulesThread(who.profile, id);
     return thread ? NextResponse.json({ thread }) : NextResponse.json({ error: 'No such conversation' }, { status: 404 });
   }
-  return NextResponse.json({ threads: rulesThreads(who.profile), budget: currentBudget() });
+  return NextResponse.json({ threads: rulesThreads(who.profile), budget: currentBudget(who.profile, 'rules') });
 }
 
 export async function POST(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
-  const b = await request.json().catch(() => ({})) as { question?: unknown; threadId?: unknown; picks?: unknown };
+  const b = await request.json().catch(() => ({})) as { question?: unknown; threadId?: unknown; picks?: unknown; secondCheck?: unknown; clarifications?: unknown };
   const question = typeof b.question === 'string' ? b.question.trim().slice(0, 600) : '';
   if (!question) return NextResponse.json({ error: 'Ask a question' }, { status: 400 });
   const threadId = typeof b.threadId === 'string' ? b.threadId : null;
@@ -46,12 +47,22 @@ export async function POST(request: Request) {
     ? Object.fromEntries(Object.entries(b.picks as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>
     : {};
 
-  const model = taggingModel();
-  if (!model) return NextResponse.json({ error: 'No GEMINI_API_KEY is set on the server, so rules answers are off' }, { status: 503 });
+  // The profile's rules model (the header's picker, lib/ai.ts).
+  const model = appModel(who.profile, 'rules');
+  if (!model) return NextResponse.json({ error: 'No model API key is set on the server, so rules answers are off' }, { status: 503 });
   try {
-    const result = await askRules({ question, earlier, picks }, {
+    const clarifications = (Array.isArray(b.clarifications) ? b.clarifications : [])
+      .map((c) => c as { question?: unknown; answer?: unknown })
+      .filter((c) => typeof c.question === 'string' && typeof c.answer === 'string' && c.answer.trim())
+      .slice(0, 4)
+      .map((c) => ({ question: String(c.question).slice(0, 300), answer: String(c.answer).trim().slice(0, 300) }));
+    const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true, clarifications }, {
       rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model,
+      helper: helperModel(who.profile), inputTokens: inputTokens(who.profile),
+      privateWorking: providerOf(modelFor(who.profile, 'rules')) === 'anthropic',
     }, { maxBusy: 1 });
+    // Something the answer turns on was left open: ask before answering.
+    if ('clarify' in result) return NextResponse.json({ clarify: result.clarify, budget: currentBudget(who.profile, 'rules') });
     if ('choice' in result) {
       // Pictures of the options, to pick by.
       const cards = await cardsNamed(result.choice.flatMap((c) => c.options)).catch(() => []);
@@ -62,10 +73,10 @@ export async function POST(request: Request) {
     }
     const id = threadId ?? startRulesThread(who.profile, result.turn);
     if (threadId) addRulesTurn(who.profile, threadId, result.turn);
-    return NextResponse.json({ thread: rulesThread(who.profile, id), budget: currentBudget() });
+    return NextResponse.json({ thread: rulesThread(who.profile, id), budget: currentBudget(who.profile, 'rules') });
   } catch (error) {
     if (error instanceof ModelError) {
-      return NextResponse.json({ error: `The model failed: ${error.message}`, budget: currentBudget() }, { status: 502 });
+      return NextResponse.json({ error: `The model failed: ${error.message}`, budget: currentBudget(who.profile, 'rules') }, { status: 502 });
     }
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[rules] ask failed', error);
