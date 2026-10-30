@@ -21,9 +21,10 @@ export function currentJob(listId: string): TagJob | null {
   return job;
 }
 
-export function startJob(list: List, params: JobParams): TagJob {
+/** Start a job on a deck, its model requests charged to the profile that owns it. */
+export function startJob(list: List, params: JobParams, profile: string): TagJob {
   if (isActive(currentJob(list.id))) throw new StepError('A tagging job is already running on this deck - stop it first');
-  const model = appModel();
+  const model = appModel(profile, 'tagging');
   if (!model) throw new StepError('No model API key is set on the server, so the model is off');
   const at = { list, boards: params.boards };
   if (params.kind === 'tag' && !deckTags(list.id).tags.some((t) => t.status === 'accepted')) {

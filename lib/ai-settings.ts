@@ -1,7 +1,7 @@
 /**
  * AI switches kept on this device, like the rules' second check. Requests
- * carry them. The model itself is one setting for the whole app, kept on
- * the server (Settings, lib/ai.ts chosenModel).
+ * carry them. The models themselves are kept on the server, per profile
+ * (Settings and the header's picker, lib/ai.ts modelFor).
  */
 
 import { useSyncExternalStore } from 'react';

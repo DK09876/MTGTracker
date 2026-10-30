@@ -4,6 +4,7 @@
  * Rules test run: the app's real pipeline (helper research, clarify, fit), each answer saved in full for grading by hand. */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { modelById } from '../../lib/ai';
+import { HELPER_MODEL, modelInfo, providerOf } from '../../lib/models';
 import { askRules } from '../../lib/rules/ask';
 import { cardNames, cardRulings, rulesIndex, wikiPage } from '../../lib/rules/sources';
 import { cardsNamed } from '../../lib/scryfall';
@@ -25,7 +26,13 @@ const [modelId, tableArg, only] = [process.argv[2], process.argv[3], process.arg
 const anchors = tableArg === 'table';
 const out = `scripts/rules-eval/results-${modelId.replace(/\W+/g, '_')}-${anchors ? 'table' : 'notable'}.json`;
 const rows: Record<string, unknown>[] = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : [];
-const deps = { rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model: modelById(modelId)!, helper: modelById('openai/gpt-oss-20b'), inputTokens: 6000 };
+// Claude runs are charged to an "eval" profile, so the app's caps hold them too.
+const charge = { profile: 'eval', feature: 'rules' as const };
+const deps = {
+  rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage,
+  model: modelById(modelId, [], charge)!, helper: modelById(HELPER_MODEL[providerOf(modelId)], [], charge),
+  inputTokens: modelInfo(modelId)?.inputTokens ?? 6000,
+};
 for (const c of CASES) {
   if (only && !only.split(',').includes(c.id)) continue;
   if (!only && rows.some((r) => r.id === c.id && !r.error)) continue;

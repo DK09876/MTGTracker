@@ -3,17 +3,27 @@
  * schema in, parsed JSON out, and which model answered. For the deck
  * tagger, which asks for more thought than search does.
  *
- * Gemini over REST, as gemini.ts is, or Mistral and Groq over their
- * OpenAI-style APIs (ai-openai.ts) - the model chosen in Settings, with
+ * Claude through Anthropic's SDK (ai-claude.ts), paid from the API credit
+ * and held to the app's daily caps (spend.ts); Gemini over REST, as
+ * gemini.ts is; or Mistral and Groq over their OpenAI-style APIs
+ * (ai-openai.ts). Each profile picks a model per feature; a Gemini one has
  * Flash-Lite behind it. Every free plan has a daily allowance, so calls go to
  * the first model with requests left (see quota.ts) and every request is counted. A busy model (503) is passed
  * over for the next, and a step stops after a few refusals or four minutes;
  * a model out of requests for the day is passed over at once.
  */
 
-import { getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, setSetting } from './db';
+import {
+  getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  setSetting, spendSince,
+} from './db';
+import { callClaude, claudeClient, ClaudeFailure, type ClaudeClient } from './ai-claude';
 import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
-import { DEFAULT_MODEL, ENV_KEY, FALLBACK_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf, type Provider } from './models';
+import {
+  costOf, DEFAULT_MODELS, EFFORTS, ENV_KEY, FALLBACK_MODEL, FEATURES, FREE_DEFAULT_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf,
+  type Effort, type Feature, type Price, type Provider,
+} from './models';
+import { capFrom, DEFAULT_CAPS, monthStart, overBudget, summarize, type Caps, type SpendSummary } from './spend';
 import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -112,66 +122,153 @@ export function storedUsage(models = ladder()): Usage {
   };
 }
 
-/** Today's requests left on the models the app is using: the chosen one, then Flash-Lite. */
-export function currentBudget(): Budget {
-  return budgetFrom(appModels().map((id) => ({ id, label: modelLabel(id) })), modelUsage(quotaDay()));
+/**
+ * Today's requests left on the models a profile's feature uses: the chosen
+ * one, then Flash-Lite for a Gemini one - and, for Claude, today's spending
+ * against the caps.
+ */
+export function currentBudget(profile: string | null, feature: Feature = 'tagging'): Budget {
+  const ids = featureModels(profile, feature);
+  const budget = budgetFrom(ids.map((id) => ({ id, label: modelLabel(id) })), modelUsage(quotaDay()));
+  return providerOf(ids[0]) === 'anthropic' ? { ...budget, spend: currentSpend(profile) } : budget;
 }
 
-// --- the model the app uses ----------------------------------------------------
+// --- the models each profile uses ------------------------------------------------
 
-const MODEL_SETTING = 'ai.model';
+const modelKey = (profile: string | null, feature: Feature) => `ai.model.${profile ?? '-'}.${feature}`;
+const EFFORT_KEY = (profile: string | null) => `ai.effort.${profile ?? '-'}`;
+const CAP_KEYS: Record<keyof Caps, string> = { daily: 'ai.cap.daily', perProfile: 'ai.cap.profile' };
 
-/** The model chosen in Settings, or the default - only one whose provider has a key - or else Flash-Lite. */
-export function chosenModel(): string {
-  const id = getSetting(MODEL_SETTING);
-  if (id && modelInfo(id) && hasKey(id)) return id;
-  return hasKey(DEFAULT_MODEL) ? DEFAULT_MODEL : FALLBACK_MODEL;
+/**
+ * The model a profile uses for a feature: its own choice, or the default -
+ * only one whose provider has a key - or else GPT-OSS, or else Flash-Lite.
+ */
+export function modelFor(profile: string | null, feature: Feature): string {
+  const id = getSetting(modelKey(profile, feature));
+  if (id && modelInfo(id) && !modelInfo(id)?.helper && hasKey(id)) return id;
+  if (hasKey(DEFAULT_MODELS[feature])) return DEFAULT_MODELS[feature];
+  return hasKey(FREE_DEFAULT_MODEL) ? FREE_DEFAULT_MODEL : FALLBACK_MODEL;
 }
 
-export function chooseModel(id: string): void {
+/** Use a model for some of a profile's features. */
+export function chooseModel(profile: string | null, id: string, features: Feature[]): void {
   if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
   if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
-  setSetting(MODEL_SETTING, id);
+  for (const f of features) if (FEATURES.includes(f)) setSetting(modelKey(profile, f), id);
+}
+
+/** How hard a profile's Claude model thinks on rules and tagging; medium unless changed. */
+export function effortFor(profile: string | null): Effort {
+  const e = getSetting(EFFORT_KEY(profile));
+  return EFFORTS.includes(e as Effort) ? e as Effort : 'medium';
+}
+
+export function chooseEffort(profile: string | null, effort: string): void {
+  if (!EFFORTS.includes(effort as Effort)) throw new ModelError(`Unknown effort ${effort}`);
+  setSetting(EFFORT_KEY(profile), effort);
+}
+
+export function caps(): Caps {
+  const read = (k: keyof Caps) => capFrom(getSetting(CAP_KEYS[k])) ?? DEFAULT_CAPS[k];
+  return { daily: read('daily'), perProfile: read('perProfile') };
+}
+
+export function setCaps(change: Partial<Record<keyof Caps, unknown>>): void {
+  for (const k of Object.keys(CAP_KEYS) as Array<keyof Caps>) {
+    if (change[k] === undefined) continue;
+    const value = capFrom(change[k]);
+    if (value === null) throw new ModelError('A cap is a number of dollars from 0 to 200');
+    setSetting(CAP_KEYS[k], String(value));
+  }
+}
+
+/** Today's and this month's Claude spending, as a profile sees it. */
+export function currentSpend(profile: string | null, now = new Date()): SpendSummary {
+  return summarize(spendSince(monthStart(now)), profile, caps(), now);
 }
 
 const hasKey = (id: string) => !!process.env[ENV_KEY[providerOf(id)]];
 
 /**
- * The chosen model, and for a Gemini one, Flash-Lite to fall back on when it
+ * A feature's model, and for a Gemini one, Flash-Lite to fall back on when it
  * refuses. Another provider's model is not swapped for Gemini's: a request
- * that Groq turns away is asked again on Groq (see generate), since a
- * different model answering changes the answers.
+ * that Claude or Groq turns away fails or is asked again on the same model
+ * (see generate), since a different model answering changes the answers.
  */
-function appModels(): string[] {
-  const chosen = chosenModel();
+function featureModels(profile: string | null, feature: Feature): string[] {
+  const chosen = modelFor(profile, feature);
   const gemini = providerOf(chosen) === 'gemini';
   return gemini && hasKey(FALLBACK_MODEL) && chosen !== FALLBACK_MODEL ? [chosen, FALLBACK_MODEL] : [chosen];
 }
 
-/** The chosen model's own size limit for a request, in tokens. */
-export function inputTokens(): number {
-  return modelInfo(chosenModel())?.inputTokens ?? 30_000;
+/** The rules model's own size limit for a request, in tokens. */
+export function inputTokens(profile: string | null): number {
+  return modelInfo(modelFor(profile, 'rules'))?.inputTokens ?? 30_000;
 }
 
-/** A small model on the chosen model's provider, for preparatory jobs; null without a key. */
-export function helperModel(): JsonModel | null {
-  const helper = HELPER_MODEL[providerOf(chosenModel())];
-  return modelById(helper);
+/** A small model on the rules model's provider, for preparatory jobs; null without a key. */
+export function helperModel(profile: string | null): JsonModel | null {
+  const helper = HELPER_MODEL[providerOf(modelFor(profile, 'rules'))];
+  return modelById(helper, [], { profile, feature: 'rules' });
 }
 
 /**
- * The model every AI feature uses (rules answers, deck tagging, search): the
- * one chosen in Settings, falling back on Flash-Lite. Null when no provider
- * has a key.
+ * The model a profile uses for a feature (rules answers, deck tagging,
+ * search). Null when no provider has a key.
  */
-export function appModel(): JsonModel | null {
-  const [id, ...fallbacks] = appModels();
-  return modelById(id, fallbacks);
+export function appModel(profile: string | null, feature: Feature): JsonModel | null {
+  const [id, ...fallbacks] = featureModels(profile, feature);
+  return modelById(id, fallbacks, { profile, feature });
+}
+
+/** Who a paid request is charged to, and for what. */
+export interface Charge {
+  profile: string | null;
+  feature: Feature;
+}
+
+/**
+ * A Claude model, charged to a profile: the caps are checked before each
+ * request, and what it cost is recorded after, answered or not. No
+ * fallback to a free model - its answers would not be Claude's.
+ */
+export function claudeModel(id: string, charge: Charge, client: () => ClaudeClient = claudeClient, now = () => new Date()): JsonModel {
+  return async (request, options = {}) => {
+    const over = overBudget(currentSpend(charge.profile, now()));
+    if (over) throw new ModelError(over, 'quota');
+    if (options.signal?.aborted) throw new ModelError('stopped', 'stopped');
+    // Search plans want speed; a preparatory step asks for little thought.
+    const effort: Effort = charge.feature === 'search' || request.thinking === 'low' ? 'low' : effortFor(charge.profile);
+    const day = quotaDay(now());
+    const record = (usage: { input: number; output: number; cacheRead: number; cacheWrite: number }) => {
+      recordModelCall(day, id);
+      recordModelTokens(day, id, usage.input + usage.output + usage.cacheRead + usage.cacheWrite);
+      recordSpend({
+        day, profileId: charge.profile ?? '-', model: id, feature: charge.feature,
+        inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, cost: costOf(id, usage),
+      });
+    };
+    try {
+      const answer = await callClaude(client(), id, request, effort, options.signal);
+      record(answer.usage);
+      recordModelHealth(id, true, 'answered');
+      options.onOutcome?.(id, true, 'answered');
+      return { data: answer.data, model: id };
+    } catch (error) {
+      const f = error instanceof ClaudeFailure ? error : new ClaudeFailure(error instanceof Error ? error.message : 'Claude failed', 'other');
+      if (f.usage) record(f.usage);
+      if (f.kind !== 'stopped') {
+        recordModelHealth(id, false, f.message);
+        options.onOutcome?.(id, false, f.message);
+      }
+      throw new ModelError(f.message, f.kind);
+    }
+  };
 }
 
 /** The app model with a caller's own usage record (tests). */
 export function taggingModel(usage?: Usage): JsonModel | null {
-  if (!usage) return appModel();
+  if (!usage) return appModel(null, 'tagging');
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   return (request, options) => generate(key, usage, request, options);
@@ -443,64 +540,81 @@ export interface ModelStatus {
   provider: Provider;
   note: string;
   reasoning: boolean;
+  /** Paid models: dollars per million tokens. */
+  price: Price | null;
   /** The server has this provider's key. */
   hasKey: boolean;
-  chosen: boolean;
+  /** The profile's features that use it. */
+  chosenFor: Feature[];
   used: number;
   remaining: number;
   limit: number;
   /** Tokens used today, and the free tier's daily token cap where that is what binds (Groq). */
   tokens: number;
   dailyTokens: number | null;
+  /** Dollars spent on it today, by everyone. */
+  spentToday: number;
   /** The last time it was asked, and whether it answered. */
   health: { ok: boolean; detail: string; at: string } | null;
 }
 
-export function modelStatuses(): ModelStatus[] {
+/** Everything Settings and the header's picker show, for one profile. */
+export interface AiState {
+  models: ModelStatus[];
+  effort: Effort;
+  spend: SpendSummary;
+}
+
+export function aiState(profile: string | null): AiState {
   const usage = modelUsage(quotaDay());
   const budget = budgetFrom(MODELS, usage);
-  const chosen = chosenModel();
-  return MODELS.filter((m) => !m.helper).map((m) => {
+  const spend = currentSpend(profile);
+  const chosen = Object.fromEntries(FEATURES.map((f) => [f, modelFor(profile, f)])) as Record<Feature, string>;
+  const models = MODELS.filter((m) => !m.helper).map((m) => {
     const b = budget.models.find((x) => x.id === m.id);
     const h = modelHealth(m.id);
     return {
-      id: m.id, label: m.label, provider: m.provider, note: m.note, reasoning: m.reasoning,
-      hasKey: hasKey(m.id), chosen: m.id === chosen,
+      id: m.id, label: m.label, provider: m.provider, note: m.note, reasoning: m.reasoning, price: m.price ?? null,
+      hasKey: hasKey(m.id), chosenFor: FEATURES.filter((f) => chosen[f] === m.id),
       used: b?.used ?? 0, remaining: b?.remaining ?? m.dailyLimit, limit: b?.limit ?? m.dailyLimit,
       tokens: usage.find((u) => u.model === m.id)?.tokens ?? 0, dailyTokens: m.dailyTokens ?? null,
+      spentToday: spend.byModel.find((x) => x.model === m.id)?.cost ?? 0,
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
+  return { models, effort: effortFor(profile), spend };
 }
 
-/** Ask one model something tiny, to see whether it answers. One of its requests. */
-export async function testModel(id: string): Promise<ModelStatus[]> {
+/** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */
+export async function testModel(profile: string | null, id: string): Promise<AiState> {
   if (!modelInfo(id)) throw new ModelError(`Unknown model ${id}`);
-  const model = modelById(id);
+  const model = modelById(id, [], { profile, feature: 'search' });
   if (!model) {
     recordModelHealth(id, false, `No ${ENV_KEY[providerOf(id)]} on the server`);
-    return modelStatuses();
+    return aiState(profile);
   }
   try {
     await model({
       system: 'Answer with JSON.', user: 'Reply {"ok": true}.',
       schema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' } }, required: ['ok'] },
-      thinking: 'low', timeoutMs: FALL_BACK_AFTER_MS,
+      thinking: 'low', timeoutMs: FALL_BACK_AFTER_MS, maxOutputTokens: 2_000,
     }, { maxBusy: 1 });
   } catch (error) {
     recordModelHealth(id, false, error instanceof Error ? error.message : 'failed');
   }
-  return modelStatuses();
+  return aiState(profile);
 }
 
 /**
- * A model by id, then any fallbacks in order - for the model chosen in
- * Settings, or to test one exactly (no fallbacks). Null if the first model's
- * provider has no key on the server.
+ * A model by id, then any fallbacks in order - for a profile's chosen model,
+ * or to test one exactly (no fallbacks). A Claude model is charged to the
+ * profile and feature given. Null if the first model's provider has no key
+ * on the server.
  */
-export function modelById(id: string, fallbacks: string[] = []): JsonModel | null {
-  const ids = [id, ...fallbacks.filter((f) => f !== id)];
+export function modelById(id: string, fallbacks: string[] = [], charge: Charge = { profile: null, feature: 'search' }): JsonModel | null {
   if (!process.env[ENV_KEY[providerOf(id)]]) return null;
+  if (providerOf(id) === 'anthropic') return claudeModel(id, charge);
+  const ids = [id, ...fallbacks.filter((f) => f !== id)];
   const list = ids.map((m) => ({ id: m, label: modelLabel(m) }));
   const usage: Usage = {
     available: () => budgetFrom(list, modelUsage(quotaDay())).models.filter((m) => m.remaining > 0).map((m) => m.id),

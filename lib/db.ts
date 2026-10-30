@@ -207,8 +207,23 @@ function open(): Database {
       updatedAt TEXT NOT NULL
     );
   `);
-  // App-wide settings, like the model every AI feature uses - see ai.ts (chosenModel).
+  // Settings: each profile's model per feature, the AI spending caps - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  // What each paid (Claude) request cost, by day, profile, model and feature -
+  // see spend.ts. The app's own daily caps are checked against it.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS ai_spend (
+      day TEXT NOT NULL,
+      profileId TEXT NOT NULL,
+      model TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      requests INTEGER NOT NULL DEFAULT 0,
+      inputTokens INTEGER NOT NULL DEFAULT 0,
+      outputTokens INTEGER NOT NULL DEFAULT 0,
+      cost REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, profileId, model, feature)
+    );
+  `);
   // Whether each model answered the last time it was asked - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS model_health (model TEXT PRIMARY KEY, ok INTEGER NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL)`);
   // Searches kept under a name to carry on later - see recent.ts (Session).
@@ -1088,3 +1103,30 @@ export function recordModelExhausted(day: string, model: string, limit: number |
     [day, model, limit],
   );
 }
+
+export interface SpendRow {
+  day: string;
+  profileId: string;
+  model: string;
+  feature: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+}
+
+/** One paid request: its tokens and what it cost. */
+export function recordSpend(row: Omit<SpendRow, 'requests'>): void {
+  open().run(
+    `INSERT INTO ai_spend (day, profileId, model, feature, requests, inputTokens, outputTokens, cost) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+     ON CONFLICT(day, profileId, model, feature) DO UPDATE SET requests = requests + 1,
+       inputTokens = inputTokens + excluded.inputTokens, outputTokens = outputTokens + excluded.outputTokens, cost = cost + excluded.cost`,
+    [row.day, row.profileId, row.model, row.feature, Math.round(row.inputTokens), Math.round(row.outputTokens), row.cost],
+  );
+}
+
+/** Spending on every day from `fromDay` on (YYYY-MM-DD). */
+export function spendSince(fromDay: string): SpendRow[] {
+  return open().all('SELECT day, profileId, model, feature, requests, inputTokens, outputTokens, cost FROM ai_spend WHERE day >= ?', [fromDay]) as unknown as SpendRow[];
+}
+

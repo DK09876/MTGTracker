@@ -1,7 +1,10 @@
 /**
  * The models the app can use for its AI features (rules answers, deck
- * tagging), across providers, with what each costs on its free plan. Pure:
- * shared by the server and the settings page.
+ * tagging, search), across providers, with what each costs. Pure: shared by
+ * the server and the settings page.
+ *
+ *   - Anthropic Claude: paid per token from the API credit (see spend.ts),
+ *     so no daily request allowance - the app's own dollar caps instead.
  *
  *   - Google Gemini: about 20 requests a day per model; Flash often refuses
  *     ("overloaded") on the free tier.
@@ -9,10 +12,25 @@
  *   - Groq: 1,000 requests a day per model, but only 8,000 tokens a minute -
  *     about one rules question a minute.
  *
- * Which is used is one setting for the whole app (lib/ai-settings-server).
+ * Each profile picks its own model per feature (lib/ai.ts modelFor).
  */
 
-export type Provider = 'gemini' | 'mistral' | 'groq';
+export type Provider = 'anthropic' | 'gemini' | 'mistral' | 'groq';
+
+/**
+ * What a model is used for. Rules and tagging share the header's picker (the
+ * thinking model); search is chosen in Settings. Kept apart so any of them
+ * can get its own choice later without moving data around.
+ */
+export type Feature = 'rules' | 'tagging' | 'search';
+export const FEATURES: Feature[] = ['rules', 'tagging', 'search'];
+
+/** How hard a Claude model thinks (its effort level). */
+export type Effort = 'low' | 'medium' | 'high';
+export const EFFORTS: Effort[] = ['low', 'medium', 'high'];
+
+/** Dollars per million tokens. Cache reads cost a tenth of input, writes a quarter more. */
+export interface Price { input: number; output: number }
 
 export interface ModelInfo {
   id: string;
@@ -35,9 +53,28 @@ export interface ModelInfo {
   helper?: boolean;
   /** Tokens a day on the free tier, where that is the tighter limit (Groq: 200,000, refilled through the day). */
   dailyTokens?: number;
+  /** Paid models: dollars per million tokens. */
+  price?: Price;
 }
 
+// Claude prices from Anthropic's price list (2026-10-30). Haiku 5.5 costs five
+// times as much past 100K tokens sent; requests here stay well under that.
+// Claude has no daily allowance: dailyLimit is only a ceiling for the counts.
+const PAID = 1_000_000;
+
 export const MODELS: ModelInfo[] = [
+  { id: 'claude-opus-5-5', provider: 'anthropic', label: 'Claude Opus 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
+    price: { input: 4, output: 20 },
+    note: 'Anthropic\'s strongest everyday model. Best at working through rules and reading a deck closely; about 10-20 cents a rules answer.' },
+  { id: 'claude-sonnet-5-5', provider: 'anthropic', label: 'Claude Sonnet 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
+    price: { input: 2, output: 10 },
+    note: 'Half the price of Opus, a little less careful. A good middle.' },
+  { id: 'claude-haiku-5-5', provider: 'anthropic', label: 'Claude Haiku 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
+    price: { input: 0.1, output: 0.5 },
+    note: 'Fast and very cheap - a fraction of a cent a search. The default for search; light for hard rules questions.' },
+  { id: 'claude-fable-5-1', provider: 'anthropic', label: 'Claude Fable 5.1', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
+    price: { input: 10, output: 50 },
+    note: 'Anthropic\'s most capable model, at two and a half times Opus\'s price. Slower; for the hardest questions.' },
   { id: 'gemini-3.5-flash-lite', provider: 'gemini', label: 'Gemini 3.5 Flash-Lite', dailyLimit: 20, reasoning: true, inputTokens: 30_000,
     note: 'Google, free: about 20 a day. Reliable, slow on hard questions, and the backstop when another model refuses.' },
   { id: 'gemini-3.8-flash', provider: 'gemini', label: 'Gemini 3.8 Flash', dailyLimit: 20, reasoning: true, inputTokens: 30_000,
@@ -57,12 +94,17 @@ export const MODELS: ModelInfo[] = [
 ];
 
 /**
- * GPT-OSS on Groq, unless changed in Settings. In a bake-off on rules
- * questions with known answers (2026-09-30) it scored the same as Flash-Lite
- * and Qwen - all right except a count of triggers from creatures dying
- * together - in 3-8 seconds, with 1,000 requests a day to Flash-Lite's 20.
+ * Claude unless changed: Opus for the thinking work (rules, tagging), Haiku
+ * for search, which wants speed and only plans a query. The free models
+ * (2026-09) were not good enough at rules or tagging. Without an Anthropic
+ * key, GPT-OSS on Groq, which did best of the free ones in a rules bake-off.
  */
-export const DEFAULT_MODEL = 'openai/gpt-oss-120b';
+export const DEFAULT_MODELS: Record<Feature, string> = {
+  rules: 'claude-opus-5-5',
+  tagging: 'claude-opus-5-5',
+  search: 'claude-haiku-5-5',
+};
+export const FREE_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 /**
  * A quick, cheap model on the same provider for small preparatory jobs (what
@@ -70,6 +112,7 @@ export const DEFAULT_MODEL = 'openai/gpt-oss-120b';
  * per-minute allowance.
  */
 export const HELPER_MODEL: Record<Provider, string> = {
+  anthropic: 'claude-haiku-5-5',
   groq: 'openai/gpt-oss-20b',
   gemini: 'gemini-3.5-flash-lite',
   mistral: 'mistral-small-latest',
@@ -83,9 +126,19 @@ export const modelInfo = (id: string): ModelInfo | undefined => MODELS.find((m) 
 export function providerOf(id: string): Provider {
   const known = modelInfo(id);
   if (known) return known.provider;
+  if (id.startsWith('claude')) return 'anthropic';
   if (id.startsWith('gemini')) return 'gemini';
   if (/^(mistral|magistral|ministral|codestral)/.test(id)) return 'mistral';
   return id.includes('/') ? 'groq' : 'gemini';
 }
 
-export const ENV_KEY: Record<Provider, string> = { gemini: 'GEMINI_API_KEY', mistral: 'MISTRAL_API_KEY', groq: 'GROQ_API_KEY' };
+export const ENV_KEY: Record<Provider, string> = { anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY', mistral: 'MISTRAL_API_KEY', groq: 'GROQ_API_KEY' };
+
+/** What a request cost in dollars, from the tokens the provider says it used. Free models cost nothing. */
+export function costOf(id: string, used: { input: number; output: number; cacheRead?: number; cacheWrite?: number }): number {
+  const price = modelInfo(id)?.price;
+  if (!price) return 0;
+  const input = used.input + (used.cacheRead ?? 0) * 0.1 + (used.cacheWrite ?? 0) * 1.25;
+  return (input * price.input + used.output * price.output) / 1_000_000;
+}
+

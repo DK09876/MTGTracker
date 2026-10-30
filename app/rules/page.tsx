@@ -24,6 +24,7 @@ import * as api from '@/lib/api';
 import type { RulesThread, RulesThreadSummary } from '@/lib/db';
 import { getProfile } from '@/lib/profile';
 import type { Budget } from '@/lib/quota';
+import { dollars } from '@/lib/spend';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
 
 const EXAMPLES = [
@@ -224,7 +225,9 @@ export default function RulesPage() {
       </div>
       <p className="mt-1 text-sm text-[var(--muted)]">
         How cards interact, or how a rule works. Answers come from the cards&apos; official rulings, the Comprehensive Rules and the MTG Wiki, with every claim linked to its source.
-        {left !== undefined && <> {' '}{secondCheck ? 'Two AI requests' : 'One AI request'} per question · {left} left today.</>}
+        {budget?.spend
+          ? <> {' '}Each question costs a few cents of the AI budget · {dollars(budget.spend.left)} left for you today.</>
+          : left !== undefined && <> {' '}{secondCheck ? 'Two AI requests' : 'One AI request'} per question · {left} left today.</>}
       </p>
 
       <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-2">
@@ -241,7 +244,7 @@ export default function RulesPage() {
               </span>
             </span>
           </label>
-          <ModelLine />
+          <ModelLine feature="rules" />
         </div>
       </details>
 

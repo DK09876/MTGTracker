@@ -16,6 +16,7 @@
  */
 
 import type { ModelUsage } from './db';
+import type { SpendSummary } from './spend';
 import { MODELS } from './models';
 
 export interface LadderModel {
@@ -78,6 +79,8 @@ export interface ModelBudget extends LadderModel {
 
 export interface Budget {
   day: string;
+  /** When the feature's model is Claude: what it has cost today against the caps. */
+  spend?: SpendSummary;
   resetsInMs: number;
   /** Best first. */
   models: ModelBudget[];
