@@ -277,7 +277,9 @@ Return JSON with:
   Season"). Otherwise null.
 - commander: the commander the request is building around, as named ("for
   my Azula deck", "good with Atraxa", "combos for vivi"). A short or partial
-  name is fine - it is looked up for you. Otherwise null.
+  name is fine - it is looked up for you. Two commanders leading one deck
+  together (partners, a Background): give both, joined by " and " - "Kratos
+  and Atreus" - never just the first. Otherwise null.
 - explanation: one short sentence saying what the search looks for, in plain
   words, e.g. "Green ramp that isn't a land, under $2".
 - query:
@@ -352,6 +354,8 @@ Examples:
 "a card under 5 cmc for azula that helps me draw cards" ->
   kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5;
   constraints: (otag:draw or otag:card-advantage) mv<5
+"kratos stoic father and atreus, counters synergy" -> kind: cards;
+  commander: Kratos, Stoic Father and Atreus; query: (o:"+1/+1 counter" or o:proliferate)
 "combo cards for vivi" -> kind: combos; commander: Vivi
 "what goes infinite with doubling season" -> kind: combos; cardName: Doubling Season
 "two card infinite mana combos in izzet" ->
