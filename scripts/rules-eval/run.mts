@@ -31,7 +31,7 @@ const charge = { profile: 'eval', feature: 'rules' as const };
 const deps = {
   rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage,
   model: modelById(modelId, [], charge)!, helper: modelById(HELPER_MODEL[providerOf(modelId)], [], charge),
-  inputTokens: modelInfo(modelId)?.inputTokens ?? 6000,
+  inputTokens: modelInfo(modelId)?.inputTokens ?? 6000, privateWorking: providerOf(modelId) === 'anthropic',
 };
 for (const c of CASES) {
   if (only && !only.split(',').includes(c.id)) continue;

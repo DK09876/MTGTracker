@@ -24,7 +24,7 @@
 import { ModelError, type CallOptions, type JsonModel } from '../ai';
 import type { Ruling, ScryfallCard } from '../scryfall';
 import { anchorRules } from './anchors';
-import { ANSWER_SCHEMA, ANSWER_SYSTEM, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, compactWorking, parseAnswer, type Earlier, type Source, type Turn } from './answer';
+import { ANSWER_SCHEMA, ANSWER_SCHEMA_PRIVATE, ANSWER_SYSTEM, ANSWER_SYSTEM_PRIVATE, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, compactWorking, parseAnswer, type Earlier, type Source, type Turn } from './answer';
 import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRules, tokens, type RulesIndex } from './cr';
 import { findMentions, type NameIndex } from './names';
 import { parseResearch, RESEARCH_SCHEMA, RESEARCH_SYSTEM, researchMessage, type Clarify, type Research } from './research';
@@ -42,6 +42,8 @@ export interface AskDeps {
   helper?: JsonModel | null;
   /** The most the answer request may send, in tokens (models.ts inputTokens). */
   inputTokens?: number;
+  /** The model works the steps out in its own thinking and answers without the working (Claude - see ANSWER_SYSTEM_PRIVATE). */
+  privateWorking?: boolean;
   now?: () => Date;
 }
 
@@ -330,7 +332,9 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   // Fit the request to the model: what the prompt and schema leave of its
   // size limit goes to sources, most important first. If the model still
   // says it is too big, send less, twice.
-  const fixed = ANSWER_SYSTEM.length + JSON.stringify(ANSWER_SCHEMA).length + answerMessage(question, context, [], clarifications).length;
+  const system = deps.privateWorking ? ANSWER_SYSTEM_PRIVATE : ANSWER_SYSTEM;
+  const schema = deps.privateWorking ? ANSWER_SCHEMA_PRIVATE : ANSWER_SCHEMA;
+  const fixed = system.length + JSON.stringify(schema).length + answerMessage(question, context, [], clarifications).length;
   const room = (deps.inputTokens ?? 30_000) * CHARS_PER_TOKEN - fixed;
   let sources: Source[] = [];
   let answer: Awaited<ReturnType<JsonModel>> | null = null;
@@ -338,9 +342,9 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
     sources = fitSources(gathered, room * share);
     try {
       answer = await deps.model({
-        system: ANSWER_SYSTEM,
+        system,
         user: answerMessage(question, context, sources, clarifications),
-        schema: ANSWER_SCHEMA,
+        schema,
         thinking: 'high',
         temperature: 0.2,
         // Room for a wait on a per-minute limit (Groq's free tier) as well as the answer.

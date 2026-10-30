@@ -93,7 +93,7 @@ describe('modelFor', () => {
 function fakeClaude(usage = { input_tokens: 10_000, output_tokens: 2_000 }, stop = 'end_turn') {
   const sent: unknown[] = [];
   const client: ClaudeClient = {
-    messages: {
+    beta: { messages: {
       stream: (params) => {
         sent.push(params);
         return {
@@ -104,7 +104,7 @@ function fakeClaude(usage = { input_tokens: 10_000, output_tokens: 2_000 }, stop
           }) as never,
         };
       },
-    },
+    } },
   };
   return { client, sent };
 }
@@ -150,6 +150,15 @@ describe('claudeModel', () => {
     const { client } = fakeClaude({ input_tokens: 1_000_000, output_tokens: 0 }, 'max_tokens');
     await expect(ai.claudeModel('claude-sonnet-5-5', { profile: 'dk', feature: 'tagging' }, () => client)(ask)).rejects.toThrow(/cut off/);
     expect(ai.currentSpend('dk').today).toBeCloseTo(2);
+  });
+
+  it('prices an answer from Anthropic\'s fallback model as that model when it is dearer', async () => {
+    const ai = await import('./ai');
+    const { client } = fakeClaude();
+    const answered: ClaudeClient = { beta: { messages: { stream: (p) => ({ finalMessage: async () => ({ ...(await client.beta.messages.stream(p).finalMessage()), model: 'claude-opus-4-8' }) }) } } };
+    await ai.claudeModel('claude-opus-5-5', { profile: 'dk', feature: 'rules' }, () => answered)(ask);
+    // 10K in at $5/M and 2K out at $25/M.
+    expect(ai.currentSpend('dk').today).toBeCloseTo(0.1);
   });
 
   it('refuses to reach the real Claude from a test', async () => {

@@ -82,6 +82,7 @@ describe('claudeParams', () => {
     const params = claudeParams('claude-opus-5-5', { system: 'S', user: 'U', schema, temperature: 0.2 }, 'high');
     expect(params.system).toEqual([{ type: 'text', text: 'S', cache_control: { type: 'ephemeral' } }]);
     expect(params.thinking).toEqual({ type: 'adaptive' });
+    expect(params.fallbacks).toBe('default');
     expect(params.output_config?.effort).toBe('high');
     // Current Claude models refuse a temperature.
     expect('temperature' in params).toBe(false);

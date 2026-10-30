@@ -10,7 +10,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { appModel, currentBudget, helperModel, inputTokens, ModelError } from '@/lib/ai';
+import { appModel, currentBudget, helperModel, inputTokens, ModelError, modelFor } from '@/lib/ai';
+import { providerOf } from '@/lib/models';
 import {
   addRulesTurn, deleteRulesThread, rulesThread, rulesThreads, startRulesThread, updateRulesThread,
 } from '@/lib/db';
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true, clarifications }, {
       rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model,
       helper: helperModel(who.profile), inputTokens: inputTokens(who.profile),
+      privateWorking: providerOf(modelFor(who.profile, 'rules')) === 'anthropic',
     }, { maxBusy: 1 });
     // Something the answer turns on was left open: ask before answering.
     if ('clarify' in result) return NextResponse.json({ clarify: result.clarify, budget: currentBudget(who.profile, 'rules') });

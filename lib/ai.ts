@@ -240,23 +240,25 @@ export function claudeModel(id: string, charge: Charge, client: () => ClaudeClie
     // Search plans want speed; a preparatory step asks for little thought.
     const effort: Effort = charge.feature === 'search' || request.thinking === 'low' ? 'low' : effortFor(charge.profile);
     const day = quotaDay(now());
-    const record = (usage: { input: number; output: number; cacheRead: number; cacheWrite: number }) => {
+    const record = (usage: { input: number; output: number; cacheRead: number; cacheWrite: number }, answeredBy?: string) => {
       recordModelCall(day, id);
       recordModelTokens(day, id, usage.input + usage.output + usage.cacheRead + usage.cacheWrite);
       recordSpend({
         day, profileId: charge.profile ?? '-', model: id, feature: charge.feature,
-        inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, cost: costOf(id, usage),
+        inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output,
+        // Anthropic's fallback may have answered: priced as the dearer of the two.
+        cost: Math.max(costOf(id, usage), costOf(answeredBy ?? id, usage)),
       });
     };
     try {
       const answer = await callClaude(client(), id, request, effort, options.signal);
-      record(answer.usage);
+      record(answer.usage, answer.model);
       recordModelHealth(id, true, 'answered');
       options.onOutcome?.(id, true, 'answered');
       return { data: answer.data, model: id };
     } catch (error) {
       const f = error instanceof ClaudeFailure ? error : new ClaudeFailure(error instanceof Error ? error.message : 'Claude failed', 'other');
-      if (f.usage) record(f.usage);
+      if (f.usage) record(f.usage, f.model);
       if (f.kind !== 'stopped') {
         recordModelHealth(id, false, f.message);
         options.onOutcome?.(id, false, f.message);

@@ -278,3 +278,17 @@ describe('fitSources', () => {
     expect(fitSources({ sources, priority }, 10).map((x) => x.id)).toEqual(['O1']);
   });
 });
+
+describe('the answer for a model that keeps its working private', () => {
+  it('asks for the same steps in its own thinking, and no working in the answer', async () => {
+    const { ANSWER_SCHEMA_PRIVATE, ANSWER_SYSTEM, ANSWER_SYSTEM_PRIVATE } = await import('./answer');
+    expect(ANSWER_SYSTEM_PRIVATE).toContain('in your own thinking before you answer');
+    expect(ANSWER_SYSTEM_PRIVATE).not.toContain('write each step into "working"');
+    expect(ANSWER_SYSTEM_PRIVATE).not.toMatch(/\((objects|events|triggers)\)/);
+    // The method itself is all still there.
+    for (const step of ['Step 1', 'Step 6', 'Step 7', 'WORKED EXAMPLE', 'ANSWERING:']) expect(ANSWER_SYSTEM_PRIVATE).toContain(step);
+    expect(ANSWER_SYSTEM_PRIVATE.length).toBeGreaterThan(ANSWER_SYSTEM.length * 0.95);
+    expect(Object.keys(ANSWER_SCHEMA_PRIVATE.properties)).toEqual(['verdict', 'summary', 'assumptions', 'confidence', 'citations', 'followUps']);
+    expect(ANSWER_SCHEMA_PRIVATE.required).not.toContain('working');
+  });
+});

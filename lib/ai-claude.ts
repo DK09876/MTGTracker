@@ -14,10 +14,20 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { JsonRequest } from './ai';
 import type { Effort } from './models';
 
+type Params = Parameters<Anthropic['beta']['messages']['stream']>[0];
+
 /** The part of the SDK client used here, so tests can pass their own. */
 export interface ClaudeClient {
-  messages: { stream: (params: Anthropic.MessageStreamParams, options?: Anthropic.RequestOptions) => { finalMessage: () => Promise<Anthropic.Message> } };
+  beta: { messages: { stream: (params: Params, options?: Anthropic.RequestOptions) => { finalMessage: () => Promise<Anthropic.Beta.BetaMessage> } } };
 }
+
+/**
+ * Anthropic re-runs a declined request on another model, chosen by why it
+ * was declined. Asked to write out its working, every Claude model declined
+ * rules questions as "reasoning_extraction" (2026-10-30); the fallback
+ * answers them. The reply says which model did, and is priced as that one.
+ */
+const FALLBACKS = (): Pick<Params, 'fallbacks' | 'betas'> => ({ fallbacks: 'default', betas: ['server-side-fallback-2026-07-01'] });
 
 let client: Anthropic | null = null;
 
@@ -60,7 +70,7 @@ export function claudeSchema(s: Schema): Record<string, unknown> {
  */
 const tooLarge = new Set<string>();
 
-export function claudeParams(model: string, request: JsonRequest, effort: Effort, strict = true): Anthropic.MessageStreamParams {
+export function claudeParams(model: string, request: JsonRequest, effort: Effort, strict = true): Params {
   const schema = claudeSchema(request.schema as Schema);
   if (!strict) {
     return {
@@ -73,6 +83,7 @@ export function claudeParams(model: string, request: JsonRequest, effort: Effort
       messages: [{ role: 'user', content: request.user }],
       thinking: { type: 'adaptive' },
       output_config: { effort },
+      ...FALLBACKS(),
     };
   }
   return {
@@ -86,22 +97,25 @@ export function claudeParams(model: string, request: JsonRequest, effort: Effort
     messages: [{ role: 'user', content: request.user }],
     thinking: { type: 'adaptive' },
     output_config: { effort, format: { type: 'json_schema', schema } },
+    ...FALLBACKS(),
   };
 }
 
 export interface ClaudeAnswer {
   data: unknown;
+  /** The model that answered: the one asked, or Anthropic's fallback for it. */
+  model: string;
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
 /** Why a Claude call failed, in the words lib/ai.ts reports. */
 export class ClaudeFailure extends Error {
-  constructor(message: string, readonly kind: 'busy' | 'stopped' | 'other', readonly usage?: ClaudeAnswer['usage']) {
+  constructor(message: string, readonly kind: 'busy' | 'stopped' | 'other', readonly usage?: ClaudeAnswer['usage'], readonly model?: string) {
     super(message);
   }
 }
 
-const usageOf = (m: Anthropic.Message): ClaudeAnswer['usage'] => ({
+const usageOf = (m: Anthropic.Beta.BetaMessage): ClaudeAnswer['usage'] => ({
   input: m.usage.input_tokens ?? 0,
   output: m.usage.output_tokens ?? 0,
   cacheRead: m.usage.cache_read_input_tokens ?? 0,
@@ -109,11 +123,14 @@ const usageOf = (m: Anthropic.Message): ClaudeAnswer['usage'] => ({
 });
 
 /** The JSON a reply carries, from its text blocks (thinking skipped). */
-export function parseClaude(message: Anthropic.Message): unknown {
-  if (message.stop_reason === 'refusal') throw new ClaudeFailure('Claude declined to answer that', 'other', usageOf(message));
-  if (message.stop_reason === 'max_tokens') throw new ClaudeFailure('the answer was too long and got cut off', 'other', usageOf(message));
-  const text = message.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('').trim();
-  if (!text) throw new ClaudeFailure('the model returned nothing', 'other', usageOf(message));
+export function parseClaude(message: Anthropic.Beta.BetaMessage): unknown {
+  if (message.stop_reason === 'refusal') {
+    const category = (message as { stop_details?: { category?: string | null } }).stop_details?.category;
+    throw new ClaudeFailure(`Claude declined to answer that${category ? ` (${category})` : ''}`, 'other', usageOf(message), message.model);
+  }
+  if (message.stop_reason === 'max_tokens') throw new ClaudeFailure('the answer was too long and got cut off', 'other', usageOf(message), message.model);
+  const text = message.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.Beta.BetaTextBlock).text).join('').trim();
+  if (!text) throw new ClaudeFailure('the model returned nothing', 'other', usageOf(message), message.model);
   // Strict answers are bare JSON; one asked for in the prompt may come fenced or with a word around it.
   const unfenced = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
   for (const candidate of [unfenced, unfenced.slice(unfenced.indexOf('{'), unfenced.lastIndexOf('}') + 1)]) {
@@ -121,17 +138,17 @@ export function parseClaude(message: Anthropic.Message): unknown {
       return JSON.parse(candidate);
     } catch { /* try the next reading */ }
   }
-  throw new ClaudeFailure('the model returned something other than JSON', 'other', usageOf(message));
+  throw new ClaudeFailure('the model returned something other than JSON', 'other', usageOf(message), message.model);
 }
 
 export async function callClaude(
   client: ClaudeClient, model: string, request: JsonRequest, effort: Effort, signal?: AbortSignal,
 ): Promise<ClaudeAnswer> {
   const key = JSON.stringify(request.schema);
-  const send = (strict: boolean) => client.messages.stream(claudeParams(model, request, effort, strict), {
+  const send = (strict: boolean) => client.beta.messages.stream(claudeParams(model, request, effort, strict), {
     signal, timeout: request.timeoutMs ?? 240_000,
   }).finalMessage();
-  let message: Anthropic.Message;
+  let message: Anthropic.Beta.BetaMessage;
   try {
     try {
       message = await send(!tooLarge.has(key));
@@ -143,7 +160,7 @@ export async function callClaude(
   } catch (error) {
     throw failure(error, signal);
   }
-  return { data: parseClaude(message), usage: usageOf(message) };
+  return { data: parseClaude(message), model: message.model, usage: usageOf(message) };
 }
 
 function failure(error: unknown, signal?: AbortSignal): ClaudeFailure {

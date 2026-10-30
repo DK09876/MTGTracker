@@ -288,6 +288,20 @@ export const ANSWER_SCHEMA = object({
   followUps: { type: 'ARRAY', items: text },
 });
 
+/**
+ * The same method for a model that may not write out its working: Claude
+ * declines a request whose answer is a step-by-step worksheet (its
+ * "reasoning_extraction" check, 2026-10-30, on every current model). It
+ * goes through the steps in its own thinking instead, and the answer has no
+ * "working" - just the verdict, summary, assumptions and citations.
+ */
+export const ANSWER_SYSTEM_PRIVATE = ANSWER_SYSTEM
+  .replace('HOW TO WORK IT OUT - write each step into "working":', 'HOW TO WORK IT OUT - go through these steps in your own thinking before you answer:')
+  .replace(/ \((?:asked, setup|objects|abilities|concepts|start|events|count|board|checks|triggers|notes)\)/g, '')
+  .replace('Go through each one in "checks"', 'Go through each one');
+
+export const ANSWER_SCHEMA_PRIVATE = object(Object.fromEntries(Object.entries(ANSWER_SCHEMA.properties).filter(([k]) => k !== 'working')));
+
 /** What a follow-up carries from the conversation. */
 export interface Earlier {
   /** Older turns, briefly: the question, the answer and its key sources. */

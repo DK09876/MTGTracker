@@ -135,8 +135,15 @@ export function providerOf(id: string): Provider {
 export const ENV_KEY: Record<Provider, string> = { anthropic: 'ANTHROPIC_API_KEY', gemini: 'GEMINI_API_KEY', mistral: 'MISTRAL_API_KEY', groq: 'GROQ_API_KEY' };
 
 /** What a request cost in dollars, from the tokens the provider says it used. Free models cost nothing. */
+// Models Anthropic's fallback may answer with, which are not offered here.
+const OTHER_PRICES: Array<[string, Price]> = [
+  ['claude-opus-5', { input: 5, output: 25 }], ['claude-opus-4', { input: 5, output: 25 }],
+  ['claude-sonnet-5', { input: 2, output: 10 }], ['claude-sonnet-4', { input: 3, output: 15 }],
+  ['claude-haiku-4', { input: 1, output: 5 }],
+];
+
 export function costOf(id: string, used: { input: number; output: number; cacheRead?: number; cacheWrite?: number }): number {
-  const price = modelInfo(id)?.price;
+  const price = modelInfo(id)?.price ?? OTHER_PRICES.find(([prefix]) => id.startsWith(prefix))?.[1];
   if (!price) return 0;
   const input = used.input + (used.cacheRead ?? 0) * 0.1 + (used.cacheWrite ?? 0) * 1.25;
   return (input * price.input + used.output * price.output) / 1_000_000;
