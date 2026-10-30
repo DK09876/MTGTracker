@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { claudeParams, claudeSchema } from './ai-claude';
+import { claudeParams, claudeSchema, parseClaude } from './ai-claude';
 import { costOf } from './models';
 import { capFrom, dollars, overBudget, summarize } from './spend';
 
@@ -85,5 +85,21 @@ describe('claudeParams', () => {
     expect(params.output_config?.effort).toBe('high');
     // Current Claude models refuse a temperature.
     expect('temperature' in params).toBe(false);
+  });
+
+  it('can ask for the schema in the prompt instead, for one too large to enforce', () => {
+    const params = claudeParams('claude-opus-5-5', { system: 'S', user: 'U', schema: { type: 'OBJECT', properties: {} } }, 'medium', false);
+    expect(params.output_config).toEqual({ effort: 'medium' });
+    expect(JSON.stringify(params.system)).toContain('matching this JSON Schema');
+  });
+});
+
+describe('parseClaude', () => {
+  const reply = (text: string) => ({ stop_reason: 'end_turn', content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }) as never;
+  it('reads JSON bare, fenced, or with words around it', () => {
+    expect(parseClaude(reply('{"a":1}'))).toEqual({ a: 1 });
+    expect(parseClaude(reply('```json\n{"a":1}\n```'))).toEqual({ a: 1 });
+    expect(parseClaude(reply('Here it is: {"a":1} - done'))).toEqual({ a: 1 });
+    expect(() => parseClaude(reply('no json here'))).toThrow(/other than JSON/);
   });
 });

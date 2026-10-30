@@ -51,7 +51,30 @@ export function claudeSchema(s: Schema): Record<string, unknown> {
   return walk(s);
 }
 
-export function claudeParams(model: string, request: JsonRequest, effort: Effort): Anthropic.MessageStreamParams {
+/**
+ * Schemas Claude would not enforce: structured outputs compile a schema to a
+ * grammar, and the rules answer's (a worked answer, a trigger worksheet,
+ * checks, citations) is too large for it (2026-10-30). Those are asked for
+ * in the prompt instead and read back leniently. Remembered per process, so
+ * each costs one refused request - which is not charged - per restart.
+ */
+const tooLarge = new Set<string>();
+
+export function claudeParams(model: string, request: JsonRequest, effort: Effort, strict = true): Anthropic.MessageStreamParams {
+  const schema = claudeSchema(request.schema as Schema);
+  if (!strict) {
+    return {
+      model,
+      max_tokens: request.maxOutputTokens ?? 32_000,
+      system: [
+        { type: 'text', text: request.system, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: `Reply with one JSON object and nothing else - no code fences, no prose - matching this JSON Schema:\n${JSON.stringify(schema)}` },
+      ],
+      messages: [{ role: 'user', content: request.user }],
+      thinking: { type: 'adaptive' },
+      output_config: { effort },
+    };
+  }
   return {
     model,
     // Thinking counts towards this; a worked rules answer with its thinking
@@ -62,7 +85,7 @@ export function claudeParams(model: string, request: JsonRequest, effort: Effort
     system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: request.user }],
     thinking: { type: 'adaptive' },
-    output_config: { effort, format: { type: 'json_schema', schema: claudeSchema(request.schema as Schema) } },
+    output_config: { effort, format: { type: 'json_schema', schema } },
   };
 }
 
@@ -91,21 +114,32 @@ export function parseClaude(message: Anthropic.Message): unknown {
   if (message.stop_reason === 'max_tokens') throw new ClaudeFailure('the answer was too long and got cut off', 'other', usageOf(message));
   const text = message.content.filter((b) => b.type === 'text').map((b) => (b as Anthropic.TextBlock).text).join('').trim();
   if (!text) throw new ClaudeFailure('the model returned nothing', 'other', usageOf(message));
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ClaudeFailure('the model returned something other than JSON', 'other', usageOf(message));
+  // Strict answers are bare JSON; one asked for in the prompt may come fenced or with a word around it.
+  const unfenced = text.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  for (const candidate of [unfenced, unfenced.slice(unfenced.indexOf('{'), unfenced.lastIndexOf('}') + 1)]) {
+    try {
+      return JSON.parse(candidate);
+    } catch { /* try the next reading */ }
   }
+  throw new ClaudeFailure('the model returned something other than JSON', 'other', usageOf(message));
 }
 
 export async function callClaude(
   client: ClaudeClient, model: string, request: JsonRequest, effort: Effort, signal?: AbortSignal,
 ): Promise<ClaudeAnswer> {
+  const key = JSON.stringify(request.schema);
+  const send = (strict: boolean) => client.messages.stream(claudeParams(model, request, effort, strict), {
+    signal, timeout: request.timeoutMs ?? 240_000,
+  }).finalMessage();
   let message: Anthropic.Message;
   try {
-    message = await client.messages.stream(claudeParams(model, request, effort), {
-      signal, timeout: request.timeoutMs ?? 240_000,
-    }).finalMessage();
+    try {
+      message = await send(!tooLarge.has(key));
+    } catch (error) {
+      if (!(error instanceof Anthropic.BadRequestError) || !/grammar is too large|schema is too complex/i.test(error.message)) throw error;
+      tooLarge.add(key);
+      message = await send(false);
+    }
   } catch (error) {
     throw failure(error, signal);
   }
