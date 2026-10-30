@@ -55,6 +55,10 @@ export interface ModelInfo {
   dailyTokens?: number;
   /** Paid models: dollars per million tokens. */
   price?: Price;
+  /** One line for a compact list: who, and the catch or the cost. */
+  short: string;
+  /** Claude's levels, most capable first: "Most capable", "Strong", "Balanced", "Fast". */
+  level?: string;
 }
 
 // Claude prices from Anthropic's price list (2026-10-30). Haiku 5.5 costs five
@@ -63,33 +67,33 @@ export interface ModelInfo {
 const PAID = 1_000_000;
 
 export const MODELS: ModelInfo[] = [
-  { id: 'claude-opus-5-5', provider: 'anthropic', label: 'Claude Opus 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
-    price: { input: 4, output: 20 },
-    note: 'Anthropic\'s strongest everyday model. Best at working through rules and reading a deck closely; about 10-20 cents a rules answer.' },
-  { id: 'claude-sonnet-5-5', provider: 'anthropic', label: 'Claude Sonnet 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
-    price: { input: 2, output: 10 },
-    note: 'Half the price of Opus, a little less careful. A good middle.' },
-  { id: 'claude-haiku-5-5', provider: 'anthropic', label: 'Claude Haiku 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
-    price: { input: 0.1, output: 0.5 },
-    note: 'Fast and very cheap - a fraction of a cent a search. The default for search; light for hard rules questions.' },
-  { id: 'claude-fable-5-1', provider: 'anthropic', label: 'Claude Fable 5.1', dailyLimit: PAID, reasoning: true, inputTokens: 30_000,
+  { id: 'claude-fable-5-1', provider: 'anthropic', label: 'Claude Fable 5.1', dailyLimit: PAID, reasoning: true, inputTokens: 30_000, short: 'Slowest and dearest; for the hardest questions · about 30-50¢ a rules answer', level: 'Most capable',
     price: { input: 10, output: 50 },
     note: 'Anthropic\'s most capable model, at two and a half times Opus\'s price. Slower; for the hardest questions.' },
-  { id: 'gemini-3.5-flash-lite', provider: 'gemini', label: 'Gemini 3.5 Flash-Lite', dailyLimit: 20, reasoning: true, inputTokens: 30_000,
+  { id: 'claude-opus-5-5', provider: 'anthropic', label: 'Claude Opus 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000, short: 'The best everyday pick for rules and tagging · about 5-15¢ a rules answer', level: 'Strong',
+    price: { input: 4, output: 20 },
+    note: 'Anthropic\'s strongest everyday model. Best at working through rules and reading a deck closely; about 5-15 cents a rules answer (4-6 cents in testing).' },
+  { id: 'claude-sonnet-5-5', provider: 'anthropic', label: 'Claude Sonnet 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000, short: 'Half Opus\'s price, a little less careful · about 3-8¢ a rules answer', level: 'Balanced',
+    price: { input: 2, output: 10 },
+    note: 'Half the price of Opus, a little less careful. A good middle.' },
+  { id: 'claude-haiku-5-5', provider: 'anthropic', label: 'Claude Haiku 5.5', dailyLimit: PAID, reasoning: true, inputTokens: 30_000, short: 'Quick and nearly free; the default for search · well under 1¢', level: 'Fast',
+    price: { input: 0.1, output: 0.5 },
+    note: 'Fast and very cheap - a fraction of a cent a search. The default for search; light for hard rules questions.' },
+  { id: 'gemini-3.5-flash-lite', provider: 'gemini', label: 'Gemini 3.5 Flash-Lite', dailyLimit: 20, reasoning: true, inputTokens: 30_000, short: 'Google · about 20 a day',
     note: 'Google, free: about 20 a day. Reliable, slow on hard questions, and the backstop when another model refuses.' },
-  { id: 'gemini-3.8-flash', provider: 'gemini', label: 'Gemini 3.8 Flash', dailyLimit: 20, reasoning: true, inputTokens: 30_000,
+  { id: 'gemini-3.8-flash', provider: 'gemini', label: 'Gemini 3.8 Flash', dailyLimit: 20, reasoning: true, inputTokens: 30_000, short: 'Google · about 20 a day, often busy',
     note: 'Google, free: about 20 a day. Often refuses ("overloaded") on the free tier.' },
-  { id: 'mistral-medium-latest', provider: 'mistral', label: 'Mistral Medium 3.5', dailyLimit: 500, reasoning: true, inputTokens: 30_000,
+  { id: 'mistral-medium-latest', provider: 'mistral', label: 'Mistral Medium 3.5', dailyLimit: 500, reasoning: true, inputTokens: 30_000, short: 'Mistral · $10 of credit a month',
     note: 'Mistral, free: $10 of credits a month (a few hundred questions). Paid-grade service, rarely refuses.' },
-  { id: 'magistral-medium-latest', provider: 'mistral', label: 'Magistral Medium', dailyLimit: 300, reasoning: true, inputTokens: 30_000,
+  { id: 'magistral-medium-latest', provider: 'mistral', label: 'Magistral Medium', dailyLimit: 300, reasoning: true, inputTokens: 30_000, short: 'Mistral · reasoning, slower',
     note: 'Mistral\'s reasoning model, same $10 a month. Slower; thinks step by step.' },
-  { id: 'mistral-small-latest', provider: 'mistral', label: 'Mistral Small', dailyLimit: 1000, reasoning: false, inputTokens: 30_000,
+  { id: 'mistral-small-latest', provider: 'mistral', label: 'Mistral Small', dailyLimit: 1000, reasoning: false, inputTokens: 30_000, short: 'Mistral · small and cheap',
     note: 'Mistral, small and cheap; stretches the $10 furthest.' },
-  { id: 'openai/gpt-oss-120b', provider: 'groq', label: 'GPT-OSS 120B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 5_000, dailyTokens: 200_000,
-    note: 'OpenAI\'s open reasoning model on Groq, free: 200,000 tokens a day (about 25 rules questions, or many more searches) and 8,000 a minute. Very fast; the default.' },
-  { id: 'qwen/qwen3.8-27b', provider: 'groq', label: 'Qwen 3.8 27B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, dailyTokens: 200_000,
+  { id: 'openai/gpt-oss-120b', provider: 'groq', label: 'GPT-OSS 120B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 5_000, short: 'Groq · 200K tokens a day, very fast', dailyTokens: 200_000,
+    note: 'OpenAI\'s open reasoning model on Groq, free: 200,000 tokens a day (about 25 rules questions, or many more searches) and 8,000 a minute. Very fast.' },
+  { id: 'qwen/qwen3.8-27b', provider: 'groq', label: 'Qwen 3.8 27B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, short: 'Groq · 200K tokens a day', dailyTokens: 200_000,
     note: 'Alibaba\'s Qwen on Groq, free: same limits. Fast, but miscounted and was sure of wrong answers in testing.' },
-  { id: 'openai/gpt-oss-20b', provider: 'groq', label: 'GPT-OSS 20B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, dailyTokens: 200_000, helper: true,
+  { id: 'openai/gpt-oss-20b', provider: 'groq', label: 'GPT-OSS 20B (Groq)', dailyLimit: 1000, reasoning: true, inputTokens: 6_000, short: 'Groq · helper for rules lookups', dailyTokens: 200_000, helper: true,
     note: 'The small GPT-OSS, with its own allowance: looks up what a rules question needs before GPT-OSS 120B answers.' },
 ];
 
