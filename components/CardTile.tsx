@@ -11,6 +11,7 @@
 import Image from 'next/image';
 
 import ManaCost from './ManaCost';
+import Tilt from './Tilt';
 import { RarityBadge } from './CardDetail';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf } from '@/lib/scryfall';
@@ -33,23 +34,18 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
   const usd = priceOf(card, finish);
 
   return (
-    <div className="group flex flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+    <div className="rise flex flex-col gap-2">
       <button
         onClick={() => onSelect(card)}
         className="relative block w-full text-left"
         aria-label={`Show details for ${card.name}`}
       >
         {image ? (
-          <Image
-            src={image}
-            alt={card.name}
-            width={488}
-            height={680}
-            className="w-full transition-transform duration-200 group-hover:scale-[1.02]"
-            unoptimized
-          />
+          <Tilt foil={finish !== 'nonfoil'} className="rounded-[4.75%/3.4%]">
+            <Image src={image} alt={card.name} width={488} height={680} className="w-full" unoptimized />
+          </Tilt>
         ) : (
-          <div className="flex aspect-[488/680] items-center justify-center px-3 text-center text-sm text-[var(--muted)]">
+          <div className="flex aspect-[488/680] items-center justify-center rounded-[4.75%/3.4%] border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-sm text-[var(--muted)]">
             {card.name}
           </div>
         )}
@@ -68,9 +64,9 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
         ) : null}
       </button>
 
-      <div className="flex flex-1 flex-col gap-2 p-3">
+      <div className="flex flex-1 flex-col gap-1.5 px-0.5">
         <div className="flex items-start justify-between gap-2">
-          <p className="min-w-0 flex-1 truncate text-sm font-medium" title={card.name}>
+          <p className="min-w-0 flex-1 truncate text-sm font-semibold" title={card.name}>
             {card.name}
           </p>
           <ManaCost cost={card.mana_cost ?? card.card_faces?.[0]?.mana_cost} size={14} />
@@ -90,7 +86,7 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
         {onAdd && (
           <button
             {...steady(() => onAdd(card))}
-            className="mt-auto rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110"
+            className="mt-auto rounded-full border border-[var(--border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--surface-hover)]"
           >
             Add to list
           </button>

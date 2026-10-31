@@ -1,13 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --background: #14120f;
-  --surface: #1d1a16;
-  --surface-hover: #262119;
-  --border: #322c23;
-  --foreground: #ece5da;
-  --muted: #9b9184;
-  --accent: #c9a227;
+  --background: #100f0e;
+  --surface: #191714;
+  --surface-hover: #221f1b;
+  --border: #2c2822;
+  --foreground: #f0e9dd;
+  --muted: #9b9285;
+  --faint: #6c655b;
+  --accent: #d6aa2e;
+  /* The accent stops: the app's gold, or inside a deck or a commander search,
+     the commander's colours (lib/identity.ts identityStyle). */
+  --c1: var(--accent);
+  --c2: var(--accent);
+  --c3: var(--accent);
 }
 
 @theme inline {
@@ -22,8 +28,92 @@ html, body {
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
+
+/* Titles, deck names and big numbers. */
+.font-display {
+  font-family: var(--font-display), var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.015em;
+}
+
+/* --- Colour identity (lib/identity.ts) ----------------------------------- */
+
+.id-grad { background-image: linear-gradient(90deg, var(--c1), var(--c2), var(--c3)); }
+.id-text {
+  background-image: linear-gradient(90deg, var(--c1), var(--c2) 60%, var(--c3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* The one main action on a screen, in the accent's colours. */
+.btn-go {
+  background-image: linear-gradient(90deg, var(--c1), var(--c2), var(--c3));
+  color: #15110a;
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--c1) 28%, transparent);
+}
+.btn-go:hover { filter: brightness(1.08); }
+/* A selected chip or tab: an accent-coloured outline. */
+.ring-id {
+  background: linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(90deg, var(--c1), var(--c2), var(--c3)) border-box;
+  border: 1px solid transparent;
+}
+/* A commander's colours, blurred, as a backdrop - standing in for its art
+   where there is none, and tinting it where there is. */
+.id-glow {
+  background:
+    radial-gradient(45% 80% at 18% 30%, var(--c1), transparent 70%),
+    radial-gradient(50% 90% at 72% 60%, var(--c2), transparent 70%),
+    radial-gradient(35% 60% at 96% 5%, var(--c3), transparent 70%),
+    #1a1712;
+}
+.glass {
+  background: rgba(25, 23, 20, 0.55);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* --- Cards that tilt and catch the light (components/Tilt.tsx) ----------- */
+
+.tilt {
+  transform-style: preserve-3d;
+  transition: transform 0.14s ease-out, box-shadow 0.2s;
+  will-change: transform;
+}
+.tilt-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  mix-blend-mode: soft-light;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 40%), rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 55%);
+}
+.tilt:hover .tilt-glare { opacity: 1; }
+/* Foil and etched printings shimmer; nothing else does. */
+.foil-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: color-dodge;
+  opacity: 0.4;
+  background: linear-gradient(115deg, transparent 18%, #ff7ac8 30%, #7ad8ff 42%, #9dff9a 54%, #ffe07a 66%, transparent 80%);
+  background-size: 260% 100%;
+  background-position: var(--fx, 30%) 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .foil-sheen { animation: foil-drift 6s ease-in-out infinite alternate; }
+  .tilt:hover .foil-sheen { animation: none; }
+}
+@keyframes foil-drift { from { background-position: 10% 0; } to { background-position: 90% 0; } }
+
+/* Results come in one after another. */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+}
+@keyframes rise { from { opacity: 0.35; transform: translateY(8px); } }
 
 /* The phone tab bar's height (components/Nav), for anything fixed to the
    bottom of the screen to sit above it. None on wider screens. */

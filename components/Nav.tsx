@@ -28,7 +28,7 @@ export function TopLinks() {
           key={s.href}
           href={s.href}
           aria-current={active(path, s.href) ? 'page' : undefined}
-          className={`rounded-lg px-3 py-1.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)] ${active(path, s.href) ? 'text-[var(--foreground)]' : 'text-[var(--muted)]'}`}
+          className={`rounded-full px-3 py-1.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)] ${active(path, s.href) ? 'bg-[var(--surface)] text-[var(--foreground)]' : 'text-[var(--muted)]'}`}
         >
           {s.label}
         </Link>
