@@ -10,7 +10,8 @@ import { applyModelAudit, applyModelTags, deckTags, replaceProposals, type List 
 import type { Board } from './decklist';
 import { taggingDeck, type TaggingDeck } from './tag-deck';
 import {
-  ASSIGN_SCHEMA, ASSIGN_SYSTEM, assignMessage, AUDIT_SCHEMA, AUDIT_SYSTEM, auditMessage,
+  ASSIGN_SCHEMA, ASSIGN_SYSTEM, assignMessage, AUDIT_SCHEMA, AUDIT_SYSTEM, auditMessage, BRIEF_SCHEMA, BRIEF_SYSTEM, briefMessage, parseBrief,
+  type DraftedBrief,
   parseAssignments, parseAudit, parseProposals, PROPOSE_SCHEMA, PROPOSE_SYSTEM, proposeMessage,
 } from './tagging';
 import { nextColor } from './tags';
@@ -89,3 +90,11 @@ export function cardsToTag(deck: TaggingDeck, cardTags: Array<{ key: string; on:
   const tagged = new Set(cardTags.filter((l) => l.on).map((l) => l.key));
   return deck.cards.map((c) => deck.keyOf.get(c.key)!).filter((k) => scope === 'all' || !tagged.has(k));
 }
+
+/** Draft the brief: how the deck wins - or that it does not - and its plan. Nothing is saved; the owner edits it. */
+export async function briefStep(model: JsonModel, at: StepDeck, options?: CallOptions): Promise<DraftedBrief & { model: string }> {
+  const { deck, context } = read(at);
+  const answer = await model({ step: 'draft the brief', system: BRIEF_SYSTEM, user: briefMessage(context), schema: BRIEF_SCHEMA, thinking: 'high' }, options);
+  return { ...parseBrief(answer.data, deck.cards), model: answer.model };
+}
+

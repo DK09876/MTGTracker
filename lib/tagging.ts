@@ -477,3 +477,93 @@ export function parseAudit(body: unknown, input: AuditInput): AuditChange[] {
   }
   return out;
 }
+
+// --- the brief, drafted ----------------------------------------------------
+
+export const BRIEF_SYSTEM = `\
+You are an experienced Commander player reading a friend's deck to write down
+what it is trying to do - the brief that then guides how its cards are
+sorted into categories.
+
+Start from how the deck wins. Look at the commander and every card and ask:
+what actually ends the game? Name each real way it closes out a game - a
+combo, a damage or drain engine, a big payoff, combat - with the cards that
+make it happen. Only count what these cards can really do; a single
+incidental card is not a plan.
+
+Be honest. Plenty of decks are a pile of good cards with no clear way to
+win, or a strong engine with nothing to finish. If so, say it plainly, and
+say what the deck needs: the kind of card, and one or two examples that
+fit its colours. Do not invent a plan the cards do not support.
+
+Then the game plan: what the deck does early, in the middle and to close,
+the engines it relies on, and how it protects itself or interacts.
+
+Write the brief in the owner's voice, as notes to themselves: plain words,
+four to eight sentences, specific card names where they help. It should
+tell someone sorting the cards which ones are the engine, which are fuel,
+which are the finish, and which are interaction or support.
+
+If the owner already wrote something, keep what they meant and build on it;
+it outranks your own reading.`;
+
+export type BriefInput = DeckContext;
+
+export function briefMessage(input: BriefInput): string {
+  return [
+    commanderBlock(input.commander),
+    '',
+    input.brief.trim()
+      ? `What the owner has written so far (keep their intent):\n"""\n${input.brief.trim()}\n"""`
+      : 'The owner has not written anything yet.',
+    '',
+    `The deck - ${input.cards.reduce((n, c) => n + c.quantity, 0)} cards:`,
+    ...input.cards.map((c) => describeCard(c, c.key)),
+  ].join('\n');
+}
+
+export const BRIEF_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    winConditions: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: { how: { type: 'STRING' }, cards: { type: 'ARRAY', items: { type: 'STRING' } } },
+        required: ['how', 'cards'],
+      },
+    },
+    missing: { type: 'STRING' },
+    brief: { type: 'STRING' },
+  },
+  required: ['winConditions', 'missing', 'brief'],
+};
+
+export interface DraftedBrief {
+  /** Each way the deck wins, with the cards that do it; empty when it has none. */
+  winConditions: Array<{ how: string; cards: string[] }>;
+  /** What the deck lacks to win, or '' when it has what it needs. */
+  missing: string;
+  brief: string;
+}
+
+/** The model's draft, checked: card names kept only if they are in the deck. */
+export function parseBrief(body: unknown, deck: DeckCard[]): DraftedBrief {
+  const b = (body ?? {}) as { winConditions?: unknown; missing?: unknown; brief?: unknown };
+  const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  const names = new Map(deck.map((c) => [c.card.name.toLowerCase(), c.card.name]));
+  const winConditions = (Array.isArray(b.winConditions) ? b.winConditions : [])
+    .map((w) => w as { how?: unknown; cards?: unknown })
+    .map((w) => ({
+      how: str(w.how, 300),
+      cards: (Array.isArray(w.cards) ? w.cards : [])
+        .map((n) => names.get(String(n).trim().toLowerCase()))
+        .filter((n): n is string => !!n),
+    }))
+    .filter((w) => w.how)
+    .slice(0, 6);
+  const missing = str(b.missing, 600);
+  const brief = str(b.brief, 4000);
+  if (!brief) throw new Error('The model wrote no brief');
+  return { winConditions, missing: /^(none|nothing|n\/a)\.?$/i.test(missing) ? '' : missing, brief };
+}

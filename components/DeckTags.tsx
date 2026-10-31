@@ -24,6 +24,7 @@ import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
+import type { DraftedBrief } from '@/lib/tagging';
 import type { TagJob } from '@/lib/tag-jobs';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { TAG_COLORS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
@@ -53,6 +54,26 @@ const primary = 'rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium t
 
 export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Props) {
   const [brief, setBrief] = useState<string | null>(null);
+  // The model's last draft of the brief: how the deck wins, and what it lacks.
+  const [drafted, setDrafted] = useState<(DraftedBrief & { model: string }) | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  const draftBrief = async () => {
+    setDrafting(true);
+    setDraftError(null);
+    try {
+      const d = await api.draftTagBrief(listId);
+      setDrafted(d);
+      // Saved straight away, like a typed brief on leaving the box; edit it freely.
+      onTags(await api.setTagBrief(listId, d.brief));
+      setBrief(null);
+    } catch (e) {
+      setDraftError(e instanceof Error ? e.message : 'Could not draft it');
+    } finally {
+      setDrafting(false);
+    }
+  };
   const [instructions, setInstructions] = useState('');
   const [boards, setBoards] = useState<Board[]>(['main']);
   const [error, setError] = useState<string | null>(null);
@@ -169,11 +190,41 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       <ModelLine feature="tagging" />
 
       <section className="flex flex-col gap-2">
-        <h3 className="font-medium">What should this deck do?</h3>
+        <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
+          <h3 className="font-medium">What should this deck do?</h3>
+          <button onClick={draftBrief} disabled={drafting} className="btn-go rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">
+            {drafting ? 'Reading the deck…' : '✦ Draft with AI'}
+          </button>
+        </div>
         <p className="text-sm text-[var(--muted)]">
           Optional, and read by every step. The plan, how it wins, what you want parts of the deck to do —
-          &ldquo;the tokens are there to feed Korvold&rdquo;, &ldquo;keep interaction cheap&rdquo;.
+          &ldquo;the tokens are there to feed Korvold&rdquo;, &ldquo;keep interaction cheap&rdquo;. The AI starts from how the deck wins,
+          and says so if it has no real way to.
         </p>
+        {draftError && <p className="text-sm text-red-400">{draftError}</p>}
+        {drafted && (
+          <div className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">How it wins</p>
+            {drafted.winConditions.length ? (
+              <ul className="flex flex-col gap-1.5">
+                {drafted.winConditions.map((w, i) => (
+                  <li key={i}>
+                    {w.how}
+                    {w.cards.length > 0 && <span className="block text-xs text-[var(--muted)]">{w.cards.join(' · ')}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-amber-300">No clear way to win.</p>
+            )}
+            {drafted.missing && (
+              <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2">
+                <span className="font-semibold text-amber-300">What it needs: </span>{drafted.missing}
+              </p>
+            )}
+            <p className="text-xs text-[var(--faint)]">Drafted by {modelLabel(drafted.model)}; the brief below is saved - edit it as you like.</p>
+          </div>
+        )}
         <textarea
           value={brief ?? tags.brief}
           onChange={(e) => setBrief(e.target.value)}
