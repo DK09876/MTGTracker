@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { steady } from '@/lib/steady-tap';
 
@@ -145,16 +146,41 @@ function List({ entries, active, newLabel, onNew, ...actions }: {
 }
 
 function Row({ entry, on, onOpen, onSave, onUnsave, onRename, onDelete }: { entry: HistoryEntry; on: boolean } & HistoryActions) {
-  const [menu, setMenu] = useState(false);
+  // Where the menu opens, in the window: drawn over the page so the panel's
+  // own scrolling cannot clip it, and upwards when there is no room below.
+  const [menu, setMenu] = useState<{ right: number; top?: number; bottom?: number } | null>(null);
   const [naming, setNaming] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    setSure(false);
+    if (menu) { setMenu(null); return; }
+    const r = trigger.current!.getBoundingClientRect();
+    const right = window.innerWidth - r.right;
+    setMenu(window.innerHeight - r.bottom < 150 ? { right, bottom: window.innerHeight - r.top + 4 } : { right, top: r.bottom + 4 });
+  };
 
   useEffect(() => {
     if (!menu) return;
-    const outside = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) { setMenu(false); setSure(false); } };
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!popup.current?.contains(t) && !trigger.current?.contains(t)) { setMenu(null); setSure(false); }
+    };
+    const away = () => { setMenu(null); setSure(false); };
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') away(); };
     document.addEventListener('mousedown', outside);
-    return () => document.removeEventListener('mousedown', outside);
+    document.addEventListener('keydown', escape);
+    // It is placed once; a scroll or resize closes it rather than leave it adrift.
+    window.addEventListener('resize', away);
+    document.addEventListener('scroll', away, true);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', escape);
+      window.removeEventListener('resize', away);
+      document.removeEventListener('scroll', away, true);
+    };
   }, [menu]);
 
   if (naming !== null) {
@@ -179,7 +205,7 @@ function Row({ entry, on, onOpen, onSave, onUnsave, onRename, onDelete }: { entr
 
   const item = 'block w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-[var(--surface-hover)]';
   return (
-    <div ref={box} className={`relative rounded-lg ${on ? 'bg-[var(--surface-hover)] shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-[var(--surface)]'}`}>
+    <div className={`relative rounded-lg ${on ? 'bg-[var(--surface-hover)] shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-[var(--surface)]'}`}>
       <button {...steady(() => onOpen(entry))} aria-current={on ? 'true' : undefined} className="flex w-full min-w-0 flex-col py-1.5 pl-2 pr-9 text-left">
         <span className="truncate text-sm">
           {entry.saved && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{entry.title}
@@ -187,32 +213,39 @@ function Row({ entry, on, onOpen, onSave, onUnsave, onRename, onDelete }: { entr
         {entry.meta && <span className="truncate text-[11px] text-[var(--muted)]">{entry.meta}</span>}
       </button>
       <button
-        onClick={() => { setMenu((m) => !m); setSure(false); }}
+        ref={trigger}
+        onClick={toggle}
         aria-label={`More for “${entry.title}”`}
         aria-haspopup="menu"
-        aria-expanded={menu}
+        aria-expanded={!!menu}
         className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-md text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
       >
         ⋯
       </button>
-      {menu && (
-        <div role="menu" className="absolute right-1 top-8 z-30 min-w-[10rem] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg">
+      {menu && createPortal(
+        <div
+          ref={popup}
+          role="menu"
+          style={{ position: 'fixed', right: menu.right, top: menu.top, bottom: menu.bottom }}
+          className="z-[80] min-w-[10rem] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl"
+        >
           {entry.saved ? (
             <>
-              <button role="menuitem" className={item} onClick={() => { setMenu(false); setNaming(entry.title); }}>Rename</button>
-              <button role="menuitem" className={item} onClick={() => { setMenu(false); onUnsave(entry); }}>☆ Unsave</button>
+              <button role="menuitem" className={item} onClick={() => { setMenu(null); setNaming(entry.title); }}>Rename</button>
+              <button role="menuitem" className={item} onClick={() => { setMenu(null); onUnsave(entry); }}>☆ Unsave</button>
             </>
           ) : (
-            <button role="menuitem" className={item} onClick={() => { setMenu(false); onSave(entry); }}>★ Save</button>
+            <button role="menuitem" className={item} onClick={() => { setMenu(null); onSave(entry); }}>★ Save</button>
           )}
           <button
             role="menuitem"
             className={`${item} text-red-400`}
-            onClick={() => { if (!sure) { setSure(true); return; } setMenu(false); onDelete(entry); }}
+            onClick={() => { if (!sure) { setSure(true); return; } setMenu(null); onDelete(entry); }}
           >
             {sure ? 'Delete - sure?' : 'Delete'}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
