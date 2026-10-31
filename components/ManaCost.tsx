@@ -38,7 +38,9 @@ export default function ManaCost({ cost, size = 16 }: { cost?: string; size?: nu
 
 /** A colour identity ("WUBRG" letters) as mana symbols; colourless as {C}. */
 export function IdentitySymbols({ identity, size = 16 }: { identity: string; size?: number }) {
-  const letters = identity ? identity.split('') : ['C'];
+  // In the usual order, white-blue-black-red-green, whatever order they came in.
+  const letters = 'WUBRG'.split('').filter((c) => identity.toUpperCase().includes(c));
+  if (!letters.length) letters.push('C');
   return (
     <span className="inline-flex items-center gap-[3px] align-middle" style={{ fontSize: size * 0.82 }} role="img" aria-label={`Colours ${identity || 'colourless'}`}>
       {letters.map((l) => <i key={l} aria-hidden className={`ms ms-cost ms-shadow ms-${l.toLowerCase()}`} />)}
