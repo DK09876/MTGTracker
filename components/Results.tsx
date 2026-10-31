@@ -86,21 +86,21 @@ export default function Results({
   return (
     <div className="mt-6">
       {tabs.length > 0 && (
-        <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-[var(--border)]">
+        <div role="tablist" className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
           {tabs.map((t) => (
             <button
               key={t.id}
               role="tab"
               aria-selected={tab === t.id}
               onClick={() => onTab(t.id)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm ${
+              className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm ${
                 tab === t.id
-                  ? 'border-[var(--accent)] text-[var(--foreground)]'
-                  : 'border-transparent text-[var(--muted)] hover:text-[var(--foreground)]'
+                  ? 'id-grad font-semibold text-[#15110a]'
+                  : 'text-[var(--muted)] hover:text-[var(--foreground)]'
               }`}
             >
               {t.label}
-              {t.count !== undefined && <span className="ml-1.5 text-xs text-[var(--muted)]">{t.count.toLocaleString()}</span>}
+              {t.count !== undefined && <span className={`ml-1.5 text-xs tabular-nums ${tab === t.id ? 'opacity-70' : 'text-[var(--faint)]'}`}>{t.count.toLocaleString()}</span>}
             </button>
           ))}
         </div>
@@ -121,9 +121,9 @@ export default function Results({
           ? (
             <>
               <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--muted)]">
-                <p className="min-w-0 flex-1">
+                <p className="min-w-0 flex-1 tabular-nums">
                   {views.cards.total.toLocaleString()} match{views.cards.total === 1 ? '' : 'es'}
-                  {views.cards.cards.length < views.cards.total && <> · showing the first {views.cards.cards.length}</>}
+                  {views.cards.cards.length < views.cards.total && <span className="max-sm:hidden"> · showing the first {views.cards.cards.length}</span>}
                 </p>
                 {views.cards.sort && <SortMenu sort={views.cards.sort} onChange={onSort} />}
               </div>
@@ -246,11 +246,11 @@ function SortMenu({ sort, onChange }: { sort: Sort; onChange: (sort: Sort) => vo
 
   return (
     <label className="flex items-center gap-2">
-      <span>Sort</span>
+      <span className="max-sm:sr-only">Sort</span>
       <select
         value={sortKey(sort)}
         onChange={(e) => { const next = parseSortKey(e.target.value); if (next) onChange(next); }}
-        className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+        className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-[var(--foreground)] outline-none focus:border-[var(--c1)]"
       >
         {options.map((o) => (
           <option key={sortKey(o.sort)} value={sortKey(o.sort)}>{o.label}</option>

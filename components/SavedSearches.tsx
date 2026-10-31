@@ -48,7 +48,7 @@ export function SaveBar({ session, saved, onSave, onSaveChanges, onNew }: {
         {!unchanged && (
           <button disabled={busy} onClick={() => setNaming(session.thread.join(' › ').slice(0, 80))} className={button}>Save as new</button>
         )}
-        <button onClick={onNew} className={`${button} ml-auto`}>New search</button>
+        <button onClick={onNew} className={`${button} ml-auto lg:hidden`}>New search</button>
         {naming !== null && <NameForm value={naming} onChange={setNaming} busy={busy} onCancel={() => setNaming(null)} onSave={(n) => act(async () => { await onSave(n); setNaming(null); })} />}
       </div>
     );
@@ -61,7 +61,7 @@ export function SaveBar({ session, saved, onSave, onSaveChanges, onNew }: {
           <button onClick={() => setNaming(session.thread.join(' › ').slice(0, 80))} className={button}>
             <span aria-hidden>☆</span> Save search
           </button>
-          <button onClick={onNew} className={`${button} ml-auto`}>New search</button>
+          <button onClick={onNew} className={`${button} ml-auto lg:hidden`}>New search</button>
         </>
       ) : (
         <NameForm value={naming} onChange={setNaming} busy={busy} onCancel={() => setNaming(null)} onSave={(n) => act(async () => { await onSave(n); setNaming(null); })} />

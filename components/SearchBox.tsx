@@ -103,7 +103,7 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
           aria-autocomplete="list"
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
           enterKeyHint="search"
-          className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] py-3 pl-4 pr-11 text-base outline-none focus:border-[var(--accent)]"
+          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-3 pl-4 pr-11 text-base outline-none focus:border-[var(--c1)]"
         />
         {value && (
           <button
@@ -149,7 +149,7 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
       </div>
       <button
         type="submit"
-        className="rounded-xl bg-[var(--accent)] px-5 py-3 font-medium text-[#221c08] hover:brightness-110"
+        className="btn-go rounded-2xl px-5 py-3 font-semibold"
       >
         Search
       </button>

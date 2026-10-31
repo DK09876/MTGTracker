@@ -172,6 +172,17 @@ export interface SearchResult {
  * their job, not ours.
  */
 /**
+ * Which printing stands for a card in search: the cheapest one with a
+ * price. Left to Scryfall it is the newest, which is often an unpriced
+ * crossover reprint (Cultivate came back as a Star Trek card with no price,
+ * 2026-10-30). A query that says its own `prefer:`, or lists every printing,
+ * is left alone.
+ */
+export function withPrinting(query: string, unique: 'cards' | 'prints' = 'cards'): string {
+  return unique === 'cards' && !/(^|\s)-?prefer:/i.test(query) ? `${query} prefer:usd-low` : query;
+}
+
+/**
  * `unique` is `cards` for search - one result per card - and `prints` to
  * list every printing of one.
  */
@@ -183,7 +194,7 @@ export async function searchCards(
 
   try {
     const body = await get<{ data: ScryfallCard[]; total_cards: number; has_more: boolean }>(
-      `/cards/search?q=${encodeURIComponent(trimmed)}&unique=${unique}&order=${sort.order}&dir=${sort.dir}&page=${page}`,
+      `/cards/search?q=${encodeURIComponent(withPrinting(trimmed, unique))}&unique=${unique}&order=${sort.order}&dir=${sort.dir}&page=${page}`,
     );
     return { cards: body.data, totalCards: body.total_cards, hasMore: body.has_more };
   } catch (error) {

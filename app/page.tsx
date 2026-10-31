@@ -15,6 +15,7 @@ import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
+import { identityStyle } from '@/lib/identity';
 import { getProfile } from '@/lib/profile';
 import { parseSession, replayOf, type RecentSearch, type Replay, type SavedSearch, type Session } from '@/lib/recent';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -393,7 +394,8 @@ export default function SearchPage() {
   return (
     <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-8">
       <HistoryPanel label="Search history" newLabel="New search" onNew={newSearch} entries={history} active={activeEntry} {...historyActions} />
-      <div className="min-w-0">
+      {/* A commander search takes on the commander's colours. */}
+      <div className="min-w-0" style={answer?.interpretation.commander ? identityStyle(answer.interpretation.commander.identity) : undefined}>
       <SearchBox
         value={query}
         onChange={setQuery}
