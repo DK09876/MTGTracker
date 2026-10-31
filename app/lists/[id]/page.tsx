@@ -16,14 +16,17 @@ import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
 import DeckTags from '@/components/DeckTags';
 import ImportResult from '@/components/ImportResult';
+import { IdentitySymbols } from '@/components/ManaCost';
+import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
+import { identityStyle } from '@/lib/identity';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { DeckTags as Tags } from '@/lib/tags';
-import { imageOf, priceOf, typeLineOf } from '@/lib/scryfall';
+import { imageOf, priceOf } from '@/lib/scryfall';
 
 export default function ListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -158,106 +161,96 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     }
   };
 
+  // A deck takes on its commander's colours, its art behind the header.
+  const hero = deck && !!list.commander && !changingCommander;
+  const heroArt = list.commander ? list.commander.image_uris?.art_crop ?? list.commander.card_faces?.[0]?.image_uris?.art_crop ?? null : null;
+
   return (
-    <div>
-      <Link href={deck ? '/decks' : '/lists'} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+    <div style={deck && list.commander ? identityStyle(list.commander.color_identity ?? []) : undefined}>
+      <Link href={deck ? '/decks' : '/lists'} className="relative z-10 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
         ← All {deck ? 'decks' : 'lists'}
       </Link>
 
-      <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          {renaming ? (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (draftName.trim()) {
-                  await api.renameList(id, draftName.trim());
-                  await load();
-                }
-                setRenaming(false);
-              }}
-              className="flex gap-2"
-            >
-              <input
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value)}
-                autoFocus
-                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-lg"
-              />
-              <button className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08]">
-                Save
-              </button>
-            </form>
-          ) : (
-            <h1 className="truncate text-xl font-semibold">{list.name}</h1>
-          )}
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            {deck
-              ? <span className={deckSize === 100 ? 'text-[var(--foreground)]' : ''}>{deckSize} / 100 cards</span>
-              : <>{copies} card{copies === 1 ? '' : 's'}</>}
-            {unique !== copies && <> · {unique} unique</>}
-            {value > 0 && <> · ${value.toFixed(2)}</>}
-            {maybe > 0 && <> · {maybe} on maybeboard</>}
-            {side > 0 && <> · {side} in sideboard</>}
-          </p>
-        </div>
+      {/* A deck's header: its commander's art behind a name in its colours. */}
+      <div className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-4 pt-20 sm:mx-0 sm:rounded-3xl sm:px-6 sm:pt-24' : ''}`}>
+        {hero && (
+          <>
+            <div aria-hidden className="id-glow absolute -inset-10 -z-20 opacity-70 blur-2xl" />
+            {heroArt && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={heroArt} alt="" aria-hidden className="absolute inset-0 -z-20 h-full w-full scale-110 object-cover object-[50%_25%] opacity-70 blur-[3px] saturate-125" />
+            )}
+            <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-b from-[var(--background)]/10 via-[var(--background)]/60 to-[var(--background)]" />
+          </>
+        )}
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            {renaming ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (draftName.trim()) {
+                    await api.renameList(id, draftName.trim());
+                    await load();
+                  }
+                  setRenaming(false);
+                }}
+                className="flex gap-2"
+              >
+                <input
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                  autoFocus
+                  aria-label="Name"
+                  className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-lg"
+                />
+                <button className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Save</button>
+                <button type="button" onClick={() => setRenaming(false)} className="px-2 text-sm text-[var(--muted)]">Cancel</button>
+              </form>
+            ) : (
+              <h1 className={`font-display font-extrabold leading-[1.05] [text-wrap:balance] ${deck ? 'id-text text-3xl sm:text-4xl' : 'text-3xl'}`}>{list.name}</h1>
+            )}
+            {deck && list.commander && !changingCommander && (
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--foreground)]/85">
+                <IdentitySymbols identity={(list.commander.color_identity ?? []).join('')} size={17} />
+                <button onClick={() => setSelected(list.commander)} className="hover:underline">{list.commander.name}</button>
+                <button onClick={() => setChangingCommander(true)} className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]">Change</button>
+              </p>
+            )}
+            <p className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold tabular-nums">
+              {deck
+                ? <span className={`rounded-full px-2.5 py-1 ${deckSize === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{deckSize} / 100</span>
+                : <span className="rounded-full bg-white/5 px-2.5 py-1">{copies} card{copies === 1 ? '' : 's'}</span>}
+              {value > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>}
+              {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
+              {maybe > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{maybe} maybe</span>}
+              {side > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{side} sideboard</span>}
+            </p>
+          </div>
 
-        <div className="flex flex-wrap gap-2 text-sm">
-          <button
-            onClick={() => setAddOpen(true)}
-            className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] hover:brightness-110"
-          >
-            Add cards
-          </button>
-          <button
-            onClick={() => (importing ? setImporting(false) : openText())}
-            className="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface)]"
-          >
-            Edit as text
-          </button>
-          {!renaming && (
-            <button
-              onClick={() => setRenaming(true)}
-              className="rounded-lg border border-[var(--border)] px-3 py-1.5 hover:bg-[var(--surface)]"
-            >
-              Rename
+          <div className="flex w-full gap-2 sm:w-auto">
+            <button onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none">
+              ＋ Add cards
             </button>
-          )}
-          <button
-            onClick={async () => {
-              if (!confirm(`Delete "${list.name}"? The cards stay in any other lists.`)) return;
-              await api.deleteList(id);
-              router.push(deck ? '/decks' : '/lists');
-            }}
-            className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-red-400 hover:bg-[var(--surface)]"
-          >
-            Delete
-          </button>
+            <MoreMenu
+              items={[
+                { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
+                { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
+                ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
+                {
+                  label: `Delete ${deck ? 'deck' : 'list'}…`,
+                  danger: true,
+                  confirm: `Delete “${list.name}”? The cards stay in any other lists.`,
+                  onClick: async () => { await api.deleteList(id); router.push(deck ? '/decks' : '/lists'); },
+                },
+              ]}
+            />
+          </div>
         </div>
       </div>
 
-      {deck && (
+      {deck && (!list.commander || changingCommander) && (
         <div className="mt-4">
-          {list.commander && !changingCommander ? (
-            <div className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
-              <button onClick={() => setSelected(list.commander)} aria-label={`Show details for ${list.commander.name}`}>
-                {imageOf(list.commander, 'small') && (
-                  <Image src={imageOf(list.commander, 'small')!} alt="" width={56} height={78} className="rounded" unoptimized />
-                )}
-              </button>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Commander</p>
-                <p className="truncate font-medium">{list.commander.name}</p>
-                <p className="truncate text-sm text-[var(--muted)]">{typeLineOf(list.commander)}</p>
-              </div>
-              <button
-                onClick={() => setChangingCommander(true)}
-                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
-              >
-                Change
-              </button>
-            </div>
-          ) : (
             <div>
               {!list.commander && cards.some((c) => canLead(c.card)) && (
                 // A flat decklist sorts the commander in with the rest.
@@ -294,7 +287,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 </button>
               )}
             </div>
-          )}
         </div>
       )}
 
@@ -342,14 +334,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
       {deck && (
-        <div className="mt-5 inline-flex max-w-full overflow-x-auto rounded-lg border border-[var(--border)] text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Deck health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
+        <div className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
+          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
               aria-selected={section === value}
               onClick={() => setSection(value)}
-              className={`shrink-0 whitespace-nowrap px-3 py-1.5 sm:px-4 ${section === value ? 'bg-[var(--surface-hover)] font-medium text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+              className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
             >
               {label}
             </button>

@@ -103,7 +103,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
   const copies = (b: Board) => entries.filter((e) => e.board === b).reduce((n, e) => n + e.quantity, 0);
 
   const select = (className: string) =>
-    `rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)] ${className}`;
+    `min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c1)] sm:flex-none ${className}`;
 
   return (
     <div className="mt-5">
@@ -116,7 +116,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
               aria-selected={board === id}
               onClick={() => setBoard(id)}
               className={`-mb-px border-b-2 px-3 py-2 text-sm ${board === id
-                ? 'border-[var(--accent)] text-[var(--foreground)]'
+                ? 'border-[var(--c1)] text-[var(--foreground)]'
                 : 'border-transparent text-[var(--muted)] hover:text-[var(--foreground)]'}`}
             >
               {label} <span className="ml-1 text-xs text-[var(--muted)]">{copies(id)}</span>
@@ -131,9 +131,11 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter — t:creature, c:rg, cmc<=3, usd>5, -t:land"
           aria-label="Filter this list"
-          className="min-w-[12rem] flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+          className="min-w-[12rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
         />
-        <div className="flex overflow-hidden rounded-lg border border-[var(--border)] text-sm" role="group" aria-label="View">
+        {/* View, group and sort share one row, a phone's included. */}
+        <div className="flex w-full min-w-0 gap-2 sm:w-auto">
+        <div className="flex shrink-0 overflow-hidden rounded-full border border-[var(--border)] text-sm" role="group" aria-label="View">
           {(['visual', 'text'] as View[]).map((v) => (
             <button
               key={v}
@@ -157,6 +159,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
           <option value="mv">Sort: mana value</option>
           <option value="price">Sort: price</option>
         </select>
+        </div>
       </div>
       {unsupported.length > 0 && (
         <p className="mt-2 text-xs text-amber-400">
