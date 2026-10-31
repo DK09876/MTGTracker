@@ -34,6 +34,7 @@ import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { AiState } from './ai';
+import type { AiCall } from './db';
 import type { Effort, Feature } from './models';
 import type { Caps } from './spend';
 import type { Budget } from './quota';
@@ -455,4 +456,7 @@ export const chooseModel = (model: string, features: Feature[]) =>
   send('ai/models', 'PUT', { model, features }).then(json<AiState>).then(changed);
 export const chooseEffort = (effort: Effort) => send('ai/models', 'PUT', { effort }).then(json<AiState>).then(changed);
 export const setCaps = (caps: Partial<Caps>) => send('ai/models', 'PUT', { caps }).then(json<AiState>).then(changed);
+/** Every Claude request in the last `days`, newest first, and profile names for showing who. */
+export const aiUsage = (days = 7) =>
+  fetch(url(`ai/usage?days=${days}`)).then(json<{ calls: AiCall[]; names: Record<string, string>; days: number }>);
 export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);

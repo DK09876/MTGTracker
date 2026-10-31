@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     : {};
 
   // The profile's rules model (the header's picker, lib/ai.ts).
-  const model = appModel(who.profile, 'rules');
+  const model = appModel(who.profile, 'rules', question);
   if (!model) return NextResponse.json({ error: 'No model API key is set on the server, so rules answers are off' }, { status: 503 });
   try {
     const clarifications = (Array.isArray(b.clarifications) ? b.clarifications : [])
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       .map((c) => ({ question: String(c.question).slice(0, 300), answer: String(c.answer).trim().slice(0, 300) }));
     const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true, clarifications }, {
       rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model,
-      helper: helperModel(who.profile), inputTokens: inputTokens(who.profile),
+      helper: helperModel(who.profile, question), inputTokens: inputTokens(who.profile),
       privateWorking: providerOf(modelFor(who.profile, 'rules')) === 'anthropic',
     }, { maxBusy: 1 });
     // Something the answer turns on was left open: ask before answering.

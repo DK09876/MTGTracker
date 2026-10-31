@@ -7,12 +7,12 @@
 
 import { useEffect, useState } from 'react';
 
+import AiUsage from '@/components/AiUsage';
 import ModelPicker from '@/components/ModelPicker';
 import { Budget } from '@/components/ModelMenu';
 import * as api from '@/lib/api';
 import type { AiState } from '@/lib/ai';
 import { EFFORTS, type Effort } from '@/lib/models';
-import { dollars } from '@/lib/spend';
 
 const EFFORT_NOTE: Record<Effort, string> = {
   low: 'Quick and cheapest. Fine for easy questions.',
@@ -35,18 +35,21 @@ export default function SettingsPage() {
   const claude = state.models.find((m) => m.chosenFor.includes('rules'))?.provider === 'anthropic';
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-10">
+    <div className="mx-auto flex max-w-3xl flex-col gap-10">
       <h1 className="text-2xl font-semibold">Settings</h1>
 
       <section className="flex flex-col gap-3">
         <h2 className="font-medium">AI budget</h2>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><Budget state={state} /></div>
-        {state.spend.byProfile.length > 0 && (
-          <p className="text-xs text-[var(--muted)]">
-            Today: {state.spend.byProfile.map((p) => `${p.profile === '-' ? 'no profile' : p.profile} ${dollars(p.cost)} (${p.requests})`).join(' · ')}
-          </p>
-        )}
         <Caps state={state} onState={setState} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium">AI usage</h2>
+        <p className="text-sm text-[var(--muted)]">
+          Every Claude request: who made it, what for, and what it cost. Kept 90 days. Opening a saved search or conversation makes no request, so it never shows here.
+        </p>
+        <AiUsage />
       </section>
 
       <section className="flex flex-col gap-3">

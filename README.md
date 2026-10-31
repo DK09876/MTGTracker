@@ -275,29 +275,34 @@ the board?" - from the sources that decide them, and shows its working:
 On phones the sections are a tab bar along the bottom (Search, Rules, Decks,
 Lists, Collection); wider screens keep them in the header.
 
-### Saved searches
+### History: saved and recent
 
-**Save search** keeps a search under a name to carry on later, as it was
-left: the request and every refinement (so refining again builds on all of
-it), the tab, the order, how many pages were loaded, and the EDHREC tab's
-narrowing. Saved searches are listed first on the empty Search page and in
-the empty search box; open one and it comes back as it was - results fresh
-from Scryfall, no model requests - with **Save changes** if it has moved on.
-They can be renamed or forgotten (with undo). **New search** leaves the one
-on screen for the lists.
+Search and Rules each keep a **history panel** - a column beside the page on
+wide screens, a **History** button that opens a sheet on a phone - which stays
+there while a search or conversation is open:
 
-The search on screen is kept the same way on each device, where it was
-scrolled to included, so a reload or iOS restarting the app lands exactly
-where it was.
+- **＋ New search / New question** starts fresh; the one on screen stays in
+  the history.
+- **★ Saved** is kept until you delete it; **Recent** keeps the newest 50,
+  grouped by day. **⋯** on an entry saves, renames, unsaves or deletes it.
+- **One thread is one entry**: a search and its refinements, a conversation
+  and its follow-ups.
+- **Opening one costs no model request.** A search keeps how it was read -
+  the Scryfall query, the commander, the order, the tab and pages loaded -
+  and runs that straight on Scryfall, so it shows today's cards and prices.
+  A conversation shows its stored answers.
 
-### Recent searches
+The search on screen is also kept on each device, where it was scrolled to
+included, so a reload or iOS restarting the app lands exactly where it was.
 
-Every search is kept for its profile - on the server, so it follows you to
-the home-screen app and other devices. Clear the search box (or open the app
-fresh) to see them; tap one to run it again. A plain-English search is kept
-with what it was read as, so running it again goes straight to Scryfall
-without spending a model request. The search on screen also survives a
-reload, or iOS restarting the app: it is run again from the same record.
+### AI usage
+
+Settings lists every Claude request for the last 7 to 90 days: when, who,
+what it was for (the search typed, the rules question, the deck, and which
+step), the model, its tokens and its cost - with requests declined by Claude
+or blocked by a daily cap marked. Filter by person and by feature. Free models
+are not listed, and reopening history never appears, since it makes no
+request.
 
 ## On a phone
 

@@ -233,10 +233,32 @@ describe('recent searches', () => {
     expect(db.recentSearches('kevin')).toHaveLength(1);
   });
 
-  it('keeps only the newest thirty', async () => {
+  it('keeps only the newest fifty', async () => {
     const db = await load();
-    for (let i = 0; i < 35; i++) db.saveRecentSearch('dk', `search ${i}`, { kind: 'name', name: `c${i}` });
-    expect(db.recentSearches('dk', 100)).toHaveLength(30);
+    for (let i = 0; i < 55; i++) db.saveRecentSearch('dk', `search ${i}`, { kind: 'name', name: `c${i}` });
+    expect(db.recentSearches('dk', 100)).toHaveLength(50);
+  });
+
+  it('keeps a refined search as one entry, its latest step', async () => {
+    const db = await load();
+    const q = { kind: 'query' as const, query: 'x' };
+    db.saveRecentSearch('dk', 'green ramp', q);
+    db.saveRecentSearch('dk', 'green rampage', q); // not a step of "green ramp"
+    db.saveRecentSearch('dk', 'green ramp › only instants', q);
+    db.saveRecentSearch('dk', 'green ramp › only instants › under $3', q);
+    expect(db.recentSearches('dk').map((r) => r.text)).toEqual(['green ramp › only instants › under $3', 'green rampage']);
+  });
+
+  it('hides the earlier steps of threads kept before they collapsed', async () => {
+    const db = await load();
+    const q = { kind: 'query' as const, query: 'x' };
+    // Written straight to the table, as the old code did, oldest first.
+    const raw = new (await import('node-sqlite3-wasm')).Database(process.env.MTG_DB_PATH!);
+    db.recentSearches('dk'); // creates the tables
+    raw.run('INSERT INTO recent_searches VALUES (?, ?, ?, ?)', ['dk', 'kratos', JSON.stringify(q), '2026-10-01T00:00:00Z']);
+    raw.run('INSERT INTO recent_searches VALUES (?, ?, ?, ?)', ['dk', 'kratos › only red', JSON.stringify(q), '2026-10-01T00:01:00Z']);
+    raw.close();
+    expect(db.recentSearches('dk').map((r) => r.text)).toEqual(['kratos › only red']);
   });
 });
 

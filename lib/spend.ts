@@ -96,8 +96,9 @@ export function monthStart(now = new Date()): string {
   return `${quotaDay(now).slice(0, 7)}-01`;
 }
 
-/** Dollars as people read them: "$0.004" for small amounts, "$1.20" otherwise. */
+/** Dollars as people read them: "$0.0004" or "$0.004" for small amounts, "$1.20" otherwise. */
 export function dollars(n: number): string {
+  if (n > 0 && n < 0.001) return `$${n.toFixed(4)}`;
   if (n > 0 && n < 0.01) return `$${n.toFixed(3)}`;
   return `$${n.toFixed(2)}`;
 }

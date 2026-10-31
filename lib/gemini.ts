@@ -91,6 +91,7 @@ export function modelTranslator(model: JsonModel, fallback: Translator | null): 
   return async (request, context) => {
     try {
       const { data } = await model({
+        step: context?.feedback ? 'try the plan again' : context?.commander ? 're-read with the commander\'s text' : context?.previous ? 'plan the refinement' : 'plan the search',
         system: SYSTEM_PROMPT, user: userMessage(request, context), schema: RESPONSE_SCHEMA,
         temperature: 0.2, thinking: 'low', timeoutMs: TIMEOUT_MS,
       }, { maxBusy: 1 });

@@ -8,7 +8,8 @@ import CommanderChoice from '@/components/CommanderChoice';
 import FollowUp from '@/components/FollowUp';
 import Interpreted from '@/components/Interpreted';
 import Results from '@/components/Results';
-import { SaveBar, SavedList } from '@/components/SavedSearches';
+import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
+import { SaveBar } from '@/components/SavedSearches';
 import SearchBox from '@/components/SearchBox';
 import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
@@ -295,6 +296,55 @@ export default function SearchPage() {
 
   const forget = (text: string | null) => { api.forgetSearch(text).then(setRecent).catch(() => {}); };
 
+  // The history panel: saved searches, then recent ones - one per thread.
+  const sessionOf = (r: RecentSearch): Session => ({ thread: r.text.split(THREAD), replay: r.replay });
+  const commanderOf = (replay: Replay) => (replay.kind !== 'name' ? replay.commander?.split(',')[0] : undefined);
+  const metaOf = (steps: number, replay: Replay) =>
+    [steps > 1 ? `${steps} steps` : '', commanderOf(replay), replay.kind === 'combos' ? 'combos' : ''].filter(Boolean).join(' · ');
+  const history: HistoryEntry[] = [
+    ...saved.map((x) => ({ id: `s:${x.id}`, title: x.name, meta: metaOf(x.session.thread.length, x.session.replay), at: x.updatedAt, saved: true })),
+    // A search that is saved is listed there, not again under Recent.
+    ...recent.filter((r) => !saved.some((x) => x.session.thread.join(THREAD) === r.text)).map((r) => {
+      const steps = r.text.split(THREAD);
+      return { id: `r:${r.text}`, title: steps[0], meta: [steps.length > 1 ? `› ${steps[steps.length - 1]}` : '', metaOf(1, r.replay)].filter(Boolean).join(' · '), at: r.at, saved: false };
+    }),
+  ];
+  const activeEntry = openSaved ? `s:${openSaved}` : live ? `r:${live.thread.join(THREAD)}` : null;
+  const savedFor = (e: HistoryEntry) => saved.find((x) => `s:${x.id}` === e.id);
+  const recentFor = (e: HistoryEntry) => recent.find((r) => `r:${r.text}` === e.id);
+  const historyActions = {
+    onOpen: (e: HistoryEntry) => {
+      const x = savedFor(e);
+      if (x) { openSession(x.session, { savedId: x.id }); return; }
+      const r = recentFor(e);
+      if (r) openSession(sessionOf(r));
+    },
+    onSave: async (e: HistoryEntry) => {
+      const r = recentFor(e);
+      if (!r) return;
+      // The one on screen is saved as it is now: its tab and pages too.
+      const onScreen = e.id === activeEntry && session ? session : sessionOf(r);
+      try {
+        // A long request is named by its first words; rename it from ⋯.
+        const name = e.title.length <= 60 ? e.title : `${e.title.slice(0, 60).replace(/[\s,;]+\S*$/, '')}…`;
+        const out = await api.saveSearch(name, onScreen);
+        setSaved(out.saved);
+        if (e.id === activeEntry) setOpenSaved(out.id);
+        setToast({ text: `Saved “${name}” - rename it from ⋯` });
+      } catch (err) {
+        setToast({ text: err instanceof Error ? err.message : 'Could not save that search' });
+      }
+    },
+    onUnsave: (e: HistoryEntry) => { const x = savedFor(e); if (x) forgetSaved(x); },
+    onRename: (e: HistoryEntry, name: string) => { const x = savedFor(e); if (x) renameSaved(x, name).catch(() => {}); },
+    onDelete: (e: HistoryEntry) => {
+      const x = savedFor(e);
+      if (x) { forgetSaved(x); return; }
+      const r = recentFor(e);
+      if (r) forget(r.text);
+    },
+  };
+
   const followUp = (text: string) => {
     if (!answer) return;
     dismissKeyboard();
@@ -341,7 +391,9 @@ export default function SearchPage() {
   const hasViews = Object.keys(views).length > 0;
 
   return (
-    <div>
+    <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+      <HistoryPanel label="Search history" newLabel="New search" onNew={newSearch} entries={history} active={activeEntry} {...historyActions} />
+      <div className="min-w-0">
       <SearchBox
         value={query}
         onChange={setQuery}
@@ -362,40 +414,8 @@ export default function SearchPage() {
         }}
       />
 
-      {!searched && saved.length > 0 && (
-        <SavedList saved={saved} onOpen={(x) => openSession(x.session, { savedId: x.id })} onForget={forgetSaved} onRename={renameSaved} />
-      )}
-
-      {!searched && recent.length > 0 && (
-        <section className="mt-4" aria-label="Recent searches">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-xs uppercase tracking-wide text-[var(--muted)]">Recent</h2>
-            <button onClick={() => forget(null)} className="min-h-9 px-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Clear all</button>
-          </div>
-          <ul className="mt-1 flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-            {recent.slice(0, 8).map((r) => (
-              <li key={r.text} className="flex items-center">
-                <button
-                  {...steady(() => openSession({ thread: r.text.split(THREAD), replay: r.replay }))}
-                  className="flex min-h-11 min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surface)]"
-                >
-                  <span aria-hidden className="text-[var(--muted)]">↺</span>
-                  <span className="truncate">{r.text}</span>
-                  {r.replay.kind !== 'name' && r.replay.commander && (
-                    <span className="ml-auto hidden shrink-0 text-xs text-[var(--muted)] sm:inline">{r.replay.commander.split(',')[0]}</span>
-                  )}
-                </button>
-                <button
-                  onClick={() => forget(r.text)}
-                  aria-label={`Forget "${r.text}"`}
-                  className="flex min-h-11 min-w-11 items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)]"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {status === 'idle' && hasViews && !answer?.choice && session && (
+        <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />
       )}
 
       {!searched && (
@@ -426,9 +446,6 @@ export default function SearchPage() {
       {status === 'thinking' && <p className="mt-8 text-center text-[var(--muted)]">Working out what you mean…</p>}
       {status === 'error' && <p className="mt-8 text-center text-red-400">{s.error}</p>}
 
-      {status === 'idle' && hasViews && !answer?.choice && session && (
-        <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />
-      )}
 
       {status === 'idle' && hasViews && !answer?.choice && (
         <Results
@@ -449,6 +466,8 @@ export default function SearchPage() {
             && answer.interpretation.constraints !== answer.interpretation.query ? s.toggleEdhrecFull : undefined}
         />
       )}
+
+      </div>
 
       <CardModal
         card={selected}

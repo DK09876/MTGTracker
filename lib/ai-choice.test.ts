@@ -161,6 +161,26 @@ describe('claudeModel', () => {
     expect(ai.currentSpend('dk').today).toBeCloseTo(0.1);
   });
 
+  it('logs every request for the AI usage trail: answered, declined, and blocked by the cap', async () => {
+    const ai = await import('./ai');
+    const db = await import('./db');
+    const { client } = fakeClaude();
+    const charge = { profile: 'dk', feature: 'rules' as const, label: 'Blade of Selves + Kratos' };
+    await ai.claudeModel('claude-opus-5-5', charge, () => client)({ ...ask, step: 'answer' });
+    const declined = fakeClaude({ input_tokens: 0, output_tokens: 0 }, 'refusal');
+    await expect(ai.claudeModel('claude-opus-5-5', charge, () => declined.client)(ask)).rejects.toThrow(/declined/);
+    ai.setCaps({ perProfile: 0.05 });
+    await expect(ai.claudeModel('claude-opus-5-5', charge, () => client)(ask)).rejects.toThrow(/your share/);
+    const trail = db.aiCalls('2000-01-01');
+    expect(trail.map((c) => c.outcome)).toEqual(['blocked', 'declined', 'ok']);
+    expect(trail[2]).toMatchObject({
+      profileId: 'dk', feature: 'rules', label: 'Blade of Selves + Kratos', step: 'answer', model: 'claude-opus-5-5',
+      inputTokens: 10_000, outputTokens: 2_000,
+    });
+    expect(trail[2].cost).toBeCloseTo(0.08);
+    expect(trail[0].cost).toBe(0);
+  });
+
   it('refuses to reach the real Claude from a test', async () => {
     const { claudeClient } = await import('./ai-claude');
     expect(() => claudeClient()).toThrow(/never called from tests/);
