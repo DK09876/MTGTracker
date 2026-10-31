@@ -104,32 +104,20 @@ export default function ModelMenu() {
           aria-label="AI model and budget"
           className="fixed inset-x-4 top-[calc(env(safe-area-inset-top)+3.75rem)] z-40 max-h-[75vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-1 sm:w-[24rem]"
         >
-          <Budget state={state} />
-          <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Model for rules and deck tagging</p>
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-baseline justify-between gap-2 text-sm [&::-webkit-details-marker]:hidden">
+              <span>
+                <span className={`font-medium ${low ? 'text-amber-400' : ''}`}>{dollars(spend.left)} left today</span>
+                <span className="text-xs text-[var(--muted)]"> · resets {resetText(spend.resetsInMs)}</span>
+              </span>
+              <span className="text-xs text-[var(--muted)] group-open:hidden">Details ▸</span>
+              <span className="hidden text-xs text-[var(--muted)] group-open:inline">Hide ▾</span>
+            </summary>
+            <div className="mt-1"><Budget state={state} compact /></div>
+          </details>
+          <p className="mb-1.5 mt-3 text-xs font-medium uppercase tracking-wide text-[var(--muted)]">Model for rules and deck tagging</p>
           {error && <p className="mb-1 text-xs text-red-400">{error}</p>}
-          <div role="radiogroup" aria-label="Model for rules and deck tagging" className="flex flex-col">
-            {state.models.filter((m) => m.hasKey).map((m) => {
-              const on = m.chosenFor.includes('rules');
-              return (
-                <button
-                  key={m.id}
-                  role="radio"
-                  aria-checked={on}
-                  onClick={() => choose(m.id)}
-                  className={`flex items-start gap-2 rounded-lg px-2 py-2 text-left hover:bg-[var(--surface-hover)] ${on ? '' : 'text-[var(--muted)]'}`}
-                >
-                  <span className="w-3 shrink-0 text-[var(--accent)]">{on ? '✓' : ''}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-baseline justify-between gap-x-2">
-                      <span className={on ? 'font-medium text-[var(--foreground)]' : 'text-[var(--foreground)]'}>{m.label}</span>
-                      <span className="text-[11px] text-[var(--muted)]">{priceText(m)}</span>
-                    </span>
-                    <span className="mt-0.5 block text-xs text-[var(--muted)]">{m.note}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <ModelTabs models={state.models} chosen={thinking?.id ?? null} onChoose={choose} />
           <p className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--muted)]">
             Search uses {shortLabel(state.models.find((m) => m.chosenFor.includes('search'))?.label ?? 'none')}.{' '}
             <Link href="/settings" onClick={() => setOpen(false)} className="underline hover:text-[var(--foreground)]">Search model, caps and more in Settings</Link>
@@ -140,17 +128,81 @@ export default function ModelMenu() {
   );
 }
 
+const TABS = [
+  { key: 'claude', label: 'Claude', test: (m: ModelStatus) => m.provider === 'anthropic' },
+  { key: 'free', label: 'Free models', test: (m: ModelStatus) => m.provider !== 'anthropic' },
+] as const;
+
+/**
+ * The models as two tabs: Claude by level, most capable first, and the free
+ * ones as a plain list. Opens on the tab of the model in use; only the chosen
+ * model shows its longer note.
+ */
+function ModelTabs({ models, chosen, onChoose }: { models: ModelStatus[]; chosen: string | null; onChoose: (id: string) => void }) {
+  const inUse = models.find((m) => m.id === chosen);
+  const [tab, setTab] = useState<'claude' | 'free'>(inUse && inUse.provider !== 'anthropic' ? 'free' : 'claude');
+  const shown = models.filter((m) => m.hasKey && TABS.find((t) => t.key === tab)!.test(m));
+  return (
+    <div>
+      <div role="tablist" aria-label="Kinds of model" className="mb-1 flex gap-1 rounded-lg bg-[var(--background)] p-0.5 text-sm">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex-1 rounded-md px-2 py-1 ${tab === t.key ? 'bg-[var(--surface-hover)] text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+          >
+            {t.label}
+            {inUse && t.test(inUse) && <span className="ml-1 text-[var(--accent)]">•</span>}
+          </button>
+        ))}
+      </div>
+      <div role="radiogroup" aria-label="Model for rules and deck tagging" className="flex flex-col">
+        {shown.length === 0 && <p className="px-2 py-2 text-xs text-[var(--muted)]">None of these has a key on the server.</p>}
+        {shown.map((m) => {
+          const on = m.id === chosen;
+          return (
+            <button
+              key={m.id}
+              role="radio"
+              aria-checked={on}
+              onClick={() => onChoose(m.id)}
+              className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--surface-hover)] ${on ? 'bg-[var(--surface-hover)]' : ''}`}
+            >
+              <span className="w-3 shrink-0 pt-0.5 text-[var(--accent)]">{on ? '✓' : ''}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm">
+                    {m.level && <span className="mr-1.5 text-[11px] uppercase tracking-wide text-[var(--muted)]">{m.level}</span>}
+                    <span className={on ? 'font-medium' : ''}>{shortLabel(m.label)}</span>
+                  </span>
+                  {m.price && <span className="shrink-0 text-[11px] text-[var(--muted)]">${m.price.input} / ${m.price.output}</span>}
+                </span>
+                <span className="block text-xs text-[var(--muted)]">{on ? m.note : m.short}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {tab === 'claude' && <p className="mt-1 px-2 text-[11px] text-[var(--muted)]">Prices are dollars per million tokens, in / out.</p>}
+    </div>
+  );
+}
+
 /** Today's AI spending against the caps, and the month against the credit. */
-export function Budget({ state }: { state: AiState }) {
+export function Budget({ state, compact = false }: { state: AiState; compact?: boolean }) {
   const { spend } = state;
   const mine = Math.min(1, spend.profileToday / Math.max(spend.caps.perProfile, 0.01));
   const app = Math.min(1, spend.today / Math.max(spend.caps.daily, 0.01));
   return (
     <div className="text-sm">
-      <p className="flex items-baseline justify-between gap-2">
-        <span className="font-medium">{dollars(spend.left)} left today</span>
-        <span className="text-xs text-[var(--muted)]">resets {resetText(spend.resetsInMs)}</span>
-      </p>
+      {!compact && (
+        <p className="flex items-baseline justify-between gap-2">
+          <span className="font-medium">{dollars(spend.left)} left today</span>
+          <span className="text-xs text-[var(--muted)]">resets {resetText(spend.resetsInMs)}</span>
+        </p>
+      )}
       <Bar label={`You: ${dollars(spend.profileToday)} of ${dollars(spend.caps.perProfile)}`} share={mine} />
       <Bar label={`Everyone: ${dollars(spend.today)} of ${dollars(spend.caps.daily)}`} share={app} />
       <p className="mt-1.5 text-xs text-[var(--muted)]">

@@ -544,6 +544,8 @@ export interface ModelStatus {
   reasoning: boolean;
   /** Paid models: dollars per million tokens. */
   price: Price | null;
+  short: string;
+  level: string | null;
   /** The server has this provider's key. */
   hasKey: boolean;
   /** The profile's features that use it. */
@@ -577,6 +579,7 @@ export function aiState(profile: string | null): AiState {
     const h = modelHealth(m.id);
     return {
       id: m.id, label: m.label, provider: m.provider, note: m.note, reasoning: m.reasoning, price: m.price ?? null,
+      short: m.short, level: m.level ?? null,
       hasKey: hasKey(m.id), chosenFor: FEATURES.filter((f) => chosen[f] === m.id),
       used: b?.used ?? 0, remaining: b?.remaining ?? m.dailyLimit, limit: b?.limit ?? m.dailyLimit,
       tokens: usage.find((u) => u.model === m.id)?.tokens ?? 0, dailyTokens: m.dailyTokens ?? null,
