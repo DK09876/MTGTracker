@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next';
+import { Bricolage_Grotesque, Figtree } from 'next/font/google';
+import 'mana-font/css/mana.css';
 import Link from 'next/link';
 
 import ModelMenu from '@/components/ModelMenu';
@@ -10,6 +12,10 @@ import ServiceWorker from '@/components/ServiceWorker';
 import './globals.css';
 
 const base = process.env.MTG_BASE_PATH || '';
+
+// Self-hosted at build time by next/font: no request to Google from the page.
+const display = Bricolage_Grotesque({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
+const ui = Figtree({ subsets: ['latin'], variable: '--font-ui', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'MTG Tracker',
@@ -24,7 +30,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#14120f',
+  themeColor: '#100f0e',
   width: 'device-width',
   initialScale: 1,
   // Draw to the screen's edges; the notch and home bar are padded in CSS.
@@ -33,12 +39,16 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${display.variable} ${ui.variable}`}>
       <body>
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--background)]/95 pt-[env(safe-area-inset-top)] backdrop-blur">
           <nav className="safe-x mx-auto flex max-w-6xl items-center gap-2 py-3 sm:gap-4">
-            <Link href="/" className="whitespace-nowrap text-lg font-semibold tracking-tight">
-              <span className="text-[var(--accent)]">MTG</span> Tracker
+            <Link href="/" className="font-display flex items-center gap-2 whitespace-nowrap text-lg font-extrabold">
+              {/* The five colours around a dark centre. */}
+              <span aria-hidden className="grid h-6 w-6 place-items-center rounded-[7px] bg-[conic-gradient(from_210deg,#f2dfa0,#5aa8e6,#a98bd0,#ef6d4f,#4fbf7a,#f2dfa0)]">
+                <span className="h-3 w-3 rounded-[3px] bg-[var(--background)]" />
+              </span>
+              <span className="max-[359px]:sr-only">MTG Tracker</span>
             </Link>
             <div className="ml-auto flex items-center gap-1 text-sm">
               <TopLinks />
