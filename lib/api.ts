@@ -33,6 +33,7 @@ import type { Combo } from './spellbook';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { DraftedBrief } from './tagging';
 import type { AiState } from './ai';
 import type { AiCall } from './db';
 import type { Effort, Feature } from './models';
@@ -311,6 +312,10 @@ const send = (path: string, method: string, body: object) =>
   fetch(url(path), { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const deckTags = (listId: string) => fetch(url(`lists/${listId}/tags`)).then(json<DeckTags>);
+
+/** The model's draft of the brief: how the deck wins, what it lacks, and the brief itself. Not saved. */
+export const draftTagBrief = (listId: string) =>
+  spending(send(`lists/${listId}/tags/brief`, 'POST', {}).then(json<DraftedBrief & { model: string }>));
 
 export const setTagBrief = (listId: string, brief: string) =>
   send(`lists/${listId}/tags`, 'PUT', { brief }).then(json<DeckTags>);

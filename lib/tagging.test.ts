@@ -159,3 +159,20 @@ describe('parseAudit', () => {
     ]);
   });
 });
+
+describe('parseBrief', () => {
+  it('keeps only cards in the deck, and reads "none" as nothing missing', async () => {
+    const { parseBrief } = await import('./tagging');
+    const deck = [{ key: 'c1', quantity: 1, card: { name: 'Past in Flames' } }, { key: 'c2', quantity: 1, card: { name: 'Storm-Kiln Artist' } }] as never;
+    const d = parseBrief({
+      winConditions: [{ how: 'Chain spells, flash them back with Past in Flames', cards: ['past in flames', 'Grapeshot'] }, { how: '', cards: [] }],
+      missing: 'None.',
+      brief: 'Spellslinger storm.',
+    }, deck);
+    expect(d.winConditions).toEqual([{ how: 'Chain spells, flash them back with Past in Flames', cards: ['Past in Flames'] }]);
+    expect(d.missing).toBe('');
+    expect(parseBrief({ winConditions: [], missing: 'A finisher: something like Aetherflux Reservoir.', brief: 'Good cards, no plan.' }, deck).missing)
+      .toMatch(/finisher/);
+    expect(() => parseBrief({ winConditions: [], missing: '', brief: '' }, deck)).toThrow(/no brief/);
+  });
+});
