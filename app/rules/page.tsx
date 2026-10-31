@@ -17,6 +17,7 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
+import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
 import RulesAnswer from '@/components/RulesAnswer';
 import ModelLine from '@/components/ModelLine';
 import { useSetting } from '@/lib/ai-settings';
@@ -217,8 +218,33 @@ export default function RulesPage() {
     </section>
   );
 
+  // The history panel: saved (starred) conversations, then recent ones.
+  const history: HistoryEntry[] = threads.map((t) => ({
+    id: t.id,
+    title: t.title,
+    meta: [t.questions > 1 ? `${t.questions} questions` : '', t.lastVerdict].filter(Boolean).join(' · '),
+    at: t.updatedAt,
+    saved: t.starred,
+  }));
+  const setStar = async (id: string, starred: boolean) => {
+    const r = await api.updateRulesThread(id, { starred });
+    setThreads(r.threads);
+    if (thread?.id === id) setThread(r.thread);
+  };
+  const historyActions = {
+    onOpen: (e: HistoryEntry) => { open(e.id); },
+    onSave: (e: HistoryEntry) => { setStar(e.id, true).catch(() => {}); },
+    onUnsave: (e: HistoryEntry) => { setStar(e.id, false).catch(() => {}); },
+    onRename: (e: HistoryEntry, title: string) => {
+      api.updateRulesThread(e.id, { title }).then((r) => { setThreads(r.threads); if (thread?.id === e.id) setThread(r.thread); }).catch(() => {});
+    },
+    onDelete: (e: HistoryEntry) => { forget(e.id).catch(() => {}); },
+  };
+
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+    <HistoryPanel label="Rules conversations" newLabel="New question" onNew={() => open(null)} entries={history} active={thread?.id ?? null} {...historyActions} />
+    <div className="mx-auto w-full max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="text-2xl font-semibold">Rules</h1>
         {thread && <button onClick={() => open(null)} className={button}>New question</button>}
@@ -283,8 +309,6 @@ export default function RulesPage() {
               <button key={q} onClick={() => { setQuestion(q); ask(q, {}, null); }} className="rounded-lg border border-[var(--border)] px-2 py-1 text-left text-xs hover:bg-[var(--surface)]">{q}</button>
             ))}
           </div>
-          <ThreadList title="Saved" threads={threads.filter((t) => t.starred)} onOpen={open} onForget={forget} />
-          <ThreadList title="Recent" threads={threads.filter((t) => !t.starred)} onOpen={open} onForget={forget} />
         </>
       )}
 
@@ -337,34 +361,6 @@ export default function RulesPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function ThreadList({ title, threads, onOpen, onForget }: {
-  title: string;
-  threads: RulesThreadSummary[];
-  onOpen: (id: string) => void;
-  onForget: (id: string) => void;
-}) {
-  if (!threads.length) return null;
-  return (
-    <section className="mt-5" aria-label={`${title} rules questions`}>
-      <h2 className="text-xs uppercase tracking-wide text-[var(--muted)]">{title}</h2>
-      <ul className="mt-1 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
-        {threads.slice(0, 12).map((t) => (
-          <li key={t.id} className="flex items-center">
-            <button {...steady(() => onOpen(t.id))} className="flex min-h-12 min-w-0 flex-1 flex-col px-3 py-2 text-left hover:bg-[var(--surface)]">
-              <span className="truncate text-sm">
-                {t.starred && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{t.title}
-              </span>
-              <span className="truncate text-xs text-[var(--muted)]">
-                {t.questions > 1 ? `${t.questions} questions · ` : ''}{t.lastVerdict}
-              </span>
-            </button>
-            <button onClick={() => onForget(t.id)} aria-label={`Forget "${t.title}"`} className="flex min-h-11 min-w-11 items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)]">✕</button>
-          </li>
-        ))}
-      </ul>
-    </section>
+    </div>
   );
 }

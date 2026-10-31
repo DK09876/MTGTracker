@@ -36,14 +36,14 @@ export const dynamic = 'force-dynamic';
  * handed over to Gemini when it refuses (lib/ai.ts); a Claude one is charged
  * to the profile.
  */
-function translator(profile: string | null) {
+function translator(profile: string | null, label: string) {
   const id = modelFor(profile, 'search');
   if (id.startsWith('gemini')) return geminiTranslator();
-  const model = modelById(id, [], { profile, feature: 'search' });
+  const model = modelById(id, [], { profile, feature: 'search', label });
   return model ? modelTranslator(model, null) : geminiTranslator();
 }
 
-function deps(request: Request): Deps {
+function deps(request: Request, label = ''): Deps {
   return {
     search: (q, sort, page) => searchCards(q, page ?? 1, sort),
     findCardNamed,
@@ -51,7 +51,7 @@ function deps(request: Request): Deps {
     cardsNamed,
     searchCombos,
     edhrec: edhrecEnabled() ? commanderPage : null,
-    translate: translator(profileOf(request)),
+    translate: translator(profileOf(request), label),
   };
 }
 
@@ -90,7 +90,7 @@ export async function GET(request: Request) {
     }));
   }
 
-  return respond(request, () => interpret(params.get('q') ?? '', deps(request)));
+  return respond(request, () => interpret(params.get('q') ?? '', deps(request, params.get('q') ?? '')));
 }
 
 const KINDS = new Set<Kind>(['cards', 'card', 'combos']);
@@ -132,6 +132,6 @@ export async function POST(request: Request) {
     : undefined;
   const deckCommander = text(body.forDeck?.commander);
   return respond(request, () => interpret(
-    text(body.q) ?? '', deps(request), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
+    text(body.q) ?? '', deps(request, [previous?.request, text(body.q)].filter(Boolean).join(' › ')), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
   ));
 }

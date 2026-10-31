@@ -224,6 +224,25 @@ function open(): Database {
       PRIMARY KEY (day, profileId, model, feature)
     );
   `);
+  // Every Claude request, for the AI usage trail in Settings - see ai.ts claudeModel.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS ai_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      profileId TEXT NOT NULL,
+      feature TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      step TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL,
+      answeredBy TEXT NOT NULL DEFAULT '',
+      inputTokens INTEGER NOT NULL DEFAULT 0,
+      outputTokens INTEGER NOT NULL DEFAULT 0,
+      cost REAL NOT NULL DEFAULT 0,
+      outcome TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT ''
+    );
+  `);
+  db.run('CREATE INDEX IF NOT EXISTS idx_ai_calls_at ON ai_calls (at)');
   // Whether each model answered the last time it was asked - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS model_health (model TEXT PRIMARY KEY, ok INTEGER NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL)`);
   // Searches kept under a name to carry on later - see recent.ts (Session).
@@ -882,13 +901,19 @@ export interface ModelUsage {
 
 // --- recent searches -----------------------------------------------------
 
-const MAX_RECENT = 30;
+const MAX_RECENT = 50;
+const STEP = ' › ';
 
-/** A profile's recent searches, newest first. */
+/**
+ * A profile's recent searches, newest first - one per thread: a search that a
+ * later refinement carried on ("green ramp" under "green ramp › only
+ * instants") is left out. Rows kept before threads collapsed are too.
+ */
 export function recentSearches(profileId: string, limit = MAX_RECENT): RecentSearch[] {
-  return (open().all(
-    'SELECT text, replay, at FROM recent_searches WHERE profileId = ? ORDER BY at DESC LIMIT ?', [profileId, limit],
+  const rows = (open().all(
+    'SELECT text, replay, at FROM recent_searches WHERE profileId = ? ORDER BY at DESC', [profileId],
   ) as Array<{ text: string; replay: string; at: string }>).map((r) => ({ ...r, replay: JSON.parse(r.replay) as Replay }));
+  return rows.filter((r) => !rows.some((o) => o.text.startsWith(r.text + STEP))).slice(0, limit);
 }
 
 /** Keep a search; searching the same thing again moves it to the top. Only the newest are kept. */
@@ -898,6 +923,11 @@ export function saveRecentSearch(profileId: string, text: string, replay: Replay
     `INSERT INTO recent_searches (profileId, text, replay, at) VALUES (?, ?, ?, ?)
      ON CONFLICT(profileId, text) DO UPDATE SET replay = excluded.replay, at = excluded.at`,
     [profileId, text, JSON.stringify(replay), now()],
+  );
+  // A refinement carries its search on: the earlier steps are one thread, one row.
+  database.run(
+    'DELETE FROM recent_searches WHERE profileId = ? AND text <> ? AND substr(?, 1, length(text) + 3) = text || ?',
+    [profileId, text, text, STEP],
   );
   database.run(
     `DELETE FROM recent_searches WHERE profileId = ? AND text NOT IN
@@ -1128,5 +1158,46 @@ export function recordSpend(row: Omit<SpendRow, 'requests'>): void {
 /** Spending on every day from `fromDay` on (YYYY-MM-DD). */
 export function spendSince(fromDay: string): SpendRow[] {
   return open().all('SELECT day, profileId, model, feature, requests, inputTokens, outputTokens, cost FROM ai_spend WHERE day >= ?', [fromDay]) as unknown as SpendRow[];
+}
+
+/** One Claude request, as the AI usage trail shows it. */
+export interface AiCall {
+  id: number;
+  at: string;
+  profileId: string;
+  /** search, rules or tagging. */
+  feature: string;
+  /** What it was for: the search typed, the rules question, the deck. */
+  label: string;
+  /** Which part of that: "plan the search", "answer", "tag cards". */
+  step: string;
+  model: string;
+  /** Anthropic's fallback, when another model answered. */
+  answeredBy: string;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  /** ok, failed, declined or stopped. */
+  outcome: string;
+  detail: string;
+}
+
+/** The trail is kept this long. */
+const AI_CALLS_DAYS = 90;
+
+export function recordAiCall(call: Omit<AiCall, 'id' | 'at'>, at = now()): void {
+  const database = open();
+  database.run(
+    `INSERT INTO ai_calls (at, profileId, feature, label, step, model, answeredBy, inputTokens, outputTokens, cost, outcome, detail)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [at, call.profileId, call.feature, call.label.slice(0, 200), call.step.slice(0, 80), call.model, call.answeredBy,
+      Math.round(call.inputTokens), Math.round(call.outputTokens), call.cost, call.outcome, call.detail.slice(0, 200)],
+  );
+  database.run('DELETE FROM ai_calls WHERE at < ?', [new Date(Date.parse(at) - AI_CALLS_DAYS * 86_400_000).toISOString()]);
+}
+
+/** The newest requests first, from `since` on. */
+export function aiCalls(since: string, limit = 500): AiCall[] {
+  return open().all('SELECT * FROM ai_calls WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?', [since, limit]) as unknown as AiCall[];
 }
 

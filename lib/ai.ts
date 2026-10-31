@@ -14,7 +14,7 @@
  */
 
 import {
-  getSetting, modelHealth, modelUsage, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
   setSetting, spendSince,
 } from './db';
 import { callClaude, claudeClient, ClaudeFailure, type ClaudeClient } from './ai-claude';
@@ -79,6 +79,8 @@ export interface CallOptions {
 }
 
 export interface JsonRequest {
+  /** Which part of the work this is, for the AI usage trail: "plan the search", "answer". */
+  step?: string;
   system: string;
   user: string;
   schema: object;
@@ -207,24 +209,26 @@ export function inputTokens(profile: string | null): number {
 }
 
 /** A small model on the rules model's provider, for preparatory jobs; null without a key. */
-export function helperModel(profile: string | null): JsonModel | null {
+export function helperModel(profile: string | null, label?: string): JsonModel | null {
   const helper = HELPER_MODEL[providerOf(modelFor(profile, 'rules'))];
-  return modelById(helper, [], { profile, feature: 'rules' });
+  return modelById(helper, [], { profile, feature: 'rules', label });
 }
 
 /**
  * The model a profile uses for a feature (rules answers, deck tagging,
  * search). Null when no provider has a key.
  */
-export function appModel(profile: string | null, feature: Feature): JsonModel | null {
+export function appModel(profile: string | null, feature: Feature, label?: string): JsonModel | null {
   const [id, ...fallbacks] = featureModels(profile, feature);
-  return modelById(id, fallbacks, { profile, feature });
+  return modelById(id, fallbacks, { profile, feature, label });
 }
 
 /** Who a paid request is charged to, and for what. */
 export interface Charge {
   profile: string | null;
   feature: Feature;
+  /** What it is for, for the AI usage trail: the search typed, the question, the deck. */
+  label?: string;
 }
 
 /**
@@ -235,11 +239,25 @@ export interface Charge {
 export function claudeModel(id: string, charge: Charge, client: () => ClaudeClient = claudeClient, now = () => new Date()): JsonModel {
   return async (request, options = {}) => {
     const over = overBudget(currentSpend(charge.profile, now()));
-    if (over) throw new ModelError(over, 'quota');
+    if (over) {
+      recordAiCall({
+        profileId: charge.profile ?? '-', feature: charge.feature, label: charge.label ?? '', step: request.step ?? '',
+        model: id, answeredBy: '', inputTokens: 0, outputTokens: 0, cost: 0, outcome: 'blocked', detail: 'over the daily cap',
+      });
+      throw new ModelError(over, 'quota');
+    }
     if (options.signal?.aborted) throw new ModelError('stopped', 'stopped');
     // Search plans want speed; a preparatory step asks for little thought.
     const effort: Effort = charge.feature === 'search' || request.thinking === 'low' ? 'low' : effortFor(charge.profile);
     const day = quotaDay(now());
+    const log = (outcome: string, detail = '', usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }, answeredBy?: string) => {
+      recordAiCall({
+        profileId: charge.profile ?? '-', feature: charge.feature, label: charge.label ?? '', step: request.step ?? '',
+        model: id, answeredBy: answeredBy && answeredBy !== id ? answeredBy : '',
+        inputTokens: usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0, outputTokens: usage?.output ?? 0,
+        cost: usage ? Math.max(costOf(id, usage), costOf(answeredBy ?? id, usage)) : 0, outcome, detail,
+      });
+    };
     const record = (usage: { input: number; output: number; cacheRead: number; cacheWrite: number }, answeredBy?: string) => {
       recordModelCall(day, id);
       recordModelTokens(day, id, usage.input + usage.output + usage.cacheRead + usage.cacheWrite);
@@ -253,12 +271,14 @@ export function claudeModel(id: string, charge: Charge, client: () => ClaudeClie
     try {
       const answer = await callClaude(client(), id, request, effort, options.signal);
       record(answer.usage, answer.model);
+      log('ok', '', answer.usage, answer.model);
       recordModelHealth(id, true, 'answered');
       options.onOutcome?.(id, true, 'answered');
       return { data: answer.data, model: id };
     } catch (error) {
       const f = error instanceof ClaudeFailure ? error : new ClaudeFailure(error instanceof Error ? error.message : 'Claude failed', 'other');
       if (f.usage) record(f.usage, f.model);
+      log(f.kind === 'stopped' ? 'stopped' : /declined/.test(f.message) ? 'declined' : 'failed', f.message, f.usage, f.model);
       if (f.kind !== 'stopped') {
         recordModelHealth(id, false, f.message);
         options.onOutcome?.(id, false, f.message);
@@ -593,14 +613,14 @@ export function aiState(profile: string | null): AiState {
 /** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */
 export async function testModel(profile: string | null, id: string): Promise<AiState> {
   if (!modelInfo(id)) throw new ModelError(`Unknown model ${id}`);
-  const model = modelById(id, [], { profile, feature: 'search' });
+  const model = modelById(id, [], { profile, feature: 'search', label: 'Test button in Settings' });
   if (!model) {
     recordModelHealth(id, false, `No ${ENV_KEY[providerOf(id)]} on the server`);
     return aiState(profile);
   }
   try {
     await model({
-      system: 'Answer with JSON.', user: 'Reply {"ok": true}.',
+      step: 'test', system: 'Answer with JSON.', user: 'Reply {"ok": true}.',
       schema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' } }, required: ['ok'] },
       thinking: 'low', timeoutMs: FALL_BACK_AFTER_MS, maxOutputTokens: 2_000,
     }, { maxBusy: 1 });

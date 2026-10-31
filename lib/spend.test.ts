@@ -53,6 +53,7 @@ describe('caps and dollars', () => {
 
   it('shows small amounts to a tenth of a cent', () => {
     expect(dollars(0.0042)).toBe('$0.004');
+    expect(dollars(0.0004)).toBe('$0.0004');
     expect(dollars(1.2)).toBe('$1.20');
     expect(dollars(0)).toBe('$0.00');
   });

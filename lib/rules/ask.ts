@@ -342,6 +342,7 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
     sources = fitSources(gathered, room * share);
     try {
       answer = await deps.model({
+        step: 'answer',
         system,
         user: answerMessage(question, context, sources, clarifications),
         schema,
@@ -361,6 +362,7 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   if (input.secondCheck) {
     try {
       const checked = await deps.model({
+        step: 'second check',
         system: CHECK_SYSTEM, user: checkMessage(question, context, sources, final, clarifications), schema: CHECK_SCHEMA,
         thinking: 'high', temperature: 0.1, timeoutMs: 90_000,
       }, options);
@@ -399,6 +401,7 @@ async function look(
   if (!deps.helper) return fallback;
   try {
     const reply = await deps.helper({
+      step: 'look up what the question needs',
       system: RESEARCH_SYSTEM,
       user: researchMessage({
         question, clarifications,
