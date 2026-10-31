@@ -48,7 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span aria-hidden className="grid h-6 w-6 place-items-center rounded-[7px] bg-[conic-gradient(from_210deg,#f2dfa0,#5aa8e6,#a98bd0,#ef6d4f,#4fbf7a,#f2dfa0)]">
                 <span className="h-3 w-3 rounded-[3px] bg-[var(--background)]" />
               </span>
-              <span className="max-[359px]:sr-only">MTG Tracker</span>
+              <span className="max-sm:sr-only">MTG Tracker</span>
             </Link>
             <div className="ml-auto flex items-center gap-1 text-sm">
               <TopLinks />

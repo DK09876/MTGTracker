@@ -30,31 +30,31 @@ export default function FollowUp({ thread, busy, onSubmit }: Props) {
       }}
       className="mt-3"
     >
-      {thread.length > 1 && (
-        <p className="mb-1.5 text-xs text-[var(--muted)]">
-          {thread.map((step, i) => (
-            <span key={i}>
-              {i > 0 && <span aria-hidden> › </span>}
-              <span className={i === thread.length - 1 ? 'text-[var(--foreground)]' : ''}>{step}</span>
-            </span>
-          ))}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Refine this search — “only instants”, “under $3”, “for Atraxa instead”"
-          aria-label="Refine this search"
-          className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-        />
-        <button
-          type="submit"
-          disabled={busy || !draft.trim()}
-          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
-        >
-          Refine
-        </button>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {thread.length > 1 && thread.slice(1).map((step, i) => (
+          <span
+            key={i}
+            className={`rounded-full px-3 py-1 text-xs ${i === thread.length - 2 ? 'ring-id text-[var(--foreground)]' : 'border border-[var(--border)] text-[var(--muted)]'}`}
+            title={`Refinement ${i + 1}`}
+          >
+            {step}
+          </span>
+        ))}
+        <label className="flex min-w-[14rem] flex-1 items-center gap-1.5 rounded-full border border-dashed border-[var(--border)] px-3 focus-within:border-[var(--c1)]">
+          <span aria-hidden className="text-[var(--muted)]">＋</span>
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Refine: “only instants”, “under $3”, “for Atraxa instead”"
+            aria-label="Refine this search"
+            className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none"
+          />
+          {draft.trim() && (
+            <button type="submit" disabled={busy} className="btn-go -mr-2 rounded-full px-3 py-0.5 text-xs font-semibold disabled:opacity-50">
+              Refine
+            </button>
+          )}
+        </label>
       </div>
     </form>
   );

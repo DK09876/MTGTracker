@@ -146,3 +146,12 @@ describe('throttle', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('withPrinting', () => {
+  it('asks for the cheapest priced printing unless the query says otherwise', async () => {
+    const { withPrinting } = await import('./scryfall');
+    expect(withPrinting('t:goblin c:r')).toBe('t:goblin c:r prefer:usd-low');
+    expect(withPrinting('!cultivate prefer:oldest')).toBe('!cultivate prefer:oldest');
+    expect(withPrinting('oracleid:abc', 'prints')).toBe('oracleid:abc');
+  });
+});
