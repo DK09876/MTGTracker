@@ -28,16 +28,17 @@ import type { Budget } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
 
-const EXAMPLES = [
-  'How does Blade of Selves interact with Kratos?',
-  'Do "when a creature dies" abilities trigger when the whole board is wiped with Blasphemous Act?',
-  'Does the legend rule apply to token copies?',
-  'Can I respond to a spell that says it can\'t be countered?',
+// Starting points, by the kind of rule they turn on.
+const EXAMPLES: Array<{ topic: string; question: string }> = [
+  { topic: 'Triggers', question: 'Do "when a creature dies" abilities trigger when the whole board is wiped with Blasphemous Act?' },
+  { topic: 'Copies', question: 'Does the legend rule apply to token copies?' },
+  { topic: 'The stack', question: 'Can I respond to a spell that says it can\'t be countered?' },
+  { topic: 'Combat', question: 'How does Blade of Selves interact with Kratos?' },
 ];
 
 const input = 'w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-base outline-none focus:border-[var(--accent)]';
-const button = 'min-h-10 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
-const primary = 'min-h-11 rounded-xl bg-[var(--accent)] px-5 font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
+const button = 'min-h-10 rounded-full border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
+const primary = 'min-h-11 rounded-full btn-go px-5 font-semibold disabled:opacity-50';
 
 const currentKey = () => `mtg-rules:${getProfile()}`;
 
@@ -218,6 +219,11 @@ export default function RulesPage() {
     </section>
   );
 
+  // What a question costs, under the box.
+  const hint = budget?.spend
+    ? `A few cents a question · ${dollars(budget.spend.left)} left for you today`
+    : left !== undefined ? `${secondCheck ? 'Two AI requests' : 'One AI request'} a question · ${left} left today` : '';
+
   // The history panel: saved (starred) conversations, then recent ones.
   const history: HistoryEntry[] = threads.map((t) => ({
     id: t.id,
@@ -246,15 +252,14 @@ export default function RulesPage() {
     <HistoryPanel label="Rules conversations" newLabel="New question" onNew={() => open(null)} entries={history} active={thread?.id ?? null} {...historyActions} />
     <div className="mx-auto w-full max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Rules</h1>
-        {thread && <button onClick={() => open(null)} className={button}>New question</button>}
+        <h1 className="font-display text-3xl font-extrabold">Rules</h1>
+        {thread && <button onClick={() => open(null)} className={`${button} lg:hidden`}>New question</button>}
       </div>
-      <p className="mt-1 text-sm text-[var(--muted)]">
-        How cards interact, or how a rule works. Answers come from the cards&apos; official rulings, the Comprehensive Rules and the MTG Wiki, with every claim linked to its source.
-        {budget?.spend
-          ? <> {' '}Each question costs a few cents of the AI budget · {dollars(budget.spend.left)} left for you today.</>
-          : left !== undefined && <> {' '}{secondCheck ? 'Two AI requests' : 'One AI request'} per question · {left} left today.</>}
-      </p>
+      {!thread && (
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          Ask how cards interact. Every answer comes from the official rulings, the Comprehensive Rules and the MTG Wiki, and links its sources.
+        </p>
+      )}
 
       <details className="mt-3 rounded-xl border border-[var(--border)] px-4 py-2">
         <summary className="cursor-pointer text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
@@ -274,23 +279,6 @@ export default function RulesPage() {
         </div>
       </details>
 
-      {!thread && (
-        <form className="mt-4 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(question, {}, null); }}>
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(question, {}, null); } }}
-            rows={3}
-            maxLength={600}
-            placeholder="How does Blade of Selves interact with Kratos?"
-            aria-label="Rules question"
-            enterKeyHint="send"
-            className={input}
-          />
-          <button disabled={busy || !question.trim()} className={`${primary} self-end`}>{busy ? 'Reading the rules…' : 'Ask'}</button>
-        </form>
-      )}
-
       {busy && (
         <p className="mt-4 text-center text-sm text-[var(--muted)]" role="status">
           Looking up what the question needs, then the cards, their rulings and the rules, then working it out step by step{secondCheck ? ', then checking it' : ''} - {secondCheck ? 'up to a minute or two' : 'about fifteen seconds, longer if the model is busy'}.
@@ -302,14 +290,30 @@ export default function RulesPage() {
       {!thread && clarifyPanel}
 
       {!thread && !choosing && !clarifying && !busy && (
-        <>
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-            <span>Try:</span>
-            {EXAMPLES.map((q) => (
-              <button key={q} onClick={() => { setQuestion(q); ask(q, {}, null); }} className="rounded-lg border border-[var(--border)] px-2 py-1 text-left text-xs hover:bg-[var(--surface)]">{q}</button>
-            ))}
-          </div>
-        </>
+        <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
+          {EXAMPLES.map((x) => (
+            <button
+              key={x.question}
+              onClick={() => { setQuestion(x.question); ask(x.question, {}, null); }}
+              className="flex flex-col gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left text-sm hover:border-[var(--accent)]/60 hover:bg-[var(--surface-hover)]"
+            >
+              <span className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--accent)]">{x.topic}</span>
+              {x.question}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!thread && (
+        <Composer
+          value={question}
+          onChange={setQuestion}
+          onSend={() => ask(question, {}, null)}
+          busy={busy}
+          placeholder="Ask about cards or a rule…"
+          label="Rules question"
+          hint={hint}
+        />
       )}
 
       {thread && (
@@ -344,23 +348,62 @@ export default function RulesPage() {
 
           {choicePanel}
           {clarifyPanel}
-          <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); ask(followUp); }}>
-            <textarea
-              value={followUp}
-              onChange={(e) => setFollowUp(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(followUp); } }}
-              rows={2}
-              maxLength={600}
-              placeholder="Ask a follow-up - the cards above stay in the conversation"
-              aria-label="Follow-up question"
-              enterKeyHint="send"
-              className={input}
-            />
-            <button disabled={busy || !followUp.trim()} className={`${primary} self-end`}>{busy ? 'Reading the rules…' : 'Ask'}</button>
-          </form>
+          <Composer
+            value={followUp}
+            onChange={setFollowUp}
+            onSend={() => ask(followUp)}
+            busy={busy}
+            placeholder="Follow up - the cards above stay in the conversation"
+            label="Follow-up question"
+            hint={hint}
+          />
         </div>
       )}
     </div>
     </div>
   );
 }
+
+/**
+ * The question box, docked at the bottom of the screen as a chat's is:
+ * Enter sends, Shift+Enter starts a new line.
+ */
+function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  busy: boolean;
+  placeholder: string;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <form
+      className="sticky bottom-[calc(var(--nav-h)+0.75rem)] z-10 mt-5 flex flex-col gap-1.5 bg-gradient-to-t from-[var(--background)] from-60% to-transparent pt-4 sm:bottom-4"
+      onSubmit={(e) => { e.preventDefault(); onSend(); }}
+    >
+      <div className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-2 pl-4 pr-2 shadow-lg focus-within:border-[var(--accent)]">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          rows={1}
+          maxLength={600}
+          placeholder={placeholder}
+          aria-label={label}
+          enterKeyHint="send"
+          className="max-h-40 min-h-[2.25rem] flex-1 resize-none bg-transparent py-1.5 text-base outline-none [field-sizing:content]"
+        />
+        <button
+          disabled={busy || !value.trim()}
+          aria-label={busy ? 'Reading the rules' : 'Ask'}
+          className="btn-go grid h-9 w-9 shrink-0 place-items-center rounded-xl text-lg font-bold disabled:opacity-40"
+        >
+          {busy ? '…' : '↑'}
+        </button>
+      </div>
+      {hint && <p className="text-center text-[11.5px] text-[var(--faint)]">{hint}</p>}
+    </form>
+  );
+}
+

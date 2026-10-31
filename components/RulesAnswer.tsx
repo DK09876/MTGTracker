@@ -76,11 +76,11 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
   const why = new Map(answer.citations.map((c) => [c.id, c.why]));
 
   return (
-    <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <article className="rounded-2xl border border-transparent p-4 [background:linear-gradient(var(--surface),var(--surface))_padding-box,linear-gradient(160deg,color-mix(in_srgb,var(--accent)_55%,transparent),var(--border)_45%)_border-box]">
       <p className={`text-xs font-semibold ${conf.tone}`} title={conf.hint}>
         <span aria-hidden>{conf.icon}</span> {conf.label} <span className="font-normal text-[var(--muted)]">· {conf.hint}</span>
       </p>
-      <p className="mt-2 text-base font-medium leading-snug">{withMarks(answer.verdict)}</p>
+      <p className="font-display mt-2 text-lg font-bold leading-snug">{withMarks(answer.verdict)}</p>
       {answer.looseEnds?.map((l, i) => (
         <p key={i} className="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-[var(--foreground)]">
           <span aria-hidden className="text-amber-400">⚠</span> This answer may have missed something - {l}
