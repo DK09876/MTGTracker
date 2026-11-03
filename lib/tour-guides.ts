@@ -25,7 +25,8 @@ export interface Guide {
 }
 
 const tab = (t: string) => `[data-tour-tab="${t}"]`;
-const deck = (id: string) => `/lists/${id}`;
+// Decks open at /decks/<id>; the same page also answers at /lists/<id>.
+const deck = (id: string) => `/decks/${id}`;
 const closeCard = '?[data-tour="card-modal"] [aria-label="Close"]';
 const closeAdd = '?[data-tour="add-panel"] [aria-label="Close"]';
 const buildStep = (n: number) => `[data-tour="build-steps"] button:nth-child(${n})`;
@@ -117,7 +118,7 @@ export const GUIDES: Guide[] = [
   },
   {
     id: 'deck',
-    match: (p) => /^\/lists\/[^/]+$/.test(p),
+    match: (p) => /^\/(decks|lists)\/[^/]+$/.test(p),
     title: 'A deck',
     help: [
       'Cards: the list, grouped and sorted how you like. Build: a checklist to build by. Chat: ask Claude about the deck.',
