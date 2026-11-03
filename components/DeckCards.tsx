@@ -108,7 +108,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
   return (
     <div className="mt-5">
       {isDeck && (
-        <div role="tablist" className="flex gap-1 border-b border-[var(--border)]">
+        <div data-tour="boards" role="tablist" className="flex gap-1 border-b border-[var(--border)]">
           {BOARDS.map(([id, label]) => (
             <button
               key={id}
@@ -125,7 +125,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div data-tour="card-tools" className="mt-3 flex flex-wrap items-center gap-2">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -198,7 +198,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
             </h3>
           ) : null}
           {prefs.view === 'visual' ? (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div data-tour="card-grid" className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {group.items.map((entry) => (
                 <CardTile
                   key={entry.card.id}

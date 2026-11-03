@@ -74,7 +74,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
     <div className="mt-5 flex flex-col gap-8">
       <Warnings warnings={health.warnings} />
 
-      <Bracket insights={insights} />
+      <div data-tour="bracket"><Bracket insights={insights} /></div>
 
       <WinRead insights={insights} />
 
@@ -85,7 +85,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         <Stat label="Game Changers" value={String(health.gameChangers.length)} />
       </div>
 
-      <Section title="Mana curve" subtitle="Spells by mana value, lands and commander excluded">
+      <Section tour="curve" title="Mana curve" subtitle="Spells by mana value, lands and commander excluded">
         <Columns
           data={health.curve.map((b) => ({ label: b.label, value: b.count, detail: b.cards }))}
           format={(v) => String(v)}
@@ -94,7 +94,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         />
       </Section>
 
-      <Section title="Colours" subtitle={`Share of the coloured symbols in spell costs, against what makes that colour`}>
+      <Section tour="colours" title="Colours" subtitle={`Share of the coloured symbols in spell costs, against what makes that colour`}>
         {health.colors.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">No coloured costs yet.</p>
         ) : (
@@ -141,6 +141,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
       </Section>
 
       <Section
+        tour="hands"
         title="Opening hands"
         subtitle={`Seven cards from the ${health.hand.library}-card library (the deck without ${short})`}
       >

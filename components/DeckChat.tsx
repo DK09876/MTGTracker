@@ -171,7 +171,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
             ))}
           </div>
         )}
-        <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
+        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
           <label htmlFor={`ask-${listId}`} className="sr-only">Ask about this deck</label>
           <textarea
             id={`ask-${listId}`}

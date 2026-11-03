@@ -100,7 +100,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
         )}
         {current === 'fill' && <Fill listId={listId} plan={plan} commander={commander} onAdd={onAdd} />}
         {current === 'mana' && (
-          <Detail title="Mana">
+          <Detail title="Mana" tour="build-mana">
             <p>
               <span className="font-semibold">{plan.lands.have} lands</span>; Karsten&apos;s formula says <span className="font-semibold">{plan.lands.want}</span>
               <span className="text-[var(--muted)]"> (average mana value {plan.lands.averageMv.toFixed(2)}, {plan.lands.cheap} cheap draw and ramp spells, never below 37).</span>
@@ -153,9 +153,9 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
   );
 }
 
-function Detail({ title, children }: { title: string; children: React.ReactNode }) {
+function Detail({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tour={tour} className="flex flex-col gap-3">
       <h3 className="font-display text-xl font-semibold">{title}</h3>
       {children}
     </div>
