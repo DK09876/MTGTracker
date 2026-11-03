@@ -36,6 +36,8 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
+import type { DeckChat } from './deck-chat';
+import type { GapCard } from './gap-cards';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
 import type { Job } from './jobs';
@@ -343,15 +345,20 @@ export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDa
 export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
 
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
-export interface GapCard {
-  id: string; name: string; image: string | null; price: string | null; typeLine: string; cmc: number;
-  /** Where the profile has a copy: "yours, Box 2", "in Ulalek Eldrazi"; null if not owned. */
-  held: string | null;
-  why: string;
-}
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
     .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }>);
+
+export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
+export const deckChats = (listId: string) => fetch(url(`lists/${listId}/chats`)).then(json<{ chats: ChatSummary[] }>);
+export const deckChat = (listId: string, chatId: string) =>
+  fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
+export const askDeck = (listId: string, text: string, chatId?: string) =>
+  send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+export const markChange = (listId: string, chatId: string, message: number, change: number) =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
+export const forgetChat = (listId: string, chatId: string) =>
+  fetch(url(`lists/${listId}/chats/${chatId}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export interface SavedRead extends DeckRead {
   since: CardChange;

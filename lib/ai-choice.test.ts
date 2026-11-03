@@ -42,7 +42,7 @@ describe('modelFor', () => {
     // Another profile is not changed by dk's choice.
     expect(ai.modelFor('kevin', 'rules')).toBe('claude-opus-5-5');
     const state = ai.aiState('dk');
-    expect(state.models.find((m) => m.id === 'claude-sonnet-5-5')?.chosenFor).toEqual(['rules', 'tagging']);
+    expect(state.models.find((m) => m.id === 'claude-sonnet-5-5')?.chosenFor).toEqual(['rules', 'tagging', 'tagcards', 'chat']);
     expect(state.models.find((m) => m.id === 'claude-haiku-5-5')?.chosenFor).toEqual(['search']);
   });
 

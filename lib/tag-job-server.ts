@@ -26,7 +26,9 @@ export function currentJob(listId: string): TagJob | null {
 export function startJob(list: List, params: JobParams, profile: string): TagJob {
   if (isActive(currentJob(list.id))) throw new StepError('A tagging job is already running on this deck - stop it first');
   const model = appModel(profile, 'tagging', list.name);
-  if (!model) throw new StepError('No model API key is set on the server, so the model is off');
+  // Putting tags on cards is many small guided calls: its own, cheaper model.
+  const cardModel = appModel(profile, 'tagcards', list.name) ?? model;
+  if (!model || !cardModel) throw new StepError('No model API key is set on the server, so the model is off');
   const at = { list, boards: params.boards };
   if (params.kind === 'tag' && !deckTags(list.id).tags.some((t) => t.status === 'accepted')) {
     throw new StepError('Keep or make some tags first');
@@ -34,8 +36,8 @@ export function startJob(list: List, params: JobParams, profile: string): TagJob
   const job = newJob(list.id, params);
   launch(job, {
     propose: (instructions, o) => proposeStep(model, at, instructions, o),
-    assign: (keys, o) => assignStep(model, at, keys, o),
-    audit: (ids, o) => auditStep(model, at, ids, o),
+    assign: (keys, o) => assignStep(cardModel, at, keys, o),
+    audit: (ids, o) => auditStep(cardModel, at, ids, o),
     plan: (scope) => {
       const tags = deckTags(list.id);
       return {
