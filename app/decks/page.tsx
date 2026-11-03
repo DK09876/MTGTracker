@@ -71,7 +71,7 @@ export default function DecksPage() {
           )}
         </div>
         {!creating && (
-          <button onClick={() => setCreating(true)} className="btn-go rounded-full px-4 py-2 font-semibold">
+          <button data-tour="new-deck" onClick={() => setCreating(true)} className="btn-go rounded-full px-4 py-2 font-semibold">
             ＋ New deck
           </button>
         )}

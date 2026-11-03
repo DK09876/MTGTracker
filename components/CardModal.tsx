@@ -37,6 +37,7 @@ export default function CardModal({
       <div className="fixed inset-0 bg-black/70" onClick={onClose} aria-hidden="true" />
       <div className="relative flex min-h-full items-start justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:items-center">
         <div
+          data-tour="card-modal"
           role="dialog"
           aria-modal="true"
           aria-label={card.name}

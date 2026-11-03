@@ -165,7 +165,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       <DeckBrief listId={listId} tags={tags} onTags={onTags} />
 
       <section className="flex flex-col gap-3">
-        <h3 className="font-medium">1 · Suggest tags</h3>
+        <h3 data-tour="suggest-tags" className="font-medium">1 · Suggest tags</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The model reads the commander, your brief and every card ({cards.length} different), and suggests tags for this
           deck&apos;s plan, each with a test for what belongs. It stops here so you can keep, edit or drop them. Ask again
