@@ -507,15 +507,37 @@ which are the finish, and which are interaction or support.
 If the owner already wrote something, keep what they meant and build on it;
 it outranks your own reading.`;
 
-export type BriefInput = DeckContext;
+/**
+ * scratch: read the cards alone, ignoring what the owner wrote.
+ * build: keep the owner's words and fill in what is missing.
+ * check: hold the owner's brief up against the cards and say where they
+ * disagree, changing the brief as little as possible.
+ */
+export type BriefMode = 'scratch' | 'build' | 'check';
+
+export const BRIEF_CHECK = `\
+
+This time the owner wants their brief checked, not rewritten. Still work
+out how the deck really wins (winConditions). In "missing", say plainly
+where the brief and the cards disagree: plans the brief counts on that the
+cards do not support, plans the cards support that the brief leaves out,
+and cards that fit neither - or, if they agree, what the deck still needs.
+In "brief", return the owner's brief with the fewest changes that make it
+true to the cards.`;
+
+export type BriefInput = DeckContext & { mode?: BriefMode };
 
 export function briefMessage(input: BriefInput): string {
+  const mode = input.mode ?? 'build';
+  const owner = input.brief.trim();
   return [
     commanderBlock(input.commander),
     '',
-    input.brief.trim()
-      ? `What the owner has written so far (keep their intent):\n"""\n${input.brief.trim()}\n"""`
-      : 'The owner has not written anything yet.',
+    mode === 'scratch' || !owner
+      ? 'Read the deck fresh: the owner has not written anything you need to keep.'
+      : mode === 'check'
+        ? `The owner's brief, to check against the cards:\n"""\n${owner}\n"""`
+        : `What the owner has written so far (keep their intent):\n"""\n${owner}\n"""`,
     '',
     `The deck - ${input.cards.reduce((n, c) => n + c.quantity, 0)} cards:`,
     ...input.cards.map((c) => describeCard(c, c.key)),

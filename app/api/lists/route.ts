@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server';
 import { createList, getList, listLists, type ListKind } from '@/lib/db';
 import { importInto } from '@/lib/import-into';
 import { requireProfile } from '@/lib/profile-route';
+import { warmRoles } from '@/lib/role-warmup';
 import { getCard, ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
     const commander = kind === 'deck' && body.commanderId ? await getCard(body.commanderId) : null;
     const list = createList(who.profile, name, (body.note ?? '').trim(), { kind, commander });
     const imported = body.decklist?.trim() ? await importInto(list, body.decklist) : undefined;
+    if (imported) warmRoles(list, who.profile);
     return NextResponse.json({ list: getList(list.id, who.profile), imported });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });

@@ -5,6 +5,7 @@
 
 import { appModel } from './ai';
 import { deckTags, loadTagJob, saveTagJob, type List } from './db';
+import { recordError } from './errors';
 import { taggingDeck } from './tag-deck';
 import { isActive, isRunningHere, launch, newJob, stop, type JobParams, type TagJob } from './tag-jobs';
 import { assignStep, auditStep, cardsToTag, proposeStep, StepError } from './tag-steps';
@@ -42,7 +43,13 @@ export function startJob(list: List, params: JobParams, profile: string): TagJob
         tags: tags.tags.filter((t) => t.status === 'accepted').map((t) => t.id),
       };
     },
-    save: saveTagJob,
+    save: (j) => {
+      // A failed run goes in the error log; a busy or refusing model is a warning, not a banner.
+      if (j.status === 'failed' && loadTagJob(j.listId)?.status === 'running') {
+        recordError({ source: `${j.params.kind === 'propose' ? 'Suggesting tags' : 'Tagging cards'} · ${list.name}`, message: j.error ?? 'The job failed', level: 'warn', profileId: profile, listId: list.id });
+      }
+      saveTagJob(j);
+    },
   });
   return job;
 }

@@ -3,6 +3,8 @@ import { Bricolage_Grotesque, Figtree } from 'next/font/google';
 import 'mana-font/css/mana.css';
 import Link from 'next/link';
 
+import ErrorBanner from '@/components/ErrorBanner';
+import JobTray from '@/components/JobTray';
 import ModelMenu from '@/components/ModelMenu';
 import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
@@ -52,12 +54,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <div className="ml-auto flex items-center gap-1 text-sm">
               <TopLinks />
+              <JobTray />
               <ModelMenu />
               <SettingsLink />
               <ProfileSwitcher />
             </div>
           </nav>
         </header>
+        <ErrorBanner />
         <main className="safe-x mx-auto max-w-6xl py-6"><ProfileGate>{children}</ProfileGate></main>
         <footer className="safe-x mx-auto max-w-6xl pb-[calc(var(--nav-h)+max(2rem,env(safe-area-inset-bottom)))] pt-4 text-xs text-[var(--muted)]">
           Card data and images from{' '}

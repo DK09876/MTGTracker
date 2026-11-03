@@ -59,6 +59,10 @@ const FINISHER = new RegExp([
   // Death and sacrifice payoffs aimed at the opponents.
   String.raw`whenever [^.]*\b(dies|die|is put into a graveyard|are put into a graveyard|you sacrifice)\b[^.]*\b(each opponent|target opponent|target player|any target)\b`,
   String.raw`whenever [^.]*\b(each opponent|target opponent)\b[^.]*\bloses? \w+ life\b[^.]*\b(dies|sacrifice)`,
+  // Spell payoffs: each spell cast (or copied) hurts the table - what turns
+  // an infinite storm or magecraft loop into a win (Longshot, Guttersnipe).
+  String.raw`whenever you cast (or copy )?an? (noncreature|instant or sorcery|instant|sorcery)? ?spell[^.]*\b(damage to each opponent|each opponent loses)`,
+  String.raw`magecraft[^.]*\b(damage to each opponent|each opponent loses)`,
 ].join('|'), 'i');
 
 export const ROLES: Role[] = [
@@ -114,6 +118,7 @@ export const ROLES_VERSION = 4;
 export const LAND_TARGET: [number, number] = [35, 38];
 
 const QUERY_BUDGET = 950;
+const RETRY_MS = process.env.VITEST ? 0 : 2_000;
 // Looked-up roles are trusted for a month; Scryfall's tags change slowly.
 const FRESH_DAYS = 30;
 
@@ -158,7 +163,13 @@ export async function countRoles(cards: Array<{ card: ScryfallCard; quantity: nu
     const found = new Map<string, string[]>([...idByName.values()].map((id) => [id, []]));
     // All at once: the Scryfall client spaces them out.
     const lookups = ROLES.flatMap((role) => (role.tag ? batches(role.tag, names) : []).map((query) => ({ role, query })));
-    const results = await Promise.all(lookups.map(({ query }) => deps.search(query)));
+    // A hundred-odd searches for a new deck: one slow answer is tried again
+    // rather than throwing the rest away.
+    const once = (query: string) => deps.search(query).catch(async () => {
+      await new Promise((r) => setTimeout(r, RETRY_MS));
+      return deps.search(query);
+    });
+    const results = await Promise.all(lookups.map(({ query }) => once(query)));
     results.forEach(({ cards: hits }, i) => {
       for (const hit of hits) {
         const id = idByName.get(front(hit.name));

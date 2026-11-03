@@ -30,3 +30,16 @@ describe('guessWinRoutes', () => {
     expect(guessWinRoutes({ cards: gear, roles: [], combos: [] }).routes.map((r) => r.id)).toEqual(['voltron']);
   });
 });
+
+describe('engine combos', () => {
+  const combo = (cards: string[], produces: string[]) => ({ id: cards.join('+'), url: '', cards, produces, popularity: 1 }) as never;
+  it('counts an infinite-storm combo as a win only with a payoff', () => {
+    const engine = [combo(['Storm-Kiln Artist', 'Reiterate'], ['Infinite storm count', 'Infinite colored mana'])];
+    const without = guessWinRoutes({ cards: [], roles: [], combos: engine });
+    expect(without.routes.map((r) => [r.label, r.strength])).toEqual([['Combo with no payoff', 'some']]);
+    expect(without.missing).toMatch(/payoff/);
+    const withPayoff = guessWinRoutes({ cards: [], roles: [role('finisher', ['Longshot, Rebel Bowman'])], combos: engine });
+    expect(withPayoff.routes[0]).toMatchObject({ label: 'Combo into a payoff', strength: 'strong' });
+    expect(withPayoff.missing).toBe('');
+  });
+});

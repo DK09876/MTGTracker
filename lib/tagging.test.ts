@@ -176,3 +176,13 @@ describe('parseBrief', () => {
     expect(() => parseBrief({ winConditions: [], missing: '', brief: '' }, deck)).toThrow(/no brief/);
   });
 });
+
+describe('briefMessage modes', () => {
+  const input = { commander: null, cards: [], brief: 'Storm off rituals.' };
+  it('ignores the owner\'s brief from scratch, keeps it to build on, and holds it up to check', async () => {
+    const { briefMessage } = await import('./tagging');
+    expect(briefMessage({ ...input, mode: 'scratch' })).not.toContain('Storm off rituals.');
+    expect(briefMessage({ ...input, mode: 'build' })).toMatch(/keep their intent[\s\S]*Storm off rituals\./);
+    expect(briefMessage({ ...input, mode: 'check' })).toMatch(/to check against the cards[\s\S]*Storm off rituals\./);
+  });
+});

@@ -37,6 +37,9 @@ export interface WinGuess {
 /** A combo result that ends the game rather than just making resources. */
 const WINS = /win the game|each opponent loses|infinite (combat )?damage|infinite (life ?loss|drain)|infinite mill|lose the game/i;
 
+/** A combo result that makes resources without a limit: needs a payoff to win. */
+const ENGINE = /^(near-)?infinite (storm count|magecraft|(colou?rless |colou?red |\w+ )?mana|.*\b(etb|ltb|cast|copies|tokens?|triggers|untap|draw))/i;
+
 const named = (roles: RoleCount[], id: string) => roles.find((r) => r.id === id)?.cards ?? [];
 
 export function guessWinRoutes(input: {
@@ -59,6 +62,24 @@ export function guessWinRoutes(input: {
       how: `${winning.length} combo${winning.length === 1 ? '' : 's'} that end the game - e.g. ${best.map((c) => `${c.cards.join(' + ')} (${c.produces.find((p) => WINS.test(p))})`).join('; ')}.`,
       cards: [...new Set(best.flatMap((c) => c.cards))],
       strength: 'strong',
+    });
+  }
+
+  // Combos that make something infinite - mana, spells, triggers - win only
+  // with a card that turns it into damage or life loss.
+  const engines = (combos ?? []).filter((c) => !winning.includes(c) && c.produces.some((p) => ENGINE.test(p)))
+    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+  if (engines.length) {
+    const payoffs = [...new Set([...named(roles, 'finisher'), ...named(roles, 'drain'), ...named(roles, 'wincon')])];
+    const what = [...new Set(engines.flatMap((c) => c.produces.filter((p) => ENGINE.test(p)).map((p) => p.replace(/^(near-)?infinite /i, ''))))].slice(0, 3);
+    const best = engines.slice(0, 2);
+    routes.push({
+      id: 'engine-combo',
+      label: payoffs.length ? 'Combo into a payoff' : 'Combo with no payoff',
+      how: `${engines.length} combo${engines.length === 1 ? '' : 's'} make infinite ${what.join(', ')} (e.g. ${best.map((c) => c.cards.join(' + ')).join('; ')})`
+        + (payoffs.length ? `, which ${payoffs.slice(0, 3).join(', ')} turn${payoffs.length === 1 ? 's' : ''} into lethal.` : ', but nothing in the deck turns that into a win.'),
+      cards: [...new Set([...best.flatMap((c) => c.cards), ...payoffs.slice(0, 4)])],
+      strength: payoffs.length ? 'strong' : 'some',
     });
   }
 
@@ -118,8 +139,11 @@ export function guessWinRoutes(input: {
   }
 
   const strong = routes.some((r) => r.strength === 'strong');
+  const noPayoff = routes.some((r) => r.label === 'Combo with no payoff');
   const missing = strong
     ? ''
+    : noPayoff
+      ? 'Its combos make infinite resources but nothing turns them into a win: add a payoff that hits each opponent per spell or trigger (Aetherflux Reservoir, Grapeshot, Guttersnipe-style creatures).'
     : routes.length
       ? 'Its ways to win only help close a game; nothing ends it once assembled. A combo, an alternate win or more finishers would make it close reliably.'
       : 'No clear way to win from the cards: no combo that ends the game, no alternate win, and too few finishers (overruns, extra combats, drain, mass steal).';

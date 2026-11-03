@@ -34,7 +34,10 @@ import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
-import type { DraftedBrief } from './tagging';
+import type { CheckRun } from './checks';
+import type { AppError } from './errors';
+import type { Job } from './jobs';
+import type { CardChange, DeckRead, ReadChange, ReadMode } from './reads';
 import type { AiState } from './ai';
 import type { AiCall } from './db';
 import type { Effort, Feature } from './models';
@@ -316,9 +319,40 @@ const send = (path: string, method: string, body: object) =>
 
 export const deckTags = (listId: string) => fetch(url(`lists/${listId}/tags`)).then(json<DeckTags>);
 
-/** The model's draft of the brief: how the deck wins, what it lacks, and the brief itself. Not saved. */
-export const draftTagBrief = (listId: string) =>
-  spending(send(`lists/${listId}/tags/brief`, 'POST', {}).then(json<DraftedBrief & { model: string }>));
+// --- background jobs, errors and deck reads ---------------------------------
+
+/** Told when a background job starts, so the header's jobs menu looks at once. */
+export const JOBS_CHANGED = 'mtg-jobs-changed';
+export const jobsChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED)); };
+
+export type JobSummary = Omit<Job, 'result'>;
+export const jobs = () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>);
+
+/** Told when errors may have been acknowledged, so the banner looks again. */
+export const ERRORS_CHANGED = 'mtg-errors-changed';
+export const errors = (all = false) => fetch(url(`errors${all ? '?all=1' : ''}`)).then(json<{ errors: AppError[] }>);
+export const acknowledgeError = (id?: string) =>
+  send('errors', 'POST', id ? { id } : {}).then(json<{ acknowledged: number }>).finally(() => window.dispatchEvent(new Event(ERRORS_CHANGED)));
+
+export const checks = () => fetch(url('checks')).then(json<{ run: CheckRun | null }>);
+export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: CheckRun }>).finally(() => window.dispatchEvent(new Event(ERRORS_CHANGED)));
+
+export interface SavedRead extends DeckRead {
+  since: CardChange;
+  against: ReadChange | null;
+}
+export interface DeckReads {
+  draft: DeckRead | null;
+  saved: SavedRead[];
+  /** The read job, while it runs or if the last one failed. */
+  job: Job | null;
+}
+export const deckReads = (listId: string) => fetch(url(`lists/${listId}/reads`)).then(json<DeckReads>);
+export const startRead = (listId: string, mode: ReadMode) =>
+  send(`lists/${listId}/reads`, 'POST', { mode }).then(json<{ job: Job }>).finally(jobsChanged);
+export const keepRead = (listId: string, id: string, saved: boolean) => send(`lists/${listId}/reads`, 'PATCH', { id, saved }).then(json<{ ok: true }>);
+export const dropRead = (listId: string, id: string) =>
+  fetch(url(`lists/${listId}/reads?read=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const setTagBrief = (listId: string, brief: string) =>
   send(`lists/${listId}/tags`, 'PUT', { brief }).then(json<DeckTags>);
