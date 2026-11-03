@@ -16,7 +16,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import {
-  aiCalls, getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
   setSetting, spendSince,
 } from './db';
 import { callClaude, claudeClient, ClaudeFailure, usageOf, type ClaudeClient, type ClaudeParams } from './ai-claude';
@@ -673,13 +673,14 @@ export function aiState(profile: string | null): AiState {
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
-  // Per step, from the usage trail; tag cards were logged as tagging before they had their own step.
-  const calls = aiCalls(new Date(Date.now() - 30 * 86400_000).toISOString(), 5000).filter((c) => c.outcome === 'ok' && c.cost > 0);
-  const stepOf = (c: { feature: string; step: string }): string => (c.feature === 'tagging' && /tag cards|check the tags/.test(c.step) ? 'tagcards' : c.feature);
+  // Per step, from the daily totals of the last 30 days: the request-by-request
+  // trail is only kept a week (lib/cleanup.ts).
+  const totals = spendSince(quotaDay(new Date(Date.now() - 30 * 86400_000)));
   const costPerRequest: Partial<Record<Feature, number>> = {};
   for (const f of FEATURES) {
-    const mine = calls.filter((c) => stepOf(c) === f);
-    if (mine.length) costPerRequest[f] = mine.reduce((n, c) => n + c.cost, 0) / mine.length;
+    const mine = totals.filter((r) => r.feature === f && r.cost > 0);
+    const requests = mine.reduce((n, r) => n + r.requests, 0);
+    if (requests) costPerRequest[f] = mine.reduce((n, r) => n + r.cost, 0) / requests;
   }
   return { models, effort: effortFor(profile), spend, app: appModels(), costPerRequest };
 }
