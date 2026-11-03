@@ -49,7 +49,7 @@ describe('countRoles', () => {
     const checked = new Set<string>();
     const first = deps(saved, checked);
     await countRoles(deck, first);
-    expect(first.search).toHaveBeenCalledTimes(ROLES.length);
+    expect(first.search).toHaveBeenCalledTimes(ROLES.filter((r) => r.tag).length);
     // A card with no roles is remembered as looked up, too.
     expect(saved.get('o-Myriad Landscape')).toEqual(['ramp']);
 
@@ -71,5 +71,18 @@ describe('countRoles', () => {
     await countRoles(deck, d);
     const queries = d.search.mock.calls.map(([q]) => q as string);
     expect(queries.find((q) => q.startsWith('otag:tutor'))).toMatch(/^otag:tutor -otag:ramp -t:land \(/);
+  });
+
+  it('reads roles Scryfall has no tag for from the card text', async () => {
+    const withText = (name: string, oracle_text: string, type_line = 'Instant') => ({ ...card(name, type_line), oracle_text }) as ScryfallCard;
+    const roles = await countRoles([
+      { card: withText('Redirect Lightning', 'Change the target of target spell or ability with a single target.'), quantity: 1 },
+      { card: withText('Syr Konrad, the Grim', 'Whenever another creature dies, Syr Konrad, the Grim deals 1 damage to each opponent.', 'Legendary Creature'), quantity: 1 },
+      { card: withText('Insurrection', 'Untap all creatures and gain control of them until end of turn. They gain haste until end of turn.', 'Sorcery'), quantity: 1 },
+      { card: withText('Opt', 'Scry 1. Draw a card.'), quantity: 1 },
+    ], deps());
+    const by = Object.fromEntries(roles.map((r) => [r.id, r.cards]));
+    expect(by.protection).toEqual(['Redirect Lightning']);
+    expect(by.finisher).toEqual(['Insurrection', 'Syr Konrad, the Grim']);
   });
 });

@@ -15,7 +15,7 @@
 
 import { primaryType } from './deckview';
 import type { RoleCount } from './roles';
-import type { ScryfallCard } from './scryfall';
+import { oracleTextOf, type ScryfallCard } from './scryfall';
 import type { Combo } from './spellbook';
 
 export interface WinRoute {
@@ -85,8 +85,24 @@ export function guessWinRoutes(input: {
     });
   }
 
-  // Commander damage: a pile of equipment and auras.
-  const suitUp = cards.filter((c) => /\b(Equipment|Aura)\b/.test(c.card.type_line ?? '')).map((c) => c.card.name);
+  // Finishers: mass steal or death payoffs that end a game already close.
+  const finishers = named(roles, 'finisher');
+  if (finishers.length >= 2) {
+    routes.push({
+      id: 'finisher',
+      label: 'Finishers',
+      how: 'Cards that turn a board, or a pile of deaths, into lethal: take every creature for a turn, or make each one that dies hurt the table.',
+      cards: finishers,
+      strength: finishers.length >= 4 ? 'strong' : 'some',
+    });
+  }
+
+  // Commander damage: a pile of equipment and auras that make one creature
+  // bigger. Ramp auras (Wild Growth) and protection auras do not count.
+  const support = new Set([...named(roles, 'ramp'), ...named(roles, 'protection')]);
+  const suitUp = cards.filter((c) => /\b(Equipment|Aura)\b/.test(c.card.type_line ?? '')
+    && !support.has(c.card.name)
+    && /(equipped|enchanted) creature gets \+/i.test(oracleTextOf(c.card))).map((c) => c.card.name);
   if (suitUp.length >= 8) {
     routes.push({ id: 'voltron', label: 'Commander damage', how: `${suitUp.length} equipment and auras to suit up one creature for 21 commander damage.`, cards: suitUp, strength: 'some' });
   }
@@ -106,6 +122,6 @@ export function guessWinRoutes(input: {
     ? ''
     : routes.length
       ? 'Its ways to win only help close a game; nothing ends it once assembled. A combo, an alternate win or more finishers would make it close reliably.'
-      : 'No clear way to win from the cards: no combo that ends the game, no alternate win, and too few finishers (overruns, extra combats, drain).';
+      : 'No clear way to win from the cards: no combo that ends the game, no alternate win, and too few finishers (overruns, extra combats, drain, mass steal).';
   return { routes, missing };
 }

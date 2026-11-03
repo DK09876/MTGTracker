@@ -30,6 +30,7 @@ import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
+import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
@@ -300,6 +301,8 @@ export interface DeckInsights {
     }>;
   } | null;
   cuts: CutGroup[];
+  /** How it wins, guessed from the cards alone; null when the roles could not be read. */
+  wincons: WinGuess | null;
   /** Parts that could not be worked out just now: 'bracket', 'combos'. */
   unavailable: string[];
 }

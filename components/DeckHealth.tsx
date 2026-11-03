@@ -76,6 +76,8 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
       <Bracket insights={insights} />
 
+      <WinRead insights={insights} />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Cards" value={`${health.size} / 100`} />
         <Stat label="Lands" value={String(health.lands)} />
@@ -174,6 +176,41 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
 const pct = (p: number) => (p > 0 && p < 0.005 ? '<1%' : p > 0.995 && p < 1 ? '>99%' : `${Math.round(p * 100)}%`);
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+const STRENGTH = { strong: ['Strong', '#7ccf8a'], some: ['Helps close', '#e0b64a'] } as const;
+
+/** How the deck wins, read from its cards without a model: free, and there as soon as the roles are. */
+function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
+  if (insights === 'loading' || insights === 'failed' || !insights.wincons) return null;
+  const { routes, missing } = insights.wincons;
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
+        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
+      </div>
+      {routes.length > 0 && (
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {routes.map((r) => (
+            <li key={r.id} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+              <div className="flex justify-between gap-2">
+                <span className="font-semibold">{r.label}</span>
+                <span className="text-xs font-semibold" style={{ color: STRENGTH[r.strength][1] }}>{STRENGTH[r.strength][0]}</span>
+              </div>
+              <p className="text-sm text-[var(--muted)]">{r.how}</p>
+              <p className="text-xs text-[var(--muted)]">{r.cards.slice(0, 6).join(' · ')}{r.cards.length > 6 ? ` · +${r.cards.length - 6} more` : ''}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {missing && (
+        <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm">
+          {routes.length > 0 && <span className="font-semibold text-amber-300">Thin spot: </span>}{missing}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
   if (insights === 'loading') {

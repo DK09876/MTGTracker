@@ -2,12 +2,12 @@ import json, collections
 import sys
 truth = json.load(open('truth.json')); ours = json.load(open(sys.argv[1] if len(sys.argv) > 1 else 'ours.json'))
 RAMP = {'ramp','rock','dork','land-ramp','ritual'}; DRAW = {'draw','engine','cantrip','wheel'}
-REMOVAL = {'removal','wipe'}; WIN = {'wincon','extra-turn','extra-combat','overrun','drain','mill'}
+REMOVAL = {'removal','wipe'}; WIN = {'wincon','finisher','extra-turn','extra-combat','overrun','drain','mill'}
 MAP = {
   'Ramp': RAMP, 'Mana Boost': RAMP, 'Critter Ramp': RAMP,
   'Draw': DRAW, 'Removal': REMOVAL, 'Disruption': REMOVAL | {'counter','stax','gy-hate'},
   'Stax': {'stax'}, 'Protection': {'protection'}, 'Tutor': {'tutor'}, 'Recursion': {'recursion'},
-  'Extra Combat': {'extra-combat'}, 'Mill': {'mill'}, 'Sac Outlet': {'sac-outlet'}, 'Drain': {'drain'},
+  'Extra Combat': {'extra-combat'}, 'Mill': {'mill'}, 'Sac Outlet': {'sac-outlet'}, 'Drain': {'drain', 'finisher'},
   'The Gun': 'WIN', 'Endgame Plans': 'WIN', 'End Em': 'WIN', 'Finisher': 'WIN',
 }
 total = collections.Counter(); hit = collections.Counter(); report = []
