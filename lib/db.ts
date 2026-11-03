@@ -1188,8 +1188,6 @@ export interface AiCall {
   detail: string;
 }
 
-/** The trail is kept this long. */
-const AI_CALLS_DAYS = 90;
 
 export function recordAiCall(call: Omit<AiCall, 'id' | 'at'>, at = now()): void {
   const database = open();
@@ -1199,7 +1197,6 @@ export function recordAiCall(call: Omit<AiCall, 'id' | 'at'>, at = now()): void 
     [at, call.profileId, call.feature, call.label.slice(0, 200), call.step.slice(0, 80), call.model, call.answeredBy,
       Math.round(call.inputTokens), Math.round(call.outputTokens), call.cost, call.outcome, call.detail.slice(0, 200)],
   );
-  database.run('DELETE FROM ai_calls WHERE at < ?', [new Date(Date.parse(at) - AI_CALLS_DAYS * 86_400_000).toISOString()]);
 }
 
 /** The newest requests first, from `since` on. */
