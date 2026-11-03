@@ -10,6 +10,7 @@ import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
+import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
@@ -39,7 +40,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'cards' | 'tags' | 'health' | 'suggestions' | 'collection'>('cards');
+  const [section, setSection] = useState<'build' | DeckTab>('cards');
   const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -335,7 +336,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && (
         <div className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['build', 'Build'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -349,7 +350,16 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
 
-      {deck && section === 'tags' ? (
+      {deck && section === 'build' ? (
+        <DeckBuild
+          listId={id}
+          cards={cards}
+          commander={list.commander?.name ?? null}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+        />
+      ) : deck && section === 'tags' ? (
         <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
       ) : deck && section === 'collection' ? (
         <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />

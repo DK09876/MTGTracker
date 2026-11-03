@@ -243,3 +243,23 @@ export function startCardRefresh(): Job {
 }
 
 
+
+/** Cards by oracle id from the copy on the Pi. */
+export function localCardsByOracle(ids: string[]): ScryfallCard[] {
+  const out: ScryfallCard[] = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = ids.slice(i, i + 500);
+    if (!part.length) continue;
+    const rows = table().all(`SELECT data FROM oracle_cards WHERE oracleId IN (${part.map(() => '?').join(',')})`, part) as Array<{ data: string }>;
+    out.push(...rows.map((r) => JSON.parse(r.data) as ScryfallCard));
+  }
+  return out;
+}
+
+/** Every kept card whose rules text matches, for roles read from text (finishers). */
+export function searchLocalText(test: RegExp): ScryfallCard[] {
+  // A rough first cut in SQL, then the real test.
+  const rows = table().all(`SELECT data FROM oracle_cards WHERE data LIKE '%opponent%' OR data LIKE '%gain control%' OR data LIKE '%target player%'`) as Array<{ data: string }>;
+  return rows.map((r) => JSON.parse(r.data) as ScryfallCard)
+    .filter((c) => test.test([c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n')));
+}

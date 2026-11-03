@@ -34,6 +34,7 @@ import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
@@ -340,6 +341,17 @@ export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: Check
 
 export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDataStatus }>);
 export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
+
+export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
+export interface GapCard {
+  id: string; name: string; image: string | null; price: string | null; typeLine: string; cmc: number;
+  /** Where the profile has a copy: "yours, Box 2", "in Ulalek Eldrazi"; null if not owned. */
+  held: string | null;
+  why: string;
+}
+export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
+  fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
+    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }>);
 
 export interface SavedRead extends DeckRead {
   since: CardChange;
