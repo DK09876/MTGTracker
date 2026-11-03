@@ -1,6 +1,6 @@
 # MTG Tracker Deck-Building Reference
 
-31 October 2026. Copied from the shared doc at https://claude.ai/artifact/Qy5JxVAnr4gojbFhvTxEm6; update both together.
+31 October 2026, revised 2 November 2026. This file is the source of truth; it began as the shared doc at https://claude.ai/artifact/Qy5JxVAnr4gojbFhvTxEm6, which is no longer kept in step.
 
 ## Summary
 
@@ -56,10 +56,29 @@ Where they disagree:
 1. **Templates at all:** V6 does not believe in them; V1 gives one and disclaims it.
 2. **Land count:** Deck Driver goes as low as 34–35 with heavy ramp. Salubrious Snail says most people run too few (V12).
 3. **Draw:** from 10 (V1) to about 30 (V5), depending on whether selection counts.
-4. **Building around the commander:** V2 builds every clause around it. V4, V8 and V15 warn against "linchpin" commanders. V3 and V15 suggest "counterweight" commanders that cover the deck's weakness.
-5. **Synergy:** V2 and V5 maximise it; V13 and V14 favour cohesion and indirect synergy.
 
 For the app: show the counts as ranges with their sources, never as pass or fail, and let the deck's plan move them.
+
+## Ways to build
+
+Much of what the videos say about commanders and synergy describes different styles of building, not rival positions. A builder picks and combines them.
+
+**Commander styles.** The videos describe what a commander does for its deck in several overlapping ways:
+
+- **Linchpin, counterweight, amplifier, payoff or specific role** (V15).
+- **Enabler or payoff** (V3), and **counterweight commanders** that cover the 99's weakness rather than pay off its theme (V3, V15).
+- **Anchor or buttress** (V6).
+- **Building around every clause** of the commander's text (V2) suits commanders whose text is the plan.
+
+One tension is real and stays as a risk check: V4 argues the deck should still work with the commander shuffled into the 99, the opposite of V2's approach. How much that matters depends on the style. A deck built tightly around a linchpin commander is the case V4 and V15 warn about (feast or famine, weak without it); a counterweight commander carries little of that risk. For the app: classify the commander's style first, then judge the deck's dependence on it in that light.
+
+**Ways to make a deck stronger.** These are complementary tools, and a good deck can use all of them:
+
+- **Synergy density:** cards that combine for more than their sum, found by reading the commander clause by clause (V2) and maximising overlap between roles and the plan (V5).
+- **Cohesion:** cards that pull in the same direction even without interacting directly (V13).
+- **Indirect synergy:** cards that reach the theme's goal as a by-product, such as Manifest Dread for self-mill (V14).
+
+The creators do push back on each other a little (V13: "reject synergy, embrace cohesion"; V14 calls the synergy obsession limiting), but in practice the ideas fit together. For the app: show these as separate dimensions of a deck, not one score with a winner.
 
 ## Mana base
 
@@ -222,7 +241,7 @@ The AI explains numbers the app computes; it never calculates them itself. These
 6. **Check ramp against the commander's curve.** A cheap commander wants 1-MV dorks and untapped lands over 3–4 MV land ramp; ramp at the commander's own MV is redundant (V1, V3).
 7. **Taplands:** flag them when the plan needs turn 1–3 plays; accept them in slow or colour-hungry decks (V1, V12, V17).
 8. **Commander dependence:** estimate how many cards are weak without the commander, and check for draw, removal and win conditions that don't need it. High dependence needs more protection than Boots and Greaves (V4, V15).
-9. **Classify the commander's role** (enabler, payoff, amplifier, counterweight, linchpin) and back up in the 99 any role only the commander provides (V3, V15).
+9. **Classify the commander's style** (enabler, payoff, amplifier, counterweight, linchpin; see Ways to build) before judging dependence on it, and back up in the 99 any role only the commander provides (V3, V6, V15).
 10. **State the plan as board state, timing and win route.** Flag decks with a theme but no way to win, and feast-or-famine decks where the theme is the only win (V6, V8, V16).
 11. **Flag win-more cards and narrow, expensive payoffs.** Suggest lowering the curve when average MV is high (V8, V11, V16).
 12. **When a deck isn't working, suggest more draw and filtering first,** then lands if short (V16).
