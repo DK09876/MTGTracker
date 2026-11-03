@@ -23,11 +23,12 @@ import type { Entry } from './DeckCards';
 import ModelLine from './ModelLine';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
-import { BATCHES, modelLabel, requestsFor, type Budget, type Mode } from '@/lib/quota';
+import { modelLabel, requestsFor, tagRunCost, type Budget, type Mode } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import type { TagJob } from '@/lib/tag-jobs';
+import type { RoleCount } from '@/lib/roles';
 import type { ScryfallCard } from '@/lib/scryfall';
-import { TAG_COLORS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
+import { TAG_COLORS, TAG_KIND_HINTS, TAG_KINDS, tagKey, tagsByCard, type DeckTags as Tags, type Tag, type TagKind } from '@/lib/tags';
 
 interface Props {
   listId: string;
@@ -37,11 +38,6 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
 }
 
-// Smart mode is shown but off: it needs about three times the requests, and
-// with Gemini's Flash models failing too much the tagger runs on Flash-Lite
-// alone (see DEFAULT_LADDER in lib/quota.ts), whose free day is too small
-// for it. Free mode it is until that changes.
-const SMART_MODE_ON = false;
 const POLL_MS = 2_500;
 
 type Scope = 'all' | 'untagged';
@@ -56,12 +52,12 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const [instructions, setInstructions] = useState('');
   const [boards, setBoards] = useState<Board[]>(['main']);
   const [error, setError] = useState<string | null>(null);
-  const [scope, setScope] = useState<Scope>('all');
+  // Unset until chosen: then cards with no tags yet if some are tagged, else every card.
+  const [chosenScope, setScope] = useState<Scope | null>(null);
   const [audit, setAudit] = useState(true);
   const [job, setJob] = useState<TagJob | null>(null);
   const [stopping, setStopping] = useState(false);
   const [budget, setBudget] = useState<(Budget & { configured?: boolean }) | null>(null);
-  const [mode, setMode] = useState<Mode>('free');
 
   // The budget is shared by everyone on the app, so it is read fresh on opening.
   useEffect(() => {
@@ -108,6 +104,11 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   const rejected = tags.tags.filter((t) => t.status === 'rejected');
   const onCard = tagsByCard(tags);
   const untagged = cards.filter((e) => !onCard.has(tagKey(e.card)));
+  const partly = untagged.length > 0 && untagged.length < cards.length;
+  const scope: Scope = chosenScope ?? (partly ? 'untagged' : 'all');
+  // Claude is paid by the token; the free models by the request.
+  const mode: Mode = budget?.spend ? 'claude' : 'free';
+  const tagModel = budget?.models[0]?.id ?? null;
   const running = active;
   const proposing = active && job?.params.kind === 'propose';
 
@@ -153,21 +154,22 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
   return (
     <div className="mt-5 flex flex-col gap-8">
       <p className="max-w-3xl text-sm text-[var(--muted)]">
-        Tags are your own categories for this deck. A card can carry several. Group the deck by them from the
-        Cards tab, and open any card to see and change its tags. The model can help in two steps: it suggests
-        tags for you to shape, then applies the ones you keep to every card.
+        Tags are this deck&apos;s own categories: its engines, payoffs and ways to win. The jobs every deck needs —
+        ramp, draw, removal — are tagged automatically below. Group the deck by tags from the Cards tab, and open any
+        card to see and change its tags.
       </p>
+      <BasicRoles listId={listId} />
       {budget && <BudgetLine budget={budget} />}
       <ModelLine feature="tagging" />
 
       <DeckBrief listId={listId} tags={tags} onTags={onTags} />
 
       <section className="flex flex-col gap-3">
-        <h3 className="font-medium">Step 1 · Suggest tags</h3>
+        <h3 className="font-medium">1 · Suggest tags</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
-          The model reads the commander and every card ({cards.length} different), works out the plan, and suggests tags with a
-          test for what belongs in each. Nothing is tagged yet — review them below. Ask again with instructions to
-          refine: &ldquo;split removal by what it hits&rdquo;, &ldquo;more detail on the graveyard package&rdquo;.
+          The model reads the commander, your brief and every card ({cards.length} different), and suggests tags for this
+          deck&apos;s plan, each with a test for what belongs. It stops here so you can keep, edit or drop them. Ask again
+          with instructions: &ldquo;split the payoffs by what they reward&rdquo;, &ldquo;more detail on the graveyard package&rdquo;.
         </p>
         <textarea
           value={instructions}
@@ -181,7 +183,6 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
           <button onClick={propose} disabled={proposing || running} className={primary}>
             {proposing ? 'Suggesting…' : proposed.length ? 'Suggest again' : accepted.length ? 'Suggest more tags' : 'Suggest tags'}
           </button>
-          <span className="text-[var(--muted)]">1 request</span>
           <span className="text-[var(--muted)]">Include:</span>
           {(['maybe', 'side'] as Board[]).map((b) => (
             <label key={b} className="flex items-center gap-1.5 text-[var(--muted)]">
@@ -238,7 +239,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 className="font-medium">Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
+        <h3 className="font-medium">2 · Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The description is the test the model tags by, so make it say exactly what belongs — and what doesn&apos;t.
         </p>
@@ -307,58 +308,41 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 className="font-medium">Step 2 · Tag the cards</h3>
+        <h3 className="font-medium">3 · Put them on the cards</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
-          The model goes through the cards in small batches, weighing every tag you kept against each card&apos;s full
-          text, and says why for each tag it applies. Then it takes each tag in turn and checks the whole deck for
-          cards missed or wrongly included. Tags you put on or took off by hand are never changed.
+          The model weighs every tag you kept against each card&apos;s full text and says why for each one it applies,
+          then checks each tag across the deck. Tags you put on or took off by hand are never changed.
         </p>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Mode">
-          {(['free', 'smart'] as Mode[]).map((m) => (
-            <button
-              key={m}
-              role="radio"
-              aria-checked={mode === m}
-              onClick={() => setMode(m)}
-              disabled={running || (m === 'smart' && !SMART_MODE_ON)}
-              title={m === 'smart' && !SMART_MODE_ON ? 'Off for now' : undefined}
-              className={`flex max-w-sm flex-col rounded-xl border px-3 py-2 text-left text-sm disabled:cursor-not-allowed ${mode === m
-                ? 'border-[var(--accent)] bg-[var(--surface-hover)]'
-                : 'border-[var(--border)] hover:bg-[var(--surface)] disabled:opacity-40 disabled:hover:bg-transparent'}`}
-            >
-              <span className="font-medium">
-                {m === 'free' ? 'Free mode' : 'Smart mode'}
-                <span className="ml-2 font-normal text-[var(--muted)]">
-                  {m === 'smart' && !SMART_MODE_ON ? 'off for now' : `${needs(m)} request${needs(m) === 1 ? '' : 's'}`}
-                </span>
-              </span>
-              <span className="text-xs text-[var(--muted)]">
-                {m === 'free'
-                  ? `About ${BATCHES.free.cards} cards per request, and every tag checked in one pass. Good for most decks.`
-                  : `${BATCHES.smart.cards} cards per request and ${BATCHES.smart.tags} tags per check: closer attention to each card, about three times the requests.`}
-              </span>
-            </button>
-          ))}
-        </div>
-        {budget && budget.remaining < needs(mode) && (
+        {mode === 'claude' && tagModel && (
+          <p className="text-sm">
+            About <span className="font-semibold">{dollars(tagRunCost(tagModel, { deck: cards.length, cards: targetCount, tags: accepted.length, audit, mode }))}</span>
+            <span className="text-[var(--muted)]"> on {modelLabel(tagModel).replace(/^Claude /, '')} · {needs(mode)} requests · runs in the background</span>
+          </p>
+        )}
+        {mode === 'free' && budget && budget.remaining < needs(mode) && (
           <p className="text-sm text-amber-400">
             {budget.remaining === 0
               ? `No free requests left today - they reset ${resetText(budget.resetsInMs)}.`
-              : `Only ${budget.remaining} free request${budget.remaining === 1 ? '' : 's'} left today and this needs ${needs(mode)}. It will do what it can; finish later with "Only cards with no tags yet".`}
+              : `Only ${budget.remaining} free request${budget.remaining === 1 ? '' : 's'} left today and this needs ${needs(mode)}. It will do what it can; finish later with the cards that have no tags yet.`}
           </p>
         )}
         <div className="flex flex-col gap-1.5 text-sm">
-          <label className="flex items-center gap-2">
-            <input type="radio" name="scope" checked={scope === 'all'} onChange={() => setScope('all')} disabled={running} />
-            Every card ({cards.length} different) — redoes the model&apos;s earlier tags, keeps yours
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="radio" name="scope" checked={scope === 'untagged'} onChange={() => setScope('untagged')} disabled={running} />
-            Only cards with no tags yet ({untagged.length})
-          </label>
+          {partly ? (
+            <p>
+              {scope === 'untagged'
+                ? <>Cards: <span className="font-medium">{untagged.length} with no tags yet</span><span className="text-[var(--muted)]"> · the {cards.length - untagged.length} already tagged keep theirs</span></>
+                : <>Cards: <span className="font-medium">every card ({cards.length})</span><span className="text-[var(--muted)]"> · redoes the model&apos;s earlier tags, keeps yours</span></>}
+              {' '}
+              <button onClick={() => setScope(scope === 'untagged' ? 'all' : 'untagged')} disabled={running} className="text-[var(--accent)] hover:underline">
+                {scope === 'untagged' ? 'Redo every card instead' : 'Only the untagged ones'}
+              </button>
+            </p>
+          ) : (
+            <p>Cards: <span className="font-medium">{cards.length}</span>{untagged.length === 0 && <span className="text-[var(--muted)]"> · redoes the model&apos;s earlier tags, keeps yours</span>}</p>
+          )}
           <label className="mt-1 flex items-center gap-2">
             <input type="checkbox" checked={audit} onChange={(e) => setAudit(e.target.checked)} disabled={running} />
-            Then check each tag across the whole deck for misses and mistakes
+            Then double-check each tag across the whole deck for misses and mistakes
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -367,7 +351,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
             disabled={running || proposing || !accepted.length || (scope === 'untagged' && !untagged.length)}
             className={primary}
           >
-            Tag cards with {accepted.length} tag{accepted.length === 1 ? '' : 's'}
+            Start tagging with {accepted.length} tag{accepted.length === 1 ? '' : 's'}
           </button>
           {!accepted.length && <span className="text-sm text-[var(--muted)]">Keep or make some tags first.</span>}
         </div>
@@ -376,6 +360,39 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
 
       {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * The jobs every deck needs, counted from Scryfall's tags without a model:
+ * what "Role" tags used to be. Read-only here; Health has the full table.
+ */
+function BasicRoles({ listId }: { listId: string }) {
+  const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>('loading');
+  useEffect(() => {
+    let cancelled = false;
+    api.deckRoles(listId).then((r) => { if (!cancelled) setRoles(r); }).catch(() => { if (!cancelled) setRoles('failed'); });
+    return () => { cancelled = true; };
+  }, [listId]);
+  const shown = Array.isArray(roles) ? roles.filter((r) => r.count > 0) : [];
+  return (
+    <section className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-medium">Basic roles <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
+        <span className="text-xs text-[var(--muted)]">From Scryfall&apos;s card tags · the Health tab has the full table</span>
+      </div>
+      {roles === 'loading' && <p className="text-sm text-[var(--muted)]">Reading the cards&apos; roles… the first time takes up to a minute.</p>}
+      {roles === 'failed' && <p className="text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the roles just now.</p>}
+      {shown.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {shown.map((r) => (
+            <li key={r.id} title={r.cards.join(', ')} className="rounded-full border border-[var(--border)] bg-[var(--background)] px-2.5 py-0.5 text-xs text-[var(--muted)]">
+              {r.label} <span className="text-[var(--foreground)]">{r.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -524,7 +541,7 @@ function TagEditor({ tag, listId, onTags, onError, footer, controls, members, on
           className={`${input} py-1`}
         >
           <option value="">No kind</option>
-          {Object.entries(TAG_KINDS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          {(Object.keys(TAG_KINDS) as TagKind[]).map((k) => <option key={k} value={k}>{TAG_KINDS[k]} — {TAG_KIND_HINTS[k]}</option>)}
         </select>
         {count !== undefined && <span className="text-sm tabular-nums text-[var(--muted)]">{count} card{count === 1 ? '' : 's'}</span>}
         {controls}
@@ -638,7 +655,7 @@ function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
           <span className="text-[var(--muted)]"> - resets {resetText(s.resetsInMs)}.</span>
         </p>
         <p className="mt-1 text-xs text-[var(--muted)]">
-          Tagging runs on {budget.models[0]?.label}, paid by the token: a Commander deck takes about three requests, usually well under a dollar.
+          Tagging runs on {budget.models[0]?.label}, paid by the token: tagging a whole deck usually costs well under a dollar.
           You have spent {dollars(s.profileToday)} of {dollars(s.caps.perProfile)} today; everyone {dollars(s.today)} of {dollars(s.caps.daily)}.
         </p>
       </div>

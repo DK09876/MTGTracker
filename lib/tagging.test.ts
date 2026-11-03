@@ -78,10 +78,10 @@ describe('parseProposals', () => {
     const { overview, tags } = parseProposals({
       overview: 'Aristocrats.',
       tags: [
-        { name: 'Sac Outlets', description: 'Repeatable.', kind: 'synergy', examples: ['viscera seer', 'Blood Artist'] },
-        { name: 'Ramp', description: 'dupe of an owner tag', kind: 'role', examples: [] },
-        { name: 'sac outlets', description: 'dupe of the first', kind: 'synergy', examples: [] },
-        { name: '', description: 'nameless', kind: 'role', examples: [] },
+        { name: 'Sac Outlets', description: 'Repeatable.', kind: 'enabler', examples: ['viscera seer', 'Blood Artist'] },
+        { name: 'Ramp', description: 'dupe of an owner tag', kind: 'other', examples: [] },
+        { name: 'sac outlets', description: 'dupe of the first', kind: 'enabler', examples: [] },
+        { name: '', description: 'nameless', kind: 'other', examples: [] },
         { name: 'Fliers', description: 'x', kind: 'nonsense', examples: ['Delver of Secrets'] },
       ],
     }, deck, [tag('a', 'Ramp')]);

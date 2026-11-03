@@ -17,7 +17,7 @@
 
 import type { ModelUsage } from './db';
 import type { SpendSummary } from './spend';
-import { MODELS } from './models';
+import { costOf, MODELS } from './models';
 
 export interface LadderModel {
   id: string;
@@ -124,7 +124,7 @@ export function quotaViolation(body: unknown): { daily: boolean; limit: number |
 
 // --- how many requests a run takes ----------------------------------------
 
-export type Mode = 'free' | 'smart';
+export type Mode = 'free' | 'smart' | 'claude';
 
 /**
  * Free mode reads the deck in two large batches and checks every tag in one
@@ -135,7 +135,25 @@ export type Mode = 'free' | 'smart';
 export const BATCHES: Record<Mode, { cards: number; tags: number }> = {
   free: { cards: 50, tags: 100 },
   smart: { cards: 12, tags: 4 },
+  // Claude is paid by the token, not the request: batches small enough for
+  // close attention, large enough that the deck is not re-read too often.
+  claude: { cards: 20, tags: 8 },
 };
+
+/**
+ * A rough price for a tagging run on a priced model, from what runs have
+ * cost: each request reads the whole deck and the tags, and writes a reason
+ * for each card in its batch, after some thinking.
+ */
+export function tagRunCost(model: string, o: { deck: number; cards: number; tags: number; audit: boolean; mode: Mode }): number {
+  const size = BATCHES[o.mode];
+  const assigns = Math.ceil(o.cards / size.cards);
+  const audits = o.audit && o.tags ? Math.ceil(o.tags / size.tags) : 0;
+  const read = 2_500 + o.deck * 110 + o.tags * 60;
+  const input = (assigns + audits) * read;
+  const output = assigns * 1_000 + o.cards * 70 + audits * 1_500;
+  return costOf(model, { input, output });
+}
 
 export function requestsFor(mode: Mode, cards: number, tags: number, audit: boolean): number {
   const size = BATCHES[mode];
