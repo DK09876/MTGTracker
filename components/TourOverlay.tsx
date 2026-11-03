@@ -72,8 +72,10 @@ export default function TourOverlay() {
       if (cancelled) return;
       target.current = el;
       // At once rather than smoothly, so the card is placed where the part ends up.
-      // A part taller than most of the screen is shown from its top.
-      el?.scrollIntoView({ block: el.getBoundingClientRect().height > window.innerHeight * 0.6 ? 'start' : 'center', behavior: 'instant' });
+      // A part taller than most of the screen is shown from its top; so is
+      // every part on a phone, where the card covers the bottom of the screen.
+      const tall = el && el.getBoundingClientRect().height > window.innerHeight * 0.6;
+      el?.scrollIntoView({ block: tall || window.innerWidth < 640 ? 'start' : 'center', behavior: 'instant' });
       await sleep(el ? 200 : 0);
       if (cancelled) return;
       setBox(el ? el.getBoundingClientRect() : null);
