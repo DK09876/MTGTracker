@@ -15,6 +15,7 @@ import type { JsonRequest } from './ai';
 import type { Effort } from './models';
 
 type Params = Parameters<Anthropic['beta']['messages']['stream']>[0];
+export type ClaudeParams = Params;
 
 /** The part of the SDK client used here, so tests can pass their own. */
 export interface ClaudeClient {
@@ -27,7 +28,7 @@ export interface ClaudeClient {
  * rules questions as "reasoning_extraction" (2026-10-30); the fallback
  * answers them. The reply says which model did, and is priced as that one.
  */
-const FALLBACKS = (): Pick<Params, 'fallbacks' | 'betas'> => ({ fallbacks: 'default', betas: ['server-side-fallback-2026-07-01'] });
+export const FALLBACKS = (): Pick<Params, 'fallbacks' | 'betas'> => ({ fallbacks: 'default', betas: ['server-side-fallback-2026-07-01'] });
 
 let client: Anthropic | null = null;
 
@@ -115,7 +116,7 @@ export class ClaudeFailure extends Error {
   }
 }
 
-const usageOf = (m: Anthropic.Beta.BetaMessage): ClaudeAnswer['usage'] => ({
+export const usageOf = (m: Anthropic.Beta.BetaMessage): ClaudeAnswer['usage'] => ({
   input: m.usage.input_tokens ?? 0,
   output: m.usage.output_tokens ?? 0,
   cacheRead: m.usage.cache_read_input_tokens ?? 0,

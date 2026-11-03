@@ -19,7 +19,7 @@
  */
 
 import { oracleTextOf, typeLineOf, manaCostOf, type ScryfallCard } from './scryfall';
-import { TAG_KINDS, type Tag, type TagKind } from './tags';
+import { OLD_KINDS, TAG_KINDS, type Tag, type TagKind } from './tags';
 
 export interface DeckCard {
   key: string;
@@ -109,22 +109,21 @@ Work carefully:
 4. Design the tags.
 
 The tag set should:
-- Cover the functional roles every Commander deck is judged by, as the deck
-  actually uses them: ramp, card advantage, targeted removal, board wipes,
-  protection, recursion, tutors, and lands that do more than make mana.
-  Split a role when the deck has enough of it for the split to matter
-  (e.g. creature removal vs. removal of artifacts and enchantments; mana
-  rocks vs. land ramp) or when the owner asks.
+- Leave out the jobs every Commander deck is judged by - ramp, card
+  draw, targeted removal, board wipes, counterspells, protection, recursion,
+  tutors. The app tags those by itself from Scryfall. Only make a tag for
+  one when this deck uses it in its own way (e.g. "Treasure makers" that
+  are ramp and also fuel the commander) or when the owner asks.
 - Name the deck's own plan and synergies, in this deck's terms: the enablers
   and the payoffs of each engine ("Sacrifice outlets", "Death-trigger
   payoffs", "Token makers", "Spells-cast triggers"), and the win conditions.
 - Follow the owner's brief and instructions above all. When they name a part
   of the deck they want to work a certain way, give that part its own tags.
-- Leave nothing out: every nonland card should fit at least one tag. A
-  card that fits none is a sign a tag is missing.
+- Cover the cards that make the plan work. A card that only does a basic
+  job (a Signet, a plain removal spell) needs no tag of its own.
 - Avoid tags that would hold one card, unless it is a win condition or the
   owner asked for it, and avoid tags so broad they hold most of the deck.
-- Aim for roughly 12 to 25 tags. More is fine for a complex deck.
+- Aim for roughly 6 to 15 tags. More is fine for a complex deck.
 - Not repeat a tag the owner already has, or suggest again one they turned
   down, under the same or a different name.
 
@@ -133,9 +132,9 @@ For each tag give:
 - description: the test for membership, 1-3 sentences. Say what a card must
   do to belong, and name the edge cases: what does NOT count ("one-shot
   sacrifices from an enters trigger do not count - only repeatable outlets").
-- kind: role (a job every deck needs), plan (how this deck develops and
-  wins), synergy (an engine's enablers or payoffs), wincon (a way the game
-  ends), or utility (lands and anything else).
+- kind: wincon (actually ends the game), engine (keeps making value every
+  turn), payoff (rewards the deck for doing its thing), enabler (makes the
+  deck's thing happen), or other.
 - examples: the names of cards in this deck that belong, exactly as listed.
   Up to 8, the clearest ones first.
 
@@ -207,7 +206,7 @@ export function parseProposals(body: unknown, deck: DeckCard[], existing: Tag[])
     const name = typeof t.name === 'string' ? t.name.trim().slice(0, 60) : '';
     if (!name || taken.has(norm(name))) continue;
     taken.add(norm(name));
-    const kind = typeof t.kind === 'string' && t.kind in TAG_KINDS ? (t.kind as TagKind) : null;
+    const kind = typeof t.kind === 'string' ? (t.kind in TAG_KINDS ? (t.kind as TagKind) : OLD_KINDS[t.kind] ?? null) : null;
     const examples = (Array.isArray(t.examples) ? t.examples : [])
       .map((e) => (typeof e === 'string' ? names.get(norm(e)) : undefined))
       .filter((e): e is string => !!e);
@@ -507,15 +506,37 @@ which are the finish, and which are interaction or support.
 If the owner already wrote something, keep what they meant and build on it;
 it outranks your own reading.`;
 
-export type BriefInput = DeckContext;
+/**
+ * scratch: read the cards alone, ignoring what the owner wrote.
+ * build: keep the owner's words and fill in what is missing.
+ * check: hold the owner's brief up against the cards and say where they
+ * disagree, changing the brief as little as possible.
+ */
+export type BriefMode = 'scratch' | 'build' | 'check';
+
+export const BRIEF_CHECK = `\
+
+This time the owner wants their brief checked, not rewritten. Still work
+out how the deck really wins (winConditions). In "missing", say plainly
+where the brief and the cards disagree: plans the brief counts on that the
+cards do not support, plans the cards support that the brief leaves out,
+and cards that fit neither - or, if they agree, what the deck still needs.
+In "brief", return the owner's brief with the fewest changes that make it
+true to the cards.`;
+
+export type BriefInput = DeckContext & { mode?: BriefMode };
 
 export function briefMessage(input: BriefInput): string {
+  const mode = input.mode ?? 'build';
+  const owner = input.brief.trim();
   return [
     commanderBlock(input.commander),
     '',
-    input.brief.trim()
-      ? `What the owner has written so far (keep their intent):\n"""\n${input.brief.trim()}\n"""`
-      : 'The owner has not written anything yet.',
+    mode === 'scratch' || !owner
+      ? 'Read the deck fresh: the owner has not written anything you need to keep.'
+      : mode === 'check'
+        ? `The owner's brief, to check against the cards:\n"""\n${owner}\n"""`
+        : `What the owner has written so far (keep their intent):\n"""\n${owner}\n"""`,
     '',
     `The deck - ${input.cards.reduce((n, c) => n + c.quantity, 0)} cards:`,
     ...input.cards.map((c) => describeCard(c, c.key)),

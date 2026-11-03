@@ -13,11 +13,13 @@
  * a model out of requests for the day is passed over at once.
  */
 
+import type Anthropic from '@anthropic-ai/sdk';
+
 import {
-  getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  aiCalls, getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
   setSetting, spendSince,
 } from './db';
-import { callClaude, claudeClient, ClaudeFailure, type ClaudeClient } from './ai-claude';
+import { callClaude, claudeClient, ClaudeFailure, usageOf, type ClaudeClient, type ClaudeParams } from './ai-claude';
 import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
 import {
   costOf, DEFAULT_MODELS, EFFORTS, ENV_KEY, FALLBACK_MODEL, FEATURES, FREE_DEFAULT_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf,
@@ -138,16 +140,38 @@ export function currentBudget(profile: string | null, feature: Feature = 'taggin
 // --- the models each profile uses ------------------------------------------------
 
 const modelKey = (profile: string | null, feature: Feature) => `ai.model.${profile ?? '-'}.${feature}`;
+const appModelKey = (feature: Feature) => `ai.model.app.${feature}`;
+
+/** Set the app's model for features (admins): what profiles use unless they pick their own. */
+export function chooseAppModel(id: string, features: Feature[]): void {
+  if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
+  if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
+  for (const f of features) if (FEATURES.includes(f)) setSetting(appModelKey(f), id);
+}
+
+/** The app's model for each feature, before any profile's own choice. */
+export function appModels(): Record<Feature, string> {
+  return Object.fromEntries(FEATURES.map((f) => [f, appModelFor(f)])) as Record<Feature, string>;
+}
 const EFFORT_KEY = (profile: string | null) => `ai.effort.${profile ?? '-'}`;
 const CAP_KEYS: Record<keyof Caps, string> = { daily: 'ai.cap.daily', perProfile: 'ai.cap.profile' };
 
+const usable = (id: string | null): id is string => !!id && !!modelInfo(id) && !modelInfo(id)?.helper && hasKey(id);
+
 /**
- * The model a profile uses for a feature: its own choice, or the default -
- * only one whose provider has a key - or else GPT-OSS, or else Flash-Lite.
+ * The model a profile uses for a feature: its own choice, the app's, or the
+ * default - only one whose provider has a key - or else GPT-OSS, or else
+ * Flash-Lite.
  */
 export function modelFor(profile: string | null, feature: Feature): string {
-  const id = getSetting(modelKey(profile, feature));
-  if (id && modelInfo(id) && !modelInfo(id)?.helper && hasKey(id)) return id;
+  const own = getSetting(modelKey(profile, feature));
+  return usable(own) ? own : appModelFor(feature);
+}
+
+/** The app's model for a feature: an admin's choice, else the default. */
+export function appModelFor(feature: Feature): string {
+  const app = getSetting(appModelKey(feature));
+  if (usable(app)) return app;
   if (hasKey(DEFAULT_MODELS[feature])) return DEFAULT_MODELS[feature];
   return hasKey(FREE_DEFAULT_MODEL) ? FREE_DEFAULT_MODEL : FALLBACK_MODEL;
 }
@@ -284,6 +308,44 @@ export function claudeModel(id: string, charge: Charge, client: () => ClaudeClie
         options.onOutcome?.(id, false, f.message);
       }
       throw new ModelError(f.message, f.kind);
+    }
+  };
+}
+
+/**
+ * A Claude call the caller builds itself - a conversation with tools, where
+ * the caller runs the loop - checked against the daily caps first, and
+ * logged and charged like every other call.
+ */
+export function claudeCall(id: string, charge: Charge, client: () => ClaudeClient = claudeClient, now = () => new Date()) {
+  return async (params: ClaudeParams, step: string): Promise<Anthropic.Beta.BetaMessage> => {
+    const over = overBudget(currentSpend(charge.profile, now()));
+    const base = { profileId: charge.profile ?? '-', feature: charge.feature, label: charge.label ?? '', step, model: id };
+    if (over) {
+      recordAiCall({ ...base, answeredBy: '', inputTokens: 0, outputTokens: 0, cost: 0, outcome: 'blocked', detail: 'over the daily cap' });
+      throw new ModelError(over, 'quota');
+    }
+    const day = quotaDay(now());
+    try {
+      const message = await client().beta.messages.stream({ ...params, model: id }).finalMessage();
+      const usage = usageOf(message);
+      const answeredBy = message.model;
+      const cost = Math.max(costOf(id, usage), costOf(answeredBy ?? id, usage));
+      recordModelCall(day, id);
+      recordModelTokens(day, id, usage.input + usage.output + usage.cacheRead + usage.cacheWrite);
+      recordSpend({ day, profileId: charge.profile ?? '-', model: id, feature: charge.feature, inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, cost });
+      recordAiCall({
+        ...base, answeredBy: answeredBy && answeredBy !== id ? answeredBy : '',
+        inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output, cost,
+        outcome: message.stop_reason === 'refusal' ? 'declined' : 'ok', detail: '',
+      });
+      recordModelHealth(id, true, 'answered');
+      return message;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Claude failed';
+      recordAiCall({ ...base, answeredBy: '', inputTokens: 0, outputTokens: 0, cost: 0, outcome: 'failed', detail: message });
+      recordModelHealth(id, false, message);
+      throw new ModelError(message, 'other');
     }
   };
 }
@@ -587,6 +649,10 @@ export interface AiState {
   models: ModelStatus[];
   effort: Effort;
   spend: SpendSummary;
+  /** The app's model for each step, before any profile's own choice. */
+  app: Record<Feature, string>;
+  /** What one request has cost on each step, on average, over the last 30 days. */
+  costPerRequest: Partial<Record<Feature, number>>;
 }
 
 export function aiState(profile: string | null): AiState {
@@ -607,7 +673,15 @@ export function aiState(profile: string | null): AiState {
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
-  return { models, effort: effortFor(profile), spend };
+  // Per step, from the usage trail; tag cards were logged as tagging before they had their own step.
+  const calls = aiCalls(new Date(Date.now() - 30 * 86400_000).toISOString(), 5000).filter((c) => c.outcome === 'ok' && c.cost > 0);
+  const stepOf = (c: { feature: string; step: string }): string => (c.feature === 'tagging' && /tag cards|check the tags/.test(c.step) ? 'tagcards' : c.feature);
+  const costPerRequest: Partial<Record<Feature, number>> = {};
+  for (const f of FEATURES) {
+    const mine = calls.filter((c) => stepOf(c) === f);
+    if (mine.length) costPerRequest[f] = mine.reduce((n, c) => n + c.cost, 0) / mine.length;
+  }
+  return { models, effort: effortFor(profile), spend, app: appModels(), costPerRequest };
 }
 
 /** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */

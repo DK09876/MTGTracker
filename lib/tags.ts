@@ -11,7 +11,7 @@ import type { ScryfallCard } from './scryfall';
 
 /** proposed: suggested by the model, not yet reviewed. rejected: kept so it is not suggested again. */
 export type TagStatus = 'proposed' | 'accepted' | 'rejected';
-export type TagKind = 'role' | 'plan' | 'synergy' | 'wincon' | 'utility';
+export type TagKind = 'wincon' | 'engine' | 'payoff' | 'enabler' | 'other';
 
 export interface Tag {
   id: string;
@@ -49,13 +49,26 @@ export interface DeckTags {
   cardTags: CardTag[];
 }
 
+// What a tag is for in this deck. The jobs every deck needs - ramp, draw,
+// removal - are not kinds: they come from Scryfall automatically (roles.ts).
 export const TAG_KINDS: Record<TagKind, string> = {
-  role: 'Role',
-  plan: 'Game plan',
-  synergy: 'Synergy',
   wincon: 'Win condition',
-  utility: 'Utility',
+  engine: 'Engine',
+  payoff: 'Payoff',
+  enabler: 'Enabler',
+  other: 'Other',
 };
+
+export const TAG_KIND_HINTS: Record<TagKind, string> = {
+  wincon: 'Actually ends the game',
+  engine: 'Keeps making value every turn',
+  payoff: "Rewards you for doing the deck's thing",
+  enabler: "Makes the deck's thing happen",
+  other: 'Anything else you want to group',
+};
+
+/** Kinds from before 2026-11 mapped onto the current ones. */
+export const OLD_KINDS: Record<string, TagKind> = { role: 'other', plan: 'enabler', synergy: 'payoff', utility: 'other' };
 
 // Distinct on the dark surface, and each readable as text on a 15% tint of itself.
 export const TAG_COLORS = [

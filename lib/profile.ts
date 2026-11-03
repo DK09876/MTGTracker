@@ -18,6 +18,11 @@ const KEY = 'mtg-profile';
 export interface Profile {
   id: string;
   name: string;
+  /** Set on the list the server gives: whether using it needs signing in. */
+  isAdmin?: boolean;
+  hasPassword?: boolean;
+  /** The favourite commander's art: the profile picture. */
+  art?: string | null;
 }
 
 const listeners = new Set<() => void>();

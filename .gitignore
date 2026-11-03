@@ -9,3 +9,5 @@ data
 public/tesseract
 *.traineddata
 scripts/rules-eval/results-*.json
+scripts/role-eval/.cache.json
+scripts/role-eval/ours.json

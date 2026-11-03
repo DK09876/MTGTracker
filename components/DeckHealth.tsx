@@ -20,7 +20,7 @@ import { geek, seenBy } from '@/lib/geek';
 import type { Warning } from '@/lib/health';
 import { atLeast } from '@/lib/odds';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
-import type { RoleCount } from '@/lib/roles';
+import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
 
 // Series colour: the app's gold, stepped down into the band that reads on
 // the dark surface (validated: lightness band and 3:1 contrast on #1d1a16).
@@ -76,6 +76,8 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
       <Bracket insights={insights} />
 
+      <WinRead insights={insights} />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Cards" value={`${health.size} / 100`} />
         <Stat label="Lands" value={String(health.lands)} />
@@ -118,13 +120,23 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
           <RoleRow label="Lands" count={health.lands} target={landTarget} />
           {roles === 'loading' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">
-              Tagging this deck&apos;s cards with Scryfall… The first time takes a few seconds; after that it is instant.
+              Tagging this deck&apos;s cards with Scryfall… The first time takes up to a minute; after that it is instant.
             </p>
           )}
           {roles === 'failed' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the role tags — try again in a moment.</p>
           )}
-          {Array.isArray(roles) && roles.map((r) => <RoleRow key={r.id} label={r.label} count={r.count} target={r.target} cards={r.cards} />)}
+          {Array.isArray(roles) && (Object.keys(ROLE_GROUPS) as RoleGroup[]).map((g) => {
+            // A role the deck has none of is only worth a row if there is a guideline for it.
+            const rows = roles.filter((r) => r.group === g && (r.count > 0 || r.target));
+            if (!rows.length) return null;
+            return (
+              <div key={g}>
+                <p className="bg-[var(--surface)] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">{ROLE_GROUPS[g]}</p>
+                {rows.map((r) => <RoleRow key={r.id} label={r.label} count={r.count} target={r.target} cards={r.cards} />)}
+              </div>
+            );
+          })}
         </div>
       </Section>
 
@@ -164,6 +176,41 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
 const pct = (p: number) => (p > 0 && p < 0.005 ? '<1%' : p > 0.995 && p < 1 ? '>99%' : `${Math.round(p * 100)}%`);
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+const STRENGTH = { strong: ['Strong', '#7ccf8a'], some: ['Helps close', '#e0b64a'] } as const;
+
+/** How the deck wins, read from its cards without a model: free, and there as soon as the roles are. */
+function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
+  if (insights === 'loading' || insights === 'failed' || !insights.wincons) return null;
+  const { routes, missing } = insights.wincons;
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
+        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
+      </div>
+      {routes.length > 0 && (
+        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {routes.map((r) => (
+            <li key={r.id} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3">
+              <div className="flex justify-between gap-2">
+                <span className="font-semibold">{r.label}</span>
+                <span className="text-xs font-semibold" style={{ color: STRENGTH[r.strength][1] }}>{STRENGTH[r.strength][0]}</span>
+              </div>
+              <p className="text-sm text-[var(--muted)]">{r.how}</p>
+              <p className="text-xs text-[var(--muted)]">{r.cards.slice(0, 6).join(' · ')}{r.cards.length > 6 ? ` · +${r.cards.length - 6} more` : ''}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {missing && (
+        <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm">
+          {routes.length > 0 && <span className="font-semibold text-amber-300">Thin spot: </span>}{missing}
+        </p>
+      )}
+    </section>
+  );
+}
 
 function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
   if (insights === 'loading') {

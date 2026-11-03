@@ -1,14 +1,16 @@
 /**
  * The profiles the app can switch between, and a new one.
  *
- * Unauthenticated and name-only, like LifeOS's: the switcher needs the list
- * before anyone has picked who they are. Anyone who can reach the app can
- * add a profile - it is shared with friends on the tailnet, and a profile
- * is only somewhere to keep lists, not a login.
+ * Unauthenticated, like LifeOS's: the switcher needs the list before anyone
+ * has picked who they are. Anyone who can reach the app can add a profile -
+ * it is shared with friends on the tailnet. A profile with a password (or
+ * an admin's) is then only used signed in; see lib/auth.ts.
  */
 
 import { NextResponse } from 'next/server';
 
+import { everyone } from '@/lib/auth';
+import { getStyle } from '@/lib/profile-style';
 import { createProfile, listProfiles } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -16,7 +18,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    return NextResponse.json({ profiles: listProfiles() });
+    // With who has a password and who is an admin, for the lock on each.
+    return NextResponse.json({ profiles: everyone().map((p) => ({ ...p, art: getStyle(p.id).commander?.art ?? null })) });
   } catch (error) {
     console.error('[profiles] list failed', error);
     return NextResponse.json({ error: 'Could not read profiles' }, { status: 500 });

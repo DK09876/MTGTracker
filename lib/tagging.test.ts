@@ -78,10 +78,10 @@ describe('parseProposals', () => {
     const { overview, tags } = parseProposals({
       overview: 'Aristocrats.',
       tags: [
-        { name: 'Sac Outlets', description: 'Repeatable.', kind: 'synergy', examples: ['viscera seer', 'Blood Artist'] },
-        { name: 'Ramp', description: 'dupe of an owner tag', kind: 'role', examples: [] },
-        { name: 'sac outlets', description: 'dupe of the first', kind: 'synergy', examples: [] },
-        { name: '', description: 'nameless', kind: 'role', examples: [] },
+        { name: 'Sac Outlets', description: 'Repeatable.', kind: 'enabler', examples: ['viscera seer', 'Blood Artist'] },
+        { name: 'Ramp', description: 'dupe of an owner tag', kind: 'other', examples: [] },
+        { name: 'sac outlets', description: 'dupe of the first', kind: 'enabler', examples: [] },
+        { name: '', description: 'nameless', kind: 'other', examples: [] },
         { name: 'Fliers', description: 'x', kind: 'nonsense', examples: ['Delver of Secrets'] },
       ],
     }, deck, [tag('a', 'Ramp')]);
@@ -174,5 +174,15 @@ describe('parseBrief', () => {
     expect(parseBrief({ winConditions: [], missing: 'A finisher: something like Aetherflux Reservoir.', brief: 'Good cards, no plan.' }, deck).missing)
       .toMatch(/finisher/);
     expect(() => parseBrief({ winConditions: [], missing: '', brief: '' }, deck)).toThrow(/no brief/);
+  });
+});
+
+describe('briefMessage modes', () => {
+  const input = { commander: null, cards: [], brief: 'Storm off rituals.' };
+  it('ignores the owner\'s brief from scratch, keeps it to build on, and holds it up to check', async () => {
+    const { briefMessage } = await import('./tagging');
+    expect(briefMessage({ ...input, mode: 'scratch' })).not.toContain('Storm off rituals.');
+    expect(briefMessage({ ...input, mode: 'build' })).toMatch(/keep their intent[\s\S]*Storm off rituals\./);
+    expect(briefMessage({ ...input, mode: 'check' })).toMatch(/to check against the cards[\s\S]*Storm off rituals\./);
   });
 });

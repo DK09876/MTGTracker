@@ -13,8 +13,10 @@
 import { useEffect, useState } from 'react';
 
 import AddProfile from './AddProfile';
+import SignIn from './SignIn';
 import * as api from '@/lib/api';
 import { getProfile, setProfile, useProfile, type Profile } from '@/lib/profile';
+import { useMeState } from '@/lib/use-me';
 
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
   const active = useProfile();
@@ -35,7 +37,12 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not reach the server'));
   }, []);
 
+  const { me, failed } = useMeState();
   if (active === null) return null;
+  // A profile with a password, or an admin, needs this browser signed in;
+  // the page waits for that answer rather than flashing refusals.
+  if (active && !me && !failed) return null;
+  if (active && me?.needsSignIn) return <SignIn me={me} onSwitch={() => setProfile('')} />;
   if (active) return <>{children}</>;
 
   return (
@@ -52,6 +59,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
             className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left hover:border-[var(--accent)]"
           >
             {profile.name}
+            {(profile.hasPassword || profile.isAdmin) && <span className="ml-2 text-xs text-[var(--muted)]">{profile.isAdmin ? 'admin · ' : ''}password</span>}
           </button>
         ))}
       </div>

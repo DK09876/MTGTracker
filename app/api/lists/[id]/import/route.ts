@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { getList } from '@/lib/db';
 import { importInto, replaceWith } from '@/lib/import-into';
 import { requireList } from '@/lib/profile-route';
+import { warmRoles } from '@/lib/role-warmup';
 import { ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -31,6 +32,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const imported = await importInto(owned.list, body.decklist);
+    warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
@@ -55,6 +57,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!result.applied) {
       return NextResponse.json({ error: 'Some lines could not be found, so nothing was changed', imported: result }, { status: 422 });
     }
+    warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported: result });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });

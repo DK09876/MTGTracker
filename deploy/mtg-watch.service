@@ -1,0 +1,8 @@
+[Unit]
+Description=Check MTG Tracker answers
+
+[Service]
+Type=oneshot
+User=admin
+WorkingDirectory=/home/admin/development/MTGTracker
+ExecStart=/home/admin/development/MTGTracker/scripts/watch.sh

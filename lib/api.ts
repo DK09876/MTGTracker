@@ -30,10 +30,20 @@ import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
 import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
+import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
-import type { DraftedBrief } from './tagging';
+import type { BuildPlan } from './build';
+import type { CardDataStatus } from './card-store';
+import type { DeckChat } from './deck-chat';
+import type { FavouriteCommander, ProfileStyle } from './profile-style';
+import type { ThemeId } from './themes';
+import type { GapCard } from './gap-cards';
+import type { CheckRun } from './checks';
+import type { AppError } from './errors';
+import type { Job } from './jobs';
+import type { CardChange, DeckRead, ReadChange, ReadMode } from './reads';
 import type { AiState } from './ai';
 import type { AiCall } from './db';
 import type { Effort, Feature } from './models';
@@ -212,7 +222,7 @@ export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const fetchList = (id: string) =>
-  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[] }>);
+  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[]; public?: boolean }>);
 
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
@@ -267,6 +277,59 @@ export const removeCard = (listId: string, cardId: string) =>
 export const fetchProfiles = () =>
   fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
 
+// --- signing in and admins -------------------------------------------------
+
+export interface Me {
+  id: string;
+  name: string;
+  isAdmin: boolean;
+  hasPassword: boolean;
+  signedIn: boolean;
+  needsSignIn: boolean;
+  /** An admin with no password yet: their first sign-in sets one. */
+  setsPassword: boolean;
+}
+/** Told when sign-in changes, so everything that shows admin parts looks again. */
+export const ME_CHANGED = 'mtg-me-changed';
+const meChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(ME_CHANGED)); };
+export const me = (profile: string) => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>);
+export const signIn = (profile: string, password: string) =>
+  fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, password }) })
+    .then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
+export const signOut = () => fetch(`${BASE}/api/auth/logout`, { method: 'POST' }).then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
+export const changePassword = (current: string, next: string) =>
+  send('auth/password', 'POST', { current, next }).then(json<{ access: Me }>).then((r) => { meChanged(); return r; });
+export interface Person { id: string; name: string; isAdmin: boolean; hasPassword: boolean; lists: number }
+export const people = () => fetch(url('admin/people')).then(json<{ people: Person[] }>);
+export const changePerson = (id: string, action: 'admin' | 'unadmin' | 'reset' | 'remove') =>
+  send('admin/people', 'POST', { id, action }).then(json<{ people: Person[] }>);
+
+// --- profiles, people and looks -------------------------------------------------
+
+/** Told when the profile's look changes, so the theme is put on again. */
+export const STYLE_CHANGED = 'mtg-style-changed';
+export interface StyleAnswer { style: ProfileStyle; vars: Record<string, string> }
+export const profileStyle = () => fetch(url('profile-style')).then(json<StyleAnswer>);
+export const setProfileStyle = (change: { theme?: ThemeId; motion?: boolean; commanderId?: string | null; featuredDeck?: string | null }) =>
+  send('profile-style', 'PUT', change).then(json<StyleAnswer>).then((r) => { window.dispatchEvent(new Event(STYLE_CHANGED)); return r; });
+export interface PersonCard { id: string; name: string; isAdmin: boolean; art: string | null; commander: string | null; publicDecks: number }
+export const peopleList = () => fetch(url('people')).then(json<{ people: PersonCard[] }>);
+export interface ShownDeck { id: string; name: string; public: boolean; commander: string | null; identity: string[]; image: string | null; art: string | null; cards: number }
+export interface PersonPage {
+  person: { id: string; name: string; isAdmin: boolean };
+  self: boolean;
+  commander: FavouriteCommander | null;
+  featured: ShownDeck | null;
+  decks: ShownDeck[];
+  hidden: number;
+}
+export const personPage = (id: string) => fetch(url(`people/${encodeURIComponent(id)}`)).then(json<PersonPage>);
+export const personDeck = (id: string, listId: string) =>
+  fetch(url(`people/${encodeURIComponent(id)}/decks/${encodeURIComponent(listId)}`)).then(json<{ list: List; cards: ListedCard[] }>);
+export const setDeckPublic = (listId: string, value: boolean) =>
+  fetch(url(`lists/${listId}`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: value }) })
+    .then(json<{ list: List; public: boolean }>);
+
 export const createProfile = (name: string) =>
   fetch(url('profiles'), {
     method: 'POST',
@@ -300,6 +363,8 @@ export interface DeckInsights {
     }>;
   } | null;
   cuts: CutGroup[];
+  /** How it wins, guessed from the cards alone; null when the roles could not be read. */
+  wincons: WinGuess | null;
   /** Parts that could not be worked out just now: 'bracket', 'combos'. */
   unavailable: string[];
 }
@@ -313,9 +378,59 @@ const send = (path: string, method: string, body: object) =>
 
 export const deckTags = (listId: string) => fetch(url(`lists/${listId}/tags`)).then(json<DeckTags>);
 
-/** The model's draft of the brief: how the deck wins, what it lacks, and the brief itself. Not saved. */
-export const draftTagBrief = (listId: string) =>
-  spending(send(`lists/${listId}/tags/brief`, 'POST', {}).then(json<DraftedBrief & { model: string }>));
+// --- background jobs, errors and deck reads ---------------------------------
+
+/** Told when a background job starts, so the header's jobs menu looks at once. */
+export const JOBS_CHANGED = 'mtg-jobs-changed';
+export const jobsChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED)); };
+
+export type JobSummary = Omit<Job, 'result'>;
+export const jobs = () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>);
+
+/** Told when errors may have been acknowledged, so the banner looks again. */
+export const ERRORS_CHANGED = 'mtg-errors-changed';
+export const errors = (all = false) => fetch(url(`errors${all ? '?all=1' : ''}`)).then(json<{ errors: AppError[] }>);
+export const acknowledgeError = (id?: string) =>
+  send('errors', 'POST', id ? { id } : {}).then(json<{ acknowledged: number }>).finally(() => window.dispatchEvent(new Event(ERRORS_CHANGED)));
+
+export const checks = () => fetch(url('checks')).then(json<{ run: CheckRun | null }>);
+export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: CheckRun }>).finally(() => window.dispatchEvent(new Event(ERRORS_CHANGED)));
+
+export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDataStatus }>);
+export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
+
+export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
+export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
+  fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
+    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }>);
+
+export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
+export const deckChats = (listId: string) => fetch(url(`lists/${listId}/chats`)).then(json<{ chats: ChatSummary[] }>);
+export const deckChat = (listId: string, chatId: string) =>
+  fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
+export const askDeck = (listId: string, text: string, chatId?: string) =>
+  send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+export const markChange = (listId: string, chatId: string, message: number, change: number) =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
+export const forgetChat = (listId: string, chatId: string) =>
+  fetch(url(`lists/${listId}/chats/${chatId}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+
+export interface SavedRead extends DeckRead {
+  since: CardChange;
+  against: ReadChange | null;
+}
+export interface DeckReads {
+  draft: DeckRead | null;
+  saved: SavedRead[];
+  /** The read job, while it runs or if the last one failed. */
+  job: Job | null;
+}
+export const deckReads = (listId: string) => fetch(url(`lists/${listId}/reads`)).then(json<DeckReads>);
+export const startRead = (listId: string, mode: ReadMode) =>
+  send(`lists/${listId}/reads`, 'POST', { mode }).then(json<{ job: Job }>).finally(jobsChanged);
+export const keepRead = (listId: string, id: string, saved: boolean) => send(`lists/${listId}/reads`, 'PATCH', { id, saved }).then(json<{ ok: true }>);
+export const dropRead = (listId: string, id: string) =>
+  fetch(url(`lists/${listId}/reads?read=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const setTagBrief = (listId: string, brief: string) =>
   send(`lists/${listId}/tags`, 'PUT', { brief }).then(json<DeckTags>);
@@ -457,6 +572,8 @@ const changed = (state: AiState) => {
 };
 
 export const aiState = () => fetch(url('ai/models')).then(json<AiState>);
+/** Admins: the model each step uses unless a profile picks its own. */
+export const setAppModels = (app: Partial<Record<Feature, string>>) => send('ai/models', 'PUT', { app }).then(json<AiState>).then(changed);
 export const chooseModel = (model: string, features: Feature[]) =>
   send('ai/models', 'PUT', { model, features }).then(json<AiState>).then(changed);
 export const chooseEffort = (effort: Effort) => send('ai/models', 'PUT', { effort }).then(json<AiState>).then(changed);

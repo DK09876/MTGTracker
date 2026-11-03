@@ -10,7 +10,9 @@ import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
+import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
@@ -39,7 +41,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'cards' | 'tags' | 'health' | 'suggestions' | 'collection'>('cards');
+  const [section, setSection] = useState<'build' | DeckTab>('cards');
   const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -49,11 +51,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Whether others can see this deck on the owner's profile; private until made public.
+  const [shown, setShown] = useState(false);
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
     setList(data.list);
     setCards(data.cards);
     setDraftName(data.list.name);
+    setShown(!!data.public);
   }, [id]);
 
   // Fetched on mount, with a guard so a slow response cannot write into a
@@ -67,6 +72,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setList(data.list);
         setCards(data.cards);
         setDraftName(data.list.name);
+        setShown(!!data.public);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load that list');
       } finally {
@@ -225,6 +231,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
               {maybe > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{maybe} maybe</span>}
               {side > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{side} sideboard</span>}
+              {deck && shown && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">Public</span>}
             </p>
           </div>
 
@@ -237,6 +244,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
+                ...(deck ? [{
+                  label: shown ? 'Make private' : 'Show on my profile',
+                  onClick: async () => { setShown((await api.setDeckPublic(id, !shown)).public); },
+                }] : []),
                 {
                   label: `Delete ${deck ? 'deck' : 'list'}…`,
                   danger: true,
@@ -335,7 +346,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
       {deck && (
         <div className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -349,7 +360,23 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       )}
 
-      {deck && section === 'tags' ? (
+      {deck && section === 'build' ? (
+        <DeckBuild
+          listId={id}
+          cards={cards}
+          commander={list.commander?.name ?? null}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+        />
+      ) : deck && section === 'chat' ? (
+        <DeckChat
+          listId={id}
+          cards={cards}
+          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onRemove={(cardId) => changeQuantity(cardId, 0)}
+        />
+      ) : deck && section === 'tags' ? (
         <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
       ) : deck && section === 'collection' ? (
         <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />

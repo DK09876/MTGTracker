@@ -19,11 +19,22 @@ export type Provider = 'anthropic' | 'gemini' | 'mistral' | 'groq';
 
 /**
  * What a model is used for. Rules and tagging share the header's picker (the
- * thinking model); search is chosen in Settings. Kept apart so any of them
- * can get its own choice later without moving data around.
+ * thinking model); the rest are set for the whole app by an admin in
+ * Settings. tagging is reading the deck (the brief, suggesting tags);
+ * tagcards is putting tags on cards and checking them - many small guided
+ * calls, so a cheaper model does.
  */
-export type Feature = 'rules' | 'tagging' | 'search';
-export const FEATURES: Feature[] = ['rules', 'tagging', 'search'];
+export type Feature = 'rules' | 'tagging' | 'tagcards' | 'chat' | 'search';
+export const FEATURES: Feature[] = ['rules', 'tagging', 'tagcards', 'chat', 'search'];
+
+/** Each feature in words, for Settings. */
+export const FEATURE_INFO: Record<Feature, { label: string; why: string }> = {
+  rules: { label: 'Rules answers', why: 'Hard reasoning; mistakes cost games' },
+  tagging: { label: 'Reading a deck', why: 'Drafting the brief and suggesting tags' },
+  tagcards: { label: 'Tagging cards', why: 'Many small guided calls, and the double-check' },
+  chat: { label: 'Deck chat', why: 'Conversation, with look-ups' },
+  search: { label: 'Search', why: 'Turns words into a Scryfall query' },
+};
 
 /** How hard a Claude model thinks (its effort level). */
 export type Effort = 'low' | 'medium' | 'high';
@@ -106,6 +117,8 @@ export const MODELS: ModelInfo[] = [
 export const DEFAULT_MODELS: Record<Feature, string> = {
   rules: 'claude-opus-5-5',
   tagging: 'claude-opus-5-5',
+  tagcards: 'claude-sonnet-5-5',
+  chat: 'claude-sonnet-5-5',
   search: 'claude-haiku-5-5',
 };
 export const FREE_DEFAULT_MODEL = 'openai/gpt-oss-120b';

@@ -266,6 +266,11 @@ function open(): Database {
       PRIMARY KEY (profileId, text)
     );
   `);
+  // Tag kinds were role/plan/synergy/wincon/utility until 2026-11; the jobs
+  // every deck needs are automatic now, so the kinds describe the deck's plan.
+  db.run(`UPDATE deck_tags SET kind = CASE kind WHEN 'role' THEN 'other' WHEN 'plan' THEN 'enabler'
+    WHEN 'synergy' THEN 'payoff' WHEN 'utility' THEN 'other' ELSE kind END
+    WHERE kind IN ('role', 'plan', 'synergy', 'utility')`);
   // The latest tagging job on each deck - see tag-jobs.ts.
   db.run(`CREATE TABLE IF NOT EXISTS tag_jobs (listId TEXT PRIMARY KEY, job TEXT NOT NULL, updatedAt TEXT NOT NULL)`);
   // What the owner wants the deck to do, and the model's reading of it.
