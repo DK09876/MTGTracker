@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
 import RulesAnswer from '@/components/RulesAnswer';
-import ModelLine from '@/components/ModelLine';
+import AiModeSwitch from '@/components/AiModeSwitch';
 import { useSetting } from '@/lib/ai-settings';
 import * as api from '@/lib/api';
 import type { RulesThread, RulesThreadSummary } from '@/lib/db';
@@ -253,6 +253,7 @@ export default function RulesPage() {
     <div className="mx-auto w-full max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="font-display text-3xl font-extrabold">Rules</h1>
+        <AiModeSwitch area="rules" className="ml-auto" />
         {thread && <button onClick={() => open(null)} className={`${button} lg:hidden`}>New question</button>}
       </div>
       {!thread && (
@@ -275,7 +276,6 @@ export default function RulesPage() {
               </span>
             </span>
           </label>
-          <ModelLine feature="rules" />
         </div>
       </details>
 

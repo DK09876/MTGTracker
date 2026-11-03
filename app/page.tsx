@@ -6,6 +6,7 @@ import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import FollowUp from '@/components/FollowUp';
+import AiModeSwitch from '@/components/AiModeSwitch';
 import Interpreted from '@/components/Interpreted';
 import Results from '@/components/Results';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -396,6 +397,7 @@ export default function SearchPage() {
       <HistoryPanel label="Search history" newLabel="New search" onNew={newSearch} entries={history} active={activeEntry} {...historyActions} />
       {/* A commander search takes on the commander's colours. */}
       <div className="min-w-0" style={answer?.interpretation.commander ? identityStyle(answer.interpretation.commander.identity) : undefined}>
+      <AiModeSwitch area="search" className="mb-3 justify-end" />
       <SearchBox
         value={query}
         onChange={setQuery}
