@@ -37,6 +37,8 @@ import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
 import type { DeckChat } from './deck-chat';
+import type { FavouriteCommander, ProfileStyle } from './profile-style';
+import type { ThemeId } from './themes';
 import type { GapCard } from './gap-cards';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
@@ -220,7 +222,7 @@ export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const fetchList = (id: string) =>
-  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[] }>);
+  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[]; public?: boolean }>);
 
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
@@ -301,6 +303,32 @@ export interface Person { id: string; name: string; isAdmin: boolean; hasPasswor
 export const people = () => fetch(url('admin/people')).then(json<{ people: Person[] }>);
 export const changePerson = (id: string, action: 'admin' | 'unadmin' | 'reset' | 'remove') =>
   send('admin/people', 'POST', { id, action }).then(json<{ people: Person[] }>);
+
+// --- profiles, people and looks -------------------------------------------------
+
+/** Told when the profile's look changes, so the theme is put on again. */
+export const STYLE_CHANGED = 'mtg-style-changed';
+export interface StyleAnswer { style: ProfileStyle; vars: Record<string, string> }
+export const profileStyle = () => fetch(url('profile-style')).then(json<StyleAnswer>);
+export const setProfileStyle = (change: { theme?: ThemeId; motion?: boolean; commanderId?: string | null; featuredDeck?: string | null }) =>
+  send('profile-style', 'PUT', change).then(json<StyleAnswer>).then((r) => { window.dispatchEvent(new Event(STYLE_CHANGED)); return r; });
+export interface PersonCard { id: string; name: string; isAdmin: boolean; art: string | null; commander: string | null; publicDecks: number }
+export const peopleList = () => fetch(url('people')).then(json<{ people: PersonCard[] }>);
+export interface ShownDeck { id: string; name: string; public: boolean; commander: string | null; identity: string[]; image: string | null; art: string | null; cards: number }
+export interface PersonPage {
+  person: { id: string; name: string; isAdmin: boolean };
+  self: boolean;
+  commander: FavouriteCommander | null;
+  featured: ShownDeck | null;
+  decks: ShownDeck[];
+  hidden: number;
+}
+export const personPage = (id: string) => fetch(url(`people/${encodeURIComponent(id)}`)).then(json<PersonPage>);
+export const personDeck = (id: string, listId: string) =>
+  fetch(url(`people/${encodeURIComponent(id)}/decks/${encodeURIComponent(listId)}`)).then(json<{ list: List; cards: ListedCard[] }>);
+export const setDeckPublic = (listId: string, value: boolean) =>
+  fetch(url(`lists/${listId}`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: value }) })
+    .then(json<{ list: List; public: boolean }>);
 
 export const createProfile = (name: string) =>
   fetch(url('profiles'), {

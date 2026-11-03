@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 
 import { everyone } from '@/lib/auth';
+import { getStyle } from '@/lib/profile-style';
 import { createProfile, listProfiles } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -18,7 +19,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     // With who has a password and who is an admin, for the lock on each.
-    return NextResponse.json({ profiles: everyone() });
+    return NextResponse.json({ profiles: everyone().map((p) => ({ ...p, art: getStyle(p.id).commander?.art ?? null })) });
   } catch (error) {
     console.error('[profiles] list failed', error);
     return NextResponse.json({ error: 'Could not read profiles' }, { status: 500 });

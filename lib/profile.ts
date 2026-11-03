@@ -21,6 +21,8 @@ export interface Profile {
   /** Set on the list the server gives: whether using it needs signing in. */
   isAdmin?: boolean;
   hasPassword?: boolean;
+  /** The favourite commander's art: the profile picture. */
+  art?: string | null;
 }
 
 const listeners = new Set<() => void>();

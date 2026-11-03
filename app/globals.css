@@ -22,10 +22,12 @@
 }
 
 html, body {
-  background: var(--background);
   color: var(--foreground);
   -webkit-text-size-adjust: 100%;
 }
+/* The page colour lives on html alone, so the living background can sit
+   between it and the content. */
+html { background: var(--background); }
 
 body {
   font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -69,10 +71,10 @@ body {
     #1a1712;
 }
 .glass {
-  background: rgba(25, 23, 20, 0.55);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--foreground) 8%, transparent);
 }
 
 /* --- Cards that tilt and catch the light (components/Tilt.tsx) ----------- */
@@ -151,3 +153,40 @@ body {
 
 /* A bar that sweeps while work of unknown length runs. */
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+/* The living background: a slow drift of the theme's colours far behind
+   everything. Off when the profile turns it off or the device asks for
+   less motion. */
+.living-bg {
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.14;
+  filter: blur(80px);
+  background:
+    radial-gradient(40% 35% at 20% 25%, var(--c1), transparent 70%),
+    radial-gradient(35% 30% at 80% 30%, var(--c2), transparent 70%),
+    radial-gradient(45% 40% at 50% 85%, var(--c3), transparent 70%);
+  animation: living 28s ease-in-out infinite alternate;
+}
+:root[data-theme="plains"] .living-bg { opacity: 0.22; }
+@keyframes living {
+  from { transform: translate3d(-3%, -2%, 0) scale(1); }
+  to { transform: translate3d(3%, 2%, 0) scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) { .living-bg { animation: none; } }
+
+/* A foil shine across a picture: the profile picture, a featured deck. */
+.foil-shine { position: relative; overflow: hidden; }
+.foil-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.22) 45%, transparent 60%);
+  transform: translateX(-120%);
+  animation: shine 5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes shine { 60%, 100% { transform: translateX(220%); } }
+@media (prefers-reduced-motion: reduce) { .foil-shine::after { animation: none; display: none; } }

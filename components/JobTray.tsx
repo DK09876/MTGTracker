@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import * as api from '@/lib/api';
 import { useProfile } from '@/lib/profile';
+import { useMe } from '@/lib/use-me';
 
 const BUSY_MS = 3_000;
 const IDLE_MS = 30_000;
@@ -25,12 +26,15 @@ const elapsed = (from: string, to: string | null) => {
 
 export default function JobTray() {
   const profile = useProfile();
+  // Not until the profile may be used: a signed-out admin's would be refused.
+  const me = useMe();
+  const ready = !!me && !me.needsSignIn;
   const [jobs, setJobs] = useState<api.JobSummary[]>([]);
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !ready) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     const look = () => {
@@ -46,7 +50,7 @@ export default function JobTray() {
     look();
     window.addEventListener(api.JOBS_CHANGED, look);
     return () => { stopped = true; clearTimeout(timer); window.removeEventListener(api.JOBS_CHANGED, look); };
-  }, [profile]);
+  }, [profile, ready]);
 
   useEffect(() => {
     if (!open) return;
@@ -57,7 +61,7 @@ export default function JobTray() {
     return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape); };
   }, [open]);
 
-  if (!profile || !jobs.length) return null;
+  if (!profile || !ready || !jobs.length) return null;
   const busy = jobs.filter((j) => j.status === 'running').length;
   const failed = jobs.some((j) => j.status === 'failed' || j.status === 'interrupted');
 

@@ -9,9 +9,11 @@
  * nothing of the last profile's is left on screen.
  */
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
 import AddProfile from './AddProfile';
+import Avatar from './Avatar';
 import * as api from '@/lib/api';
 import { setProfile, useProfile, type Profile } from '@/lib/profile';
 
@@ -58,9 +60,7 @@ export default function ProfileSwitcher() {
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
       >
-        <span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-semibold text-[#221c08]">
-          {name.charAt(0).toUpperCase()}
-        </span>
+        <Avatar art={profiles.find((p) => p.id === active)?.art ?? null} name={name} size={20} />
         {/* Just the initial on the narrowest phones; the name is still read out. */}
         <span className="max-w-[8rem] truncate max-[359px]:sr-only">{name}</span>
         <svg width="10" height="6" viewBox="0 0 10 6" aria-hidden className={open ? 'rotate-180' : ''}>
@@ -78,8 +78,13 @@ export default function ProfileSwitcher() {
             >
               <span className="w-3 text-[var(--accent)]">{p.id === active ? '✓' : ''}</span>
               {p.name}
+              {(p.hasPassword || p.isAdmin) && <span className="ml-auto text-[10px] text-[var(--faint)]">{p.isAdmin ? 'admin' : 'password'}</span>}
             </button>
           ))}
+          <div className="mt-1 flex flex-col border-t border-[var(--border)] pt-1 text-sm">
+            <Link href={`/people/${active}`} onClick={() => setOpen(false)} className="px-3 py-2 hover:bg-[var(--surface-hover)]">Your profile</Link>
+            <Link href="/people" onClick={() => setOpen(false)} className="px-3 py-2 hover:bg-[var(--surface-hover)]">People</Link>
+          </div>
           <div className="mt-1 border-t border-[var(--border)] pt-1">
             <AddProfile compact onAdded={(p) => switchTo(p.id)} />
           </div>

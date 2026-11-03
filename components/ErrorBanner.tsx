@@ -13,18 +13,22 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import type { AppError } from '@/lib/errors';
 import { useProfile } from '@/lib/profile';
+import { useMe } from '@/lib/use-me';
 
 const LOOK_MS = 60_000;
 
 export default function ErrorBanner() {
   const profile = useProfile();
+  // Not until the profile may be used: a signed-out admin's would be refused.
+  const me = useMe();
+  const ready = !!me && !me.needsSignIn;
   const [open, setOpen] = useState<AppError[]>([]);
   const [busy, setBusy] = useState(false);
 
   const look = useCallback(() => { api.errors().then((r) => setOpen(r.errors)).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || !ready) return;
     look();
     const timer = setInterval(look, LOOK_MS);
     window.addEventListener(api.ERRORS_CHANGED, look);
@@ -34,9 +38,9 @@ export default function ErrorBanner() {
       window.removeEventListener(api.ERRORS_CHANGED, look);
       window.removeEventListener(api.JOBS_CHANGED, look);
     };
-  }, [profile, look]);
+  }, [profile, look, ready]);
 
-  if (!profile || !open.length) return null;
+  if (!profile || !ready || !open.length) return null;
   const [newest] = open;
 
   const ack = async () => {

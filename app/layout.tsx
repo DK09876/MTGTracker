@@ -10,6 +10,7 @@ import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
 import { SettingsLink, TabBar, TopLinks } from '@/components/Nav';
 import ServiceWorker from '@/components/ServiceWorker';
+import ThemeApplier from '@/components/ThemeApplier';
 
 import './globals.css';
 
@@ -71,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           . Not affiliated with Wizards of the Coast.
         </footer>
         <TabBar />
+        <ThemeApplier />
         <ServiceWorker />
       </body>
     </html>

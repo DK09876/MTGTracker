@@ -51,11 +51,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Whether others can see this deck on the owner's profile; private until made public.
+  const [shown, setShown] = useState(false);
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
     setList(data.list);
     setCards(data.cards);
     setDraftName(data.list.name);
+    setShown(!!data.public);
   }, [id]);
 
   // Fetched on mount, with a guard so a slow response cannot write into a
@@ -69,6 +72,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setList(data.list);
         setCards(data.cards);
         setDraftName(data.list.name);
+        setShown(!!data.public);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load that list');
       } finally {
@@ -227,6 +231,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
               {maybe > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{maybe} maybe</span>}
               {side > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{side} sideboard</span>}
+              {deck && shown && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">Public</span>}
             </p>
           </div>
 
@@ -239,6 +244,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
+                ...(deck ? [{
+                  label: shown ? 'Make private' : 'Show on my profile',
+                  onClick: async () => { setShown((await api.setDeckPublic(id, !shown)).public); },
+                }] : []),
                 {
                   label: `Delete ${deck ? 'deck' : 'list'}…`,
                   danger: true,

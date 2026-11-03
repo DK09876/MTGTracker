@@ -7,6 +7,7 @@ import { NextResponse } from 'next/server';
 
 import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander } from '@/lib/db';
 import { requireList } from '@/lib/profile-route';
+import { isPublic, setPublic } from '@/lib/profile-style';
 import { getCard, ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -17,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const owned = requireList(request, id);
     if (owned instanceof NextResponse) return owned;
-    return NextResponse.json({ list: owned.list, cards: cardsInList(id) });
+    return NextResponse.json({ list: owned.list, cards: cardsInList(id), public: isPublic(id) });
   } catch (error) {
     console.error('[list] read failed', error);
     return NextResponse.json({ error: 'Could not read that list' }, { status: 500 });
@@ -28,7 +29,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let body: { name?: string; note?: string; commanderId?: string | null; fromList?: boolean };
+  let body: { name?: string; note?: string; commanderId?: string | null; fromList?: boolean; public?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -39,6 +40,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   try {
     if (name !== undefined) renameList(id, name, body.note);
+    // Shown to other people on the owner's profile, or not (the default).
+    if (typeof body.public === 'boolean') setPublic(id, body.public);
     // A deck's commander, by Scryfall id; null clears it. `fromList` takes
     // a card already in the deck, moving it out of the 99.
     if (body.commanderId && body.fromList) {
@@ -48,7 +51,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     } else if (body.commanderId !== undefined) {
       setCommander(id, body.commanderId ? await getCard(body.commanderId) : null);
     }
-    return NextResponse.json({ list: getList(id, owned.profile) });
+    return NextResponse.json({ list: getList(id, owned.profile), public: isPublic(id) });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[list] rename failed', error);
