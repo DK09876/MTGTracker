@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import * as api from '@/lib/api';
 import type { AiCall } from '@/lib/db';
 import { dollars } from '@/lib/spend';
-import { shortLabel } from './ModelMenu';
+import { shortLabel } from './AiBits';
 
 const FEATURES = [
   { key: 'all', label: 'All' },

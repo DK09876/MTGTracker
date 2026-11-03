@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import DeckBrief from './DeckBrief';
 import type { Entry } from './DeckCards';
-import ModelLine from './ModelLine';
+import AiModeSwitch from './AiModeSwitch';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { modelLabel, requestsFor, tagRunCost, type Budget, type Mode } from '@/lib/quota';
@@ -160,7 +160,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       </p>
       <BasicRoles listId={listId} />
       {budget && <BudgetLine budget={budget} />}
-      <ModelLine feature="tagging" />
+      <AiModeSwitch area="deck" />
 
       <DeckBrief listId={listId} tags={tags} onTags={onTags} />
 

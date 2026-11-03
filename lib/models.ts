@@ -109,18 +109,34 @@ export const MODELS: ModelInfo[] = [
 ];
 
 /**
- * Claude unless changed: Opus for the thinking work (rules, tagging), Haiku
- * for search, which wants speed and only plans a query. The free models
- * (2026-09) were not good enough at rules or tagging. Without an Anthropic
- * key, GPT-OSS on Groq, which did best of the free ones in a rules bake-off.
+ * Each AI page has a Regular and a Smart mode, chosen per profile and page:
+ * Regular is the cheaper model, Smart the stronger one, thinking harder.
+ * Admins can change which model each mode uses for each step. The free
+ * models (2026-09) were not good enough at rules or tagging; without an
+ * Anthropic key, GPT-OSS on Groq, which did best of them in a rules bake-off.
  */
-export const DEFAULT_MODELS: Record<Feature, string> = {
-  rules: 'claude-opus-5-5',
-  tagging: 'claude-opus-5-5',
-  tagcards: 'claude-sonnet-5-5',
-  chat: 'claude-sonnet-5-5',
-  search: 'claude-haiku-5-5',
+export type AiMode = 'regular' | 'smart';
+export const MODES: AiMode[] = ['regular', 'smart'];
+
+/** The pages with a mode switch, and the steps each one's mode covers. */
+export type AiArea = 'search' | 'rules' | 'deck' | 'chat';
+export const AREAS: AiArea[] = ['search', 'rules', 'deck', 'chat'];
+export const AREA_OF: Record<Feature, AiArea> = { search: 'search', rules: 'rules', tagging: 'deck', tagcards: 'deck', chat: 'chat' };
+
+export const MODE_MODELS: Record<Feature, Record<AiMode, string>> = {
+  search: { regular: 'claude-haiku-5-5', smart: 'claude-sonnet-5-5' },
+  rules: { regular: 'claude-sonnet-5-5', smart: 'claude-opus-5-5' },
+  tagging: { regular: 'claude-sonnet-5-5', smart: 'claude-opus-5-5' },
+  tagcards: { regular: 'claude-sonnet-5-5', smart: 'claude-opus-5-5' },
+  chat: { regular: 'claude-sonnet-5-5', smart: 'claude-opus-5-5' },
 };
+
+/** Where each page starts: Smart for rules, where a wrong answer costs a game; Regular elsewhere. */
+export const DEFAULT_MODE: Record<AiArea, AiMode> = { search: 'regular', rules: 'smart', deck: 'regular', chat: 'regular' };
+
+export const DEFAULT_MODELS: Record<Feature, string> = Object.fromEntries(
+  FEATURES.map((f) => [f, MODE_MODELS[f][DEFAULT_MODE[AREA_OF[f]]]]),
+) as Record<Feature, string>;
 export const FREE_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 
 /**

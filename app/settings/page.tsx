@@ -12,18 +12,11 @@ import { People, StepModels } from '@/components/AdminSettings';
 import CardData from '@/components/CardData';
 import MyProfile from '@/components/MyProfile';
 import ErrorLog from '@/components/ErrorLog';
-import ModelPicker from '@/components/ModelPicker';
-import { Budget } from '@/components/ModelMenu';
+import { Budget } from '@/components/AiBits';
 import * as api from '@/lib/api';
 import type { AiState } from '@/lib/ai';
-import { EFFORTS, type Effort } from '@/lib/models';
 import { useMe } from '@/lib/use-me';
 
-const EFFORT_NOTE: Record<Effort, string> = {
-  low: 'Quick and cheapest. Fine for easy questions.',
-  medium: 'The default. Thinks things through on most questions.',
-  high: 'Thinks longest - about twice the cost of medium on a hard rules question.',
-};
 
 export default function SettingsPage() {
   const me = useMe();
@@ -39,7 +32,6 @@ export default function SettingsPage() {
 
   if (!state) return <p className="text-sm text-[var(--muted)]">{error ?? 'Loading…'}</p>;
   const admin = !!me?.isAdmin;
-  const claude = state.models.find((m) => m.chosenFor.includes('rules'))?.provider === 'anthropic';
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-10">
@@ -62,43 +54,12 @@ export default function SettingsPage() {
       </section>
 
       <section data-tour="ai-model" className="flex flex-col gap-3">
-        <h2 className="font-medium">Model for rules and deck tagging</h2>
+        <h2 className="font-medium">Regular and Smart</h2>
         <p className="text-sm text-[var(--muted)]">
-          Yours alone - other profiles pick their own. The same choice as the picker in the header.
+          Search, Rules, a deck&apos;s Tags and its Chat each have a Regular / Smart switch, remembered for you on each page.
+          Regular uses a cheaper model; Smart a stronger one that thinks harder, at a few times the price.
+          {admin ? ' Which model each uses is set below.' : ''}
         </p>
-        <ModelPicker state={state} features={['rules', 'tagging']} onState={setState} name="thinking-model" label="Model for rules and deck tagging" />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-medium">How hard Claude thinks</h2>
-        <p className="text-sm text-[var(--muted)]">
-          On rules answers and tagging{claude ? '' : ' (only when the model above is Claude)'}. Search always thinks briefly.
-        </p>
-        <div className="flex flex-col gap-2" role="radiogroup" aria-label="How hard Claude thinks">
-          {EFFORTS.map((e) => (
-            <label key={e} className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--border)] px-4 py-2.5">
-              <input
-                type="radio"
-                name="effort"
-                checked={state.effort === e}
-                onChange={() => api.chooseEffort(e).then(setState).catch(() => setError('Could not change it'))}
-                className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
-              />
-              <span>
-                <span className="font-medium capitalize">{e}</span>
-                <span className="block text-xs text-[var(--muted)]">{EFFORT_NOTE[e]}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-medium">Model for search</h2>
-        <p className="text-sm text-[var(--muted)]">
-          Plans each plain-English search; the cards themselves always come from Scryfall. A fast model keeps searches quick.
-        </p>
-        <ModelPicker state={state} features={['search']} onState={setState} name="search-model" label="Model for search" />
       </section>
 
       {admin && (
