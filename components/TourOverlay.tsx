@@ -133,7 +133,12 @@ export default function TourOverlay() {
   const phone = vw < 640;
   let style: React.CSSProperties;
   if (phone || !box) {
-    style = phone ? { left: 12, right: 12, bottom: 'calc(var(--nav-h, 0px) + 12px)' } : { left: (vw - cardSize.w) / 2, top: (vh - cardSize.h) / 2 };
+    // On a phone the card docks at the bottom - or at the top, when the part
+    // it is about sits low on the screen and would be covered.
+    const low = !!box && box.bottom > vh - cardSize.h - 90;
+    style = phone
+      ? (low ? { left: 12, right: 12, top: 'calc(env(safe-area-inset-top) + 6.5rem)' } : { left: 12, right: 12, bottom: 'calc(var(--nav-h, 0px) + 12px)' })
+      : { left: (vw - cardSize.w) / 2, top: (vh - cardSize.h) / 2 };
   } else {
     const left = Math.min(Math.max(12, box.left), vw - cardSize.w - 12);
     const below = box.bottom + PAD + 12;
