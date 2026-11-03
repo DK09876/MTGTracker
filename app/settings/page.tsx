@@ -56,7 +56,7 @@ export default function SettingsPage() {
       <section className="flex flex-col gap-3">
         <h2 className="font-medium">AI usage</h2>
         <p className="text-sm text-[var(--muted)]">
-          Every Claude request: who made it, what for, and what it cost. Kept 90 days. Opening a saved search or conversation makes no request, so it never shows here.
+          Every Claude request: who made it, what for, and what it cost. Kept a week, then cleared on Sunday. Opening a saved search or conversation makes no request, so it never shows here.
         </p>
         <AiUsage />
       </section>
