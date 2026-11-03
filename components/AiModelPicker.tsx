@@ -62,7 +62,15 @@ export default function AiModelPicker({ area, align = 'left', className = '' }: 
               ? 'btn-go'
               : off ? 'cursor-not-allowed text-[var(--faint)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
           >
-            {TIER_INFO[t].label}{off && <span aria-hidden className="ml-0.5">·</span>}
+            <span className="inline-flex items-center justify-center gap-1">
+              {off && (
+                <svg width="9" height="10" viewBox="0 0 9 10" aria-hidden>
+                  <rect x="0.5" y="4.5" width="8" height="5" rx="1.2" fill="none" stroke="currentColor" />
+                  <path d="M2.5 4.5V3a2 2 0 0 1 4 0v1.5" fill="none" stroke="currentColor" />
+                </svg>
+              )}
+              {TIER_INFO[t].label}
+            </span>
           </button>
         );
       })}
