@@ -113,7 +113,20 @@ export const ROLES: Role[] = [
  * Bumped whenever a role's search changes, so saved answers from the old
  * definition are looked up again rather than trusted.
  */
-export const ROLES_VERSION = 4;
+export const ROLES_VERSION = 5;
+
+/**
+ * A role's search read as tag sets, so roles can be worked out from
+ * Scryfall's tag file without searching: a card is in the role when it has
+ * any of `any` (or a tag under one) and none of `none`. "-t:land" is left
+ * out - lands are counted as lands whatever their tags.
+ */
+export function tagSets(query: string): { any: string[]; none: string[] } {
+  const any: string[] = [];
+  const none: string[] = [];
+  for (const m of query.matchAll(/(-?)otag:([a-z0-9-]+)/g)) (m[1] ? none : any).push(m[2]);
+  return { any, none };
+}
 
 export const LAND_TARGET: [number, number] = [35, 38];
 

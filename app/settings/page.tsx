@@ -8,6 +8,7 @@
 import { useEffect, useState } from 'react';
 
 import AiUsage from '@/components/AiUsage';
+import CardData from '@/components/CardData';
 import ErrorLog from '@/components/ErrorLog';
 import ModelPicker from '@/components/ModelPicker';
 import { Budget } from '@/components/ModelMenu';
@@ -92,6 +93,8 @@ export default function SettingsPage() {
         </p>
         <ModelPicker state={state} features={['search']} onState={setState} name="search-model" label="Model for search" />
       </section>
+
+      <CardData />
 
       <ErrorLog />
     </div>

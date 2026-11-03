@@ -34,6 +34,7 @@ import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
+import type { CardDataStatus } from './card-store';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
 import type { Job } from './jobs';
@@ -336,6 +337,9 @@ export const acknowledgeError = (id?: string) =>
 
 export const checks = () => fetch(url('checks')).then(json<{ run: CheckRun | null }>);
 export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: CheckRun }>).finally(() => window.dispatchEvent(new Event(ERRORS_CHANGED)));
+
+export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDataStatus }>);
+export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
 
 export interface SavedRead extends DeckRead {
   since: CardChange;

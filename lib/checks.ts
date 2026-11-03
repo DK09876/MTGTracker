@@ -92,8 +92,9 @@ export function runChecks(now = Date.now()): CheckRun {
     { id: 'app', label: 'App is up', ok: true, detail: 'Answering' },
     backup(now), refresh(now), stuck(now),
   ];
+  // A failed refresh logs itself as it fails; the others are only seen here.
   for (const c of checks) {
-    if (!c.ok && before.get(c.id) !== false) recordError({ source: c.label, message: c.detail });
+    if (!c.ok && c.id !== 'refresh' && before.get(c.id) !== false) recordError({ source: c.label, message: c.detail });
   }
   const run = { at: new Date(now).toISOString(), checks };
   setSetting(KEY, JSON.stringify(run));
