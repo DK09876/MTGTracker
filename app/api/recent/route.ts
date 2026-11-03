@@ -22,6 +22,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // The tour's sample is read only: running one of its searches saves nothing.
+  if (new URL(request.url).searchParams.get('profile') === 'tour') return NextResponse.json({ recent: recentSearches('tour') });
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
   let body: { text?: unknown; replay?: unknown };

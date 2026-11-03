@@ -47,7 +47,7 @@ export default function SettingsPage() {
 
       <MyProfile />
 
-      <section className="flex flex-col gap-3">
+      <section data-tour="ai-budget" className="flex flex-col gap-3">
         <h2 className="font-medium">AI budget</h2>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><Budget state={state} /></div>
         {admin && <Caps state={state} onState={setState} />}
@@ -61,7 +61,7 @@ export default function SettingsPage() {
         <AiUsage />
       </section>
 
-      <section className="flex flex-col gap-3">
+      <section data-tour="ai-model" className="flex flex-col gap-3">
         <h2 className="font-medium">Model for rules and deck tagging</h2>
         <p className="text-sm text-[var(--muted)]">
           Yours alone - other profiles pick their own. The same choice as the picker in the header.

@@ -90,13 +90,14 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
 
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
-      <aside className="flex min-w-0 flex-[1_1_15rem] flex-col gap-2">
+      <aside data-tour="chat-list" className="flex min-w-0 flex-[1_1_15rem] flex-col gap-2">
         <button onClick={() => { setOpen(null); setChat(null); setError(null); }} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08]">New chat</button>
         <p className="mt-1 text-xs uppercase tracking-wide text-[var(--muted)]">Saved automatically</p>
         {chats?.length === 0 && <p className="text-sm text-[var(--muted)]">No chats yet.</p>}
         {chats?.map((c) => (
           <button
             key={c.id}
+            data-tour-entry
             onClick={() => setOpen(c.id)}
             className={`rounded-xl border px-3 py-2 text-left ${open === c.id ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}
           >
@@ -108,7 +109,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
         ))}
       </aside>
 
-      <section className="flex min-w-0 flex-[999_1_34rem] flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 p-4">
+      <section data-tour="chat-thread" className="flex min-w-0 flex-[999_1_34rem] flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 p-4">
         {!chat && (
           <div className="flex flex-col gap-2">
             <h3 className="font-display text-lg font-semibold">Ask about this deck</h3>

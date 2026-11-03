@@ -48,7 +48,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
-      <nav aria-label="Build steps" className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
+      <nav data-tour="build-steps" aria-label="Build steps" className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
         {plan.steps.map((s, i) => (
           <button
             key={s.id}
@@ -185,7 +185,7 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-tour="build-fill" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-display text-xl font-semibold">Fill the gaps</h3>
         <div className="flex flex-wrap items-center gap-4 text-sm">

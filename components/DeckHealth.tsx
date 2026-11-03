@@ -115,7 +115,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         )}
       </Section>
 
-      <Section title="Roles" subtitle="How many of each kind of card, against common Commander guidelines. Tags from Scryfall.">
+      <Section tour="roles" title="Roles" subtitle="How many of each kind of card, against common Commander guidelines. Tags from Scryfall.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
           <RoleRow label="Lands" count={health.lands} target={landTarget} />
           {roles === 'loading' && (
@@ -184,7 +184,7 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
   if (insights === 'loading' || insights === 'failed' || !insights.wincons) return null;
   const { routes, missing } = insights.wincons;
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
         <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
@@ -385,9 +385,9 @@ function Calculator({ library, roles }: { library: number; roles: RoleCount[] })
   );
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children, tour }: { title: string; subtitle?: string; children: React.ReactNode; tour?: string }) {
   return (
-    <section>
+    <section data-tour={tour}>
       <h3 className="font-medium">{title}</h3>
       {subtitle && <p className="mb-3 text-sm text-[var(--muted)]">{subtitle}</p>}
       {children}

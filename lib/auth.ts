@@ -50,7 +50,7 @@ export function access(profileId: string): Access | null {
 }
 
 export function everyone(): Access[] {
-  return (db().all('SELECT id, name, isAdmin, passwordHash FROM profiles ORDER BY createdAt') as Array<{ id: string; name: string; isAdmin: number; passwordHash: string | null }>)
+  return (db().all(`SELECT id, name, isAdmin, passwordHash FROM profiles WHERE id != 'tour' ORDER BY createdAt`) as Array<{ id: string; name: string; isAdmin: number; passwordHash: string | null }>)
     .map((r) => ({ id: r.id, name: r.name, isAdmin: !!r.isAdmin, hasPassword: !!r.passwordHash }));
 }
 

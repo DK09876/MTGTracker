@@ -11,6 +11,9 @@ import { NextResponse } from 'next/server';
 import { access, guarded, signedIn } from './auth';
 import { getList, knownProfile, type List } from './db';
 
+// Kept here rather than imported from tour.ts, which pulls in the seeding.
+const TOUR_PROFILE = 'tour';
+
 /**
  * The profile a request asks for, if it may use it: a profile with a
  * password (or an admin) only from a browser signed in as it.
@@ -27,7 +30,12 @@ export function requireProfile(request: Request): { profile: string } | NextResp
   const asked = knownProfile(new URL(request.url).searchParams.get('profile')?.trim() || null);
   if (!asked) return NextResponse.json({ error: 'Pick a profile first' }, { status: 400 });
   const profile = profileOf(request);
-  return profile ? { profile } : NextResponse.json({ error: 'Sign in first', signIn: asked }, { status: 401 });
+  if (!profile) return NextResponse.json({ error: 'Sign in first', signIn: asked }, { status: 401 });
+  // The guided tour's sample is shown, never changed.
+  if (profile === TOUR_PROFILE && request.method !== 'GET') {
+    return NextResponse.json({ error: 'This is the tour\'s sample - nothing here changes. End the tour to use your own.' }, { status: 403 });
+  }
+  return { profile };
 }
 
 /** The profile, if it is an admin's, or the response to send instead. */

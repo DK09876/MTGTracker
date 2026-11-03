@@ -243,6 +243,8 @@ export function helperModel(profile: string | null, label?: string): JsonModel |
  * search). Null when no provider has a key.
  */
 export function appModel(profile: string | null, feature: Feature, label?: string): JsonModel | null {
+  // The guided tour's sample never spends AI.
+  if (profile === 'tour') return null;
   const [id, ...fallbacks] = featureModels(profile, feature);
   return modelById(id, fallbacks, { profile, feature, label });
 }

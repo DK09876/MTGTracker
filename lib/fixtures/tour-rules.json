@@ -1,0 +1,354 @@
+{
+ "question": "I have a scute swarm with 6 lands, a green warden on my battle field and doubling season. If I played 5 lands how many scute swarms would that make?",
+ "answer": {
+  "verdict": "243 Scute Swarms in total: your original plus 242 token copies. The number triples with each land: 1 \u2192 3 \u2192 9 \u2192 27 \u2192 81 \u2192 243.",
+  "summary": "Because you already control six or more lands, each Scute Swarm's landfall trigger makes a token copy of itself instead of a 1/1 Insect [O1]. That self-replacement is applied first [C8], and then Doubling Season turns each copy into two [O2][C11]. Every token copy has the same landfall ability and can make copies of itself [R4][C9]. So each land you play makes every Swarm you control trigger [R1][R3], and each trigger adds two Swarms, which triples your count.",
+  "confidence": "likely",
+  "citations": [
+   {
+    "id": "R4",
+    "role": "key",
+    "why": "Token copies have the landfall ability and can create copies of themselves."
+   },
+   {
+    "id": "O1",
+    "role": "key",
+    "why": "Landfall creates a token copy instead of an Insect when you control six or more lands."
+   },
+   {
+    "id": "O2",
+    "role": "key",
+    "why": "Doubling Season doubles the tokens created."
+   },
+   {
+    "id": "R1",
+    "role": "supporting",
+    "why": "Landfall triggers when you play a land."
+   },
+   {
+    "id": "R3",
+    "role": "supporting",
+    "why": "Every landfall ability you control triggers for each land."
+   },
+   {
+    "id": "C8",
+    "role": "supporting",
+    "why": "The self-replacement (copy instead of Insect) applies before Doubling Season."
+   },
+   {
+    "id": "C11",
+    "role": "supporting",
+    "why": "Doubling Season applies to creating token copies."
+   },
+   {
+    "id": "C9",
+    "role": "supporting",
+    "why": "A copy acquires the original's rules text."
+   }
+  ],
+  "followUps": [
+   "What if I had two Doubling Seasons?",
+   "Does fetching a land with a fetchland also trigger every Swarm?",
+   "What happens if I sacrifice lands and drop below six?"
+  ],
+  "assumptions": [
+   "You start with exactly one Scute Swarm (the original card) and only one Doubling Season.",
+   "\"Green warden\" isn't in the sources I have; I assumed it doesn't create tokens, double anything or add landfall triggers. It might be how you get the extra land drops. If it does something more, the count could change.",
+   "You play the five lands one at a time, and each land's triggers resolve before the next land. You can only play a land when the stack is empty, so this is how it normally goes.",
+   "Nothing removes any Swarms or counters the triggers during the process."
+  ]
+ },
+ "sources": [
+  {
+   "id": "O1",
+   "kind": "oracle",
+   "label": "Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm",
+   "text": "Scute Swarm {2}{G} - Creature \u2014 Insect\nLandfall \u2014 Whenever a land you control enters, create a 1/1 green Insect creature token. If you control six or more lands, create a token that's a copy of this creature instead."
+  },
+  {
+   "id": "O2",
+   "kind": "oracle",
+   "label": "Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season",
+   "text": "Doubling Season {4}{G} - Enchantment\nIf an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.\nIf an effect would put one or more counters on a permanent you control, it puts twice that many of those counters on that permanent instead."
+  },
+  {
+   "id": "R1",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "A landfall ability triggers whenever a land you control enters for any reason. It triggers whenever you play a land, as well as whenever a spell or ability puts a land onto the battlefield under your control.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R2",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "A landfall ability doesn't trigger if a permanent already on the battlefield becomes a land.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R3",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "Whenever a land you control enters, each landfall ability of the permanents you control will trigger. You can put them \u00a0\u00a0on the stack in any order. The last ability you put on the stack will be the first one to resolve (As a result, you can have those abilities resolve in the order of your choosing.).",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R4",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "The token copy will have Scute Swarm's ability. It will also be able to create copies of itself.",
+   "date": "2020-09-25"
+  },
+  {
+   "id": "R5",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "The token copy won't copy counters or damage marked on Scute Swarm, nor will it copy other effects that have changed Scute Swarm's power, toughness, types, color, and so on. Normally, this means the token will simply be a Scute Swarm, but if any copy effects have affected the original Scute Swarm, the token will take those into account.",
+   "date": "2020-09-25"
+  },
+  {
+   "id": "R6",
+   "kind": "ruling",
+   "label": "Ruling: Scute Swarm",
+   "url": "https://scryfall.com/card/trc/470/scute-swarm#rulings",
+   "text": "If Scute Swarm leaves the battlefield before its triggered ability resolves, the token will still enter the battlefield as a copy of Scute Swarm, using Scute Swarm's copiable values from when it was last on the battlefield.",
+   "date": "2020-09-25"
+  },
+  {
+   "id": "R7",
+   "kind": "ruling",
+   "label": "Ruling: Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season#rulings",
+   "text": "Planeswalkers will enter with double the normal number of loyalty counters. However, if you activate an ability whose cost has you put loyalty counters on a planeswalker, the number you put on isn't doubled. This is because those counters are put on as a cost, not as an effect.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R8",
+   "kind": "ruling",
+   "label": "Ruling: Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season#rulings",
+   "text": "Everything that is specified by the effect creating the original token or tokens will also be true about the additional token or tokens created by Doubling Season's replacement effect. For example, if an effect tells you to create a token \"tapped and attacking,\" the additional tokens will also be tapped and attacking.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R9",
+   "kind": "ruling",
+   "label": "Ruling: Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season#rulings",
+   "text": "Doubling Season affects permanents that enter with counters.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R10",
+   "kind": "ruling",
+   "label": "Ruling: Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season#rulings",
+   "text": "Battles will enter with double the normal number of defense counters.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "R11",
+   "kind": "ruling",
+   "label": "Ruling: Doubling Season",
+   "url": "https://scryfall.com/card/fdn/216/doubling-season#rulings",
+   "text": "If there are two Doubling Seasons on the battlefield, then the number of tokens or counters is four times the original number. If there are three on the battlefield, then the number of tokens or counters is eight times the original number, and so on.",
+   "date": "2024-11-08"
+  },
+  {
+   "id": "C1",
+   "kind": "rule",
+   "label": "CR 207.2c",
+   "url": "https://yawgatog.com/resources/magic-rules/#R2072c",
+   "text": "(207.2: The text box may also contain italicized text that has no game function.) An ability word appears in italics at the beginning of some abilities. Ability words are similar to keywords in that they tie together cards that have similar functionality, but they have no special rules meaning and no individual entries in the Comprehensive Rules. The ability words are adamant, addendum, alliance, battalion, bloodrush, celebration, channel, chroma, cohort, constellation, converge, council\u2019s dilemma, coven, delirium, descend 4, descend 8, disappear, domain, eerie, eminence, enrage, fateful hour, fathomless descent, ferocious, flurry, formidable, grandeur, hellbent, heroic, imprint, infusion, inspired, join forces, kinship, landfall, lieutenant, magecraft, metalcraft, morbid, opus, pack tactics, paradox, parley, radiance, raid, rally, renew, repartee, revolt, secret council, spell mastery, \u2026\n[Included because: landfall]"
+  },
+  {
+   "id": "G1",
+   "kind": "glossary",
+   "label": "Glossary: Triggered Ability",
+   "url": "https://yawgatog.com/resources/magic-rules/#triggered_ability",
+   "text": "A kind of ability. Triggered abilities begin with the word \u201cwhen,\u201d \u201cwhenever,\u201d or \u201cat.\u201d They\u2019re written as \u201c[Trigger condition], [effect].\u201d See rule 113, \u201cAbilities,\u201d and rule 603, \u201cHandling Triggered Abilities.\u201d"
+  },
+  {
+   "id": "C2",
+   "kind": "rule",
+   "label": "CR 603.2f",
+   "url": "https://yawgatog.com/resources/magic-rules/#R6032f",
+   "text": "(603.2: Whenever a game event or game state matches a triggered ability\u2019s trigger event, that ability automatically triggers.) If a triggered ability\u2019s trigger condition is met, but the object with that triggered ability is at no time visible to all players, the ability does not trigger.\n[Included because: triggered ability]"
+  },
+  {
+   "id": "C3",
+   "kind": "rule",
+   "label": "CR 603.7e",
+   "url": "https://yawgatog.com/resources/magic-rules/#R6037e",
+   "text": "(603.7: An effect may create a delayed triggered ability that can do something at a later time.) If an activated or triggered ability creates a delayed triggered ability, the source of that delayed triggered ability is the same as the source of that other ability. The controller of that delayed triggered ability is the player who controlled that other ability as it resolved.\n[Included because: triggered ability]"
+  },
+  {
+   "id": "G2",
+   "kind": "glossary",
+   "label": "Glossary: Token",
+   "url": "https://yawgatog.com/resources/magic-rules/#token",
+   "text": "A marker used to represent any permanent that isn\u2019t represented by a card. See rule 111, \u201cTokens.\u201d"
+  },
+  {
+   "id": "C4",
+   "kind": "rule",
+   "label": "CR 701.7b",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7017b",
+   "text": "(701.7: Create) If a replacement effect applies to a token being created, that effect applies before considering any continuous effects that will modify the characteristics of that token. If a replacement effect applies to a token entering the battlefield, that effect applies after considering any continuous effects that will modify the characteristics of that token.\n[Included because: token]"
+  },
+  {
+   "id": "C5",
+   "kind": "rule",
+   "label": "CR 701.7c",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7017c",
+   "text": "(701.7: Create) Previously, an effect that created tokens instructed a player to \u201cput [those tokens] onto the battlefield.\u201d Cards that were printed with that text have received errata in the Oracle card reference so they now \u201ccreate\u201d those tokens.\n[Included because: token]"
+  },
+  {
+   "id": "C6",
+   "kind": "rule",
+   "label": "CR 707.10f",
+   "url": "https://yawgatog.com/resources/magic-rules/#R70710f",
+   "text": "(707.10: To copy a spell, activated ability, or triggered ability means to put a copy of it onto the stack; a copy of a spell isn\u2019t cast and a copy of an activated ability isn\u2019t activated.) Some effects copy a permanent spell. As that copy resolves, it ceases being a copy of a spell and becomes a token permanent. (See rule 608.3f.)\n[Included because: copy of a permanent]"
+  },
+  {
+   "id": "C7",
+   "kind": "rule",
+   "label": "CR 707.8a",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7078a",
+   "text": "(707.8: When copying a melded permanent or other double-faced permanent, use the copiable values of the face that\u2019s currently up to determine the characteristics of the copy.) If an effect creates a token that is a copy of a double-faced permanent or a double-faced card not on the battlefield, the resulting token is a double-faced token that has both a front face and a back face. The characteristics of each face are determined by the copiable values of the same face of the permanent or card it is a copy of, as modified by any other copy effects that apply to that object. If the token is a copy of a double-faced permanent with its back face up, the token enters the battlefield with its back face up. This rule does not apply to tokens that are created with their own set of characteristics and enter the battlefield as a copy of a double-faced object due to a replacement effect.\nExample: Aff\u2026\n[Included because: copy of a permanent]"
+  },
+  {
+   "id": "G3",
+   "kind": "glossary",
+   "label": "Glossary: Replacement Effect",
+   "url": "https://yawgatog.com/resources/magic-rules/#replacement_effect",
+   "text": "A kind of continuous effect that watches for a particular event that would happen and completely or partially replaces that event with a different event. See rule 614, \u201cReplacement Effects.\u201d"
+  },
+  {
+   "id": "C8",
+   "kind": "rule",
+   "label": "CR 614.15",
+   "url": "https://yawgatog.com/resources/magic-rules/#R61415",
+   "text": "Some replacement effects are not continuous effects. Rather, they are an effect of a resolving spell or ability that replace part or all of that spell or ability\u2019s own effect(s). Such effects are called self-replacement effects. The text creating a self-replacement effect is usually part of the ability whose effect is being replaced, but the text can be a separate ability, particularly when preceded by an ability word. When applying replacement effects to an event, self-replacement effects are applied before other replacement effects.\n[Included because: replacement effect]"
+  },
+  {
+   "id": "G4",
+   "kind": "glossary",
+   "label": "Glossary: Create",
+   "url": "https://yawgatog.com/resources/magic-rules/#create",
+   "text": "To create a token is to put a token onto the battlefield. See rule 701.7, \u201cCreate.\u201d"
+  },
+  {
+   "id": "C9",
+   "kind": "rule",
+   "label": "CR 707.2",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7072",
+   "text": "When copying an object, the copy acquires the copiable values of the original object\u2019s characteristics and, for an object on the stack, choices made when casting or activating it (mode, targets, the value of X, whether it was kicked, how it will affect multiple targets, and so on). The copiable values are the values derived from the text printed on the object (that text being name, mana cost, color indicator, card type, subtype, supertype, rules text, power, toughness, and/or loyalty), as modified by other copy effects, by its face-down status, and by \u201cas . . . enters\u201d and \u201cas . . . is turned face up\u201d abilities that set power and toughness (and may also set additional characteristics). Other effects (including type-changing and text-changing effects), status, counters, and stickers are not copied.\nExample: Chimeric Staff is an artifact that reads, \u201c{X}: This artifact becomes an X/X Const\u2026\n[Included because: a copy has the copied object's abilities, so token copies trigger like the original]"
+  },
+  {
+   "id": "C10",
+   "kind": "rule",
+   "label": "CR 122.1",
+   "url": "https://yawgatog.com/resources/magic-rules/#R1221",
+   "text": "A counter is a marker placed on an object or player that modifies its characteristics and/or interacts with a rule, ability, or effect. Counters are not objects and have no characteristics. Notably, a counter is not a token, and a token is not a counter. Counters with the same name or description are interchangeable.\n[Included because: counters]"
+  },
+  {
+   "id": "C11",
+   "kind": "rule",
+   "label": "CR 616.1g",
+   "url": "https://yawgatog.com/resources/magic-rules/#R6161g",
+   "text": "(616.1: If two or more replacement and/or prevention effects are attempting to modify the way an event affects an object or player, the affected object\u2019s controller (or its owner if it has no controller) or the affected player chooses one to apply, following the steps listed below.) While following the steps in 616.1a\u2013f, one replacement or prevention effect may apply to an event, and another may apply to an event contained within the first event. In this case, the second effect can\u2019t be chosen until after the first effect has been chosen.\nExample: A player is instructed to create a token that\u2019s a copy of Voice of All, which has the ability \u201cAs this creature enters, choose a color.\u201d Doubling Season has an ability that reads \u201cIf an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.\u201d Because entering the battlefield is an event con\u2026"
+  },
+  {
+   "id": "C12",
+   "kind": "rule",
+   "label": "CR 111.2",
+   "url": "https://yawgatog.com/resources/magic-rules/#R1112",
+   "text": "The player who creates a token is its owner. The token enters the battlefield under that player\u2019s control."
+  },
+  {
+   "id": "C13",
+   "kind": "rule",
+   "label": "CR 111.5",
+   "url": "https://yawgatog.com/resources/magic-rules/#R1115",
+   "text": "If a spell or ability would create a token, but a rule or effect states that a permanent with one or more of that token\u2019s characteristics can\u2019t enter the battlefield, the token is not created. Similarly, if an effect would create a token that is a copy of an instant or sorcery card, no token is created."
+  },
+  {
+   "id": "C14",
+   "kind": "rule",
+   "label": "CR 707.10e",
+   "url": "https://yawgatog.com/resources/magic-rules/#R70710e",
+   "text": "(707.10: To copy a spell, activated ability, or triggered ability means to put a copy of it onto the stack; a copy of a spell isn\u2019t cast and a copy of an activated ability isn\u2019t activated.) Some effects copy a spell or ability and specify a new target for the copy. If the spell or ability has more than one target, each of the copy\u2019s targets must be that player or object. If that player or object isn\u2019t a legal target for each instance of the word \u201ctarget,\u201d the copy isn\u2019t created. In the case where a replacement effect causes the copy to target more than one object, the copy\u2019s controller chooses one of them to be the new target. The chosen target must be a legal target for that spell or ability.\nExample: Frontline Heroism is an enchantment with the ability \u201cWhenever you cast a spell that targets only a single creature you control, create a 1/1 red Soldier creature token with haste, then co\u2026"
+  },
+  {
+   "id": "C15",
+   "kind": "rule",
+   "label": "CR 106.6",
+   "url": "https://yawgatog.com/resources/magic-rules/#R1066",
+   "text": "Some spells or abilities that produce mana restrict how that mana can be spent, have an additional effect that affects the spell or ability that mana is spent on, or create a delayed triggered ability (see rule 603.7a) that triggers when that mana is spent. This doesn\u2019t affect the mana\u2019s type.\nExample: A player\u2019s mana pool contains {R}{G} which can be spent only to cast creature spells. That player activates Doubling Cube\u2019s ability, which reads \u201c{3}, {T}: Double the amount of each type of unspent mana you have.\u201d The player\u2019s mana pool now has {R}{R}{G}{G} in it, {R}{G} of which can be spent on anything."
+  },
+  {
+   "id": "C16",
+   "kind": "rule",
+   "label": "CR 707.9f",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7079f",
+   "text": "(707.9: Copy effects may include modifications or exceptions to the copying process.) Some exceptions to the copying process apply only if the copy is or has certain characteristics. To determine whether such an exception applies, consider what the resulting permanent\u2019s characteristics would be if the copy effect were applied without that exception, taking into account any other exceptions that effect includes.\nExample: Moritte of the Frost says, in part, \u201cYou may have Moritte enter as a copy of a permanent you control, except it\u2019s legendary and snow in addition to its other types and, if it\u2019s a creature, it enters with two additional +1/+1 counters on it and it has changeling.\u201d Moritte of the Frost copies a land that has become a creature until end of turn. It would enter as a noncreature permanent, so it won\u2019t enter with two additional +1+1 counters on it and it won\u2019t have changeling, \u2026"
+  },
+  {
+   "id": "C17",
+   "kind": "rule",
+   "label": "CR 701.7a",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7017a",
+   "text": "(701.7: Create) To create one or more tokens with certain characteristics, put the specified number of tokens with the specified characteristics onto the battlefield."
+  },
+  {
+   "id": "C18",
+   "kind": "rule",
+   "label": "CR 310.4b",
+   "url": "https://yawgatog.com/resources/magic-rules/#R3104b",
+   "text": "(310.4: Defense is a characteristic that battles have.) A battle has the intrinsic ability \u201cThis permanent enters with a number of defense counters on it equal to its printed defense number.\u201d This ability creates a replacement effect (see rule 614.1c)."
+  },
+  {
+   "id": "C19",
+   "kind": "rule",
+   "label": "CR 111.12",
+   "url": "https://yawgatog.com/resources/magic-rules/#R11112",
+   "text": "If an effect instructs a player to create a token that is a copy of a nonexistent object, no token is created (see rule 707, \u201cCopying Objects\u201d). This does not apply to an effect that would use the last known information of an object.\nExample: Mimic Vat has a triggered ability whose effect gives you the option to exile a card and an activated ability that says \u201cCreate a token that\u2019s a copy of a card exiled with this artifact. It gains haste. Exile it at the beginning of the next end step.\u201d If no card has been exiled with Mimic Vat\u2019s triggered ability, no token is created."
+  },
+  {
+   "id": "C20",
+   "kind": "rule",
+   "label": "CR 707.5",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7075",
+   "text": "An object that enters the battlefield \u201cas a copy\u201d or \u201cthat\u2019s a copy\u201d of another object becomes a copy as it enters the battlefield. It doesn\u2019t enter the battlefield, and then become a copy of that permanent. If the text that\u2019s being copied includes any abilities that replace the enters-the-battlefield event (such as \u201centers with\u201d or \u201cas [this] enters\u201d abilities), those abilities will take effect. Also, any enters-the-battlefield triggered abilities of the copy will have a chance to trigger.\nExample: Skyshroud Behemoth reads, \u201cFading 2 (This creature enters with two fade counters on it. At the beginning of your upkeep, remove a fade counter from it. If you can\u2019t, sacrifice it.)\u201d and \u201cThis creature enters tapped.\u201d A Clone that enters the battlefield as a copy of a Skyshroud Behemoth will also enter the battlefield tapped with two fade counters on it.\nExample: Wall of Omens reads, \u201cWhen thi\u2026"
+  },
+  {
+   "id": "C21",
+   "kind": "rule",
+   "label": "CR 111.4",
+   "url": "https://yawgatog.com/resources/magic-rules/#R1114",
+   "text": "A spell or ability that creates a token sets both its name and its subtype(s). If the spell or ability doesn\u2019t specify the name of the token, its name is the same as its subtype(s) plus the word \u201cToken.\u201d Once a token is on the battlefield, changing its name doesn\u2019t change its subtype(s), and vice versa.\nExample: Dwarven Reinforcements is a sorcery that says, in part, \u201cCreate two 2/1 red Dwarf Berserker creature tokens.\u201d The tokens created as it resolves are each named Dwarf Berserker Token and each have the creature types Dwarf and Berserker.\nExample: Minsc, Beloved Ranger says, in part, \u201cWhen Minsc enters, create Boo, a legendary 1/1 red Hamster creature token with trample and haste.\u201d That token\u2019s subtype is Hamster, but because Minsc specifies that the token\u2019s name is Boo, neither \u201cHamster\u201d nor \u201cToken\u201d are part of its name.\nExample: Spitting Image is a sorcery that says, in part, \u201cCrea\u2026"
+  },
+  {
+   "id": "C22",
+   "kind": "rule",
+   "label": "CR 701.7",
+   "url": "https://yawgatog.com/resources/magic-rules/#R7017",
+   "text": "Create"
+  }
+ ],
+ "cards": [
+  "Scute Swarm",
+  "Doubling Season"
+ ],
+ "model": "claude-opus-5-5",
+ "rulesEdition": "September 25, 2026",
+ "at": "2026-10-31T04:42:20.951Z"
+}

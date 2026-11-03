@@ -84,7 +84,7 @@ export default function CollectionPage() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Collection</h1>
+          <h1 data-tour="collection-head" className="text-2xl font-semibold">Collection</h1>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {totals.copies.toLocaleString()} card{totals.copies === 1 ? '' : 's'} · {totals.unique.toLocaleString()} different · {money(totals.value)}
             {totals.inDecks > 0 && <> · {totals.inDecks} in decks</>}

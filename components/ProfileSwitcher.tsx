@@ -43,7 +43,7 @@ export default function ProfileSwitcher() {
   }, [open]);
 
   if (!active) return null;
-  const name = profiles.find((p) => p.id === active)?.name ?? active;
+  const name = profiles.find((p) => p.id === active)?.name ?? (active === 'tour' ? 'Sample' : active);
 
   const switchTo = (id: string) => {
     setOpen(false);

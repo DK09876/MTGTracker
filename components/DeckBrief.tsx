@@ -117,7 +117,7 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
   const last = reads?.job;
 
   return (
-    <section className="flex flex-col gap-3">
+    <section data-tour="brief" className="flex flex-col gap-3">
       <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium">What should this deck do?</h3>
         <div className="relative" ref={menuRef}>
@@ -197,7 +197,7 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
         </div>
 
         {reads && reads.saved.length > 0 && (
-          <aside className="flex min-w-0 flex-[1_1_18rem] flex-col gap-3">
+          <aside data-tour="saved-reads" className="flex min-w-0 flex-[1_1_18rem] flex-col gap-3">
             <h4 className="font-display font-semibold">Saved reads</h4>
             {reads.saved.map((r) => <SavedCard key={r.id} read={r} onDrop={() => act(() => api.dropRead(listId, r.id))} />)}
           </aside>

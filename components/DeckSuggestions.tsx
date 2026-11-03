@@ -49,7 +49,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
   };
 
   return (
-    <div className="mt-5 flex flex-col gap-8">
+    <div data-tour="suggestions" className="mt-5 flex flex-col gap-8">
       <Section
         title={`Combos in this deck${insights.combos ? ` (${insights.combos.included.length})` : ''}`}
         subtitle="Every piece is already in the list. From Commander Spellbook."

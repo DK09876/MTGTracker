@@ -295,7 +295,8 @@ export interface Profile {
 }
 
 export function listProfiles(): Profile[] {
-  return open().all('SELECT id, name FROM profiles ORDER BY createdAt') as unknown as Profile[];
+  // The guided tour's sample profile is never listed.
+  return open().all(`SELECT id, name FROM profiles WHERE id != 'tour' ORDER BY createdAt`) as unknown as Profile[];
 }
 
 /** The profile id if it exists, else null - so a typo cannot create lists nobody can see. */

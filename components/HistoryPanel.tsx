@@ -77,6 +77,7 @@ export default function HistoryPanel({ label, newLabel, onNew, entries, active, 
   return (
     <>
       <aside
+        data-tour="history"
         aria-label={label}
         className="hidden lg:sticky lg:top-[calc(env(safe-area-inset-top)+5rem)] lg:block lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto lg:pr-1"
       >
@@ -84,6 +85,7 @@ export default function HistoryPanel({ label, newLabel, onNew, entries, active, 
       </aside>
 
       <button
+        data-tour="history-button"
         onClick={() => setSheet(true)}
         className="mb-3 flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface)] lg:hidden"
         aria-haspopup="dialog"
@@ -206,7 +208,7 @@ function Row({ entry, on, onOpen, onSave, onUnsave, onRename, onDelete }: { entr
   const item = 'block w-full rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-[var(--surface-hover)]';
   return (
     <div className={`relative rounded-lg ${on ? 'bg-[var(--surface-hover)] shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-[var(--surface)]'}`}>
-      <button {...steady(() => onOpen(entry))} aria-current={on ? 'true' : undefined} className="flex w-full min-w-0 flex-col py-1.5 pl-2 pr-9 text-left">
+      <button data-tour-entry {...steady(() => onOpen(entry))} aria-current={on ? 'true' : undefined} className="flex w-full min-w-0 flex-col py-1.5 pl-2 pr-9 text-left">
         <span className="truncate text-sm">
           {entry.saved && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{entry.title}
         </span>

@@ -84,7 +84,7 @@ export default function Results({
     : [];
 
   return (
-    <div className="mt-6">
+    <div className="mt-6" data-tour="results">
       {tabs.length > 0 && (
         <div role="tablist" className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1">
           {tabs.map((t) => (
