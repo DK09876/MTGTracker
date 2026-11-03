@@ -3,7 +3,7 @@
 /**
  * Pieces for showing AI models and today's budget: short model names, a
  * model's price, and the budget bars Settings shows. Which model a page
- * uses is its Regular / Smart switch (AiModeSwitch).
+ * uses is picked on the page itself (AiModelPicker).
  */
 
 

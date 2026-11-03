@@ -24,7 +24,7 @@ import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
 import {
   costOf, ENV_KEY, FALLBACK_MODEL, FEATURES, FREE_DEFAULT_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf,
   type Effort, type Feature, type Price, type Provider,
-  AREA_OF, AREAS, DEFAULT_MODE, MODE_MODELS, MODES, type AiArea, type AiMode,
+  AREA_OF, AREAS, DEFAULT_TIER, TIER_EFFORT, TIER_INFO, TIER_MODEL, TIERS, TIERS_OFF, type AiArea, type Tier,
 } from './models';
 import { capFrom, DEFAULT_CAPS, monthStart, overBudget, summarize, type Caps, type SpendSummary } from './spend';
 import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
@@ -140,56 +140,34 @@ export function currentBudget(profile: string | null, feature: Feature = 'taggin
 
 // --- the models each profile uses ------------------------------------------------
 
-const modeKey = (profile: string | null, area: AiArea) => `ai.mode.${profile ?? '-'}.${area}`;
-const appModelKey = (feature: Feature, mode: AiMode) => `ai.model.app.${feature}.${mode}`;
+const tierKey = (profile: string | null, area: AiArea) => `ai.tier.${profile ?? '-'}.${area}`;
 const CAP_KEYS: Record<keyof Caps, string> = { daily: 'ai.cap.daily', perProfile: 'ai.cap.profile' };
 
-const usable = (id: string | null): id is string => !!id && !!modelInfo(id) && !modelInfo(id)?.helper && hasKey(id);
-
-/** A profile's mode on one page: Regular or Smart. */
-export function modeFor(profile: string | null, area: AiArea): AiMode {
-  const m = getSetting(modeKey(profile, area));
-  return MODES.includes(m as AiMode) ? m as AiMode : DEFAULT_MODE[area];
+/** The Claude model a profile picked on one page. */
+export function tierFor(profile: string | null, area: AiArea): Tier {
+  const t = getSetting(tierKey(profile, area)) as Tier | null;
+  return t && TIERS.includes(t) && !TIERS_OFF.includes(t) ? t : DEFAULT_TIER[area];
 }
 
-export function chooseMode(profile: string | null, area: AiArea, mode: AiMode): void {
-  if (!AREAS.includes(area) || !MODES.includes(mode)) throw new ModelError(`Unknown mode ${area} ${mode}`);
-  setSetting(modeKey(profile, area), mode);
-}
-
-/** The model a profile uses for a step: its page's mode, on the app's model for that mode. */
-export function modelFor(profile: string | null, feature: Feature): string {
-  return appModelFor(feature, modeFor(profile, AREA_OF[feature]));
+export function chooseTier(profile: string | null, area: AiArea, tier: Tier): void {
+  if (!AREAS.includes(area) || !TIERS.includes(tier)) throw new ModelError(`Unknown model ${area} ${tier}`);
+  if (TIERS_OFF.includes(tier)) throw new ModelError(`${TIER_INFO[tier].label} is off for now`);
+  setSetting(tierKey(profile, area), tier);
 }
 
 /**
- * The app's model for a step in a mode: an admin's choice, else the default -
- * only one whose provider has a key - or else GPT-OSS, or else Flash-Lite.
+ * The model a profile uses for a step: the one picked on its page - or,
+ * without an Anthropic key, GPT-OSS, or else Flash-Lite.
  */
-export function appModelFor(feature: Feature, mode: AiMode = DEFAULT_MODE[AREA_OF[feature]]): string {
-  const app = getSetting(appModelKey(feature, mode));
-  if (usable(app)) return app;
-  if (hasKey(MODE_MODELS[feature][mode])) return MODE_MODELS[feature][mode];
+export function modelFor(profile: string | null, feature: Feature): string {
+  const id = TIER_MODEL[tierFor(profile, AREA_OF[feature])];
+  if (hasKey(id)) return id;
   return hasKey(FREE_DEFAULT_MODEL) ? FREE_DEFAULT_MODEL : FALLBACK_MODEL;
 }
 
-/** Set the app's model for a step in a mode (admins). */
-export function chooseAppModel(id: string, feature: Feature, mode: AiMode): void {
-  if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
-  if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
-  if (!FEATURES.includes(feature) || !MODES.includes(mode)) throw new ModelError(`Unknown step ${feature} ${mode}`);
-  setSetting(appModelKey(feature, mode), id);
-}
-
-/** The app's model for each step in each mode. */
-export function appModels(): Record<Feature, Record<AiMode, string>> {
-  return Object.fromEntries(FEATURES.map((f) => [f, { regular: appModelFor(f, 'regular'), smart: appModelFor(f, 'smart') }])) as Record<Feature, Record<AiMode, string>>;
-}
-
-/** How hard Claude thinks: harder in Smart mode; search wants speed. */
+/** How hard Claude thinks: the stronger the model picked, the harder. */
 export function effortFor(profile: string | null, feature: Feature): Effort {
-  if (feature === 'search') return modeFor(profile, 'search') === 'smart' ? 'medium' : 'low';
-  return modeFor(profile, AREA_OF[feature]) === 'smart' ? 'high' : 'medium';
+  return TIER_EFFORT[tierFor(profile, AREA_OF[feature])];
 }
 
 export function caps(): Caps {
@@ -647,11 +625,9 @@ export interface ModelStatus {
 /** Everything Settings and the header's picker show, for one profile. */
 export interface AiState {
   models: ModelStatus[];
-  /** The profile's mode on each page. */
-  modes: Record<AiArea, AiMode>;
+  /** The model the profile picked on each page. */
+  tiers: Record<AiArea, Tier>;
   spend: SpendSummary;
-  /** The app's model for each step in each mode. */
-  app: Record<Feature, Record<AiMode, string>>;
   /** What one request has cost on each step, on average, over the last 30 days. */
   costPerRequest: Partial<Record<Feature, number>>;
   /** The same, by the model that ran it: what a mode costs on that step. */
@@ -695,8 +671,8 @@ export function aiState(profile: string | null): AiState {
     }
     costByModel[f] = Object.fromEntries(Object.entries(byModel).map(([m, x]) => [m, x.cost / x.requests]));
   }
-  const modes = Object.fromEntries(AREAS.map((a) => [a, modeFor(profile, a)])) as Record<AiArea, AiMode>;
-  return { models, modes, spend, app: appModels(), costPerRequest, costByModel };
+  const tiers = Object.fromEntries(AREAS.map((a) => [a, tierFor(profile, a)])) as Record<AiArea, Tier>;
+  return { models, tiers, spend, costPerRequest, costByModel };
 }
 
 /** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */

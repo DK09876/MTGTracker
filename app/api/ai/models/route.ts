@@ -11,8 +11,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { aiState, chooseAppModel, chooseMode, ModelError, setCaps, testModel } from '@/lib/ai';
-import type { AiArea, AiMode, Feature } from '@/lib/models';
+import { aiState, chooseTier, ModelError, setCaps, testModel } from '@/lib/ai';
+import type { AiArea, Tier } from '@/lib/models';
 import { profileOf, requireAdmin, requireProfile } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -31,24 +31,16 @@ export async function PUT(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
   const { profile } = who;
-  const b = await request.json().catch(() => ({})) as { area?: unknown; mode?: unknown; caps?: unknown; app?: unknown };
-  // The caps and the app's own models are for admins.
-  if (b.caps !== undefined || b.app !== undefined) {
+  const b = await request.json().catch(() => ({})) as { area?: unknown; tier?: unknown; caps?: unknown };
+  // The caps are for admins.
+  if (b.caps !== undefined) {
     const admin = requireAdmin(request);
     if (admin instanceof NextResponse) return admin;
   }
   try {
-    // {area, mode}: this profile's Regular or Smart on one page.
-    if (typeof b.area === 'string' && typeof b.mode === 'string') chooseMode(profile, b.area as AiArea, b.mode as AiMode);
+    // {area, tier}: the model this profile uses on one page.
+    if (typeof b.area === 'string' && typeof b.tier === 'string') chooseTier(profile, b.area as AiArea, b.tier as Tier);
     if (b.caps && typeof b.caps === 'object') setCaps(b.caps as Record<string, unknown>);
-    // {app: {feature: {regular?, smart?}}}: which model each mode uses on each step.
-    if (b.app && typeof b.app === 'object') {
-      for (const [feature, byMode] of Object.entries(b.app as Record<string, Record<string, unknown>>)) {
-        for (const [mode, id] of Object.entries(byMode ?? {})) {
-          if (typeof id === 'string') chooseAppModel(id, feature as Feature, mode as AiMode);
-        }
-      }
-    }
   } catch (error) {
     return refused(error);
   }

@@ -7,10 +7,11 @@
  * re-sorting, "Load more", and re-running an edited query.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Tab, Views } from './Results';
 import * as api from '@/lib/api';
+import { getProfile } from '@/lib/profile';
 import type { Sort } from '@/lib/sort';
 
 export type Status = 'idle' | 'searching' | 'thinking' | 'error';
@@ -34,19 +35,37 @@ function firstTab(answer: api.AskResponse): Tab {
   return answer.edhrec ? 'edhrec' : 'cards';
 }
 
+/**
+ * The last search on screen, kept in memory while the app is open: going to
+ * another page and back shows it at once rather than running it again. A
+ * reload starts fresh (the search page runs it again from what it saved).
+ */
+interface Kept {
+  profile: string;
+  answer: api.AskResponse;
+  views: Views;
+  tab: Tab;
+  inLists: Record<string, string[]>;
+  owned: Record<string, number>;
+  edhrecFull: boolean;
+}
+let kept: Kept | null = null;
+
 export function useSearch() {
-  const [answer, setAnswer] = useState<api.AskResponse | null>(null);
-  const [views, setViews] = useState<Views>({});
-  const [tab, setTab] = useState<Tab>('cards');
+  // Only this profile's, and read once, when the page opens.
+  const [memory] = useState(() => (kept && kept.profile === getProfile() ? kept : null));
+  const [answer, setAnswer] = useState<api.AskResponse | null>(memory?.answer ?? null);
+  const [views, setViews] = useState<Views>(memory?.views ?? {});
+  const [tab, setTab] = useState<Tab>(memory?.tab ?? 'cards');
   const [tabLoading, setTabLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [inLists, setInLists] = useState<Record<string, string[]>>({});
+  const [inLists, setInLists] = useState<Record<string, string[]>>(memory?.inLists ?? {});
   // Copies the profile owns of each card shown, by card id.
-  const [owned, setOwned] = useState<Record<string, number>>({});
+  const [owned, setOwned] = useState<Record<string, number>>(memory?.owned ?? {});
   const [status, setStatus] = useState<Status>('idle');
   // The EDHREC tab narrows by what was asked for; it can be switched to the
   // whole search, and back.
-  const [edhrecFull, setEdhrecFull] = useState(false);
+  const [edhrecFull, setEdhrecFull] = useState(memory?.edhrecFull ?? false);
   const statedEdhrec = useRef<Views['edhrec']>(undefined);
   const [error, setError] = useState<string | null>(null);
 
@@ -268,7 +287,13 @@ export function useSearch() {
     }
   };
 
+  useEffect(() => {
+    kept = answer ? { profile: getProfile(), answer, views, tab, inLists, owned, edhrecFull } : null;
+  }, [answer, views, tab, inLists, owned, edhrecFull]);
+
   return {
+    /** Whether this opened on the search kept from before, rather than empty. */
+    fromMemory: !!memory,
     answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists, owned,
     status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull, resumeView,
   };

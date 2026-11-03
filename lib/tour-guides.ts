@@ -92,7 +92,7 @@ export const GUIDES: Guide[] = [
     help: [
       'Ask how cards interact. Answers come from the official rulings, the Comprehensive Rules and the MTG Wiki, each cited.',
       'Conversations are kept on the left; ask a follow-up in the same one.',
-      'Uses Claude: the Regular / Smart switch at the top picks how strong a model answers, and shows today\'s budget.',
+      'Uses Claude: the picker at the top chooses the model - Haiku, Sonnet or Opus - with about what a question costs.',
     ],
     steps: [
       { target: 'rules-composer', title: 'Ask a rules question', body: 'Name the cards and the situation. If a name could be several cards, it asks which; if something matters, it asks before answering.' },
@@ -144,13 +144,13 @@ export const GUIDES: Guide[] = [
     match: (p) => p.startsWith('/settings'),
     title: 'Settings',
     help: [
-      'Your profile: add a password, sign out. Today\'s AI budget, and what the Regular / Smart switch on each AI page means.',
+      'Your profile: add a password, sign out. Today\'s AI budget, and how each AI page lets you pick its model.',
       'Admins also see the model for each AI step, People, card data, and the error log.',
     ],
     steps: [
       { target: 'my-profile', title: 'Your profile', body: 'Add a password so only you can open your profile, or sign out of this browser.' },
       { target: 'ai-budget', title: 'Today\'s AI budget', body: 'What the app and you have spent today against the daily caps. Most of the app needs no AI at all.' },
-      { target: 'ai-model', title: 'Regular and Smart', body: 'Each AI page - Search, Rules, a deck\'s Tags and Chat - has its own Regular / Smart switch. Regular is cheaper; Smart uses a stronger model that thinks harder.' },
+      { target: 'ai-model', title: 'Pick the AI per page', body: 'Search, Rules, a deck\'s Tags and Chat each let you pick the model - Haiku, Sonnet or Opus - with about what a request costs. Stronger models think harder and cost more.' },
     ],
   },
   {

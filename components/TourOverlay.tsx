@@ -11,7 +11,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { guideById } from '@/lib/tour-guides';
-import { endTour, goToStep, useTour } from '@/lib/tour-state';
+import { endTour, getTour, goToStep, useTour } from '@/lib/tour-state';
 
 const WAIT_MS = 6_000;
 const PAD = 8;
@@ -37,6 +37,15 @@ async function waitFor(selector: string, ms = WAIT_MS): Promise<HTMLElement | nu
 
 /** "history|history-button": the first of those parts that is on screen. */
 const targetSelector = (target: string) => target.split('|').map((t) => `[data-tour="${t}"]`).join(', ');
+
+/** On to the next step, or the end after the last. */
+function advance() {
+  const t = getTour();
+  const g = t && guideById(t.guide);
+  if (!t || !g) return;
+  if (t.step >= g.steps.length - 1) endTour();
+  else goToStep(t.step + 1);
+}
 
 export default function TourOverlay() {
   const tour = useTour();
@@ -112,7 +121,7 @@ export default function TourOverlay() {
     if (!tour) return;
     const keys = (e: KeyboardEvent) => {
       if (e.key === 'Escape') endTour();
-      if (e.key === 'ArrowRight') next();
+      if (e.key === 'ArrowRight') advance();
       if (e.key === 'ArrowLeft' && tour.step > 0) goToStep(tour.step - 1);
     };
     document.addEventListener('keydown', keys);
@@ -121,11 +130,7 @@ export default function TourOverlay() {
 
   if (!tour || !guide) return null;
   const last = tour.step >= guide.steps.length - 1;
-  function next() {
-    if (!tour || !guide) return;
-    if (tour.step >= guide.steps.length - 1) endTour();
-    else goToStep(tour.step + 1);
-  }
+  const next = advance;
 
   // The card sits below the spotlight if it fits, else above, else centred.
   const vw = typeof window === 'undefined' ? 1280 : window.innerWidth;
@@ -151,8 +156,40 @@ export default function TourOverlay() {
     style = { left, top: Math.min(Math.max(12, top), Math.max(12, vh - cardSize.h - 12)) };
   }
 
+  // The list of steps sits on the left; when the part being shown is over
+  // there too, it shrinks to its numbers and opens on hover.
+  const railCovers = !!box && box.left < 16 + 256 + 12;
+
   return (
     <>
+      <nav
+        aria-label="Tour steps"
+        className={`group fixed left-4 top-[calc(env(safe-area-inset-top)+6.5rem)] z-[85] hidden max-h-[calc(100vh-9rem)] flex-col overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-2 shadow-2xl backdrop-blur transition-[width] lg:flex ${railCovers ? 'w-12 hover:w-64 focus-within:w-64' : 'w-64'}`}
+      >
+        <p className={`px-2 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)] ${railCovers ? 'hidden group-hover:block group-focus-within:block' : ''}`}>
+          {guide.title} tour
+        </p>
+        <ol className="flex flex-col gap-0.5">
+          {guide.steps.map((s, i) => {
+            const now = i === tour.step;
+            const done = i < tour.step;
+            return (
+              <li key={i}>
+                <button
+                  onClick={() => goToStep(i)}
+                  aria-current={now ? 'step' : undefined}
+                  className={`flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left text-xs ${now ? 'bg-[var(--accent)]/15 text-[var(--foreground)]' : 'text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]'}`}
+                >
+                  <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold ${now ? 'btn-go' : done ? 'bg-[var(--surface-hover)] text-emerald-400' : 'border border-[var(--border)]'}`}>
+                    {done ? '✓' : i + 1}
+                  </span>
+                  <span className={`truncate ${railCovers ? 'hidden group-hover:inline group-focus-within:inline' : ''}`}>{s.title}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
       <div className="fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.6rem)] z-[70] flex justify-center px-3 pointer-events-none">
         <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-[var(--accent)]/60 bg-[var(--surface)] px-4 py-1.5 text-xs shadow-lg">
           <span><span className="font-semibold text-[var(--accent)]">Guided tour</span> · sample data, nothing here changes</span>
@@ -178,7 +215,20 @@ export default function TourOverlay() {
         style={{ position: 'fixed', ...style, width: phone ? undefined : 360 }}
         className={`z-[90] flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl transition-opacity ${ready ? 'opacity-100' : 'opacity-0'}`}
       >
-        <p className="text-xs text-[var(--muted)]">{guide.title} · {tour.step + 1} of {guide.steps.length}</p>
+        {/* On narrow screens the step count jumps to any step; wide ones have the list on the left. */}
+        <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+          <span>{guide.title} ·</span>
+          <label className="sr-only" htmlFor="tour-step">Go to step</label>
+          <select
+            id="tour-step"
+            value={tour.step}
+            onChange={(e) => goToStep(Number(e.target.value))}
+            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-xs lg:hidden"
+          >
+            {guide.steps.map((s, i) => <option key={i} value={i}>{i + 1} of {guide.steps.length} · {s.title}</option>)}
+          </select>
+          <span className="max-lg:hidden">{tour.step + 1} of {guide.steps.length}</span>
+        </div>
         <h2 className="font-display text-lg font-semibold">{step?.title}</h2>
         <p className="text-sm leading-relaxed text-[var(--muted)]">{step?.body}</p>
         <div className="mt-1 flex items-center gap-2">

@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 
 import AiUsage from '@/components/AiUsage';
-import { People, StepModels } from '@/components/AdminSettings';
+import { People } from '@/components/AdminSettings';
 import CardData from '@/components/CardData';
 import MyProfile from '@/components/MyProfile';
 import ErrorLog from '@/components/ErrorLog';
@@ -54,17 +54,16 @@ export default function SettingsPage() {
       </section>
 
       <section data-tour="ai-model" className="flex flex-col gap-3">
-        <h2 className="font-medium">Regular and Smart</h2>
+        <h2 className="font-medium">Which AI each page uses</h2>
         <p className="text-sm text-[var(--muted)]">
-          Search, Rules, a deck&apos;s Tags and its Chat each have a Regular / Smart switch, remembered for you on each page.
-          Regular uses a cheaper model; Smart a stronger one that thinks harder, at a few times the price.
-          {admin ? ' Which model each uses is set below.' : ''}
+          Search, Rules, a deck&apos;s Tags and its Chat each let you pick the Claude model - Haiku, Sonnet or Opus - remembered
+          for you on each page, with about what a request costs. Stronger models think harder and cost more. Fable is listed
+          but off for now.
         </p>
       </section>
 
       {admin && (
         <>
-          <StepModels state={state} onState={setState} />
           <People self={me!.id} />
           <CardData />
           <ErrorLog />

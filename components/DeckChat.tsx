@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import AiModeSwitch from './AiModeSwitch';
+import AiModelPicker from './AiModelPicker';
 import * as api from '@/lib/api';
 import type { DeckChat as Chat } from '@/lib/deck-chat';
 import type { ListedCard } from '@/lib/db';
@@ -111,7 +111,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
       </aside>
 
       <section data-tour="chat-thread" className="flex min-w-0 flex-[999_1_34rem] flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 p-4">
-        <AiModeSwitch area="chat" className="justify-end" />
+        <AiModelPicker area="chat" align="right" />
         {!chat && (
           <div className="flex flex-col gap-2">
             <h3 className="font-display text-lg font-semibold">Ask about this deck</h3>

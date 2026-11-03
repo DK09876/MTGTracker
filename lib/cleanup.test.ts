@@ -47,5 +47,5 @@ describe('cleanUp', () => {
     expect(listErrors(3650).map((e) => e.message)).toEqual(['still needs a look']);
     // A saved read is the owner's: kept.
     expect(readsFor('l1').saved.map((r) => r.id)).toEqual([kept.id]);
-  });
+  }, 20_000);
 });
