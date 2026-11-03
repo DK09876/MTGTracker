@@ -18,6 +18,9 @@ const KEY = 'mtg-profile';
 export interface Profile {
   id: string;
   name: string;
+  /** Set on the list the server gives: whether using it needs signing in. */
+  isAdmin?: boolean;
+  hasPassword?: boolean;
 }
 
 const listeners = new Set<() => void>();

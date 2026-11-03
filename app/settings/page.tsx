@@ -8,13 +8,16 @@
 import { useEffect, useState } from 'react';
 
 import AiUsage from '@/components/AiUsage';
+import { People, StepModels } from '@/components/AdminSettings';
 import CardData from '@/components/CardData';
+import MyProfile from '@/components/MyProfile';
 import ErrorLog from '@/components/ErrorLog';
 import ModelPicker from '@/components/ModelPicker';
 import { Budget } from '@/components/ModelMenu';
 import * as api from '@/lib/api';
 import type { AiState } from '@/lib/ai';
 import { EFFORTS, type Effort } from '@/lib/models';
+import { useMe } from '@/lib/use-me';
 
 const EFFORT_NOTE: Record<Effort, string> = {
   low: 'Quick and cheapest. Fine for easy questions.',
@@ -23,6 +26,7 @@ const EFFORT_NOTE: Record<Effort, string> = {
 };
 
 export default function SettingsPage() {
+  const me = useMe();
   const [state, setState] = useState<AiState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,16 +38,19 @@ export default function SettingsPage() {
   }, []);
 
   if (!state) return <p className="text-sm text-[var(--muted)]">{error ?? 'Loading…'}</p>;
+  const admin = !!me?.isAdmin;
   const claude = state.models.find((m) => m.chosenFor.includes('rules'))?.provider === 'anthropic';
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-10">
       <h1 className="text-2xl font-semibold">Settings</h1>
 
+      <MyProfile />
+
       <section className="flex flex-col gap-3">
         <h2 className="font-medium">AI budget</h2>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><Budget state={state} /></div>
-        <Caps state={state} onState={setState} />
+        {admin && <Caps state={state} onState={setState} />}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -94,9 +101,14 @@ export default function SettingsPage() {
         <ModelPicker state={state} features={['search']} onState={setState} name="search-model" label="Model for search" />
       </section>
 
-      <CardData />
-
-      <ErrorLog />
+      {admin && (
+        <>
+          <StepModels state={state} onState={setState} />
+          <People self={me!.id} />
+          <CardData />
+          <ErrorLog />
+        </>
+      )}
     </div>
   );
 }

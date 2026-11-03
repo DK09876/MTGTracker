@@ -275,6 +275,33 @@ export const removeCard = (listId: string, cardId: string) =>
 export const fetchProfiles = () =>
   fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
 
+// --- signing in and admins -------------------------------------------------
+
+export interface Me {
+  id: string;
+  name: string;
+  isAdmin: boolean;
+  hasPassword: boolean;
+  signedIn: boolean;
+  needsSignIn: boolean;
+  /** An admin with no password yet: their first sign-in sets one. */
+  setsPassword: boolean;
+}
+/** Told when sign-in changes, so everything that shows admin parts looks again. */
+export const ME_CHANGED = 'mtg-me-changed';
+const meChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(ME_CHANGED)); };
+export const me = (profile: string) => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>);
+export const signIn = (profile: string, password: string) =>
+  fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, password }) })
+    .then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
+export const signOut = () => fetch(`${BASE}/api/auth/logout`, { method: 'POST' }).then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
+export const changePassword = (current: string, next: string) =>
+  send('auth/password', 'POST', { current, next }).then(json<{ access: Me }>).then((r) => { meChanged(); return r; });
+export interface Person { id: string; name: string; isAdmin: boolean; hasPassword: boolean; lists: number }
+export const people = () => fetch(url('admin/people')).then(json<{ people: Person[] }>);
+export const changePerson = (id: string, action: 'admin' | 'unadmin' | 'reset' | 'remove') =>
+  send('admin/people', 'POST', { id, action }).then(json<{ people: Person[] }>);
+
 export const createProfile = (name: string) =>
   fetch(url('profiles'), {
     method: 'POST',
@@ -517,6 +544,8 @@ const changed = (state: AiState) => {
 };
 
 export const aiState = () => fetch(url('ai/models')).then(json<AiState>);
+/** Admins: the model each step uses unless a profile picks its own. */
+export const setAppModels = (app: Partial<Record<Feature, string>>) => send('ai/models', 'PUT', { app }).then(json<AiState>).then(changed);
 export const chooseModel = (model: string, features: Feature[]) =>
   send('ai/models', 'PUT', { model, features }).then(json<AiState>).then(changed);
 export const chooseEffort = (effort: Effort) => send('ai/models', 'PUT', { effort }).then(json<AiState>).then(changed);

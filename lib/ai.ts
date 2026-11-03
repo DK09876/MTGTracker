@@ -16,7 +16,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import {
-  getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  aiCalls, getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
   setSetting, spendSince,
 } from './db';
 import { callClaude, claudeClient, ClaudeFailure, usageOf, type ClaudeClient, type ClaudeParams } from './ai-claude';
@@ -649,6 +649,10 @@ export interface AiState {
   models: ModelStatus[];
   effort: Effort;
   spend: SpendSummary;
+  /** The app's model for each step, before any profile's own choice. */
+  app: Record<Feature, string>;
+  /** What one request has cost on each step, on average, over the last 30 days. */
+  costPerRequest: Partial<Record<Feature, number>>;
 }
 
 export function aiState(profile: string | null): AiState {
@@ -669,7 +673,15 @@ export function aiState(profile: string | null): AiState {
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
-  return { models, effort: effortFor(profile), spend };
+  // Per step, from the usage trail; tag cards were logged as tagging before they had their own step.
+  const calls = aiCalls(new Date(Date.now() - 30 * 86400_000).toISOString(), 5000).filter((c) => c.outcome === 'ok' && c.cost > 0);
+  const stepOf = (c: { feature: string; step: string }): string => (c.feature === 'tagging' && /tag cards|check the tags/.test(c.step) ? 'tagcards' : c.feature);
+  const costPerRequest: Partial<Record<Feature, number>> = {};
+  for (const f of FEATURES) {
+    const mine = calls.filter((c) => stepOf(c) === f);
+    if (mine.length) costPerRequest[f] = mine.reduce((n, c) => n + c.cost, 0) / mine.length;
+  }
+  return { models, effort: effortFor(profile), spend, app: appModels(), costPerRequest };
 }
 
 /** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */
