@@ -1,0 +1,1504 @@
+{
+ "Praise the Sun, Fire the Gun": {
+  "roles": [
+   {
+    "id": "ramp",
+    "label": "Ramp",
+    "group": "mana",
+    "target": [
+     10,
+     12
+    ],
+    "count": 11,
+    "cards": [
+     "Arcane Signet",
+     "Chrome Mox",
+     "Gleaming Splendor",
+     "Grim Monolith",
+     "Lotus Petal",
+     "Mana Vault",
+     "Mox Opal",
+     "Path to Exile",
+     "Smothering Tithe",
+     "Sol Ring",
+     "The Mind Stone"
+    ]
+   },
+   {
+    "id": "rock",
+    "label": "Mana rocks",
+    "group": "mana",
+    "target": null,
+    "count": 7,
+    "cards": [
+     "Arcane Signet",
+     "Chrome Mox",
+     "Grim Monolith",
+     "Mana Vault",
+     "Mox Opal",
+     "Sol Ring",
+     "The Mind Stone"
+    ]
+   },
+   {
+    "id": "dork",
+    "label": "Mana creatures",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "land-ramp",
+    "label": "Land ramp",
+    "group": "mana",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Path to Exile"
+    ]
+   },
+   {
+    "id": "ritual",
+    "label": "Rituals",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "reducer",
+    "label": "Cost reducers",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "draw",
+    "label": "Card advantage",
+    "group": "cards",
+    "target": [
+     10,
+     12
+    ],
+    "count": 6,
+    "cards": [
+     "Archivist of Oghma",
+     "Esper Sentinel",
+     "Gleaming Splendor",
+     "Sensei's Divining Top",
+     "The One Ring",
+     "Vexing Bauble"
+    ]
+   },
+   {
+    "id": "engine",
+    "label": "Draw engines",
+    "group": "cards",
+    "target": null,
+    "count": 5,
+    "cards": [
+     "Archivist of Oghma",
+     "Esper Sentinel",
+     "Gleaming Splendor",
+     "Sensei's Divining Top",
+     "The One Ring"
+    ]
+   },
+   {
+    "id": "cantrip",
+    "label": "Cantrips",
+    "group": "cards",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "Abeyance",
+     "Reprieve"
+    ]
+   },
+   {
+    "id": "tutor",
+    "label": "Tutors",
+    "group": "cards",
+    "target": null,
+    "count": 9,
+    "cards": [
+     "Enlightened Tutor",
+     "Land Tax",
+     "Ranger of Eos",
+     "Ranger-Captain of Eos",
+     "Recruiter of the Guard",
+     "Scrapyard Recombiner",
+     "Starfield Shepherd",
+     "Tezzeret, Cruel Captain",
+     "Weathered Wayfarer"
+    ]
+   },
+   {
+    "id": "wheel",
+    "label": "Wheels",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "removal",
+    "label": "Targeted removal",
+    "group": "interaction",
+    "target": [
+     8,
+     12
+    ],
+    "count": 10,
+    "cards": [
+     "Dauntless Dismantler",
+     "Path to Exile",
+     "Portable Hole",
+     "Skyclave Apparition",
+     "Solitude",
+     "Soul Partition",
+     "Swords to Plowshares",
+     "Triskelion",
+     "Walking Ballista",
+     "Winds of Abandon"
+    ]
+   },
+   {
+    "id": "wipe",
+    "label": "Board wipes",
+    "group": "interaction",
+    "target": [
+     2,
+     4
+    ],
+    "count": 2,
+    "cards": [
+     "Dauntless Dismantler",
+     "Winds of Abandon"
+    ]
+   },
+   {
+    "id": "counter",
+    "label": "Counterspells",
+    "group": "interaction",
+    "target": null,
+    "count": 6,
+    "cards": [
+     "Aven Interrupter",
+     "Bilbo's Gambit",
+     "Boromir, Warden of the Tower",
+     "Rebuff the Wicked",
+     "Reprieve",
+     "Vexing Bauble"
+    ]
+   },
+   {
+    "id": "gy-hate",
+    "label": "Graveyard hate",
+    "group": "interaction",
+    "target": null,
+    "count": 5,
+    "cards": [
+     "Agatha's Soul Cauldron",
+     "Calamity's Wake",
+     "Grafdigger's Cage",
+     "Rest in Peace",
+     "Soulless Jailer"
+    ]
+   },
+   {
+    "id": "stax",
+    "label": "Stax",
+    "group": "interaction",
+    "target": null,
+    "count": 19,
+    "cards": [
+     "Abeyance",
+     "Archon of Emeria",
+     "Aven Interrupter",
+     "Bilbo's Gambit",
+     "Calamity's Wake",
+     "Deafening Silence",
+     "Disruptor Flute",
+     "Drannith Magistrate",
+     "Esper Sentinel",
+     "Ethersworn Canonist",
+     "Grand Abolisher",
+     "Linvala, Keeper of Silence",
+     "Orim's Chant",
+     "Phyrexian Censor",
+     "Ranger-Captain of Eos",
+     "Rule of Law",
+     "Silence",
+     "Soul Partition",
+     "Voice of Victory"
+    ]
+   },
+   {
+    "id": "protection",
+    "label": "Protection",
+    "group": "resilience",
+    "target": null,
+    "count": 9,
+    "cards": [
+     "Boromir, Warden of the Tower",
+     "Galadriel's Dismissal",
+     "Giver of Runes",
+     "Mother of Runes",
+     "Rebuff the Wicked",
+     "Soul Partition",
+     "Surge of Salvation",
+     "Teferi's Protection",
+     "The One Ring"
+    ]
+   },
+   {
+    "id": "recursion",
+    "label": "Recursion",
+    "group": "resilience",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "wincon",
+    "label": "Wins the game",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-turn",
+    "label": "Extra turns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-combat",
+    "label": "Extra combats",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "overrun",
+    "label": "Overruns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "anthem",
+    "label": "Anthems",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "drain",
+    "label": "Drain",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Blind Obedience"
+    ]
+   },
+   {
+    "id": "mill",
+    "label": "Mills opponents",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "tokens",
+    "label": "Token makers",
+    "group": "plan",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Gleaming Splendor",
+     "Smothering Tithe",
+     "Voice of Victory"
+    ]
+   },
+   {
+    "id": "sac-outlet",
+    "label": "Sac outlets",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Scrapyard Recombiner"
+    ]
+   }
+  ],
+  "wincons": {
+   "routes": [
+    {
+     "id": "combo",
+     "label": "Combo",
+     "how": "2 combos that end the game - e.g. Heliod, Sun-Crowned + Walking Ballista (Infinite damage); Heliod, Sun-Crowned + Triskelion (Infinite damage).",
+     "cards": [
+      "Heliod, Sun-Crowned",
+      "Walking Ballista",
+      "Triskelion"
+     ],
+     "strength": "strong"
+    }
+   ],
+   "missing": ""
+  },
+  "combos": [
+   [
+    [
+     "Heliod, Sun-Crowned",
+     "Walking Ballista"
+    ],
+    [
+     "Infinite damage",
+     "Infinite lifegain",
+     "Infinite lifegain triggers"
+    ]
+   ],
+   [
+    [
+     "Heliod, Sun-Crowned",
+     "Triskelion"
+    ],
+    [
+     "Infinite damage",
+     "Infinite lifegain",
+     "Infinite lifegain triggers"
+    ]
+   ]
+  ]
+ },
+ "Baby Lasagna": {
+  "roles": [
+   {
+    "id": "ramp",
+    "label": "Ramp",
+    "group": "mana",
+    "target": [
+     10,
+     12
+    ],
+    "count": 20,
+    "cards": [
+     "Badgermole Cub",
+     "Blossoming Tortoise",
+     "Dryad of the Ilysian Grove",
+     "Earthbender Ascension",
+     "Exploration",
+     "Gilded Goose",
+     "Icetill Explorer",
+     "Liquimetal Torque",
+     "Nature's Chosen",
+     "Ordeal of Nylea",
+     "Ornithopter of Paradise",
+     "Patriar's Seal",
+     "Sanctum Weaver",
+     "Sol Ring",
+     "Tireless Provisioner",
+     "Titania, Protector of Argoth",
+     "Utopia Sprawl",
+     "Wild Growth",
+     "Will of the Sultai",
+     "World Shaper"
+    ]
+   },
+   {
+    "id": "rock",
+    "label": "Mana rocks",
+    "group": "mana",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Liquimetal Torque",
+     "Patriar's Seal",
+     "Sol Ring"
+    ]
+   },
+   {
+    "id": "dork",
+    "label": "Mana creatures",
+    "group": "mana",
+    "target": null,
+    "count": 5,
+    "cards": [
+     "Badgermole Cub",
+     "Gilded Goose",
+     "Ornithopter of Paradise",
+     "Sanctum Weaver",
+     "Tireless Provisioner"
+    ]
+   },
+   {
+    "id": "land-ramp",
+    "label": "Land ramp",
+    "group": "mana",
+    "target": null,
+    "count": 9,
+    "cards": [
+     "Blossoming Tortoise",
+     "Dryad of the Ilysian Grove",
+     "Earthbender Ascension",
+     "Exploration",
+     "Icetill Explorer",
+     "Ordeal of Nylea",
+     "Titania, Protector of Argoth",
+     "Will of the Sultai",
+     "World Shaper"
+    ]
+   },
+   {
+    "id": "ritual",
+    "label": "Rituals",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "reducer",
+    "label": "Cost reducers",
+    "group": "mana",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Blossoming Tortoise"
+    ]
+   },
+   {
+    "id": "draw",
+    "label": "Card advantage",
+    "group": "cards",
+    "target": [
+     10,
+     12
+    ],
+    "count": 3,
+    "cards": [
+     "Braids, Arisen Nightmare",
+     "Obsessive Pursuit",
+     "Starscream, Power Hungry // Starscream, Seeker Leader"
+    ]
+   },
+   {
+    "id": "engine",
+    "label": "Draw engines",
+    "group": "cards",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Braids, Arisen Nightmare",
+     "Obsessive Pursuit",
+     "Starscream, Power Hungry // Starscream, Seeker Leader"
+    ]
+   },
+   {
+    "id": "cantrip",
+    "label": "Cantrips",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "tutor",
+    "label": "Tutors",
+    "group": "cards",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Invasion of Ikoria // Zilortha, Apex of Ikoria"
+    ]
+   },
+   {
+    "id": "wheel",
+    "label": "Wheels",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "removal",
+    "label": "Targeted removal",
+    "group": "interaction",
+    "target": [
+     8,
+     12
+    ],
+    "count": 6,
+    "cards": [
+     "Assassin's Trophy",
+     "Drag to the Roots",
+     "Mortality Spear",
+     "Nowhere to Run",
+     "Tear Asunder",
+     "Tragic Slip"
+    ]
+   },
+   {
+    "id": "wipe",
+    "label": "Board wipes",
+    "group": "interaction",
+    "target": [
+     2,
+     4
+    ],
+    "count": 4,
+    "cards": [
+     "Deadly Tempest",
+     "Living Death",
+     "Toxic Deluge",
+     "Villainous Wrath"
+    ]
+   },
+   {
+    "id": "counter",
+    "label": "Counterspells",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "gy-hate",
+    "label": "Graveyard hate",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "stax",
+    "label": "Stax",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "protection",
+    "label": "Protection",
+    "group": "resilience",
+    "target": null,
+    "count": 7,
+    "cards": [
+     "Arachnogenesis",
+     "Changing Loyalty",
+     "Galadhrim Ambush",
+     "Kaya's Ghostform",
+     "Lightning Greaves",
+     "Necrogen Communion",
+     "Swiftfoot Boots"
+    ]
+   },
+   {
+    "id": "recursion",
+    "label": "Recursion",
+    "group": "resilience",
+    "target": null,
+    "count": 11,
+    "cards": [
+     "Animate Dead",
+     "Blossoming Tortoise",
+     "Crucible of Worlds",
+     "Icetill Explorer",
+     "Invasion of Ikoria // Zilortha, Apex of Ikoria",
+     "Living Death",
+     "Necromancy",
+     "Rancor",
+     "Titania, Protector of Argoth",
+     "Will of the Sultai",
+     "World Shaper"
+    ]
+   },
+   {
+    "id": "wincon",
+    "label": "Wins the game",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-turn",
+    "label": "Extra turns",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Ugin's Nexus"
+    ]
+   },
+   {
+    "id": "extra-combat",
+    "label": "Extra combats",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "overrun",
+    "label": "Overruns",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Blossoming Bogbeast"
+    ]
+   },
+   {
+    "id": "anthem",
+    "label": "Anthems",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Blossoming Tortoise"
+    ]
+   },
+   {
+    "id": "drain",
+    "label": "Drain",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "mill",
+    "label": "Mills opponents",
+    "group": "plan",
+    "target": null,
+    "count": 4,
+    "cards": [
+     "Blossoming Tortoise",
+     "Icetill Explorer",
+     "Will of the Sultai",
+     "World Shaper"
+    ]
+   },
+   {
+    "id": "tokens",
+    "label": "Token makers",
+    "group": "plan",
+    "target": null,
+    "count": 7,
+    "cards": [
+     "Baloth Prime",
+     "Gilded Goose",
+     "Jolrael, Mwonvuli Recluse",
+     "Mindless Conscription",
+     "Obsessive Pursuit",
+     "Tireless Provisioner",
+     "Titania, Protector of Argoth"
+    ]
+   },
+   {
+    "id": "sac-outlet",
+    "label": "Sac outlets",
+    "group": "plan",
+    "target": null,
+    "count": 4,
+    "cards": [
+     "Baloth Prime",
+     "Braids, Arisen Nightmare",
+     "Gilded Goose",
+     "Zuran Orb"
+    ]
+   }
+  ],
+  "wincons": {
+   "routes": [
+    {
+     "id": "voltron",
+     "label": "Commander damage",
+     "how": "14 equipment and auras to suit up one creature for 21 commander damage.",
+     "cards": [
+      "Animate Dead",
+      "Changing Loyalty",
+      "Glimmerlight",
+      "Instill Energy",
+      "Journey to Eternity // Atzal, Cave of Eternity",
+      "Kaya's Ghostform",
+      "Lightning Greaves",
+      "Nature's Chosen",
+      "Necrogen Communion",
+      "Ordeal of Nylea",
+      "Rancor",
+      "Swiftfoot Boots",
+      "Utopia Sprawl",
+      "Wild Growth"
+     ],
+     "strength": "some"
+    }
+   ],
+   "missing": "Its ways to win only help close a game; nothing ends it once assembled. A combo, an alternate win or more finishers would make it close reliably."
+  },
+  "combos": []
+ },
+ "Knuck if you buck": {
+  "roles": [
+   {
+    "id": "ramp",
+    "label": "Ramp",
+    "group": "mana",
+    "target": [
+     10,
+     12
+    ],
+    "count": 16,
+    "cards": [
+     "Big Score",
+     "Charming Scoundrel",
+     "Curse of Opulence",
+     "Goldhound",
+     "Goldlust Triad",
+     "Great Train Heist",
+     "Impulsive Pilferer",
+     "J. Jonah Jameson",
+     "Magda, Brazen Outlaw",
+     "Neheb, Dreadhorde Champion",
+     "Professional Face-Breaker",
+     "Ragavan, Nimble Pilferer",
+     "Seize the Spotlight",
+     "Smaug the Magnificent",
+     "Unexpected Windfall",
+     "Village Pillagers"
+    ]
+   },
+   {
+    "id": "rock",
+    "label": "Mana rocks",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "dork",
+    "label": "Mana creatures",
+    "group": "mana",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Magda, Brazen Outlaw"
+    ]
+   },
+   {
+    "id": "land-ramp",
+    "label": "Land ramp",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "ritual",
+    "label": "Rituals",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "reducer",
+    "label": "Cost reducers",
+    "group": "mana",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "Defiler of Instinct",
+     "Ruby Medallion"
+    ]
+   },
+   {
+    "id": "draw",
+    "label": "Card advantage",
+    "group": "cards",
+    "target": [
+     10,
+     12
+    ],
+    "count": 17,
+    "cards": [
+     "Akki Scrapchomper",
+     "Big Score",
+     "Charming Scoundrel",
+     "Dismissive Pyromancer",
+     "Fear of Missing Out",
+     "Hawkeye, Master Marksman",
+     "Ivora, Insatiable Heir",
+     "Neheb, Dreadhorde Champion",
+     "Professional Face-Breaker",
+     "Ragavan, Nimble Pilferer",
+     "Reckless Lackey",
+     "Seize the Spotlight",
+     "Slagdrill Scrapper",
+     "Tersa Lightshatter",
+     "The One Ring",
+     "Unexpected Windfall",
+     "Voldaren Epicure"
+    ]
+   },
+   {
+    "id": "engine",
+    "label": "Draw engines",
+    "group": "cards",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Akki Scrapchomper",
+     "Slagdrill Scrapper",
+     "The One Ring"
+    ]
+   },
+   {
+    "id": "cantrip",
+    "label": "Cantrips",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "tutor",
+    "label": "Tutors",
+    "group": "cards",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Goblin Engineer"
+    ]
+   },
+   {
+    "id": "wheel",
+    "label": "Wheels",
+    "group": "cards",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Neheb, Dreadhorde Champion"
+    ]
+   },
+   {
+    "id": "removal",
+    "label": "Targeted removal",
+    "group": "interaction",
+    "target": [
+     8,
+     12
+    ],
+    "count": 9,
+    "cards": [
+     "Defiler of Instinct",
+     "Dismissive Pyromancer",
+     "Fury",
+     "Hideous Taskmaster",
+     "Inferno Titan",
+     "Overlord of the Boilerbilges",
+     "Red Elemental Blast",
+     "Smaug the Magnificent",
+     "Untimely Malfunction"
+    ]
+   },
+   {
+    "id": "wipe",
+    "label": "Board wipes",
+    "group": "interaction",
+    "target": [
+     2,
+     4
+    ],
+    "count": 2,
+    "cards": [
+     "Krark-Clan Shaman",
+     "Village Pillagers"
+    ]
+   },
+   {
+    "id": "counter",
+    "label": "Counterspells",
+    "group": "interaction",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Red Elemental Blast"
+    ]
+   },
+   {
+    "id": "gy-hate",
+    "label": "Graveyard hate",
+    "group": "interaction",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "Agatha's Soul Cauldron",
+     "Canoptek Scarab Swarm"
+    ]
+   },
+   {
+    "id": "stax",
+    "label": "Stax",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "protection",
+    "label": "Protection",
+    "group": "resilience",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Commander's Plate",
+     "Hexing Squelcher",
+     "The One Ring"
+    ]
+   },
+   {
+    "id": "recursion",
+    "label": "Recursion",
+    "group": "resilience",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "Goblin Engineer",
+     "Tersa Lightshatter"
+    ]
+   },
+   {
+    "id": "wincon",
+    "label": "Wins the game",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-turn",
+    "label": "Extra turns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-combat",
+    "label": "Extra combats",
+    "group": "plan",
+    "target": null,
+    "count": 6,
+    "cards": [
+     "Fear of Missing Out",
+     "Fury of the Horde",
+     "Great Train Heist",
+     "Grim Reaper's Sprint",
+     "Karlach, Fury of Avernus",
+     "Overpowering Attack"
+    ]
+   },
+   {
+    "id": "overrun",
+    "label": "Overruns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "anthem",
+    "label": "Anthems",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Magda, Brazen Outlaw"
+    ]
+   },
+   {
+    "id": "drain",
+    "label": "Drain",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "mill",
+    "label": "Mills opponents",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Ragavan, Nimble Pilferer"
+    ]
+   },
+   {
+    "id": "tokens",
+    "label": "Token makers",
+    "group": "plan",
+    "target": null,
+    "count": 11,
+    "cards": [
+     "Curse of Opulence",
+     "Dragonmaster Outcast",
+     "Goldlust Triad",
+     "Ivora, Insatiable Heir",
+     "J. Jonah Jameson",
+     "Kari Zev, Skyship Raider",
+     "Magda, Brazen Outlaw",
+     "Professional Face-Breaker",
+     "Ragavan, Nimble Pilferer",
+     "Smaug the Magnificent",
+     "Village Pillagers"
+    ]
+   },
+   {
+    "id": "sac-outlet",
+    "label": "Sac outlets",
+    "group": "plan",
+    "target": null,
+    "count": 7,
+    "cards": [
+     "Akki Scrapchomper",
+     "Emrakul, the World Anew",
+     "Goblin Engineer",
+     "Krark-Clan Shaman",
+     "Magda, Brazen Outlaw",
+     "Professional Face-Breaker",
+     "Slagdrill Scrapper"
+    ]
+   }
+  ],
+  "wincons": {
+   "routes": [
+    {
+     "id": "combat",
+     "label": "Combat",
+     "how": "39 creatures with 7 anthems, overruns or extra combats to swing for lethal.",
+     "cards": [
+      "Magda, Brazen Outlaw",
+      "Fear of Missing Out",
+      "Fury of the Horde",
+      "Great Train Heist",
+      "Grim Reaper's Sprint",
+      "Karlach, Fury of Avernus",
+      "Overpowering Attack"
+     ],
+     "strength": "strong"
+    }
+   ],
+   "missing": ""
+  },
+  "combos": []
+ },
+ "The Unity": {
+  "roles": [
+   {
+    "id": "ramp",
+    "label": "Ramp",
+    "group": "mana",
+    "target": [
+     10,
+     12
+    ],
+    "count": 13,
+    "cards": [
+     "Aftermath Analyst",
+     "Arcane Signet",
+     "Bighorner Rancher",
+     "Birds of Paradise",
+     "Caged Sun",
+     "Cultivate",
+     "Growth Spiral",
+     "Harold and Bob, First Numens",
+     "Patchwork Banner",
+     "Patriar's Seal",
+     "Skull Prophet",
+     "Sol Ring",
+     "Tato Farmer"
+    ]
+   },
+   {
+    "id": "rock",
+    "label": "Mana rocks",
+    "group": "mana",
+    "target": null,
+    "count": 5,
+    "cards": [
+     "Arcane Signet",
+     "Caged Sun",
+     "Patchwork Banner",
+     "Patriar's Seal",
+     "Sol Ring"
+    ]
+   },
+   {
+    "id": "dork",
+    "label": "Mana creatures",
+    "group": "mana",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Bighorner Rancher",
+     "Birds of Paradise",
+     "Skull Prophet"
+    ]
+   },
+   {
+    "id": "land-ramp",
+    "label": "Land ramp",
+    "group": "mana",
+    "target": null,
+    "count": 4,
+    "cards": [
+     "Aftermath Analyst",
+     "Cultivate",
+     "Growth Spiral",
+     "Tato Farmer"
+    ]
+   },
+   {
+    "id": "ritual",
+    "label": "Rituals",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "reducer",
+    "label": "Cost reducers",
+    "group": "mana",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "draw",
+    "label": "Card advantage",
+    "group": "cards",
+    "target": [
+     10,
+     12
+    ],
+    "count": 7,
+    "cards": [
+     "Court of Cunning",
+     "Elemental Bond",
+     "Guardian Project",
+     "Jenova, Ancient Calamity",
+     "Marcus, Mutant Mayor",
+     "Raul, Trouble Shooter",
+     "Vault 87: Forced Evolution"
+    ]
+   },
+   {
+    "id": "engine",
+    "label": "Draw engines",
+    "group": "cards",
+    "target": null,
+    "count": 5,
+    "cards": [
+     "Court of Cunning",
+     "Elemental Bond",
+     "Guardian Project",
+     "Jenova, Ancient Calamity",
+     "Marcus, Mutant Mayor"
+    ]
+   },
+   {
+    "id": "cantrip",
+    "label": "Cantrips",
+    "group": "cards",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Growth Spiral"
+    ]
+   },
+   {
+    "id": "tutor",
+    "label": "Tutors",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "wheel",
+    "label": "Wheels",
+    "group": "cards",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "removal",
+    "label": "Targeted removal",
+    "group": "interaction",
+    "target": [
+     8,
+     12
+    ],
+    "count": 5,
+    "cards": [
+     "Alpha Deathclaw",
+     "Atomize",
+     "Casualties of War",
+     "Drown in Ichor",
+     "Putrefy"
+    ]
+   },
+   {
+    "id": "wipe",
+    "label": "Board wipes",
+    "group": "interaction",
+    "target": [
+     2,
+     4
+    ],
+    "count": 2,
+    "cards": [
+     "Bane of Progress",
+     "Nuclear Fallout"
+    ]
+   },
+   {
+    "id": "counter",
+    "label": "Counterspells",
+    "group": "interaction",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "An Offer You Can't Refuse",
+     "Psychic Strike"
+    ]
+   },
+   {
+    "id": "gy-hate",
+    "label": "Graveyard hate",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "stax",
+    "label": "Stax",
+    "group": "interaction",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "protection",
+    "label": "Protection",
+    "group": "resilience",
+    "target": null,
+    "count": 4,
+    "cards": [
+     "Heroic Intervention",
+     "Lightning Greaves",
+     "Mutational Advantage",
+     "Ripples of Potential"
+    ]
+   },
+   {
+    "id": "recursion",
+    "label": "Recursion",
+    "group": "resilience",
+    "target": null,
+    "count": 9,
+    "cards": [
+     "Aftermath Analyst",
+     "Colossal Grave-Reaver",
+     "Elixir of Immortality",
+     "Infesting Radroach",
+     "Muldrotha, the Gravetide",
+     "Raul, Trouble Shooter",
+     "Tato Farmer",
+     "Tyvar, Jubilant Brawler",
+     "Vat Emergence"
+    ]
+   },
+   {
+    "id": "wincon",
+    "label": "Wins the game",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-turn",
+    "label": "Extra turns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "extra-combat",
+    "label": "Extra combats",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "overrun",
+    "label": "Overruns",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "anthem",
+    "label": "Anthems",
+    "group": "plan",
+    "target": null,
+    "count": 3,
+    "cards": [
+     "Caged Sun",
+     "Hancock, Ghoulish Mayor",
+     "Patchwork Banner"
+    ]
+   },
+   {
+    "id": "drain",
+    "label": "Drain",
+    "group": "plan",
+    "target": null,
+    "count": 0,
+    "cards": []
+   },
+   {
+    "id": "mill",
+    "label": "Mills opponents",
+    "group": "plan",
+    "target": null,
+    "count": 26,
+    "cards": [
+     "Aftermath Analyst",
+     "Altar of Dementia",
+     "Altar of the Brood",
+     "Colossal Grave-Reaver",
+     "Court of Cunning",
+     "Feral Ghoul",
+     "Glowing One",
+     "Harold and Bob, First Numens",
+     "Infesting Radroach",
+     "Mesmeric Orb",
+     "Mindcrank",
+     "Nightkin Ambusher",
+     "Nuclear Fallout",
+     "Phenax, God of Deception",
+     "Psychic Strike",
+     "Raul, Trouble Shooter",
+     "Ruin Crab",
+     "Screeching Scorchbeast",
+     "Skull Prophet",
+     "Strong, the Brutish Thespian",
+     "Syr Konrad, the Grim",
+     "Tato Farmer",
+     "The Wise Mothman",
+     "Tyvar, Jubilant Brawler",
+     "Vault 12: The Necropolis",
+     "Vexing Radgull"
+    ]
+   },
+   {
+    "id": "tokens",
+    "label": "Token makers",
+    "group": "plan",
+    "target": null,
+    "count": 2,
+    "cards": [
+     "Screeching Scorchbeast",
+     "Watchful Radstag"
+    ]
+   },
+   {
+    "id": "sac-outlet",
+    "label": "Sac outlets",
+    "group": "plan",
+    "target": null,
+    "count": 1,
+    "cards": [
+     "Altar of Dementia"
+    ]
+   }
+  ],
+  "wincons": {
+   "routes": [
+    {
+     "id": "combat",
+     "label": "Combat",
+     "how": "33 creatures with 3 anthems, overruns or extra combats to swing for lethal.",
+     "cards": [
+      "Caged Sun",
+      "Hancock, Ghoulish Mayor",
+      "Patchwork Banner"
+     ],
+     "strength": "some"
+    },
+    {
+     "id": "mill",
+     "label": "Mill",
+     "how": "Empty the opponents' libraries.",
+     "cards": [
+      "Aftermath Analyst",
+      "Altar of Dementia",
+      "Altar of the Brood",
+      "Colossal Grave-Reaver",
+      "Court of Cunning",
+      "Feral Ghoul",
+      "Glowing One",
+      "Harold and Bob, First Numens",
+      "Infesting Radroach",
+      "Mesmeric Orb",
+      "Mindcrank",
+      "Nightkin Ambusher",
+      "Nuclear Fallout",
+      "Phenax, God of Deception",
+      "Psychic Strike",
+      "Raul, Trouble Shooter",
+      "Ruin Crab",
+      "Screeching Scorchbeast",
+      "Skull Prophet",
+      "Strong, the Brutish Thespian",
+      "Syr Konrad, the Grim",
+      "Tato Farmer",
+      "The Wise Mothman",
+      "Tyvar, Jubilant Brawler",
+      "Vault 12: The Necropolis",
+      "Vexing Radgull"
+     ],
+     "strength": "strong"
+    }
+   ],
+   "missing": ""
+  },
+  "combos": []
+ }
+}

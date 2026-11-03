@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { countRoles, type Deps } from './roles';
+import { countRoles, ROLES, type Deps } from './roles';
 import type { ScryfallCard } from './scryfall';
 
 const card = (name: string, type_line = 'Sorcery') => ({ id: name, oracle_id: `o-${name}`, name, type_line }) as ScryfallCard;
@@ -49,7 +49,7 @@ describe('countRoles', () => {
     const checked = new Set<string>();
     const first = deps(saved, checked);
     await countRoles(deck, first);
-    expect(first.search).toHaveBeenCalledTimes(5);
+    expect(first.search).toHaveBeenCalledTimes(ROLES.length);
     // A card with no roles is remembered as looked up, too.
     expect(saved.get('o-Myriad Landscape')).toEqual(['ramp']);
 

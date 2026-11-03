@@ -10,8 +10,8 @@ const stats = new Map([
   ['Harrow', { decks: 1, inclusion: 0.5, synergy: 0 }],
   ['Beast Within', { decks: 1, inclusion: 0.7, synergy: 0 }],
 ]);
-const ramp = { id: 'ramp', label: 'Ramp', target: [1, 2] as [number, number], count: 4, cards: ['Cultivate', 'Farseek', 'Harrow', 'Pet Rock'] };
-const removal = { id: 'removal', label: 'Targeted removal', target: [8, 12] as [number, number], count: 1, cards: ['Beast Within'] };
+const ramp = { id: 'ramp', label: 'Ramp', group: 'cards' as const, target: [1, 2] as [number, number], count: 4, cards: ['Cultivate', 'Farseek', 'Harrow', 'Pet Rock'] };
+const removal = { id: 'removal', label: 'Targeted removal', group: 'cards' as const, target: [8, 12] as [number, number], count: 1, cards: ['Beast Within'] };
 
 describe('cutCandidates', () => {
   it('starts with roles over their guideline, rarest first, unlisted before all', () => {

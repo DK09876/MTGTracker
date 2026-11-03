@@ -16,6 +16,7 @@ import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
 import { primaryType } from '@/lib/deckview';
 import { requireList } from '@/lib/profile-route';
 import { countRoles } from '@/lib/roles';
+import { guessWinRoutes } from '@/lib/wincons';
 import { imageOf, searchCards, type ScryfallCard } from '@/lib/scryfall';
 import { exactName } from '@/lib/syntax';
 import { combosInDeck, estimateBracket, SPELLBOOK_TAGS, type DeckList } from '@/lib/spellbook';
@@ -86,6 +87,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     bracket: bracket && { ...bracketFloor(bracket), spellbook: { tag: bracket.tag, label: SPELLBOOK_TAGS[bracket.tag] } },
     combos: combos && { included: combos.included, toAdd },
     cuts: cutCandidates(spells, page?.stats ?? null, roles),
+    // How it wins, from the cards alone (no model): combos, finishers, shape.
+    wincons: roles ? guessWinRoutes({ cards: [...main, ...(list.commander ? [{ card: list.commander, quantity: 1 }] : [])], roles, combos: combos?.included ?? null }) : null,
     unavailable: [!bracket && 'bracket', !combos && 'combos'].filter(Boolean),
   };
   if (bracket && combos) {

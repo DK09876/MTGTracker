@@ -13,34 +13,78 @@ import { exactName } from './syntax';
 import type { ScryfallCard, SearchResult } from './scryfall';
 import { primaryType } from './deckview';
 
+export type RoleGroup = 'mana' | 'cards' | 'interaction' | 'resilience' | 'plan';
+
+export const ROLE_GROUPS: Record<RoleGroup, string> = {
+  mana: 'Mana',
+  cards: 'Cards',
+  interaction: 'Interaction',
+  resilience: 'Resilience',
+  plan: 'Game plan',
+};
+
 export interface Role {
   id: string;
   label: string;
+  group: RoleGroup;
   /** The Scryfall search that finds cards in this role. */
   tag: string;
   /** A common guideline for a Commander deck, as a range - or none. */
   target: [number, number] | null;
 }
 
-// Guideline ranges most Commander deckbuilding advice lands near; they are
-// a starting point, and a deck's plan may want more or fewer of any.
+// Every role is a Scryfall community tag (scryfall.com/docs/tagger-tags),
+// checked to exist on 2026-10-31 - no model involved. Guideline ranges are
+// where most Commander deckbuilding advice lands; a deck's plan may want
+// more or fewer of any.
 //
-// Scryfall's tags are broader than deckbuilders mean: otag:tutor includes
-// every land-fetcher (Cultivate, Evolving Wilds) and otag:card-advantage
-// the cycling lands. Lands are counted as lands, and land-fetching as ramp.
+// Scryfall's tags are broader than deckbuilders mean, so some are narrowed:
+// otag:tutor includes every land-fetcher (Cultivate, Evolving Wilds) and
+// otag:card-advantage the cycling lands, so lands are counted as lands and
+// land-fetching as ramp. A cantrip replaces itself rather than gaining a
+// card, so it is not counted as card advantage (the deckbuilding videos'
+// rule: only cards that leave you with more in hand are draw).
 export const ROLES: Role[] = [
-  { id: 'ramp', label: 'Ramp', tag: 'otag:ramp -t:land', target: [10, 12] },
-  { id: 'draw', label: 'Card advantage', tag: 'otag:card-advantage -t:land', target: [10, 12] },
-  { id: 'removal', label: 'Targeted removal', tag: 'otag:spot-removal -t:land', target: [8, 12] },
-  { id: 'wipe', label: 'Board wipes', tag: 'otag:board-wipe -t:land', target: [2, 4] },
-  { id: 'tutor', label: 'Tutors', tag: 'otag:tutor -otag:ramp -t:land', target: null },
+  { id: 'ramp', label: 'Ramp', group: 'mana', tag: 'otag:ramp -t:land', target: [10, 12] },
+  { id: 'rock', label: 'Mana rocks', group: 'mana', tag: 'otag:mana-rock -t:land', target: null },
+  { id: 'dork', label: 'Mana creatures', group: 'mana', tag: 'otag:mana-dork', target: null },
+  { id: 'land-ramp', label: 'Land ramp', group: 'mana', tag: 'otag:land-ramp -t:land', target: null },
+  { id: 'ritual', label: 'Rituals', group: 'mana', tag: 'otag:ritual', target: null },
+  { id: 'reducer', label: 'Cost reducers', group: 'mana', tag: 'otag:cost-reducer -t:land', target: null },
+
+  { id: 'draw', label: 'Card advantage', group: 'cards', tag: 'otag:card-advantage -otag:cantrip -t:land', target: [10, 12] },
+  { id: 'engine', label: 'Draw engines', group: 'cards', tag: 'otag:draw-engine -t:land', target: null },
+  { id: 'cantrip', label: 'Cantrips', group: 'cards', tag: 'otag:cantrip', target: null },
+  { id: 'tutor', label: 'Tutors', group: 'cards', tag: 'otag:tutor -otag:ramp -t:land', target: null },
+  { id: 'wheel', label: 'Wheels', group: 'cards', tag: 'otag:wheel', target: null },
+
+  { id: 'removal', label: 'Targeted removal', group: 'interaction', tag: 'otag:spot-removal -t:land', target: [8, 12] },
+  { id: 'wipe', label: 'Board wipes', group: 'interaction', tag: 'otag:board-wipe -t:land', target: [2, 4] },
+  { id: 'counter', label: 'Counterspells', group: 'interaction', tag: 'otag:counterspell', target: null },
+  { id: 'gy-hate', label: 'Graveyard hate', group: 'interaction', tag: 'otag:graveyard-hate -t:land', target: null },
+  // Slows the whole table down. Scryfall has no single stax tag; these are
+  // the tags for rule-setting pieces, without punisher draw (otag:tax).
+  { id: 'stax', label: 'Stax', group: 'interaction', tag: '(otag:cost-increaser or otag:rule-of-law or otag:tax-attack or otag:prevent-cast or otag:prevent-activation or otag:skip-untap-step or otag:cast-tax or otag:mass-land-denial)', target: null },
+
+  { id: 'protection', label: 'Protection', group: 'resilience', tag: 'otag:protection -t:land', target: null },
+  { id: 'recursion', label: 'Recursion', group: 'resilience', tag: 'otag:recursion -t:land', target: null },
+
+  { id: 'wincon', label: 'Wins the game', group: 'plan', tag: 'otag:win-condition', target: null },
+  { id: 'extra-turn', label: 'Extra turns', group: 'plan', tag: 'otag:extra-turn', target: null },
+  { id: 'extra-combat', label: 'Extra combats', group: 'plan', tag: 'otag:extra-combat', target: null },
+  { id: 'overrun', label: 'Overruns', group: 'plan', tag: 'otag:overrun', target: null },
+  { id: 'anthem', label: 'Anthems', group: 'plan', tag: 'otag:anthem', target: null },
+  { id: 'drain', label: 'Drain', group: 'plan', tag: 'otag:drain-life', target: null },
+  { id: 'mill', label: 'Mills opponents', group: 'plan', tag: 'otag:mill', target: null },
+  { id: 'tokens', label: 'Token makers', group: 'plan', tag: 'otag:repeatable-token-generator', target: null },
+  { id: 'sac-outlet', label: 'Sac outlets', group: 'plan', tag: 'otag:sac-outlet', target: null },
 ];
 
 /**
  * Bumped whenever a role's search changes, so saved answers from the old
  * definition are looked up again rather than trusted.
  */
-export const ROLES_VERSION = 2;
+export const ROLES_VERSION = 3;
 
 export const LAND_TARGET: [number, number] = [35, 38];
 
@@ -107,6 +151,7 @@ export async function countRoles(cards: Array<{ card: ScryfallCard; quantity: nu
     return {
       id: role.id,
       label: role.label,
+      group: role.group,
       target: role.target,
       count: members.reduce((n, c) => n + c.quantity, 0),
       cards: members.map((c) => c.card.name).sort(),

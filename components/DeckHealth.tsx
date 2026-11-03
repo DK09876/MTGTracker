@@ -20,7 +20,7 @@ import { geek, seenBy } from '@/lib/geek';
 import type { Warning } from '@/lib/health';
 import { atLeast } from '@/lib/odds';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
-import type { RoleCount } from '@/lib/roles';
+import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
 
 // Series colour: the app's gold, stepped down into the band that reads on
 // the dark surface (validated: lightness band and 3:1 contrast on #1d1a16).
@@ -118,13 +118,23 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
           <RoleRow label="Lands" count={health.lands} target={landTarget} />
           {roles === 'loading' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">
-              Tagging this deck&apos;s cards with Scryfall… The first time takes a few seconds; after that it is instant.
+              Tagging this deck&apos;s cards with Scryfall… The first time takes up to a minute; after that it is instant.
             </p>
           )}
           {roles === 'failed' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the role tags — try again in a moment.</p>
           )}
-          {Array.isArray(roles) && roles.map((r) => <RoleRow key={r.id} label={r.label} count={r.count} target={r.target} cards={r.cards} />)}
+          {Array.isArray(roles) && (Object.keys(ROLE_GROUPS) as RoleGroup[]).map((g) => {
+            // A role the deck has none of is only worth a row if there is a guideline for it.
+            const rows = roles.filter((r) => r.group === g && (r.count > 0 || r.target));
+            if (!rows.length) return null;
+            return (
+              <div key={g}>
+                <p className="bg-[var(--surface)] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">{ROLE_GROUPS[g]}</p>
+                {rows.map((r) => <RoleRow key={r.id} label={r.label} count={r.count} target={r.target} cards={r.cards} />)}
+              </div>
+            );
+          })}
         </div>
       </Section>
 
