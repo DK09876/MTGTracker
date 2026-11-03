@@ -135,7 +135,10 @@ export default function TourOverlay() {
   if (phone || !box) {
     // On a phone the card docks at the bottom - or at the top, when the part
     // it is about sits low on the screen and would be covered.
-    const low = !!box && box.bottom > vh - cardSize.h - 90;
+    // Whichever end hides less of the part.
+    const bottomEdge = vh - 90 - cardSize.h;
+    const topEdge = 104 + cardSize.h;
+    const low = !!box && Math.max(0, box.bottom - bottomEdge) > Math.max(0, topEdge - box.top);
     style = phone
       ? (low ? { left: 12, right: 12, top: 'calc(env(safe-area-inset-top) + 6.5rem)' } : { left: 12, right: 12, bottom: 'calc(var(--nav-h, 0px) + 12px)' })
       : { left: (vw - cardSize.w) / 2, top: (vh - cardSize.h) / 2 };
