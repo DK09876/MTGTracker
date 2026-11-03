@@ -31,8 +31,14 @@ describe('tour guides', () => {
     expect(missing).toEqual([]);
   });
 
+  it('gives a deck its own help, at either address', () => {
+    expect(GUIDES.find((g) => g.match('/decks/abc'))?.id).toBe('deck');
+    expect(GUIDES.find((g) => g.match('/lists/abc'))?.id).toBe('deck');
+    expect(GUIDES.find((g) => g.match('/decks'))?.id).toBe('decks');
+  });
+
   it('has help for every page it guides, and a guide per main page', () => {
-    for (const path of ['/', '/rules', '/decks', '/lists/x', '/collection', '/settings', '/people']) {
+    for (const path of ['/', '/rules', '/decks', '/decks/x', '/lists/x', '/collection', '/settings', '/people']) {
       expect(GUIDES.find((g) => g.match(path))?.help.length, path).toBeGreaterThan(0);
     }
   });
