@@ -41,6 +41,16 @@ export function getProfile(): string {
   }
 }
 
+/** The profile chosen on this device, whatever the tour is showing. */
+export function getChosenProfile(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return localStorage.getItem(KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /** Tell everything that reads the profile to read it again (the tour starting or ending). */
 export function profileChanged(): void {
   for (const listener of listeners) listener();
