@@ -102,6 +102,7 @@ export const paths = {
   playtest: (id: string) => `lists/${id}/playtest`,
   chats: (id: string) => `lists/${id}/chats`,
   reads: (id: string) => `lists/${id}/reads`,
+  folders: 'folders',
 };
 
 async function json<T>(response: Response): Promise<T> {
@@ -268,6 +269,17 @@ export const renameList = (id: string, name: string) =>
 export const duplicateList = (id: string) =>
   fetch(url(`lists/${id}/duplicate`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     .then(json<{ list: List }>).then((b) => b.list);
+
+export interface DeckFolders { folders: Array<{ id: string; name: string }>; placed: Record<string, string> }
+export const fetchFolders = () => get<DeckFolders>(paths.folders);
+export const createFolder = (name: string) =>
+  fetch(url('folders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    .then(json<{ folder: { id: string; name: string } }>).then((b) => b.folder);
+export const renameFolder = (id: string, name: string) =>
+  fetch(url(`folders/${id}`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(json<{ folder: { id: string; name: string } }>);
+export const deleteFolder = (id: string) => fetch(url(`folders/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+export const placeDeck = (listId: string, folderId: string | null) =>
+  fetch(url(`lists/${listId}/folder`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId }) }).then(json<{ ok: true }>);
 
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);

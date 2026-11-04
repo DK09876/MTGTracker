@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 
 import { duplicateList, getList } from '@/lib/db';
+import { copyPlacement } from '@/lib/deck-folders';
 import { copyPlan } from '@/lib/deck-plan';
 import { copyDeckRoles } from '@/lib/deck-roles';
 import { requireList } from '@/lib/profile-route';
@@ -24,5 +25,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!copy) return NextResponse.json({ error: 'No such list' }, { status: 404 });
   copyDeckRoles(id, copy);
   copyPlan(id, copy);
+  copyPlacement(id, copy);
   return NextResponse.json({ list: getList(copy, owned.profile) }, { status: 201 });
 }

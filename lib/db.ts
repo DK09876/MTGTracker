@@ -505,6 +505,8 @@ export function deleteList(id: string): void {
   database.run('DELETE FROM deck_card_tags WHERE listId = ?', [id]);
   database.run('DELETE FROM deck_tags WHERE listId = ?', [id]);
   database.run('DELETE FROM tag_jobs WHERE listId = ?', [id]);
+  // Folders keep their own table (deck-folders.ts), made on first use.
+  try { database.run('DELETE FROM deck_folder_items WHERE listId = ?', [id]); } catch { /* no folders yet */ }
   database.run('DELETE FROM lists WHERE id = ?', [id]);
 }
 

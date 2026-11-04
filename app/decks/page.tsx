@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import CommanderPicker from '@/components/CommanderPicker';
+import DeckFolderBar, { DECK_DRAG, type FolderPick } from '@/components/DeckFolderBar';
 import ImportResult from '@/components/ImportResult';
 import ManaCost, { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
@@ -28,17 +29,18 @@ const SORTS: Array<[Sort, string]> = [['recent', 'Recently edited'], ['name', 'N
 const COLOURS = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
 // How the grid is sorted and which colours it shows, remembered in this browser.
 const VIEW_KEY = 'mtg-decks-view';
-interface View { sort: Sort; colours: string[]; short: boolean }
-const DEFAULT_VIEW: View = { sort: 'recent', colours: [], short: false };
+interface View { sort: Sort; colours: string[]; short: boolean; folder: FolderPick }
+const DEFAULT_VIEW: View = { sort: 'recent', colours: [], short: false, folder: 'all' };
 
 function loadView(): View {
   try { return { ...DEFAULT_VIEW, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? 'null') as Partial<View> | null) }; } catch { return DEFAULT_VIEW; }
 }
 
 /** The decks the toolbar lets through, in its order. Colours: the deck has every one picked; C is colourless. */
-function shownDecks(decks: List[], view: View, query: string): List[] {
+function shownDecks(decks: List[], view: View, query: string, placed: Record<string, string>): List[] {
   const q = query.trim().toLowerCase();
   const out = decks.filter((d) => {
+    if (view.folder === 'none' ? !!placed[d.id] : view.folder !== 'all' && placed[d.id] !== view.folder) return false;
     if (q && !d.name.toLowerCase().includes(q) && !(d.commander?.name.toLowerCase().includes(q))) return false;
     if (view.short && d.totalCards === 100) return false;
     const id = d.commander?.color_identity ?? [];
@@ -78,16 +80,40 @@ export default function DecksPage() {
     try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* fine */ }
     return next;
   });
-  const shown = shownDecks(decks, view, query);
+  // Folders, and which one each deck is in.
+  const [folders, setFolders] = useState<api.DeckFolders>(() => api.peek<api.DeckFolders>(api.paths.folders) ?? { folders: [], placed: {} });
+  const [naming, setNaming] = useState(false);
+  // A deck waiting for the folder being named ("New folder with this deck").
+  const [toFile, setToFile] = useState<string | null>(null);
+  const placed = folders.placed;
+  // A folder that is gone (deleted elsewhere) shows everything.
+  const folderPick: FolderPick = view.folder === 'all' || view.folder === 'none' || folders.folders.some((f) => f.id === view.folder) ? view.folder : 'all';
+  const shown = shownDecks(decks, { ...view, folder: folderPick }, query, placed);
   const filtered = !!query.trim() || view.colours.length > 0 || view.short;
+  const counts = {
+    all: decks.length,
+    none: decks.filter((d) => !placed[d.id]).length,
+    byFolder: decks.reduce<Record<string, number>>((n, d) => { if (placed[d.id]) n[placed[d.id]] = (n[placed[d.id]] ?? 0) + 1; return n; }, {}),
+  };
+  const refreshFolders = () => api.fetchFolders().then(setFolders).catch(() => {});
+  const fileDeck = async (deckId: string, folderId: string | null) => {
+    // Shown moved at once; the answer confirms it.
+    setFolders((f) => {
+      const next = { ...f.placed };
+      if (folderId) next[deckId] = folderId; else delete next[deckId];
+      return { ...f, placed: next };
+    });
+    try { await api.placeDeck(deckId, folderId); } catch (e) { setError(e instanceof Error ? e.message : 'Could not move that deck'); }
+    await refreshFolders();
+  };
 
   useEffect(() => {
     api.fetchLists('deck').then(setDecks).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    api.fetchFolders().then(setFolders).catch(() => {});
   }, []);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    // A link brings its own name; otherwise the commander's.
     // A link or a list brings its own name (a list takes its commander's).
     const deckName = name.trim() || commander?.name || (box.kind === 'link' || box.kind === 'list' ? '' : null);
     if (deckName === null || deckName === undefined) { setError('Pick a commander, or paste a list or a link'); return; }
@@ -96,6 +122,8 @@ export default function DecksPage() {
     try {
       const { list, imported: result } = await api.createDeck(deckName, commander, decklist,
         commander && !decklist.trim() && starter ? { ownedFirst } : undefined);
+      // Made while a folder is open: it goes in that folder.
+      if (folderPick !== 'all' && folderPick !== 'none') await api.placeDeck(list.id, folderPick).then(refreshFolders).catch(() => {});
       // Show what an import did before moving on; otherwise go straight in.
       if (result && (result.missing.length || result.unreadable.length || result.outvoted)) {
         setDecks((prev) => [...prev, list]);
@@ -243,9 +271,40 @@ export default function DecksPage() {
       {!loading && !decks.length && !creating && (
         <p className="mt-10 text-center text-[var(--muted)]">No decks yet.</p>
       )}
+      {!loading && decks.length > 0 && !shown.length && !filtered && (
+        <p className="mt-8 text-center text-sm text-[var(--muted)]">
+          {folderPick === 'none' ? 'Every deck is in a folder.' : 'Nothing in this folder yet. Drag a deck onto it, or use a deck’s ⋯ → Move to.'}
+        </p>
+      )}
 
-      {decks.length > 1 && (
-        <div data-tour="deck-sort" className="mt-6 flex flex-wrap items-center gap-2 text-sm">
+      {decks.length > 0 && (
+        <DeckFolderBar
+          folders={folders.folders}
+          counts={counts}
+          active={folderPick}
+          onPick={(folder) => changeView({ folder })}
+          naming={naming}
+          setNaming={(on) => { setNaming(on); if (!on) setToFile(null); }}
+          onCreate={async (folderName) => {
+            try {
+              const folder = await api.createFolder(folderName);
+              if (toFile) await api.placeDeck(toFile, folder.id);
+              setToFile(null);
+              await refreshFolders();
+              changeView({ folder: folder.id });
+              return null;
+            } catch (e) { return e instanceof Error ? e.message : 'Could not make that folder'; }
+          }}
+          onRename={async (id, folderName) => {
+            try { await api.renameFolder(id, folderName); await refreshFolders(); return null; } catch (e) { return e instanceof Error ? e.message : 'Could not rename that folder'; }
+          }}
+          onDelete={async (id) => { await api.deleteFolder(id); changeView({ folder: 'all' }); await refreshFolders(); }}
+          onDrop={(deckId, folderId) => void fileDeck(deckId, folderId)}
+        />
+      )}
+
+      {decks.length > 0 && (
+        <div data-tour="deck-sort" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -286,7 +345,7 @@ export default function DecksPage() {
           </label>
           {filtered && (
             <p className="basis-full text-xs text-[var(--muted)]">
-              {shown.length ? `Showing ${shown.length} of ${decks.length}.` : 'No decks match.'}{' '}
+              {shown.length ? `Showing ${shown.length} of ${folderPick === 'all' ? decks.length : folderPick === 'none' ? counts.none : counts.byFolder[folderPick] ?? 0}.` : 'No decks match.'}{' '}
               <button onClick={() => { setQuery(''); changeView({ colours: [], short: false }); }} className="underline hover:text-[var(--foreground)]">Clear</button>
             </p>
           )}
@@ -300,20 +359,25 @@ export default function DecksPage() {
           const identity = deck.commander?.color_identity ?? [];
           return (
             // Each deck in its commander's colours, its art on the cover; its ⋯ sits beside the link, not in it.
-            <div key={deck.id} className="relative">
+            <div
+              key={deck.id}
+              className="relative"
+              // Dragged onto a folder above, it goes in it.
+              onDragStart={(e) => { e.dataTransfer.setData(DECK_DRAG, deck.id); e.dataTransfer.effectAllowed = 'move'; }}
+            >
             <Link
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
               className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
             >
               {/* Nothing on the tile moves or is filtered on hover - a lift, a scale or a brightness filter
-                  each left seams on the art's edges. A shade over the art fades out instead.
+                  each left seams on the art's edges; the border and glow show it instead.
                   The art is framed from near its top, where the faces are. */}
               <div className="relative h-36 overflow-hidden bg-[var(--surface)]">
                 {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover object-[50%_22%]" unoptimized />
                   : <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />}
-                <div aria-hidden className="absolute inset-0 bg-black/20 transition-opacity duration-200 group-hover:opacity-0" />
-                <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[var(--surface)]" />
+                {/* Only the bottom fades, under the name: a shade or a fade over the whole art washed it out. */}
+                <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-b from-transparent to-[var(--surface)]" />
                 <span className="absolute left-3 top-3"><IdentitySymbols identity={identity.join('')} size={18} /></span>
               </div>
               <div className="relative -mt-5 flex flex-1 flex-col gap-0.5 px-3.5 pb-3.5">
@@ -330,7 +394,10 @@ export default function DecksPage() {
               <MoreMenu
                 label={`More for ${deck.name}`}
                 items={[
-                  { label: 'Duplicate', onClick: async () => { await api.duplicateList(deck.id); setDecks(await api.fetchLists('deck')); } },
+                  { label: 'Duplicate', onClick: async () => { await api.duplicateList(deck.id); setDecks(await api.fetchLists('deck')); await refreshFolders(); } },
+                  ...folders.folders.filter((f) => f.id !== placed[deck.id]).map((f) => ({ label: `Move to ${f.name}`, onClick: () => fileDeck(deck.id, f.id) })),
+                  ...(placed[deck.id] ? [{ label: `Take out of ${folders.folders.find((f) => f.id === placed[deck.id])?.name ?? 'its folder'}`, onClick: () => fileDeck(deck.id, null) }] : []),
+                  { label: folders.folders.length ? 'New folder with this deck…' : 'Put in a new folder…', onClick: () => { setToFile(deck.id); setNaming(true); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                   {
                     label: 'Delete deck…',
                     danger: true,
