@@ -124,7 +124,7 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
   return (
     <section data-tour="brief" className="flex flex-col gap-3">
       <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">What this deck does</h3>
+        <h3 data-section="What it does" className="font-medium">What this deck does</h3>
         <div className="relative" ref={menuRef}>
           <div data-tour="draft-menu" className="btn-go inline-flex overflow-hidden rounded-full text-sm font-semibold">
             <button onClick={() => start(tags.brief.trim() ? 'build' : 'scratch')} disabled={running} className="px-3.5 py-1.5 disabled:opacity-60">

@@ -193,3 +193,6 @@ body {
 
 /* A part the guided tour scrolls to clears the sticky header and the tour's banner. */
 [data-tour] { scroll-margin-top: 7.5rem; }
+
+/* Jump targets from a deck's rail land below the sticky header. */
+[data-section] { scroll-margin-top: 5.5rem; }

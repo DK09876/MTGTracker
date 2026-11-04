@@ -100,7 +100,7 @@ export default function DeckCollection({ listId, version }: Props) {
         if (!cards.length) return null;
         return (
           <section key={g.status}>
-            <h3 className="font-medium">{g.title} <span className="font-normal text-[var(--muted)]">({cards.reduce((n, h) => n + (g.status === 'in-deck' ? h.pulled : g.status === 'proxy' ? h.proxies : h.short), 0)})</span></h3>
+            <h3 data-section={g.title} className="font-medium">{g.title} <span className="font-normal text-[var(--muted)]">({cards.reduce((n, h) => n + (g.status === 'in-deck' ? h.pulled : g.status === 'proxy' ? h.proxies : h.short), 0)})</span></h3>
             <p className="mb-2 text-sm text-[var(--muted)]">{g.hint}</p>
             <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
               {cards.map((h) => <HoldingRow key={h.key} h={h} busy={busy} act={act} />)}

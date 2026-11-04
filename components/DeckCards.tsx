@@ -35,7 +35,16 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
   onQuantity: (cardId: string, quantity: number) => void;
   onMove: (cardId: string, board: Board) => void;
+  /** How big the pictures are: small shows the most at once. */
+  size?: CardSize;
 }
+
+export type CardSize = 's' | 'm' | 'l';
+const GRID: Record<CardSize, string> = {
+  s: 'grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7',
+  m: 'grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5',
+  l: 'grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4',
+};
 
 type View = 'visual' | 'text';
 
@@ -51,7 +60,7 @@ function loadPrefs(): { view: View; groupBy: GroupBy; sortBy: SortBy } {
   }
 }
 
-export default function DeckCards({ listId, entries, tags, version, isDeck, onSelect, onQuantity, onMove }: Props) {
+export default function DeckCards({ listId, entries, tags, version, isDeck, onSelect, onQuantity, onMove, size = 's' }: Props) {
   const [board, setBoard] = useState<Board>('main');
   const [filter, setFilter] = useState('');
   const [prefs, setPrefs] = useState(() => (typeof window === 'undefined'
@@ -191,14 +200,14 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
       {groups.map((group) => (
         <section key={group.key} className="mt-6">
           {groupBy !== 'none' || group.key === 'commander' ? (
-            <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)]">
+            <h3 data-section={group.label} data-section-count={group.count} className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)]">
               {group.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: group.color }} aria-hidden="true" />}
               <span style={group.color ? { color: group.color } : undefined}>{group.label}</span>
               <span className="tabular-nums">({group.count})</span>
             </h3>
           ) : null}
           {prefs.view === 'visual' ? (
-            <div data-tour="card-grid" className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div data-tour="card-grid" className={`grid ${GRID[size]}`}>
               {group.items.map((entry) => (
                 <CardTile
                   key={entry.card.id}

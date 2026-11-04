@@ -195,7 +195,7 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
   return (
     <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
+        <h3 data-section="How it wins" className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
         <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
       </div>
       {routes.length > 0 && (
@@ -397,7 +397,7 @@ function Calculator({ library, roles }: { library: number; roles: RoleCount[] })
 function Section({ title, subtitle, children, tour }: { title: string; subtitle?: string; children: React.ReactNode; tour?: string }) {
   return (
     <section data-tour={tour}>
-      <h3 className="font-medium">{title}</h3>
+      <h3 data-section={title} className="font-medium">{title}</h3>
       {subtitle && <p className="mb-3 text-sm text-[var(--muted)]">{subtitle}</p>}
       {children}
     </section>

@@ -123,7 +123,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
       ) : (<>
       <section data-tour="build-issues" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="font-display text-xl font-semibold">
+          <h3 data-section="To look at" className="font-display text-xl font-semibold">
             {plan.issues.length - hiddenCount === 0 ? 'Nothing stands out' : `${plan.issues.length - hiddenCount} thing${plan.issues.length - hiddenCount === 1 ? '' : 's'} to look at`}
           </h3>
           {hiddenCount > 0 && (
@@ -161,13 +161,13 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
       <div className="flex flex-wrap items-start gap-5">
         <section data-tour="build-roles" className="flex min-w-0 flex-[1_1_28rem] flex-col gap-3">
-          <h3 className="font-display text-xl font-semibold">Roles</h3>
+          <h3 data-section="Roles" className="font-display text-xl font-semibold">Roles</h3>
           <Roles rows={plan.roles} finishers={plan.finishers} onFind={(role) => toggle({ at: 'roles', kind: 'fill', role })} />
           {panel('roles')}
         </section>
 
         <section data-tour="build-mana" className="flex min-w-0 flex-[1_1_20rem] flex-col gap-3">
-          <h3 className="font-display text-xl font-semibold">Mana</h3>
+          <h3 data-section="Mana" className="font-display text-xl font-semibold">Mana</h3>
           <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
             <p>
               <span className="font-semibold">{plan.lands.have} lands.</span> Karsten&apos;s formula suggests <span className="font-semibold">{plan.lands.want}</span>
@@ -206,12 +206,12 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
       </div>
 
       <section data-tour="tune-combos" className="flex flex-col gap-3">
-        <h3 className="font-display text-xl font-semibold">Combos</h3>
+        <h3 data-section="Combos" className="font-display text-xl font-semibold">Combos</h3>
         <DeckSuggestions listId={listId} cards={cards} commander={commander} version={version} onAdd={onAdd} onMove={(id, board) => { void onMove(id, board); }} onRemove={() => {}} combosOnly />
       </section>
 
       <section data-tour="tune-ideas" className="flex max-w-3xl flex-col gap-2">
-        <h3 className="font-display text-xl font-semibold">Ideas from Claude</h3>
+        <h3 data-section="Ideas from Claude" className="font-display text-xl font-semibold">Ideas from Claude</h3>
         <p className="text-sm text-[var(--muted)]">Claude reads the plan, the roles and the cards, and suggests what to add, each with an Add button. It opens in Chat, where you can keep asking.</p>
         <label className="flex flex-col gap-1 text-sm">
           Your instructions <span className="text-xs text-[var(--muted)]">(optional)</span>

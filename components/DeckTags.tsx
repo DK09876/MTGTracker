@@ -193,7 +193,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </div>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="suggest-tags" className="font-medium">1 · Suggest tags</h3>
+        <h3 data-tour="suggest-tags" data-section="1 · Suggest tags" className="font-medium">1 · Suggest tags</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The model reads the commander, your brief and every card ({cards.length} different), and suggests tags for this
           deck&apos;s plan, each with a test for what belongs. It stops here so you can keep, edit or drop them. Ask again
@@ -267,7 +267,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="your-tags" className="font-medium">2 · Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
+        <h3 data-tour="your-tags" data-section="2 · Your tags" className="font-medium">2 · Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The description is the test the model tags by, so make it say exactly what belongs — and what doesn&apos;t.
         </p>
@@ -336,7 +336,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="tag-cards" className="font-medium">3 · Put them on the cards</h3>
+        <h3 data-tour="tag-cards" data-section="3 · Put them on cards" className="font-medium">3 · Put them on the cards</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The model weighs every tag you kept against each card&apos;s full text and says why for each one it applies,
           then checks each tag across the deck. Tags you put on or took off by hand are never changed.
@@ -460,7 +460,7 @@ function BasicRoles({ listId }: { listId: string }) {
   return (
     <section data-tour="basic-roles" className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-medium">Basic roles <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
+        <h3 data-section="Built-in tags" className="font-medium">Basic roles <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
         <span className="text-xs text-[var(--muted)]">From Scryfall&apos;s card tags · the Health tab has the full table</span>
       </div>
       {roles === 'loading' && <p className="text-sm text-[var(--muted)]">Reading the cards&apos; roles… the first time takes up to a minute.</p>}

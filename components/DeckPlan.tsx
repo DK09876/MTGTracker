@@ -74,7 +74,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
       <DeckBrief listId={listId} tags={tags} onTags={onTags} drafted={plan.brief ? '' : plan.draft} />
 
       <section data-tour="plan-style" className="flex flex-col gap-3">
-        <h3 className="font-medium">Style</h3>
+        <h3 data-section="Style" className="font-medium">Style</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           Read from the commander&apos;s text and the deck&apos;s own cards: it looks like <span className="text-[var(--foreground)]">{detected?.label}</span>
           {plan.detected.secondary && <> with <span className="text-[var(--foreground)]">{styleOf(plan.detected.secondary)?.label}</span></>}. The style sets the usual counts below.
@@ -92,7 +92,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
       </section>
 
       <section data-tour="plan-wins" className="flex flex-col gap-2">
-        <h3 className="font-medium">How it wins</h3>
+        <h3 data-section="How it wins" className="font-medium">How it wins</h3>
         {plan.wins.tagged.length + plan.wins.finishers.length ? (
           <ul className="flex flex-wrap gap-1.5 text-sm">
             {plan.wins.tagged.map((n) => <li key={n} className="rounded-full border border-[var(--accent)]/60 bg-[var(--accent)]/10 px-3 py-1">{n}</li>)}
@@ -106,7 +106,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
       </section>
 
       <section data-tour="plan-guidelines" className="flex flex-col gap-3">
-        <h3 className="font-medium">Guidelines</h3>
+        <h3 data-section="Guidelines" className="font-medium">Guidelines</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">How many of each the deck should run. They start from the style; change a range and it is yours, kept when the style changes. Tune, Health and the cut list all use these.</p>
         <ul className="flex max-w-xl flex-col gap-1.5">
           {plan.targets.map((t) => <Range key={`${t.role}:${t.range.join("-")}`} target={t} disabled={busy} onChange={(range) => change({ targets: { [t.role]: range } })} />)}

@@ -164,18 +164,18 @@ function Goldfish({ listId, deck, commander, byName }: SimProps) {
           <div className="flex flex-wrap gap-4">
             {commander && (
               <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                <h3 className="text-sm font-semibold">Commander cast by turn</h3>
+                <h3 data-section="Commander by turn" className="text-sm font-semibold">Commander cast by turn</h3>
                 <Bars values={r.commanderBy} label={(i) => `Turn ${i + 1}`} />
               </div>
             )}
             <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-              <h3 className="text-sm font-semibold">Mana each turn</h3>
+              <h3 data-section="Mana each turn" className="text-sm font-semibold">Mana each turn</h3>
               <Bars values={r.manaByTurn} max={Math.max(...r.manaByTurn, 1)} label={(i) => `Turn ${i + 1}`} format={one} />
             </div>
           </div>
 
           <div data-tour="goldfish-stuck" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-            <h3 className="text-sm font-semibold">Stuck in hand</h3>
+            <h3 data-section="Stuck in hand" className="text-sm font-semibold">Stuck in hand</h3>
             {r.stuck.length ? (
               <>
                 <p className="text-xs text-[var(--muted)]">Still in hand after turn 8, in this share of the games it was drawn. Usually too expensive, or a colour the lands do not make enough of.</p>

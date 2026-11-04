@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react';
 import CommanderPicker from '@/components/CommanderPicker';
 import ImportResult from '@/components/ImportResult';
 import { IdentitySymbols } from '@/components/ManaCost';
+import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import { identityStyle } from '@/lib/identity';
@@ -175,9 +176,9 @@ export default function DecksPage() {
           const total = deck.totalCards;
           const identity = deck.commander?.color_identity ?? [];
           return (
-            // Each deck in its commander's colours, its art on the cover.
+            // Each deck in its commander's colours, its art on the cover; its ⋯ sits beside the link, not in it.
+            <div key={deck.id} className="relative">
             <Link
-              key={deck.id}
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
               className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
@@ -198,6 +199,21 @@ export default function DecksPage() {
               </div>
               <div aria-hidden className="id-grad h-[3px]" />
             </Link>
+            <div data-tour="deck-tile-more" className="absolute right-2 top-2 z-10 rounded-full bg-black/45 backdrop-blur">
+              <MoreMenu
+                label={`More for ${deck.name}`}
+                items={[
+                  { label: 'Duplicate', onClick: async () => { await api.duplicateList(deck.id); setDecks(await api.fetchLists('deck')); } },
+                  {
+                    label: 'Delete deck…',
+                    danger: true,
+                    confirm: `Delete “${deck.name}”? Copies pulled from boxes go back to them.`,
+                    onClick: async () => { await api.deleteList(deck.id); setDecks((all) => all.filter((d) => d.id !== deck.id)); },
+                  },
+                ]}
+              />
+            </div>
+            </div>
           );
         })}
       </div>

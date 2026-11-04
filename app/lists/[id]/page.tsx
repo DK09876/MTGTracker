@@ -12,8 +12,9 @@ import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
-import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckCards, { type CardSize, type Entry } from '@/components/DeckCards';
 import DeckPlan from '@/components/DeckPlan';
+import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
@@ -58,6 +59,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [imported, setImported] = useState<ImportSummary | null>(null);
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [exported, setExported] = useState<'copied' | 'failed' | null>(null);
+  // Card size on the Cards tab, kept in this browser; small shows the most at once.
+  const [cardSize, setCardSizeState] = useState<CardSize>(() => {
+    try { const v = localStorage.getItem('mtg-card-size'); return v === 'm' || v === 'l' ? v : 's'; } catch { return 's'; }
+  });
+  const setCardSize = (v: CardSize) => { setCardSizeState(v); try { localStorage.setItem('mtg-card-size', v); } catch { /* fine */ } };
 
   // Whether others can see this deck on the owner's profile; private until made public.
   const [shown, setShown] = useState(false);
@@ -270,7 +277,18 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </button>
             <div data-tour="deck-more"><MoreMenu
               items={[
-                { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
+                { label: importing ? 'Close the import' : 'Import', onClick: () => (importing ? setImporting(false) : openText()) },
+                {
+                  label: 'Export',
+                  onClick: async () => {
+                    try {
+                      await navigator.clipboard.writeText(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
+                      setExported('copied');
+                    } catch { setExported('failed'); }
+                    setTimeout(() => setExported(null), 2500);
+                  },
+                },
+                ...(['s', 'm', 'l'] as const).map((v) => ({ label: `Card size: ${{ s: 'small', m: 'medium', l: 'large' }[v]}${cardSize === v ? ' ✓' : ''}`, onClick: () => setCardSize(v) })),
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
                 { label: `Duplicate ${deck ? 'deck' : 'list'}`, onClick: async () => { const copy = await api.duplicateList(id); router.push(`${deck ? '/decks' : '/lists'}/${copy.id}`); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
@@ -372,6 +390,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {imported && rejected && (
         <p className="mt-3 text-sm text-amber-400">Nothing was changed — fix the lines below and save again.</p>
       )}
+      {exported && (
+        <p role="status" className="mt-3 text-sm text-[var(--muted)]">
+          {exported === 'copied' ? 'Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.' : 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'}
+        </p>
+      )}
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
       {building && (
@@ -380,25 +403,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           Building a starter list - roles first, then what fits the commander, then lands. The cards appear here when it is done.
         </p>
       )}
-      {deck && (
-        <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['chat', 'Chat'], ['collection', 'Collection']] as const).map(([value, label]) => (
-            <button
-              key={value}
-              role="tab"
-              data-tour-tab={value}
-              aria-selected={section === value}
-              onClick={() => setSection(value)}
-              className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
-            >
-              {value === 'chat' && !planConfirmed && <span aria-hidden>🔒 </span>}
-              {label}
-              {value === 'plan' && !planConfirmed && section !== 'plan' && <span className="ml-1.5 rounded-full bg-amber-300/15 px-1.5 text-xs font-semibold text-amber-300">start here</span>}
-            </button>
-          ))}
-        </div>
-      )}
-
+      <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
+      {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} />}
+      <div className="min-w-0">
       {deck && section === 'plan' ? (
         tags ? (
           <DeckPlan
@@ -469,11 +476,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           tags={deck ? tags : null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
+          size={cardSize}
           onSelect={setSelected}
           onQuantity={changeQuantity}
           onMove={moveCard}
         />
       )}
+      </div>
+      </div>
 
       <CardModal
         card={selected}
