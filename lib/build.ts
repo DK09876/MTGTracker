@@ -37,6 +37,8 @@ export interface BuildPlan {
   /** Every role with a guideline, short ones first: what Fill the gaps can look for. */
   targets: Gap[];
   lands: { have: number; want: number; averageMv: number; cheap: number };
+  /** Each colour's sources against Karsten's table, from the Health analysis. */
+  colors: Array<{ color: string; sources: number; needed: number | null; neededFor: string | null }>;
   size: number;
 }
 
@@ -79,6 +81,7 @@ export function buildPlan(input: {
   lands: number;
   averageMv: number;
   size: number;
+  colors?: BuildPlan['colors'];
   brief: string;
   savedReads: number;
 }): BuildPlan {
@@ -117,5 +120,12 @@ export function buildPlan(input: {
   ];
   const targets = [...gaps, ...roles.filter((r) => r.target && r.count >= r.target[0])
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }))];
-  return { steps, style, gaps, targets, lands: { have: input.lands, want, averageMv: input.averageMv, cheap }, size: input.size };
+  const colors = input.colors ?? [];
+  const shortColors = colors.filter((c) => c.needed !== null && c.sources < c.needed - 1);
+  const mana = steps.find((x) => x.id === 'mana')!;
+  if (shortColors.length) {
+    mana.status = 'warn';
+    mana.summary += ` · short on ${shortColors.map((c) => c.color).join('')}`;
+  }
+  return { steps, style, gaps, targets, colors, lands: { have: input.lands, want, averageMv: input.averageMv, cheap }, size: input.size };
 }

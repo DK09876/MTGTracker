@@ -112,3 +112,16 @@ describe('fetchedColors', () => {
     expect(h.colors.find((c) => c.color === 'R')!.landSources).toBe(0);
   });
 });
+
+describe('colour sources', () => {
+  it('reads Karsten\'s table, one more for gold', async () => {
+    const { sourcesNeeded } = await import('./health');
+    expect(sourcesNeeded(1, 1)).toBe(19);
+    expect(sourcesNeeded(2, 3)).toBe(28);
+    expect(sourcesNeeded(3, 3)).toBe(36);
+    expect(sourcesNeeded(1, 9)).toBe(14);
+    expect(sourcesNeeded(2, 2, true)).toBe(31);
+    // Two pips on a one-drop cannot happen; the first column that exists is used.
+    expect(sourcesNeeded(2, 1)).toBe(30);
+  });
+});

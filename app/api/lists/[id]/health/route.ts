@@ -6,13 +6,13 @@
  * page does not wait on them. Main board only.
  */
 
+import { deckRoles } from '@/lib/deck-roles';
 import { NextResponse } from 'next/server';
 
-import { cachedRoles, cardsInList, saveRoles } from '@/lib/db';
+import { cardsInList } from '@/lib/db';
 import { analyse } from '@/lib/health';
 import { requireList } from '@/lib/profile-route';
-import { countRoles, LAND_TARGET } from '@/lib/roles';
-import { searchCards } from '@/lib/scryfall';
+import { LAND_TARGET } from '@/lib/roles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ health: analyse({ commander: owned.list.commander, cards: main }), landTarget: LAND_TARGET });
   }
   try {
-    const roles = await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles });
+    const roles = await deckRoles(id, main);
     return NextResponse.json({ roles });
   } catch (error) {
     console.error('[health] roles failed', error);

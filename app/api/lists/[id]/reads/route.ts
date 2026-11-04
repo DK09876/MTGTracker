@@ -10,15 +10,15 @@
  * DELETE ?read=: drop one.
  */
 
+import { deckRoles } from '@/lib/deck-roles';
 import { NextResponse } from 'next/server';
 
 import { appModel, ModelError } from '@/lib/ai';
-import { cachedRoles, cardsInList, saveRoles, type List } from '@/lib/db';
+import { cardsInList, type List } from '@/lib/db';
 import { latestJob, startJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
 import { addRead, cardChange, compareReads, deleteRead, readsFor, setSaved, type ReadMode } from '@/lib/reads';
-import { countRoles } from '@/lib/roles';
-import { ScryfallError, searchCards } from '@/lib/scryfall';
+import { ScryfallError } from '@/lib/scryfall';
 import { combosInDeck } from '@/lib/spellbook';
 import { briefStep, StepError } from '@/lib/tag-steps';
 import { guessWinRoutes } from '@/lib/wincons';
@@ -55,7 +55,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 async function quickRead(list: List) {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
   const [roles, combos] = await Promise.all([
-    countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles }),
+    deckRoles(list.id, main),
     combosInDeck({ commanders: list.commander ? [list.commander.name] : [], main: main.map((c) => ({ name: c.card.name, quantity: c.quantity })) }).catch(() => null),
   ]);
   const guess = guessWinRoutes({ cards: [...main, ...(list.commander ? [{ card: list.commander, quantity: 1 }] : [])], roles, combos: combos?.included ?? null });

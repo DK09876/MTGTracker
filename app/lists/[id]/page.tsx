@@ -8,6 +8,7 @@ import { use, useCallback, useEffect, useState } from 'react';
 import AddCardsPanel from '@/components/AddCardsPanel';
 import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
+import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
@@ -418,6 +419,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           <>
             {deck && selectedInDeck && tags && selected && (
               <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
+            )}
+            {deck && selectedInDeck && selected && (
+              <CardRoles key={selected.id} listId={id} card={selected} />
             )}
             {selectedEntry && (
               <CardEditor

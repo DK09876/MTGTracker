@@ -399,6 +399,12 @@ export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: Check
 export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDataStatus }>);
 export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
 
+export interface CardRole { id: string; label: string; group: string; scryfall: boolean; has: boolean; corrected: boolean }
+export const cardRoles = (listId: string, oracleId: string) =>
+  fetch(url(`lists/${listId}/roles?card=${encodeURIComponent(oracleId)}`)).then(json<{ roles: CardRole[] }>).then((r) => r.roles);
+export const correctRole = (listId: string, oracleId: string, role: string, has: boolean | null) =>
+  send(`lists/${listId}/roles`, 'PUT', { oracleId, role, has }).then(json<{ roles: CardRole[] }>).then((r) => r.roles);
+
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))

@@ -11,6 +11,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 
+import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { BuildPlan, StepId } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
@@ -105,6 +106,20 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
               <span className="font-semibold">{plan.lands.have} lands</span>; Karsten&apos;s formula says <span className="font-semibold">{plan.lands.want}</span>
               <span className="text-[var(--muted)]"> (average mana value {plan.lands.averageMv.toFixed(2)}, {plan.lands.cheap} cheap draw and ramp spells, never below 37).</span>
             </p>
+            {plan.colors.some((c) => c.needed !== null) && (
+              <ul className="flex flex-col gap-1 text-sm">
+                {plan.colors.filter((c) => c.needed !== null).map((c) => {
+                  const short = c.sources < c.needed! - 1;
+                  return (
+                    <li key={c.color} className="flex flex-wrap items-center gap-2">
+                      <ManaCost cost={`{${c.color}}`} size={16} />
+                      <span className={short ? 'font-semibold text-amber-300' : 'text-emerald-400'}>{short ? '▲' : '✓'} {c.sources} of {c.needed} sources</span>
+                      <span className="text-[var(--muted)]">- {c.neededFor} sets it</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             <p className="text-sm text-[var(--muted)]">
               {plan.lands.have > plan.lands.want + 1 ? 'You could cut a land or two for spells.' : plan.lands.have < plan.lands.want - 1 ? 'Add lands, or cheap ramp and draw, before cutting more.' : 'Right where it should be.'}
               {' '}For how often each spell is castable on curve, check the deck in Salubrious Snail&apos;s tool.
