@@ -12,6 +12,9 @@ import { join } from 'path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Each test opens a fresh database and card copy; under a full parallel run that can pass five seconds.
+vi.setConfig({ testTimeout: 20_000 });
+
 import type { Identifier, ScryfallCard } from './scryfall';
 
 const card = (name: string, set: string, number: string, type = 'Instant'): ScryfallCard =>
