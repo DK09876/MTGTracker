@@ -17,7 +17,7 @@ import type { BuildPlan, StepId } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 
-export type DeckTab = 'cards' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat';
+export type DeckTab = 'cards' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
 
 interface Props {
   listId: string;
