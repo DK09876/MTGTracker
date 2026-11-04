@@ -201,11 +201,12 @@ export default function DecksPage() {
             <Link
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
-              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_16px_34px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
+              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition duration-200 hover:-translate-y-[3px] hover:border-[color-mix(in_srgb,var(--c1)_55%,var(--border))] hover:shadow-[0_16px_34px_color-mix(in_srgb,var(--c1)_22%,transparent)] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
             >
-              <div className="relative h-32 overflow-hidden">
-                <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />
-                {art && <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover opacity-80 transition duration-500 group-hover:scale-105" unoptimized />}
+              {/* The art is never scaled - scaling it inside a lifting tile, over a blurred glow, showed seams. It brightens instead. */}
+              <div className="relative h-32 overflow-hidden bg-[var(--surface)]">
+                {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover brightness-[0.82] transition-[filter] duration-200 group-hover:brightness-100" unoptimized />
+                  : <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />}
                 <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[var(--surface)]" />
                 <span className="absolute left-3 top-3"><IdentitySymbols identity={identity.join('')} size={18} /></span>
               </div>

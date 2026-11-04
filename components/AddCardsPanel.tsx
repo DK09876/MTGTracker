@@ -122,13 +122,14 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
+      {/* A light backdrop, and on a wide screen a narrower panel: the deck stays in view while you add to it. */}
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
       <aside
         data-tour="add-panel"
         role="dialog"
         aria-modal="true"
         aria-label="Add cards"
-        className="absolute inset-y-0 right-0 flex w-full max-w-3xl flex-col border-l border-[var(--border)] bg-[var(--background)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-3xl xl:max-w-2xl flex-col border-l border-[var(--border)] bg-[var(--background)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl"
       >
         <div className="border-b border-[var(--border)] p-4">
           <div className="flex items-center justify-between gap-3">

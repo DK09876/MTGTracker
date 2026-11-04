@@ -12,7 +12,8 @@ import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
-import DeckCards, { type CardSize, type Entry } from '@/components/DeckCards';
+import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckGlance from '@/components/DeckGlance';
 import DeckPlan from '@/components/DeckPlan';
 import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
@@ -54,6 +55,31 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
+  // Once the big header has scrolled away, a compact one takes its place at the top.
+  const [headEl, setHeadEl] = useState<HTMLDivElement | null>(null);
+  const [headGone, setHeadGone] = useState(false);
+  // The app's own bar is the compact header's top; read once, it does not change.
+  const [navHeight] = useState(() => (typeof document === 'undefined' ? 57 : document.querySelector('body header')?.getBoundingClientRect().height ?? 57));
+  useEffect(() => {
+    if (!headEl) return;
+    const h = navHeight;
+    const watch = new IntersectionObserver(([e]) => setHeadGone(!e.isIntersecting), { rootMargin: `-${Math.round(h)}px 0px 0px 0px` });
+    watch.observe(headEl);
+    return () => watch.disconnect();
+  }, [headEl, navHeight]);
+
+  // Keyboard: 1-8 switch the deck's tabs, N adds cards (the Cards tab has its own keys).
+  useEffect(() => {
+    const TABS: DeckTab[] = ['cards', 'plan', 'tune', 'tags', 'health', 'playtest', 'chat', 'collection'];
+    const key = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
+      if (/^[1-8]$/.test(e.key)) { setSection(TABS[Number(e.key) - 1]); window.scrollTo({ top: 0 }); }
+      else if (e.key.toLowerCase() === 'n') { e.preventDefault(); setAddOpen(true); }
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
   const [tags, setTags] = useState<Tags | null>(() => api.peek<Tags>(api.paths.tags(id)) ?? null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -63,11 +89,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exported, setExported] = useState<'copied' | 'failed' | null>(null);
-  // Card size on the Cards tab, kept in this browser; small shows the most at once.
-  const [cardSize, setCardSizeState] = useState<CardSize>(() => {
-    try { const v = localStorage.getItem('mtg-card-size'); return v === 'm' || v === 'l' ? v : 's'; } catch { return 's'; }
-  });
-  const setCardSize = (v: CardSize) => { setCardSizeState(v); try { localStorage.setItem('mtg-card-size', v); } catch { /* fine */ } };
+
 
   // Whether others can see this deck on the owner's profile; private until made public.
   const [shown, setShown] = useState(!!seen?.public);
@@ -218,12 +240,37 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
 
   return (
     <div style={deck && list.commander ? identityStyle(list.commander.color_identity ?? []) : undefined}>
+      {deck && headGone && (
+        <div data-tour="compact-head" style={{ top: navHeight }}
+          className="fixed inset-x-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur">
+          <div className="safe-x mx-auto flex max-w-[1680px] flex-wrap items-center gap-x-3 gap-y-1 py-2">
+            {heroArt && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={heroArt} alt="" aria-hidden className="h-9 w-9 shrink-0 rounded-lg object-cover object-[50%_25%]" />
+            )}
+            <span className="flex min-w-0 flex-col leading-tight">
+              <b className="truncate font-display text-base">{list.name}</b>
+              <span className="truncate text-xs text-[var(--muted)]">{list.commander?.name ?? 'No commander'}{!planConfirmed && ' · plan not confirmed'}</span>
+            </span>
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums ${deckSize === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{deckSize} / 100</span>
+            <span className="hidden rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-bold tabular-nums sm:inline">${value.toFixed(2)}</span>
+            <span className="ml-auto flex items-center gap-2">
+              {deckSize !== 100 && (
+                <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0 }); }} className="hidden rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)] sm:block">
+                  Tune: {deckSize > 100 ? `cut ${deckSize - 100}` : `add ${100 - deckSize}`}
+                </button>
+              )}
+              <button onClick={() => setAddOpen(true)} className="btn-go rounded-full px-4 py-1 text-sm font-semibold">＋ Add cards</button>
+            </span>
+          </div>
+        </div>
+      )}
       <Link href={deck ? '/decks' : '/lists'} className="relative z-10 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
         ← All {deck ? 'decks' : 'lists'}
       </Link>
 
       {/* A deck's header: its commander's art behind a name in its colours. */}
-      <div className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-4 pt-20 sm:mx-0 sm:rounded-3xl sm:px-6 sm:pt-24' : ''}`}>
+      <div ref={setHeadEl} className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-4 pt-20 sm:mx-0 sm:rounded-3xl sm:px-6 sm:pt-24' : ''}`}>
         {hero && (
           <>
             <div aria-hidden className="id-glow absolute -inset-10 -z-20 opacity-70 blur-2xl" />
@@ -297,7 +344,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                     setTimeout(() => setExported(null), 2500);
                   },
                 },
-                ...(['s', 'm', 'l'] as const).map((v) => ({ label: `Card size: ${{ s: 'small', m: 'medium', l: 'large' }[v]}${cardSize === v ? ' ✓' : ''}`, onClick: () => setCardSize(v) })),
+
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
                 { label: `Duplicate ${deck ? 'deck' : 'list'}`, onClick: async () => { const copy = await api.duplicateList(id); router.push(`${deck ? '/decks' : '/lists'}/${copy.id}`); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
@@ -487,17 +534,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
         />
       ) : (
+        <>
+        {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }} />}
         <DeckCards
           listId={id}
           entries={entries}
           tags={deck ? tags : null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
-          size={cardSize}
+          onTags={setTags}
+          onAsk={deck ? (q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); } : undefined}
           onSelect={setSelected}
           onQuantity={changeQuantity}
           onMove={moveCard}
         />
+        </>
       )}
       </div>
       </div>

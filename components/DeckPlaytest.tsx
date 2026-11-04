@@ -12,6 +12,7 @@
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { lastGoodStartKey } from './DeckGlance';
 import GoldfishSettings from './GoldfishSettings';
 
 import type { ListedCard } from '@/lib/db';
@@ -155,6 +156,8 @@ function Goldfish({ listId, deck, commander, byName, settings }: SimProps) {
     if (run.state === 'done' && shown.current !== run.result) {
       shown.current = run.result;
       saveLast(listId, ran.current ?? settings, run.result);
+      // The deck page's at-a-glance strip shows the last good-start rate.
+      if (run.result.goodStart !== null) { try { localStorage.setItem(lastGoodStartKey(listId), JSON.stringify({ share: run.result.goodStart })); } catch { /* fine */ } }
     }
   }, [run, listId, settings]);
 
