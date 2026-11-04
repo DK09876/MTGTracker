@@ -53,7 +53,7 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
       onClick={() => onPick(pick)}
       aria-pressed={active === pick}
       {...drop(pick)}
-      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition ${
+      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition ${
         over === pick ? 'border-[var(--accent)] bg-[var(--accent)]/20'
           : active === pick ? 'border-[var(--accent)] text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
     >
@@ -70,7 +70,7 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
     if (!problem) { setDraft(''); setNaming(false); setRenaming(null); }
   };
   const nameBox = (id?: string) => (
-    <form onSubmit={(e) => submit(e, id)} className="flex items-center gap-1">
+    <form onSubmit={(e) => submit(e, id)} className="flex shrink-0 items-center gap-1">
       <input
         autoFocus
         value={draft}
@@ -87,12 +87,13 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
 
   return (
     <div data-tour="deck-folders" className="mt-6">
-      <div role="group" aria-label="Folders" className="flex flex-wrap items-center gap-1.5">
+      {/* One row to swipe on a phone; wrapped on wider screens. */}
+      <div role="group" aria-label="Folders" className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
         {chip('all', 'All decks', counts.all)}
         {folders.length > 0 && chip('none', 'Unfiled', counts.none)}
         {folders.map((f) => (
           renaming === f.id ? <span key={f.id}>{nameBox(f.id)}</span> : (
-            <span key={f.id} className="flex items-center">
+            <span key={f.id} className="flex shrink-0 items-center">
               {chip(f.id, <><FolderIcon />{f.name}</>, counts.byFolder[f.id] ?? 0)}
               {active === f.id && (
                 <MoreMenu
@@ -107,7 +108,7 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
           )
         ))}
         {naming ? nameBox() : (
-          <button onClick={() => { setDraft(''); setNaming(true); setError(null); }} className="rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+          <button onClick={() => { setDraft(''); setNaming(true); setError(null); }} className="shrink-0 whitespace-nowrap rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
             ＋ Folder
           </button>
         )}

@@ -395,7 +395,11 @@ export default function DecksPage() {
                 label={`More for ${deck.name}`}
                 items={[
                   { label: 'Duplicate', onClick: async () => { await api.duplicateList(deck.id); setDecks(await api.fetchLists('deck')); await refreshFolders(); } },
-                  ...folders.folders.filter((f) => f.id !== placed[deck.id]).map((f) => ({ label: `Move to ${f.name}`, onClick: () => fileDeck(deck.id, f.id) })),
+                  // Up to three folders are listed here; more go behind "Move to folder ›", in a list that scrolls.
+                  ...(() => {
+                    const others = folders.folders.filter((f) => f.id !== placed[deck.id]).map((f) => ({ label: f.name, onClick: () => fileDeck(deck.id, f.id) }));
+                    return others.length > 3 ? [{ label: 'Move to folder', submenu: others }] : others.map((o) => ({ ...o, label: `Move to ${o.label}` }));
+                  })(),
                   ...(placed[deck.id] ? [{ label: `Take out of ${folders.folders.find((f) => f.id === placed[deck.id])?.name ?? 'its folder'}`, onClick: () => fileDeck(deck.id, null) }] : []),
                   { label: folders.folders.length ? 'New folder with this deck…' : 'Put in a new folder…', onClick: () => { setToFile(deck.id); setNaming(true); window.scrollTo({ top: 0, behavior: 'smooth' }); } },
                   {
