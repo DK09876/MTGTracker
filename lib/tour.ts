@@ -26,7 +26,7 @@ export const TOUR_PROFILE = 'tour';
 const DECK_KEY = 'tour.deck';
 const VERSION_KEY = 'tour.version';
 // Bumped whenever the sample changes, so a server reseeds it.
-const TOUR_VERSION = '2';
+const TOUR_VERSION = '3';
 
 const DECKLIST = `
 1 Archmage Emeritus
@@ -52,7 +52,6 @@ const DECKLIST = `
 1 Dig Through Time
 1 Electrodominance
 1 Frantic Search
-1 Invoke Calamity
 1 Lightning Bolt
 1 Narset's Reversal
 1 Opt
@@ -77,18 +76,11 @@ const DECKLIST = `
 1 Withering Torment
 1 Waterlogged Teachings
 1 Fell the Profane
-1 Demand Answers
-1 Confounding Riddle
 1 Spellskite
 1 Pinnacle Monk
 1 Electrostatic Field
 1 High Fae Trickster
 1 Resonating Lute
-1 Force of Despair
-1 Cast into the Fire
-1 Mysterious Stranger
-1 Kaya's Ghostform
-1 Brainsurge
 1 Arcane Signet
 1 Dimir Signet
 1 Izzet Signet
@@ -111,9 +103,19 @@ const DECKLIST = `
 1 Cascade Bluffs
 1 Sunken Hollow
 1 Rogue's Passage
-8 Island
-5 Mountain
-4 Swamp
+1 Watery Grave
+1 Blood Crypt
+1 Dragonskull Summit
+1 Smoldering Marsh
+1 Xander's Lounge
+1 Spirebluff Canal
+1 Bloodstained Mire
+1 Polluted Delta
+1 Scalding Tarn
+1 Badlands
+5 Island
+4 Mountain
+6 Swamp
 `;
 
 const BRIEF = 'Grixis spellslinger. Win with one big storm turn: rituals and cheap spells make Treasure off Storm-Kiln Artist, Past in Flames replays the graveyard, and Longshot or Comet Storm finishes the table. Hullbreaker Horror is the backup lock. Keep interaction cheap: counters and 1-2 mana removal. Cantrips are glue, not card draw.';
