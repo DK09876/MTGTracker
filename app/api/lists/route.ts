@@ -13,7 +13,9 @@ import { NextResponse } from 'next/server';
 import { createList, getList, listLists, type ListKind } from '@/lib/db';
 import { importInto } from '@/lib/import-into';
 import { requireProfile } from '@/lib/profile-route';
+import { startJob } from '@/lib/jobs';
 import { warmRoles } from '@/lib/role-warmup';
+import { starterList } from '@/lib/starter';
 import { getCard, ScryfallError } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -36,7 +38,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
-  let body: { name?: string; note?: string; kind?: string; commanderId?: string; decklist?: string };
+  let body: { name?: string; note?: string; kind?: string; commanderId?: string; decklist?: string; starter?: boolean; ownedFirst?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -53,6 +55,18 @@ export async function POST(request: Request) {
     const list = createList(who.profile, name, (body.note ?? '').trim(), { kind, commander });
     const imported = body.decklist?.trim() ? await importInto(list, body.decklist) : undefined;
     if (imported) warmRoles(list, who.profile);
+    // A starter list, built in the background: the deck opens at once and fills in.
+    if (!imported && body.starter && commander) {
+      const profile = who.profile;
+      startJob({ kind: 'starter', label: 'Building a starter list', subject: list.name, profileId: profile, listId: list.id }, async ({ progress }) => {
+        progress('Picking cards for each role, then the ones that fit the commander');
+        const starter = starterList(commander, profile, body.ownedFirst !== false);
+        progress('Adding the cards');
+        await importInto(list, starter.lines.join('\n'));
+        warmRoles(list, profile);
+        return { spells: starter.spells, lands: starter.lands };
+      });
+    }
     return NextResponse.json({ list: getList(list.id, who.profile), imported });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });

@@ -165,12 +165,12 @@ export const searchCommanders = (q: string, signal?: AbortSignal) =>
   fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
 
-export const createDeck = (name: string, commanderId: string | null, decklist: string) =>
+export const createDeck = (name: string, commanderId: string | null, decklist: string, starter?: { ownedFirst: boolean }) =>
   fetch(url('lists'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist }),
-  }).then(json<{ list: List; imported?: ImportSummary }>);
+    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
+  }).then(json<{ list: List; imported?: ImportSummary }>).finally(jobsChanged);
 
 /** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
 export const setCommander = (listId: string, commanderId: string | null, fromList = false) =>
