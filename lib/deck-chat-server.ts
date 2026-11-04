@@ -3,14 +3,14 @@
  * question and the reply runs as a background job. Server only.
  */
 
+import { deckRoles } from './deck-roles';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
-import { cachedRoles, cardsInList, deckTags, saveRoles, type List } from './db';
+import { cardsInList, deckTags, type List } from './db';
 import { commanderPage, edhrecEnabled } from './edhrec';
 import { gapCards, heldByName } from './gap-cards';
 import { startJob, type Job } from './jobs';
 import { newChat, reply, saveChat, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
-import { countRoles } from './roles';
 import { searchCards, ScryfallError } from './scryfall';
 
 export class ChatError extends Error {}
@@ -30,7 +30,7 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     progress('Claude is reading the deck');
     const cards = cardsInList(list.id);
     const main = cards.filter((c) => c.board === 'main');
-    const roles = await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles }).catch(() => null);
+    const roles = await deckRoles(list.id, main).catch(() => null);
     const identity = (list.commander?.color_identity ?? []).join('') || 'c';
     const message = await reply(current, { list, cards, brief: deckTags(list.id).brief, roles }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,

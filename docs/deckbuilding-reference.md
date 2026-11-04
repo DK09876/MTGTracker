@@ -162,6 +162,19 @@ Favour cards that fill two or more of mana, draw, interaction and game plan, and
 - **Testing:** goldfish or play 10 games and log failures; ignore Sol Ring hands; judge consistent speed, not peak speed (V1, V6).
 - **Theme decks:** build the functional list first, then swap the weakest cards for theme cards (V6).
 
+### Cutting to 100
+
+From a second playlist, [MTG Deck cuts](https://www.youtube.com/playlist?list=PLH0UXIPYmReU) (three videos, transcripts supplied by the user on 3 November 2026). The app's cut workbench follows this (`lib/cut-score.ts`).
+
+- **The order (C3, Rebell Lily of Commander Template):** look first where the mana curve is overloaded - usually too many 3-6 drops, often pet cards. Then trim utility: interaction first (two to four single-target removal spells; keep a board wipe or two and flexible removal), then ramp if the commander is cheap or draw if it is expensive. Never cut lands to make room. Their baseline: 38 lands, 12 ramp, 12 draw, 8-12 interaction, leaving about 24 slots - three packages of eight - for the deck's own themes. Trimming two of each utility costs only about 6-7% on finding one by turn five.
+- **Floor and ceiling (C1):** a card should be worth about a card. Ask how hard its best case is to reach and how bad its worst case is; slow cards that are often dead draws with little upside are the cuts. Judge in context: the same card is good in one deck and unplayable in another.
+- **Keep cuts cost-neutral or cheaper (C1),** or the curve creeps up. If cuts are not one-for-one, check the ratios they leave.
+- **Ratios follow the commander (C1):** a cheap commander with a low curve needs less mana; a late-game finisher commander does not need other costly finishers. A card doing the commander's job again is a weak slot.
+- **Generic is fine away from the fun (C1):** staples like Night's Whisper keep a deck from running out of gas, but do not swap the synergy cards that are why you play the deck for generic ones.
+- **Type A and Type B decks (C2):** Type A decks have a solid foundation, simple broad roles and one theme, so any reasonable card can fill a role and swaps are easy - cut on quality. Type B decks have dense, layered synergy (a combo plus a tribal storm count) or a narrow card pool (snow, slivers, curses), so their theme cards carry the deck and cutting them breaks it. Packages (cards fine alone, better together) are only a tiebreaker.
+- **Pet cards (C3):** let the owner mark favourites that are never cut; that is why we play.
+- **Method (C1, C3):** rebuilding a deck the other way round (additive vs subtractive) shows which cards get squeezed out; one-in-one-out does not solve not knowing which card is weakest; goldfishing at 100 cards is how to tell.
+
 ## Power level, stax, salt and free spells
 
 None of the videos define the brackets; the app's bracket floor comes from Wizards' rules and Commander Spellbook, and its stax and free-spell tags need the friend's curated lists.
@@ -288,6 +301,14 @@ The playlist: [EDH deck building](https://www.youtube.com/playlist?list=PLsvebAO
 | V17 | [All Underplayed Utility Lands in Commander](https://www.youtube.com/watch?v=xy16QHJU-ls) | 3/3 Elk | 26:08 |
 | V18 | [Change 3 Cards, Not 20](https://www.youtube.com/watch?v=7tvEAtqkDR0) | Arcane Broadcast | 0:52 |
 | V19 | [Everyone Should Play Mono Blue Control](https://www.youtube.com/watch?v=VqTJWlEfBxo) | The Trinket Mage | 12:04 |
+
+The cutting playlist: [MTG Deck cuts](https://www.youtube.com/playlist?list=PLH0UXIPYmReU).
+
+| # | Video | Channel | Length |
+| --- | --- | --- | --- |
+| C1 | [How to MERCILESSLY cut cards from your Commander deck!](https://www.youtube.com/watch?v=n2mgeEoifWA) | 3/3 Elk | 8:35 |
+| C2 | [The Two Types of Commander Deck](https://www.youtube.com/watch?v=LfmO02zFvfI) | Salubrious Snail | 16:12 |
+| C3 | [Forbidden Trick To Cutting Cards in Your Commander Deck](https://www.youtube.com/watch?v=IBdPiZOu9LI) | Rebell Lily (Commander Template) | 11:44 |
 
 Other sources:
 

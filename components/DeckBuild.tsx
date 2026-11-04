@@ -11,6 +11,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 
+import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { BuildPlan, StepId } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
@@ -24,6 +25,8 @@ interface Props {
   commander: string | null;
   version: string;
   onAdd: (cardId: string, board: Board) => Promise<void>;
+  /** Move a card between boards: cuts go to the maybeboard, so nothing is lost. */
+  onMove: (cardId: string, board: Board) => Promise<void> | void;
   onTab: (tab: DeckTab) => void;
 }
 
@@ -31,7 +34,7 @@ const MARK = { done: ['✓', 'text-emerald-400'], warn: ['!', 'text-amber-300'],
 const PRICES = [null, 1, 5, 10, 25] as const;
 const SNAIL = 'https://www.salubrioussnail.com/manabase-tool';
 
-export default function DeckBuild({ listId, cards, commander, version, onAdd, onTab }: Props) {
+export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, onTab }: Props) {
   const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>('loading');
   const [step, setStep] = useState<StepId | null>(null);
 
@@ -105,6 +108,20 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
               <span className="font-semibold">{plan.lands.have} lands</span>; Karsten&apos;s formula says <span className="font-semibold">{plan.lands.want}</span>
               <span className="text-[var(--muted)]"> (average mana value {plan.lands.averageMv.toFixed(2)}, {plan.lands.cheap} cheap draw and ramp spells, never below 37).</span>
             </p>
+            {plan.colors.some((c) => c.needed !== null) && (
+              <ul className="flex flex-col gap-1 text-sm">
+                {plan.colors.filter((c) => c.needed !== null).map((c) => {
+                  const short = c.sources < c.needed! - 1;
+                  return (
+                    <li key={c.color} className="flex flex-wrap items-center gap-2">
+                      <ManaCost cost={`{${c.color}}`} size={16} />
+                      <span className={short ? 'font-semibold text-amber-300' : 'text-emerald-400'}>{short ? '▲' : '✓'} {c.sources} of {c.needed} sources</span>
+                      <span className="text-[var(--muted)]">- {c.neededFor} sets it</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             <p className="text-sm text-[var(--muted)]">
               {plan.lands.have > plan.lands.want + 1 ? 'You could cut a land or two for spells.' : plan.lands.have < plan.lands.want - 1 ? 'Add lands, or cheap ramp and draw, before cutting more.' : 'Right where it should be.'}
               {' '}For how often each spell is castable on curve, check the deck in Salubrious Snail&apos;s tool.
@@ -125,19 +142,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
             </div>
           </Detail>
         )}
-        {current === 'cuts' && (
-          <Detail title="Cuts">
-            <p>
-              {plan.size === 100 ? 'The deck is exactly 100 cards.' : plan.size > 100 ? `The deck is ${plan.size - 100} over 100.` : `The deck is ${100 - plan.size} short of 100.`}
-            </p>
-            {plan.size > 100 && (
-              <>
-                <p className="text-sm text-[var(--muted)]">Start with roles you are over on and cards this commander&apos;s decks rarely play.</p>
-                <div><button onClick={() => onTab('suggestions')} className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08]">See cut ideas</button></div>
-              </>
-            )}
-          </Detail>
-        )}
+        {current === 'cuts' && <Cuts listId={listId} cards={cards} version={version} onMove={onMove} onTab={onTab} />}
         {current === 'check' && (
           <Detail title="Check">
             <p>Look over the bracket, the combos it has and the free win read, then save a read of the finished deck.</p>
@@ -236,10 +241,152 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
             ))}
           </ul>
           <p className="text-xs text-[var(--muted)]">
-            {found.source === 'edhrec' ? `Ranked by how often ${commander ?? 'this commander'}'s decks play them on EDHREC` : 'Ranked by how popular they are in Commander'}; in your colours, legal, and not in the deck. No AI.
+            Ranked by how well they fit {commander ?? 'the commander'} and how much Commander plays them{found.source === 'edhrec' ? ', with EDHREC\'s numbers for this commander' : ''}; in your colours, legal, and not in the deck. No AI.
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+function Cuts({ listId, cards, version, onMove, onTab }: { listId: string; cards: ListedCard[]; version: string; onMove: Props['onMove']; onTab: Props['onTab'] }) {
+  const [plan, setPlan] = useState<{ version: string; plan: api.CutPlan | 'failed' } | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [undo, setUndo] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.cutPlan(listId).then((p) => { if (!cancelled) setPlan({ version, plan: p }); }).catch(() => { if (!cancelled) setPlan({ version, plan: 'failed' }); });
+    return () => { cancelled = true; };
+  }, [listId, version]);
+
+  const current = plan?.version === version ? plan.plan : null;
+  if (!current) return <p className="text-sm text-[var(--muted)]">Weighing every card…</p>;
+  if (current === 'failed') return <p className="text-sm text-red-400">Couldn&apos;t weigh the cards just now.</p>;
+
+  const over = current.size - 100;
+  const chosen = current.candidates.filter((c) => picked.has(c.cardId));
+  // Cuts should keep the curve where it is or lower it (3/3 Elk).
+  const spellCount = Math.max(1, Math.round(current.size - 1 - 37));
+  const mvAfter = chosen.length
+    ? (current.averageMv * spellCount - chosen.reduce((n, c) => n + c.cmc, 0)) / Math.max(1, spellCount - chosen.length)
+    : current.averageMv;
+  const left = Math.max(0, over - chosen.length);
+  // The role counts as they would be after these cuts.
+  const after = current.roles.map((r) => ({ ...r, now: r.count - chosen.filter((c) => c.roles.includes(r.id)).length }))
+    .filter((r) => r.now !== r.count);
+  // A ★ keeps a card for good: it leaves the list at once.
+  const star = async (c: api.CutPlan['candidates'][number]) => {
+    const card = cards.find((x) => x.card.id === c.cardId)?.card;
+    if (!card || !current || typeof current === 'string') return;
+    await api.keepCard(listId, card.oracle_id ?? card.id, true);
+    setPicked((p) => { const n = new Set(p); n.delete(c.cardId); return n; });
+    setPlan({ version, plan: { ...current, candidates: current.candidates.filter((x) => x.cardId !== c.cardId), protectedCards: [...current.protectedCards, c.name] } });
+  };
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const cut = async () => {
+    setBusy(true);
+    try {
+      const ids = chosen.map((c) => c.cardId);
+      for (const id of ids) await onMove(id, 'maybe');
+      setUndo(ids);
+      setPicked(new Set());
+    } finally {
+      setBusy(false);
+    }
+  };
+  const putBack = async () => {
+    if (!undo) return;
+    setBusy(true);
+    try {
+      for (const id of undo) await onMove(id, 'main');
+      setUndo(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div data-tour="cut-workbench" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-display text-xl font-semibold">Cuts</h3>
+        <p className="text-sm">
+          {over > 0
+            ? <>{current.size} cards · <span className={left ? 'font-semibold text-amber-300' : 'font-semibold text-emerald-400'}>{left ? `pick ${left} more` : 'that gets it to 100'}</span></>
+            : over === 0 ? <span className="text-emerald-400">100 cards - nothing has to go</span> : <span>{-over} short of 100</span>}
+        </p>
+      </div>
+      {undo && (
+        <p className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
+          {undo.length} moved to the maybeboard.
+          <button onClick={putBack} disabled={busy} className="text-[var(--accent)] hover:underline">Undo</button>
+        </p>
+      )}
+      <div className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+        <p>
+          <span className="font-semibold">Type {current.type.type} deck.</span>{' '}
+          <span className="text-[var(--muted)]">{current.type.why}</span>
+        </p>
+        {current.curve && <p className="text-[var(--muted)]"><span className="text-[var(--foreground)]">Look here first:</span> {current.curve}.</p>}
+        <p className="text-[var(--muted)]">
+          Then interaction, then {current.type.type === 'B' ? 'the cards outside the theme' : 'ramp or draw'}; lands only if you run more than the formula wants.
+          Cuts go to the maybeboard, so nothing is lost.
+          {current.protectedCards.length > 0 && <> {current.protectedCards.length} card{current.protectedCards.length === 1 ? ' is' : 's are'} kept out by your tags or a ★.</>}
+        </p>
+      </div>
+      {(after.length > 0 || chosen.length > 0) && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          {chosen.length > 0 && (
+            <span className={`rounded-full border px-2.5 py-0.5 ${mvAfter > current.averageMv + 0.02 ? 'border-amber-400/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)]'}`}>
+              Average mana value {current.averageMv.toFixed(2)} → {mvAfter.toFixed(2)}{mvAfter > current.averageMv + 0.02 ? ' (heavier)' : ''}
+            </span>
+          )}
+          {after.map((r) => {
+            const low = r.now < r.target[0];
+            return (
+              <span key={r.id} className={`rounded-full border px-2.5 py-0.5 ${low ? 'border-amber-400/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)]'}`}>
+                {r.label} {r.count} → {r.now}{low ? ` (below ${r.target[0]})` : ''}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {current.candidates.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">Nothing stands out - every card has a job here.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {current.candidates.slice(0, 30).map((c) => (
+            <li key={c.cardId}>
+              <div className={`flex items-start gap-3 rounded-2xl border p-2.5 ${picked.has(c.cardId) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}>
+                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                  <input type="checkbox" checked={picked.has(c.cardId)} onChange={() => toggle(c.cardId)} className="mt-1" />
+                  {c.image ? <Image src={c.image} alt="" width={40} height={56} className="rounded" unoptimized /> : <span className="h-14 w-10 rounded bg-[var(--surface-hover)]" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{c.name}</span>
+                    <span className="block text-xs text-[var(--muted)]">{c.reasons.join(' · ')}</span>
+                  </span>
+                </label>
+                <button
+                  onClick={() => star(c)}
+                  aria-label={`Keep ${c.name}: never offer it as a cut`}
+                  title="Keep it: never offer it as a cut"
+                  className="rounded-full px-2 py-1 text-base text-[var(--muted)] hover:text-[var(--accent)]"
+                >
+                  ☆
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="sticky bottom-[calc(var(--nav-h,0px)+0.75rem)] flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 backdrop-blur sm:bottom-4">
+        <button onClick={cut} disabled={!chosen.length || busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
+          {busy ? 'Moving…' : `Cut ${chosen.length || ''} to the maybeboard`.replace('  ', ' ')}
+        </button>
+        <button onClick={() => onTab('suggestions')} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">Combos and more ideas</button>
+      </div>
     </div>
   );
 }

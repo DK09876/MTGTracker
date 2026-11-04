@@ -3,11 +3,12 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 
 import AddCardsPanel from '@/components/AddCardsPanel';
 import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
+import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
@@ -61,6 +62,25 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setShown(!!data.public);
   }, [id]);
 
+  // A starter list being built for this deck in the background: the page
+  // looks every few seconds and fills in when it is done.
+  const [building, setBuilding] = useState(false);
+  const wasBuilding = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const look = () => api.jobs().then(({ jobs }) => {
+      if (cancelled) return;
+      const job = jobs.find((j) => j.kind === 'starter' && j.listId === id);
+      const running = job?.status === 'running';
+      if (wasBuilding.current && !running) void load();
+      wasBuilding.current = running;
+      setBuilding(running);
+      if (running) timer = setTimeout(look, 3000);
+    }).catch(() => {});
+    void look();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [id, load]);
   // Fetched on mount, with a guard so a slow response cannot write into a
   // page the user has already navigated away from.
   useEffect(() => {
@@ -344,6 +364,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
+      {building && (
+        <p className="mt-4 flex items-center gap-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-2.5 text-sm">
+          <span className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--border)]"><span className="id-grad block h-full w-1/3 animate-[slide_1.6s_ease-in-out_infinite] rounded-full motion-reduce:animate-none" /></span>
+          Building a starter list - roles first, then what fits the commander, then lands. The cards appear here when it is done.
+        </p>
+      )}
       {deck && (
         <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
           {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
@@ -368,6 +394,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           commander={list.commander?.name ?? null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onMove={moveCard}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
         />
       ) : deck && section === 'chat' ? (
@@ -418,6 +445,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           <>
             {deck && selectedInDeck && tags && selected && (
               <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
+            )}
+            {deck && selectedInDeck && selected && (
+              <CardRoles key={selected.id} listId={id} card={selected} />
             )}
             {selectedEntry && (
               <CardEditor

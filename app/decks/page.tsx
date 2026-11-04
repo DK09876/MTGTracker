@@ -29,6 +29,9 @@ export default function DecksPage() {
   const [name, setName] = useState('');
   const [commander, setCommander] = useState<api.CommanderOption | null>(null);
   const [decklist, setDecklist] = useState('');
+  // A suggested first list when starting from a commander with nothing pasted.
+  const [starter, setStarter] = useState(true);
+  const [ownedFirst, setOwnedFirst] = useState(true);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState<{ id: string; result: ImportSummary } | null>(null);
 
@@ -43,7 +46,8 @@ export default function DecksPage() {
     setBusy(true);
     setError(null);
     try {
-      const { list, imported: result } = await api.createDeck(deckName, commander?.id ?? null, decklist);
+      const { list, imported: result } = await api.createDeck(deckName, commander?.id ?? null, decklist,
+        commander && !decklist.trim() && starter ? { ownedFirst } : undefined);
       // Show what an import did before moving on; otherwise go straight in.
       if (result && (result.missing.length || result.unreadable.length)) {
         setDecks((prev) => [...prev, list]);
@@ -111,6 +115,26 @@ export default function DecksPage() {
               </span>
             )}
           </label>
+          {commander && !decklist.trim() && (
+            <div data-tour="starter" className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={starter} onChange={(e) => setStarter(e.target.checked)} className="mt-1" />
+                <span>
+                  Start with a suggested list
+                  <span className="block text-xs text-[var(--muted)]">
+                    About 99 cards: ramp, draw, removal and protection first, then what fits {commander.name.split(',')[0]} best, and lands
+                    for its colours. No AI, no Game Changers - a starting point to tune with Build.
+                  </span>
+                </span>
+              </label>
+              {starter && (
+                <label className="ml-6 flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={ownedFirst} onChange={(e) => setOwnedFirst(e.target.checked)} />
+                  Cards I own first
+                </label>
+              )}
+            </div>
+          )}
           {error && <p className="text-sm text-red-400">{error}</p>}
           <div className="flex gap-2">
             <button

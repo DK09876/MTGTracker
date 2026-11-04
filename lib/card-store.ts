@@ -103,7 +103,7 @@ export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>
 function slim(c: Record<string, unknown>): Partial<ScryfallCard> {
   const keep = ['id', 'oracle_id', 'name', 'mana_cost', 'cmc', 'type_line', 'oracle_text', 'colors', 'color_identity',
     'keywords', 'power', 'toughness', 'loyalty', 'rarity', 'set', 'set_name', 'collector_number', 'image_uris', 'card_faces',
-    'prices', 'edhrec_rank', 'game_changer', 'scryfall_uri', 'layout'] as const;
+    'prices', 'edhrec_rank', 'game_changer', 'scryfall_uri', 'layout', 'produced_mana'] as const;
   const out: Record<string, unknown> = {};
   for (const k of keep) if (c[k] !== undefined) out[k] = c[k];
   const legal = (c.legalities as Record<string, string> | undefined)?.commander;
@@ -262,4 +262,9 @@ export function searchLocalText(test: RegExp): ScryfallCard[] {
   const rows = table().all(`SELECT data FROM oracle_cards WHERE data LIKE '%opponent%' OR data LIKE '%gain control%' OR data LIKE '%target player%'`) as Array<{ data: string }>;
   return rows.map((r) => JSON.parse(r.data) as ScryfallCard)
     .filter((c) => test.test([c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n')));
+}
+
+/** Every kept card - for building a starter list. A few seconds; call rarely. */
+export function allLocalCards(): ScryfallCard[] {
+  return (table().all('SELECT data FROM oracle_cards') as Array<{ data: string }>).map((r) => JSON.parse(r.data) as ScryfallCard);
 }

@@ -40,6 +40,11 @@ export interface Health {
     color: Color; pips: number; share: number; landSources: number; otherSources: number;
     /** How many of the land sources count only because they fetch the colour. */
     fetchLandSources: number;
+    /** Sources Karsten's table wants for the colour's hungriest spell (null without coloured spells), and that spell. */
+    needed: number | null;
+    neededFor: string | null;
+    /** Sources counted his way: lands in full, mana rocks and dorks at three quarters. */
+    sources: number;
   }>;
   gameChangers: string[];
   warnings: Warning[];
@@ -88,6 +93,29 @@ function anyNumberAllowed(card: ScryfallCard): boolean {
   return /\bBasic\b/.test(typeLine(card)) || /A deck can have (any number of|up to \w+) cards named/i.test(oracle(card));
 }
 
+/**
+ * Coloured sources a 99-card deck needs to cast a spell on curve about 90%
+ * of the time (Frank Karsten, 2022 - docs/deckbuilding-reference.md), by
+ * how many pips of the colour it has and its mana value. A gold spell needs
+ * one more of each colour.
+ */
+const KARSTEN: Record<number, Array<number | null>> = {
+  1: [19, 19, 18, 16, 15, 14],
+  2: [null, 30, 28, 26, 23, 22],
+  3: [null, null, 36, 33, 30, 28],
+  4: [null, null, null, 39, 36, 36],
+};
+
+export function sourcesNeeded(pipCount: number, manaValue: number, gold = false): number {
+  const row = KARSTEN[Math.min(4, Math.max(1, pipCount))];
+  let col = Math.min(6, Math.max(1, Math.round(manaValue))) - 1;
+  // Fewer mana than pips cannot happen; take the first column that exists.
+  while (row[col] === null && col < 5) col++;
+  return (row[col] ?? 36) + (gold ? 1 : 0);
+}
+
+const COLOR_NAME: Record<Color, string> = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
+
 export function analyse({ commander, cards }: HealthInput): Health {
   const count = (list: typeof cards) => list.reduce((n, c) => n + c.quantity, 0);
   const lands = cards.filter((c) => isLand(c.card));
@@ -124,14 +152,44 @@ export function analyse({ commander, cards }: HealthInput): Health {
   const landColors = colorsOf(lands);
   const makes = (card: ScryfallCard, color: Color) =>
     !!card.produced_mana?.includes(color) || fetchedColors(card, basics, landColors).has(color);
-  const colors = shown.map((color) => ({
-    color,
-    pips: Math.round(demand[color] * 10) / 10,
-    share: totalPips ? demand[color] / totalPips : 0,
-    landSources: count(lands.filter((c) => makes(c.card, color))),
-    otherSources: count(spells.filter((c) => makes(c.card, color))),
-    fetchLandSources: count(lands.filter((c) => !c.card.produced_mana?.includes(color) && makes(c.card, color))),
-  }));
+  const warnings_: Warning[] = [];
+  const casts = [...spells, ...(commander ? [{ card: commander, quantity: 1 }] : [])];
+  const colors = shown.map((color) => {
+    const landSources = count(lands.filter((c) => makes(c.card, color)));
+    const otherSources = count(spells.filter((c) => makes(c.card, color)));
+    // The spell that asks the most of this colour sets how many sources it needs.
+    let needed: number | null = null;
+    let neededFor: string | null = null;
+    for (const { card } of casts) {
+      const cost = manaCostOf(card);
+      const want = Math.ceil(pips(cost)[color]);
+      if (!want) continue;
+      const gold = COLORS.filter((c) => pips(cost)[c] > 0).length > 1;
+      const n = sourcesNeeded(want, card.cmc ?? want, gold);
+      if (needed === null || n > needed) { needed = n; neededFor = card.name; }
+    }
+    return {
+      color,
+      pips: Math.round(demand[color] * 10) / 10,
+      share: totalPips ? demand[color] / totalPips : 0,
+      landSources,
+      otherSources,
+      fetchLandSources: count(lands.filter((c) => !c.card.produced_mana?.includes(color) && makes(c.card, color))),
+      needed,
+      neededFor,
+      sources: Math.round((landSources + otherSources * 0.75) * 10) / 10,
+    };
+  });
+
+  // Only once the deck is nearly built: a half-made deck is short of everything.
+  const short = size >= 90 ? colors.filter((c) => c.needed !== null && c.sources < c.needed - 1) : [];
+  for (const c of short) {
+    warnings_.push({
+      level: 'warning',
+      title: `Short on ${COLOR_NAME[c.color]} sources: ${c.sources} of ${c.needed}`,
+      detail: `${c.neededFor} wants ${c.needed} to be castable on curve about 90% of the time (Karsten). Add lands or rocks that make ${COLOR_NAME[c.color].toLowerCase()}.`,
+    });
+  }
 
   const gameChangers = [commander, ...cards.map((c) => c.card)]
     .filter((c): c is ScryfallCard => !!c && c.game_changer === true).map((c) => c.name);
@@ -187,7 +245,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
     types,
     colors,
     gameChangers,
-    warnings,
+    warnings: [...warnings, ...warnings_],
     hand: {
       library,
       lands: landCount,

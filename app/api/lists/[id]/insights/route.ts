@@ -7,15 +7,15 @@
  * changes: switching tabs does not ask again.
  */
 
+import { deckRoles } from '@/lib/deck-roles';
 import { NextResponse } from 'next/server';
 
 import { bracketFloor } from '@/lib/bracket';
 import { cutCandidates } from '@/lib/cuts';
-import { cachedRoles, cardsInList, saveRoles } from '@/lib/db';
+import { cardsInList } from '@/lib/db';
 import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
 import { primaryType } from '@/lib/deckview';
 import { requireList } from '@/lib/profile-route';
-import { countRoles } from '@/lib/roles';
 import { guessWinRoutes } from '@/lib/wincons';
 import { imageOf, searchCards, type ScryfallCard } from '@/lib/scryfall';
 import { exactName } from '@/lib/syntax';
@@ -47,7 +47,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const [bracket, combos, roles, page] = await Promise.all([
     estimateBracket(deck).catch(() => null),
     combosInDeck(deck).catch(() => null),
-    countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles }).catch(() => null),
+    deckRoles(id, main).catch(() => null),
     list.commander && edhrecEnabled() ? commanderPage(list.commander.name) : Promise.resolve(null),
   ]);
 

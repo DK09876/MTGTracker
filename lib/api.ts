@@ -36,6 +36,7 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
+import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
 import type { ThemeId } from './themes';
@@ -164,12 +165,12 @@ export const searchCommanders = (q: string, signal?: AbortSignal) =>
   fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
 
-export const createDeck = (name: string, commanderId: string | null, decklist: string) =>
+export const createDeck = (name: string, commanderId: string | null, decklist: string, starter?: { ownedFirst: boolean }) =>
   fetch(url('lists'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist }),
-  }).then(json<{ list: List; imported?: ImportSummary }>);
+    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
+  }).then(json<{ list: List; imported?: ImportSummary }>).finally(jobsChanged);
 
 /** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
 export const setCommander = (listId: string, commanderId: string | null, fromList = false) =>
@@ -399,10 +400,30 @@ export const runChecks = () => send('checks', 'POST', {}).then(json<{ run: Check
 export const cardData = () => fetch(url('card-data')).then(json<{ status: CardDataStatus }>);
 export const refreshCardData = () => send('card-data', 'POST', {}).then(json<{ job: Job }>).finally(jobsChanged);
 
+export interface CardRole { id: string; label: string; group: string; scryfall: boolean; has: boolean; corrected: boolean }
+export const cardRoles = (listId: string, oracleId: string) =>
+  fetch(url(`lists/${listId}/roles?card=${encodeURIComponent(oracleId)}`)).then(json<{ roles: CardRole[] }>).then((r) => r.roles);
+export const correctRole = (listId: string, oracleId: string, role: string, has: boolean | null) =>
+  send(`lists/${listId}/roles`, 'PUT', { oracleId, role, has }).then(json<{ roles: CardRole[] }>).then((r) => r.roles);
+
+export interface CutPlan {
+  size: number;
+  candidates: Array<CutCandidate & { image: string | null }>;
+  protectedCards: string[];
+  type: DeckType;
+  /** Where the curve is overloaded, in words; null when it is not. */
+  curve: string | null;
+  averageMv: number;
+  roles: Array<{ id: string; label: string; count: number; target: [number, number] }>;
+}
+export const cutPlan = (listId: string) => fetch(url(`lists/${listId}/cuts`)).then(json<CutPlan>);
+/** Star a card so it is never offered as a cut. */
+export const keepCard = (listId: string, oracleId: string, keep: boolean) => send(`lists/${listId}/cuts`, 'PUT', { oracleId, keep }).then(json<{ ok: true }>);
+
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
-    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }>);
+    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
 export const deckChats = (listId: string) => fetch(url(`lists/${listId}/chats`)).then(json<{ chats: ChatSummary[] }>);
