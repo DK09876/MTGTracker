@@ -12,6 +12,7 @@
  * cards or copy spells; it measures how the mana and curve hold up.
  */
 
+import { DEFAULT_KEEP, keeps, type KeepRule } from './keep';
 import type { ScryfallCard } from './scryfall';
 
 const COLORS = ['W', 'U', 'B', 'R', 'G'] as const;
@@ -33,7 +34,51 @@ export interface SimCard {
   tapped: boolean;
   /** Land-fetching ramp: how many lands it puts onto the battlefield. */
   fetches: number;
+  /** Its tags - built-in (Ramp, Card advantage) and the owner's - for the keep rule, play order and goals. */
+  tags: string[];
 }
+
+// --- what the owner can set -------------------------------------------------
+
+/** One step of the autopilot's order: what it casts first, each turn. */
+export type PlayStep = { kind: 'mana' } | { kind: 'commander' } | { kind: 'tag'; tag: string } | { kind: 'biggest' } | { kind: 'cheapest' };
+
+/** Something to look for in each game, by a turn. */
+export type Check =
+  | { kind: 'commander'; turn: number; good?: boolean }
+  | { kind: 'mana'; amount: number; turn: number; good?: boolean }
+  /** A card with this tag (or this name) in hand, or cast, by the turn. */
+  | { kind: 'card'; tag?: string; name?: string; how: 'hand' | 'cast'; turn: number; good?: boolean };
+
+export interface GoldfishSettings {
+  games: number;
+  turns: number;
+  drawFirst: boolean;
+  keep: KeepRule;
+  maxMulligans: number;
+  /** The first mulligan costs no card (multiplayer Commander). */
+  freeFirst: boolean;
+  /** What goes to the bottom after a mulligan. */
+  bottom: 'expensive' | 'lands';
+  order: PlayStep[];
+  /** Goals and cards-by-turn; those marked good make up a "good start". */
+  checks: Check[];
+}
+
+export const DEFAULT_ORDER: PlayStep[] = [{ kind: 'mana' }, { kind: 'commander' }, { kind: 'biggest' }];
+export const DEFAULT_SETTINGS: GoldfishSettings = {
+  games: 2000, turns: 8, drawFirst: true, keep: DEFAULT_KEEP, maxMulligans: 2, freeFirst: true, bottom: 'expensive',
+  order: DEFAULT_ORDER, checks: [],
+};
+
+export function describeCheck(c: Check): string {
+  if (c.kind === 'commander') return `Commander out by turn ${c.turn}`;
+  if (c.kind === 'mana') return `${c.amount} mana on turn ${c.turn}`;
+  return `${c.name ?? `A card tagged ${c.tag}`} ${c.how === 'cast' ? 'cast' : 'in hand'} by turn ${c.turn}`;
+}
+
+const matches = (card: SimCard, c: Extract<Check, { kind: 'card' }>) =>
+  c.name ? card.name === c.name || card.name.split(' // ')[0] === c.name : !!c.tag && card.tags.includes(c.tag);
 
 const textOf = (c: ScryfallCard) => [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
 const typeOf = (c: ScryfallCard) => (c.type_line ?? '').split('//')[0];
@@ -61,12 +106,12 @@ function colorsMade(card: ScryfallCard): string[] {
   return [...new Set([...found, ...fetched])];
 }
 
-export function simCard(card: ScryfallCard): SimCard {
+export function simCard(card: ScryfallCard, tags: string[] = []): SimCard {
   const front = card.card_faces?.[0];
   const type = typeOf(card);
   const text = textOf(card);
   const { pips, generic } = parseCost(card.mana_cost ?? front?.mana_cost ?? '');
-  const base = { name: card.name, mv: card.cmc ?? 0, pips, generic, makes: 0, colors: [] as string[], tapped: false, fetches: 0 };
+  const base = { name: card.name, mv: card.cmc ?? 0, pips, generic, makes: 0, colors: [] as string[], tapped: false, fetches: 0, tags };
   // A land, or a modal card whose back is a land: played as a land.
   const landBack = (card.card_faces ?? []).some((f) => /\bLand\b/.test(f.type_line ?? ''));
   if (/\bLand\b/.test(type) || landBack) {
@@ -160,22 +205,27 @@ export interface GameLog {
   hand: string[];
   /** Every card seen: the opening hand and each draw. */
   drawn: string[];
+  /** Whether each check was met, in the order they were asked. */
+  checks: boolean[];
 }
 
 export interface GameOptions {
   turns: number;
-  /** London mulligan: keep 2-5 lands, else mulligan, at most twice. */
+  /** London mulligan by the keep rule. */
   mulligan: boolean;
   /** Play first (no draw on turn one)? In multiplayer most people draw. */
   drawFirst: boolean;
   /** A fixed opening hand to play from (best-hand search). */
   hand?: SimCard[];
+  keep?: KeepRule;
+  maxMulligans?: number;
+  freeFirst?: boolean;
+  bottom?: 'expensive' | 'lands';
+  order?: PlayStep[];
+  checks?: Check[];
 }
 
-const keepable = (hand: SimCard[]) => {
-  const lands = hand.filter((c) => c.kind === 'land').length;
-  return lands >= 2 && lands <= 5;
-};
+const asKeep = (c: SimCard) => ({ land: c.kind === 'land', tags: c.tags });
 
 export function playGame(deck: SimCard[], commander: SimCard | null, rand: () => number, opts: GameOptions): GameLog {
   let library: SimCard[];
@@ -189,23 +239,46 @@ export function playGame(deck: SimCard[], commander: SimCard | null, rand: () =>
   } else {
     library = shuffle(deck, rand);
     hand = library.splice(0, 7);
-    // London mulligan, at most twice; the first is free in multiplayer Commander.
-    while (opts.mulligan && !keepable(hand) && mulligans < 2) {
+    // London mulligan by the keep rule; in multiplayer Commander the first is free.
+    const rule = opts.keep ?? DEFAULT_KEEP;
+    while (opts.mulligan && !keeps(hand.map(asKeep), rule) && mulligans < (opts.maxMulligans ?? 2)) {
       mulligans += 1;
       library = shuffle([...library, ...hand], rand);
       hand = library.splice(0, 7);
-      const bottom = Math.max(0, mulligans - 1);
+      const bottom = Math.max(0, mulligans - ((opts.freeFirst ?? true) ? 1 : 0));
       // Put back what helps least: the most expensive non-lands, or extra lands.
       const lands = hand.filter((c) => c.kind === 'land').length;
-      const order = [...hand].sort((a, b) => (lands > 4 ? Number(b.kind === 'land') - Number(a.kind === 'land') : b.mv - a.mv));
+      const landsFirst = opts.bottom === 'lands' || lands > rule.lands[1];
+      const order = [...hand].sort((a, b) => (landsFirst ? Number(b.kind === 'land') - Number(a.kind === 'land') || b.mv - a.mv : b.mv - a.mv));
       for (const c of order.slice(0, bottom)) { hand.splice(hand.indexOf(c), 1); library.push(c); }
     }
   }
 
   const sources: Source[] = [];
-  const log: GameLog = { commanderTurn: null, lands: [], mana: [], spent: [], stuck: [], mulligans, hand: hand.map((c) => c.name), drawn: hand.map((c) => c.name) };
+  const log: GameLog = { commanderTurn: null, lands: [], mana: [], spent: [], stuck: [], mulligans, hand: hand.map((c) => c.name), drawn: hand.map((c) => c.name), checks: [] };
   let commanderCast = !commander;
   let lands = 0;
+  const checks = opts.checks ?? [];
+  const met = checks.map(() => false);
+  const cast: SimCard[] = [];
+  const steps = opts.order?.length ? opts.order : DEFAULT_ORDER;
+  // Where a card falls in the owner's order: the first step it matches, then the rest by size.
+  const stepOf = (c: SimCard, fromHand: boolean) => {
+    const i = steps.findIndex((s) => (s.kind === 'mana' && (c.kind === 'rock' || c.kind === 'dork' || c.kind === 'landRamp'))
+      || (s.kind === 'commander' && !fromHand)
+      || (s.kind === 'tag' && c.tags.includes(s.tag))
+      || s.kind === 'biggest' || s.kind === 'cheapest');
+    return i < 0 ? steps.length : i;
+  };
+  const tieBreak = (c: SimCard, step: number) => (steps[step]?.kind === 'cheapest' ? -c.mv : c.mv);
+  const look = (turn: number) => {
+    checks.forEach((c, i) => {
+      if (met[i] || turn > c.turn) return;
+      if (c.kind === 'commander') met[i] = log.commanderTurn !== null && log.commanderTurn <= c.turn;
+      else if (c.kind === 'mana') met[i] = turn === c.turn && (log.mana[turn - 1] ?? 0) >= c.amount;
+      else met[i] = (c.how === 'hand' ? hand : cast).some((x) => matches(x, c)) || (c.how === 'hand' && cast.some((x) => matches(x, c)));
+    });
+  };
 
   for (let turn = 1; turn <= opts.turns; turn++) {
     if (turn > 1 || opts.drawFirst) { const d = library.shift(); if (d) { hand.push(d); log.drawn.push(d.name); } }
@@ -233,12 +306,11 @@ export function playGame(deck: SimCard[], commander: SimCard | null, rand: () =>
         ...(!commanderCast && commander ? [{ c: commander, fromHand: false }] : []),
       ].filter(({ c }) => canPay(c, sources));
       if (!castable.length) break;
-      const rank = ({ c, fromHand }: { c: SimCard; fromHand: boolean }) =>
-        (c.kind === 'rock' || c.kind === 'dork' || c.kind === 'landRamp' ? 1000 : 0) + (!fromHand ? 500 : 0) + c.mv;
+      const rank = ({ c, fromHand }: { c: SimCard; fromHand: boolean }) => { const step = stepOf(c, fromHand); return -step * 1000 + tieBreak(c, step); };
       const pick = castable.sort((a, b) => rank(b) - rank(a))[0];
       const paid = canPay(pick.c, sources)!;
       for (const i of paid) sources[i].ready = false;
-      if (pick.fromHand) hand.splice(hand.indexOf(pick.c), 1); else { commanderCast = true; log.commanderTurn = turn; }
+      if (pick.fromHand) { hand.splice(hand.indexOf(pick.c), 1); cast.push(pick.c); } else { commanderCast = true; log.commanderTurn = turn; }
       spent += pick.c.mv;
       if (pick.c.kind === 'rock') sources.push({ colors: pick.c.colors.length ? pick.c.colors : ['C'], makes: pick.c.makes, ready: true });
       if (pick.c.kind === 'dork') sources.push({ colors: pick.c.colors.length ? pick.c.colors : ['C'], makes: pick.c.makes, ready: false });
@@ -249,8 +321,10 @@ export function playGame(deck: SimCard[], commander: SimCard | null, rand: () =>
     }
     log.lands.push(lands);
     log.spent.push(spent);
+    look(turn);
   }
   log.stuck = hand.filter((c) => c.kind !== 'land').map((c) => c.name);
+  log.checks = met;
   return log;
 }
 
@@ -269,14 +343,24 @@ export interface GoldfishReport {
   /** Average mana value cast by the end of turn 4 and turn 6. */
   spentBy: { 4: number; 6: number };
   mulliganRate: number;
+  /** Each check, and the share of games it was met in. */
+  checks: Array<{ check: Check; share: number }>;
+  /** Share of games meeting every check marked good: a "good start". Null with none marked. */
+  goodStart: number | null;
   /** Cards most often still in hand at the end, as a share of the games they were drawn in. */
   stuck: Array<{ name: string; share: number }>;
 }
 
-export function goldfish(deck: SimCard[], commander: SimCard | null, games = 2000, seed = 1, turns = 8): GoldfishReport {
+export function goldfish(deck: SimCard[], commander: SimCard | null, games = 2000, seed = 1, turns = 8, settings?: Partial<GoldfishSettings>): GoldfishReport {
   const rand = rng(seed);
   const logs: GameLog[] = [];
-  for (let g = 0; g < games; g++) logs.push(playGame(deck, commander, rand, { turns, mulligan: true, drawFirst: true }));
+  const checks = settings?.checks ?? [];
+  const opts: GameOptions = {
+    turns, mulligan: true, drawFirst: settings?.drawFirst ?? true, keep: settings?.keep, maxMulligans: settings?.maxMulligans,
+    freeFirst: settings?.freeFirst, bottom: settings?.bottom, order: settings?.order, checks,
+  };
+  for (let g = 0; g < games; g++) logs.push(playGame(deck, commander, rand, opts));
+  const good = checks.map((c, i) => (c.good ? i : -1)).filter((i) => i >= 0);
   const share = (f: (l: GameLog) => boolean) => logs.filter(f).length / games;
   const cmdTurns = logs.map((l) => l.commanderTurn).filter((t): t is number => t !== null);
   const stuckCount = new Map<string, number>();
@@ -298,6 +382,8 @@ export function goldfish(deck: SimCard[], commander: SimCard | null, games = 200
       6: logs.reduce((n, l) => n + l.spent.slice(0, 6).reduce((a, b) => a + b, 0), 0) / games,
     },
     mulliganRate: share((l) => l.mulligans > 0),
+    checks: checks.map((check, i) => ({ check, share: share((l) => l.checks[i]) })),
+    goodStart: good.length ? share((l) => good.every((i) => l.checks[i])) : null,
     stuck: [...stuckCount.entries()]
       // Only cards drawn often enough to say.
       .filter(([name]) => (drawnCount.get(name) ?? 0) >= games * 0.05)
@@ -310,12 +396,18 @@ export function goldfish(deck: SimCard[], commander: SimCard | null, games = 200
 
 // --- the best opening hand --------------------------------------------------
 
-/** How good a start is: the commander early, mana spent by turn four, no land drops missed. */
-function startScore(logs: GameLog[]): number {
+/**
+ * How good a start is. With goals: how many of them it meets (the good ones
+ * count double), mana spent only breaking ties. Without: the commander
+ * early, mana spent by turn four, no land drops missed.
+ */
+function startScore(logs: GameLog[], checks: Check[]): number {
   let score = 0;
   for (const l of logs) {
     const spent = l.spent.slice(0, 4).reduce((a, b) => a + b, 0);
-    score += spent + (l.commanderTurn ? Math.max(0, 6 - l.commanderTurn) * 2 : 0) - (l.lands[3] < 4 ? 3 : 0);
+    score += checks.length
+      ? checks.reduce((n, c, i) => n + (l.checks[i] ? (c.good ? 20 : 10) : 0), 0) + spent * 0.2
+      : spent + (l.commanderTurn ? Math.max(0, 6 - l.commanderTurn) * 2 : 0) - (l.lands[3] < 4 ? 3 : 0);
   }
   return score / logs.length;
 }
@@ -325,6 +417,8 @@ export interface BestHand {
   /** In games from this hand: the commander's average turn, and mana spent by turn four. */
   commanderAverage: number | null;
   spentBy4: number;
+  /** Each goal, and how often games from this hand meet it. */
+  checks: Array<{ check: Check; share: number }>;
 }
 
 /**
@@ -332,7 +426,10 @@ export interface BestHand {
  * keeping the few best partial hands at each step (a beam search), each
  * judged by playing it out against many shuffled libraries.
  */
-export function bestHand(deck: SimCard[], commander: SimCard | null, opts: { beam?: number; trials?: number; seed?: number } = {}): BestHand {
+export function bestHand(deck: SimCard[], commander: SimCard | null, opts: { beam?: number; trials?: number; seed?: number; settings?: Partial<GoldfishSettings> } = {}): BestHand {
+  const checks = opts.settings?.checks ?? [];
+  const play = { mulligan: false, drawFirst: opts.settings?.drawFirst ?? true, order: opts.settings?.order, checks };
+  const turnsFor = Math.max(5, ...checks.map((c) => c.turn));
   const beamWidth = opts.beam ?? 5;
   const trials = opts.trials ?? 40;
   const rand = rng(opts.seed ?? 7);
@@ -344,9 +441,9 @@ export function bestHand(deck: SimCard[], commander: SimCard | null, opts: { bea
     for (let t = 0; t < trials; t++) {
       const rest = shuffle(deck.filter((c) => !hand.includes(c)), rand);
       const full = [...hand, ...rest.slice(0, 7 - hand.length)];
-      logs.push(playGame(deck, commander, rand, { turns: 5, mulligan: false, drawFirst: true, hand: full }));
+      logs.push(playGame(deck, commander, rand, { ...play, turns: turnsFor, hand: full }));
     }
-    return startScore(logs);
+    return startScore(logs, checks);
   };
   let beam: Array<{ hand: SimCard[]; score: number }> = [{ hand: [], score: 0 }];
   for (let size = 1; size <= 7; size++) {
@@ -367,16 +464,17 @@ export function bestHand(deck: SimCard[], commander: SimCard | null, opts: { bea
     beam = next.sort((a, b) => b.score - a.score).slice(0, beamWidth);
   }
   const best = beam[0].hand;
-  const logs = Array.from({ length: 300 }, () => playGame(deck, commander, rand, { turns: 6, mulligan: false, drawFirst: true, hand: best }));
+  const logs = Array.from({ length: 300 }, () => playGame(deck, commander, rand, { ...play, turns: Math.max(6, turnsFor), hand: best }));
   const cmd = logs.map((l) => l.commanderTurn).filter((t): t is number => t !== null);
   return {
     cards: best.map((c) => c.name),
     commanderAverage: cmd.length ? cmd.reduce((a, b) => a + b, 0) / cmd.length : null,
     spentBy4: logs.reduce((n, l) => n + l.spent.slice(0, 4).reduce((a, b) => a + b, 0), 0) / logs.length,
+    checks: checks.map((check, i) => ({ check, share: logs.filter((l) => l.checks[i]).length / logs.length })),
   };
 }
 
 /** A deck's cards as the simulator sees them, one entry per copy. */
-export function simDeck(cards: Array<{ card: ScryfallCard; quantity: number }>): SimCard[] {
-  return cards.flatMap(({ card, quantity }) => Array.from({ length: quantity }, () => simCard(card)));
+export function simDeck(cards: Array<{ card: ScryfallCard; quantity: number }>, tagsOf: (card: ScryfallCard) => string[] = () => []): SimCard[] {
+  return cards.flatMap(({ card, quantity }) => Array.from({ length: quantity }, () => simCard(card, tagsOf(card))));
 }
