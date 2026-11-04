@@ -122,7 +122,7 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
   return (
     <div data-tour="cut-workbench" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-semibold">The cut list</h3>
+        <h3 data-section="The cut list" data-section-count={String(current.candidates.length)} className="font-semibold">The cut list</h3>
         <p className="text-sm">
           {over > 0
             ? <>{current.size} cards · <span className={left ? 'font-semibold text-amber-300' : 'font-semibold text-emerald-400'}>{left ? `pick ${left} more` : 'that gets it to 100'}</span></>
@@ -242,7 +242,7 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {sources.map((src) => (
         <section key={src} className="flex flex-col gap-1.5">
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{src}</h4>
+          <h4 data-section={src} className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{src}</h4>
           {CUT_RULES.filter((r) => r.source === src).map((r) => {
             const mine = draft.rules[r.id] ?? {};
             const on = mine.on !== false;
@@ -271,7 +271,7 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
       ))}
 
       <section className="flex flex-col gap-2">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Your rules</h4>
+        <h4 data-section="Your rules" className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Your rules</h4>
         {draft.custom.length === 0 && <p className="text-sm text-[var(--muted)]">None yet.</p>}
         {draft.custom.map((c, i) => (
           <div key={i} className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
@@ -353,7 +353,7 @@ function Review({ listId, state, planConfirmed, onPlan, onStarted }: {
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {failed && <p className="text-sm text-red-400">The review did not finish: {failed.error}</p>}
       {review && (
-        <section className="flex flex-col gap-2">
+        <section data-section="Claude's notes" data-section-count={String(review.items.length)} className="flex flex-col gap-2">
           <p className="text-xs text-[var(--muted)]">
             {new Date(review.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             {review.instructions && <> · your instructions: &ldquo;{review.instructions}&rdquo;</>}

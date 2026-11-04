@@ -27,9 +27,13 @@ interface Props {
   footer?: React.ReactNode;
   /** Foil or etched copies are labelled and priced as such. */
   finish?: Finish;
+  /** Just the picture: for small cards, where the details are a click away. */
+  compact?: boolean;
+  /** Copies, shown on the picture when compact and more than one. */
+  quantity?: number;
 }
 
-export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer, finish = 'nonfoil' }: Props) {
+export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer, finish = 'nonfoil', compact = false, quantity = 1 }: Props) {
   const image = imageOf(card, 'normal');
   const usd = priceOf(card, finish);
 
@@ -62,9 +66,12 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
             ✓ Own {owned}
           </span>
         ) : null}
+        {compact && quantity > 1 && (
+          <span className="absolute right-1.5 top-1.5 rounded-full bg-[#14120f]/85 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--foreground)] ring-1 ring-[var(--border)]">×{quantity}</span>
+        )}
       </button>
 
-      <div className="flex flex-1 flex-col gap-1.5 px-0.5">
+      {!compact && <div className="flex flex-1 flex-col gap-1.5 px-0.5">
         <div className="flex items-start justify-between gap-2">
           <p className="min-w-0 flex-1 truncate text-sm font-semibold" title={card.name}>
             {card.name}
@@ -92,7 +99,7 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
           </button>
         )}
         {footer}
-      </div>
+      </div>}
     </div>
   );
 }

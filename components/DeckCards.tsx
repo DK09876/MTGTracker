@@ -213,6 +213,8 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
                   key={entry.card.id}
                   card={entry.card}
                   finish={entry.finish}
+                  compact={size === 's'}
+                  quantity={entry.quantity}
                   onSelect={onSelect}
                   footer={entry.commander ? (
                     <p className="mt-auto rounded-lg bg-[var(--accent)]/15 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">
