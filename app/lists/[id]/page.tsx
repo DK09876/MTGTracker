@@ -236,10 +236,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           </div>
 
           <div className="flex w-full gap-2 sm:w-auto">
-            <button onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none">
+            <button data-tour="add-cards" onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none">
               ＋ Add cards
             </button>
-            <MoreMenu
+            <div data-tour="deck-more"><MoreMenu
               items={[
                 { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
@@ -255,7 +255,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                   onClick: async () => { await api.deleteList(id); router.push(deck ? '/decks' : '/lists'); },
                 },
               ]}
-            />
+            /></div>
           </div>
         </div>
       </div>
@@ -345,11 +345,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
 
       {deck && (
-        <div className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
+        <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
           {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
+              data-tour-tab={value}
               aria-selected={section === value}
               onClick={() => setSection(value)}
               className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}

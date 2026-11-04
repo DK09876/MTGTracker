@@ -1,7 +1,6 @@
 /**
- * The models each profile uses: kept on the server per profile and feature,
- * only ones whose provider has a key, back to the default when that key
- * goes - and Claude held to the app's daily caps, with what it cost
+ * The models each profile uses: a Claude model picked per page, or the free
+ * fallbacks without an Anthropic key - and Claude held to the app's daily caps, with what it cost
  * recorded. Claude itself is never called: a fake client answers.
  */
 
@@ -31,19 +30,29 @@ afterEach(() => {
 });
 
 describe('modelFor', () => {
-  it('starts on Claude - Opus to think, Haiku to search - and keeps each profile\'s own choice', async () => {
+  it('starts each page on its default model, and keeps each profile\'s own pick per page', async () => {
     const ai = await import('./ai');
+    // Rules start on Opus, a deck and chat on Sonnet, search on Haiku.
     expect(ai.modelFor('dk', 'rules')).toBe('claude-opus-5-5');
-    expect(ai.modelFor('dk', 'tagging')).toBe('claude-opus-5-5');
+    expect(ai.modelFor('dk', 'tagging')).toBe('claude-sonnet-5-5');
     expect(ai.modelFor('dk', 'search')).toBe('claude-haiku-5-5');
-    ai.chooseModel('dk', 'claude-sonnet-5-5', ['rules', 'tagging']);
+    ai.chooseTier('dk', 'rules', 'sonnet');
+    ai.chooseTier('dk', 'deck', 'opus');
+    ai.chooseTier('dk', 'search', 'sonnet');
     expect(ai.modelFor('dk', 'rules')).toBe('claude-sonnet-5-5');
-    expect(ai.modelFor('dk', 'search')).toBe('claude-haiku-5-5');
-    // Another profile is not changed by dk's choice.
+    expect(ai.modelFor('dk', 'tagging')).toBe('claude-opus-5-5');
+    expect(ai.modelFor('dk', 'tagcards')).toBe('claude-opus-5-5');
+    expect(ai.modelFor('dk', 'search')).toBe('claude-sonnet-5-5');
+    // Another profile is not changed by dk's pick.
     expect(ai.modelFor('kevin', 'rules')).toBe('claude-opus-5-5');
-    const state = ai.aiState('dk');
-    expect(state.models.find((m) => m.id === 'claude-sonnet-5-5')?.chosenFor).toEqual(['rules', 'tagging', 'tagcards', 'chat']);
-    expect(state.models.find((m) => m.id === 'claude-haiku-5-5')?.chosenFor).toEqual(['search']);
+    expect(ai.aiState('dk').tiers).toEqual({ search: 'sonnet', rules: 'sonnet', deck: 'opus', chat: 'sonnet' });
+  });
+
+  it('lists Fable but will not use it yet', async () => {
+    const ai = await import('./ai');
+    expect(() => ai.chooseTier('dk', 'rules', 'fable')).toThrow(/off for now/);
+    expect(() => ai.chooseTier('dk', 'rules', 'turbo' as never)).toThrow(/Unknown/);
+    expect(ai.modelFor('dk', 'rules')).toBe('claude-opus-5-5');
   });
 
   it('falls back to GPT-OSS, then Flash-Lite, without the keys', async () => {
@@ -54,34 +63,13 @@ describe('modelFor', () => {
     expect(ai.modelFor('dk', 'rules')).toBe('gemini-3.5-flash-lite');
   });
 
-  it('puts Flash-Lite behind a Gemini model only', async () => {
+  it('thinks harder on a stronger model, and keeps caps', async () => {
     const ai = await import('./ai');
-    ai.chooseModel('dk', 'openai/gpt-oss-120b', ['tagging']);
-    expect(ai.currentBudget('dk', 'tagging').models.map((m) => m.id)).toEqual(['openai/gpt-oss-120b']);
-    ai.chooseModel('dk', 'gemini-3.8-flash', ['tagging']);
-    expect(ai.currentBudget('dk', 'tagging').models.map((m) => m.id)).toEqual(['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
-    expect(ai.currentBudget('dk', 'tagging').spend).toBeUndefined();
-    expect(ai.currentBudget('dk', 'rules').spend?.caps).toEqual({ daily: 5, perProfile: 2 });
-  });
-
-  it('refuses a model without a key or unknown, and forgets one whose key is gone', async () => {
-    const ai = await import('./ai');
-    expect(() => ai.chooseModel('dk', 'mistral-medium-latest', ['rules'])).toThrow(/MISTRAL_API_KEY/);
-    expect(() => ai.chooseModel('dk', 'made-up', ['rules'])).toThrow(/Unknown/);
-    expect(() => ai.chooseModel('dk', 'openai/gpt-oss-20b', ['rules'])).toThrow(/Unknown/); // a helper, not offered
-    ai.chooseModel('dk', 'openai/gpt-oss-120b', ['rules']);
-    vi.stubEnv('GROQ_API_KEY', '');
-    expect(ai.modelFor('dk', 'rules')).toBe('claude-opus-5-5');
-    expect(ai.aiState('dk').models.find((m) => m.id === 'openai/gpt-oss-120b')?.hasKey).toBe(false);
-  });
-
-  it('keeps an effort and caps, and refuses nonsense', async () => {
-    const ai = await import('./ai');
-    expect(ai.effortFor('dk')).toBe('medium');
-    ai.chooseEffort('dk', 'high');
-    expect(ai.effortFor('dk')).toBe('high');
-    expect(ai.effortFor('kevin')).toBe('medium');
-    expect(() => ai.chooseEffort('dk', 'max')).toThrow(/Unknown effort/);
+    expect(ai.effortFor('dk', 'rules')).toBe('high');
+    expect(ai.effortFor('dk', 'tagging')).toBe('medium');
+    expect(ai.effortFor('dk', 'search')).toBe('low');
+    ai.chooseTier('dk', 'search', 'sonnet');
+    expect(ai.effortFor('dk', 'search')).toBe('medium');
     ai.setCaps({ daily: '8', perProfile: 3 });
     expect(ai.caps()).toEqual({ daily: 8, perProfile: 3 });
     expect(() => ai.setCaps({ daily: -1 })).toThrow(/dollars/);
@@ -124,8 +112,8 @@ describe('claudeModel', () => {
     expect(spend.left).toBeCloseTo(1.92);
     expect(ai.currentSpend('kevin').left).toBeCloseTo(2);
     expect(spend.byModel).toEqual([{ model: 'claude-opus-5-5', cost: 0.08, requests: 1 }]);
-    // The profile's effort for thinking work; low for search.
-    expect((sent[0] as { output_config: { effort: string } }).output_config.effort).toBe('medium');
+    // Rules start Smart, so it thinks hard; search stays quick.
+    expect((sent[0] as { output_config: { effort: string } }).output_config.effort).toBe('high');
     await ai.claudeModel('claude-haiku-5-5', { profile: 'dk', feature: 'search' }, () => client)(ask);
     expect((sent[1] as { output_config: { effort: string } }).output_config.effort).toBe('low');
   });

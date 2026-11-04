@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
 import RulesAnswer from '@/components/RulesAnswer';
-import ModelLine from '@/components/ModelLine';
+import AiModelPicker from '@/components/AiModelPicker';
 import { useSetting } from '@/lib/ai-settings';
 import * as api from '@/lib/api';
 import type { RulesThread, RulesThreadSummary } from '@/lib/db';
@@ -253,6 +253,7 @@ export default function RulesPage() {
     <div className="mx-auto w-full max-w-3xl">
       <div className="flex items-baseline justify-between gap-3">
         <h1 className="font-display text-3xl font-extrabold">Rules</h1>
+        <AiModelPicker area="rules" align="right" className="ml-auto" />
         {thread && <button onClick={() => open(null)} className={`${button} lg:hidden`}>New question</button>}
       </div>
       {!thread && (
@@ -275,7 +276,6 @@ export default function RulesPage() {
               </span>
             </span>
           </label>
-          <ModelLine feature="rules" />
         </div>
       </details>
 
@@ -337,7 +337,7 @@ export default function RulesPage() {
           </div>
 
           {thread.turns.map((t, i) => (
-            <section key={i} id={`turn-${i}`} className="scroll-mt-20">
+            <section key={i} id={`turn-${i}`} data-tour={i === 0 ? 'rules-answer' : undefined} className="scroll-mt-20">
               <p className="mb-2 ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-[var(--surface-hover)] px-4 py-2 text-sm">{t.question}</p>
               {t.cards.length > 0 && (
                 <p className="mb-2 text-xs text-[var(--muted)]">About: {t.cards.join(', ')}</p>
@@ -379,6 +379,7 @@ function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
 }) {
   return (
     <form
+      data-tour="rules-composer"
       className="sticky bottom-[calc(var(--nav-h)+0.75rem)] z-10 mt-5 flex flex-col gap-1.5 bg-gradient-to-t from-[var(--background)] from-60% to-transparent pt-4 sm:bottom-4"
       onSubmit={(e) => { e.preventDefault(); onSend(); }}
     >

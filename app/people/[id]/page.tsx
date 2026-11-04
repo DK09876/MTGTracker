@@ -28,7 +28,7 @@ export default function PersonPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <div className="flex flex-col gap-8" style={identityStyle(commander?.identity ?? null)}>
-      <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+      <section data-tour="profile-banner" className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
         <div className="relative h-44 sm:h-56">
           {commander?.art
             // eslint-disable-next-line @next/next/no-img-element
@@ -123,7 +123,7 @@ function Edit({ page, onChanged }: { page: api.PersonPage; onChanged: () => void
   const identity = style.style.commander?.identity ?? null;
 
   return (
-    <aside className="flex min-w-0 flex-[1_1_20rem] flex-col gap-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <aside data-tour="profile-edit" className="flex min-w-0 flex-[1_1_20rem] flex-col gap-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <h2 className="font-display text-lg font-semibold">Edit your profile</h2>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex flex-col gap-2">

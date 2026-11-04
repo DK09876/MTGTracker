@@ -32,7 +32,7 @@ export default function MyProfile() {
   const field = 'w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5';
 
   return (
-    <section className="flex flex-col gap-3">
+    <section data-tour="my-profile" className="flex flex-col gap-3">
       <h2 className="font-display text-lg font-semibold">Your profile · {me.name}</h2>
       <p className="text-sm text-[var(--muted)]">
         {me.isAdmin ? 'You are an admin: you see the app-wide settings below. Admins keep a password.'

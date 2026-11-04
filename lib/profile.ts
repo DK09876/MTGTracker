@@ -27,13 +27,33 @@ export interface Profile {
 
 const listeners = new Set<() => void>();
 
+// While the guided tour runs (lib/tour-state.ts), this tab uses the tour's
+// sample profile; the profile you chose is left as it was.
+export const TOUR_KEY = 'mtg-tour';
+
 export function getProfile(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    if (sessionStorage.getItem(TOUR_KEY)) return 'tour';
+    return localStorage.getItem(KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** The profile chosen on this device, whatever the tour is showing. */
+export function getChosenProfile(): string {
   if (typeof window === 'undefined') return '';
   try {
     return localStorage.getItem(KEY) ?? '';
   } catch {
     return '';
   }
+}
+
+/** Tell everything that reads the profile to read it again (the tour starting or ending). */
+export function profileChanged(): void {
+  for (const listener of listeners) listener();
 }
 
 export function setProfile(id: string): void {

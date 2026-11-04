@@ -73,8 +73,8 @@ export default function DeckCollection({ listId, version }: Props) {
   const { summary } = data;
 
   return (
-    <div className="mt-5 flex flex-col gap-6">
-      <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+    <div data-tour="deck-collection" className="mt-5 flex flex-col gap-6">
+      <section data-tour="collection-summary" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
         <p className="text-base font-medium">{summary.inDeck} of {summary.need} cards in the deck{summary.proxies ? `, plus ${summary.proxies} proxies` : ''}</p>
         <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[var(--muted)] sm:grid-cols-4">
           <li><span className="text-[var(--foreground)]">{summary.inBoxes}</span> in your boxes</li>

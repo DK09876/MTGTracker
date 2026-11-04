@@ -48,7 +48,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
-      <nav aria-label="Build steps" className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
+      <nav data-tour="build-steps" aria-label="Build steps" className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
         {plan.steps.map((s, i) => (
           <button
             key={s.id}
@@ -100,7 +100,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
         )}
         {current === 'fill' && <Fill listId={listId} plan={plan} commander={commander} onAdd={onAdd} />}
         {current === 'mana' && (
-          <Detail title="Mana">
+          <Detail title="Mana" tour="build-mana">
             <p>
               <span className="font-semibold">{plan.lands.have} lands</span>; Karsten&apos;s formula says <span className="font-semibold">{plan.lands.want}</span>
               <span className="text-[var(--muted)]"> (average mana value {plan.lands.averageMv.toFixed(2)}, {plan.lands.cheap} cheap draw and ramp spells, never below 37).</span>
@@ -153,9 +153,9 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
   );
 }
 
-function Detail({ title, children }: { title: string; children: React.ReactNode }) {
+function Detail({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div data-tour={tour} className="flex flex-col gap-3">
       <h3 className="font-display text-xl font-semibold">{title}</h3>
       {children}
     </div>
@@ -185,7 +185,7 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div data-tour="build-fill" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-display text-xl font-semibold">Fill the gaps</h3>
         <div className="flex flex-wrap items-center gap-4 text-sm">

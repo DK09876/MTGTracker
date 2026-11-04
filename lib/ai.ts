@@ -16,14 +16,15 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import {
-  aiCalls, getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
+  getSetting, modelHealth, modelUsage, recordAiCall, recordModelCall, recordModelExhausted, recordModelHealth, recordModelTokens, recordSpend,
   setSetting, spendSince,
 } from './db';
 import { callClaude, claudeClient, ClaudeFailure, usageOf, type ClaudeClient, type ClaudeParams } from './ai-claude';
 import { callOpenAI, parseOpenAIJson, retryAfterHeader } from './ai-openai';
 import {
-  costOf, DEFAULT_MODELS, EFFORTS, ENV_KEY, FALLBACK_MODEL, FEATURES, FREE_DEFAULT_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf,
+  costOf, ENV_KEY, FALLBACK_MODEL, FEATURES, FREE_DEFAULT_MODEL, HELPER_MODEL, MODELS, modelInfo, providerOf,
   type Effort, type Feature, type Price, type Provider,
+  AREA_OF, AREAS, DEFAULT_TIER, TIER_EFFORT, TIER_INFO, TIER_MODEL, TIERS, TIERS_OFF, type AiArea, type Tier,
 } from './models';
 import { capFrom, DEFAULT_CAPS, monthStart, overBudget, summarize, type Caps, type SpendSummary } from './spend';
 import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
@@ -139,59 +140,34 @@ export function currentBudget(profile: string | null, feature: Feature = 'taggin
 
 // --- the models each profile uses ------------------------------------------------
 
-const modelKey = (profile: string | null, feature: Feature) => `ai.model.${profile ?? '-'}.${feature}`;
-const appModelKey = (feature: Feature) => `ai.model.app.${feature}`;
-
-/** Set the app's model for features (admins): what profiles use unless they pick their own. */
-export function chooseAppModel(id: string, features: Feature[]): void {
-  if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
-  if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
-  for (const f of features) if (FEATURES.includes(f)) setSetting(appModelKey(f), id);
-}
-
-/** The app's model for each feature, before any profile's own choice. */
-export function appModels(): Record<Feature, string> {
-  return Object.fromEntries(FEATURES.map((f) => [f, appModelFor(f)])) as Record<Feature, string>;
-}
-const EFFORT_KEY = (profile: string | null) => `ai.effort.${profile ?? '-'}`;
+const tierKey = (profile: string | null, area: AiArea) => `ai.tier.${profile ?? '-'}.${area}`;
 const CAP_KEYS: Record<keyof Caps, string> = { daily: 'ai.cap.daily', perProfile: 'ai.cap.profile' };
 
-const usable = (id: string | null): id is string => !!id && !!modelInfo(id) && !modelInfo(id)?.helper && hasKey(id);
-
-/**
- * The model a profile uses for a feature: its own choice, the app's, or the
- * default - only one whose provider has a key - or else GPT-OSS, or else
- * Flash-Lite.
- */
-export function modelFor(profile: string | null, feature: Feature): string {
-  const own = getSetting(modelKey(profile, feature));
-  return usable(own) ? own : appModelFor(feature);
+/** The Claude model a profile picked on one page. */
+export function tierFor(profile: string | null, area: AiArea): Tier {
+  const t = getSetting(tierKey(profile, area)) as Tier | null;
+  return t && TIERS.includes(t) && !TIERS_OFF.includes(t) ? t : DEFAULT_TIER[area];
 }
 
-/** The app's model for a feature: an admin's choice, else the default. */
-export function appModelFor(feature: Feature): string {
-  const app = getSetting(appModelKey(feature));
-  if (usable(app)) return app;
-  if (hasKey(DEFAULT_MODELS[feature])) return DEFAULT_MODELS[feature];
+export function chooseTier(profile: string | null, area: AiArea, tier: Tier): void {
+  if (!AREAS.includes(area) || !TIERS.includes(tier)) throw new ModelError(`Unknown model ${area} ${tier}`);
+  if (TIERS_OFF.includes(tier)) throw new ModelError(`${TIER_INFO[tier].label} is off for now`);
+  setSetting(tierKey(profile, area), tier);
+}
+
+/**
+ * The model a profile uses for a step: the one picked on its page - or,
+ * without an Anthropic key, GPT-OSS, or else Flash-Lite.
+ */
+export function modelFor(profile: string | null, feature: Feature): string {
+  const id = TIER_MODEL[tierFor(profile, AREA_OF[feature])];
+  if (hasKey(id)) return id;
   return hasKey(FREE_DEFAULT_MODEL) ? FREE_DEFAULT_MODEL : FALLBACK_MODEL;
 }
 
-/** Use a model for some of a profile's features. */
-export function chooseModel(profile: string | null, id: string, features: Feature[]): void {
-  if (!modelInfo(id) || modelInfo(id)?.helper) throw new ModelError(`Unknown model ${id}`);
-  if (!hasKey(id)) throw new ModelError(`No ${ENV_KEY[providerOf(id)]} on the server`);
-  for (const f of features) if (FEATURES.includes(f)) setSetting(modelKey(profile, f), id);
-}
-
-/** How hard a profile's Claude model thinks on rules and tagging; medium unless changed. */
-export function effortFor(profile: string | null): Effort {
-  const e = getSetting(EFFORT_KEY(profile));
-  return EFFORTS.includes(e as Effort) ? e as Effort : 'medium';
-}
-
-export function chooseEffort(profile: string | null, effort: string): void {
-  if (!EFFORTS.includes(effort as Effort)) throw new ModelError(`Unknown effort ${effort}`);
-  setSetting(EFFORT_KEY(profile), effort);
+/** How hard Claude thinks: the stronger the model picked, the harder. */
+export function effortFor(profile: string | null, feature: Feature): Effort {
+  return TIER_EFFORT[tierFor(profile, AREA_OF[feature])];
 }
 
 export function caps(): Caps {
@@ -243,6 +219,8 @@ export function helperModel(profile: string | null, label?: string): JsonModel |
  * search). Null when no provider has a key.
  */
 export function appModel(profile: string | null, feature: Feature, label?: string): JsonModel | null {
+  // The guided tour's sample never spends AI.
+  if (profile === 'tour') return null;
   const [id, ...fallbacks] = featureModels(profile, feature);
   return modelById(id, fallbacks, { profile, feature, label });
 }
@@ -272,7 +250,7 @@ export function claudeModel(id: string, charge: Charge, client: () => ClaudeClie
     }
     if (options.signal?.aborted) throw new ModelError('stopped', 'stopped');
     // Search plans want speed; a preparatory step asks for little thought.
-    const effort: Effort = charge.feature === 'search' || request.thinking === 'low' ? 'low' : effortFor(charge.profile);
+    const effort: Effort = request.thinking === 'low' ? 'low' : effortFor(charge.profile, charge.feature);
     const day = quotaDay(now());
     const log = (outcome: string, detail = '', usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }, answeredBy?: string) => {
       recordAiCall({
@@ -647,12 +625,13 @@ export interface ModelStatus {
 /** Everything Settings and the header's picker show, for one profile. */
 export interface AiState {
   models: ModelStatus[];
-  effort: Effort;
+  /** The model the profile picked on each page. */
+  tiers: Record<AiArea, Tier>;
   spend: SpendSummary;
-  /** The app's model for each step, before any profile's own choice. */
-  app: Record<Feature, string>;
   /** What one request has cost on each step, on average, over the last 30 days. */
   costPerRequest: Partial<Record<Feature, number>>;
+  /** The same, by the model that ran it: what a mode costs on that step. */
+  costByModel: Partial<Record<Feature, Record<string, number>>>;
 }
 
 export function aiState(profile: string | null): AiState {
@@ -673,15 +652,27 @@ export function aiState(profile: string | null): AiState {
       health: h && { ok: h.ok, detail: h.detail, at: h.at },
     };
   });
-  // Per step, from the usage trail; tag cards were logged as tagging before they had their own step.
-  const calls = aiCalls(new Date(Date.now() - 30 * 86400_000).toISOString(), 5000).filter((c) => c.outcome === 'ok' && c.cost > 0);
-  const stepOf = (c: { feature: string; step: string }): string => (c.feature === 'tagging' && /tag cards|check the tags/.test(c.step) ? 'tagcards' : c.feature);
+  // Per step, from the daily totals of the last 30 days: the request-by-request
+  // trail is only kept a week (lib/cleanup.ts).
+  const totals = spendSince(quotaDay(new Date(Date.now() - 30 * 86400_000)));
   const costPerRequest: Partial<Record<Feature, number>> = {};
   for (const f of FEATURES) {
-    const mine = calls.filter((c) => stepOf(c) === f);
-    if (mine.length) costPerRequest[f] = mine.reduce((n, c) => n + c.cost, 0) / mine.length;
+    const mine = totals.filter((r) => r.feature === f && r.cost > 0);
+    const requests = mine.reduce((n, r) => n + r.requests, 0);
+    if (requests) costPerRequest[f] = mine.reduce((n, r) => n + r.cost, 0) / requests;
   }
-  return { models, effort: effortFor(profile), spend, app: appModels(), costPerRequest };
+  const costByModel: Partial<Record<Feature, Record<string, number>>> = {};
+  for (const f of FEATURES) {
+    const byModel: Record<string, { cost: number; requests: number }> = {};
+    for (const r of totals.filter((x) => x.feature === f && x.cost > 0)) {
+      const m = (byModel[r.model] ??= { cost: 0, requests: 0 });
+      m.cost += r.cost;
+      m.requests += r.requests;
+    }
+    costByModel[f] = Object.fromEntries(Object.entries(byModel).map(([m, x]) => [m, x.cost / x.requests]));
+  }
+  const tiers = Object.fromEntries(AREAS.map((a) => [a, tierFor(profile, a)])) as Record<AiArea, Tier>;
+  return { models, tiers, spend, costPerRequest, costByModel };
 }
 
 /** Ask one model something tiny, to see whether it answers. One of its requests; a Claude one costs a fraction of a cent. */

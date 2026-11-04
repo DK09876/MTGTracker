@@ -109,17 +109,47 @@ export const MODELS: ModelInfo[] = [
 ];
 
 /**
- * Claude unless changed: Opus for the thinking work (rules, tagging), Haiku
- * for search, which wants speed and only plans a query. The free models
- * (2026-09) were not good enough at rules or tagging. Without an Anthropic
- * key, GPT-OSS on Groq, which did best of the free ones in a rules bake-off.
+ * Each AI page lets a profile pick the Claude model it uses - Haiku, Sonnet,
+ * Opus or Fable - remembered per profile and page. Stronger models think
+ * harder and cost more. Fable is listed but off for now, while it is tried
+ * out. The free models (2026-09) were not good enough at rules or tagging;
+ * without an Anthropic key, GPT-OSS on Groq, which did best of them in a
+ * rules bake-off.
  */
-export const DEFAULT_MODELS: Record<Feature, string> = {
-  rules: 'claude-opus-5-5',
-  tagging: 'claude-opus-5-5',
-  tagcards: 'claude-sonnet-5-5',
-  chat: 'claude-sonnet-5-5',
-  search: 'claude-haiku-5-5',
+export type Tier = 'haiku' | 'sonnet' | 'opus' | 'fable';
+export const TIERS: Tier[] = ['haiku', 'sonnet', 'opus', 'fable'];
+export const TIER_MODEL: Record<Tier, string> = {
+  haiku: 'claude-haiku-5-5', sonnet: 'claude-sonnet-5-5', opus: 'claude-opus-5-5', fable: 'claude-fable-5-1',
+};
+export const TIER_INFO: Record<Tier, { label: string; note: string }> = {
+  haiku: { label: 'Haiku', note: 'Fast and nearly free' },
+  sonnet: { label: 'Sonnet', note: 'Balanced' },
+  opus: { label: 'Opus', note: 'Strongest everyday model; thinks hard' },
+  fable: { label: 'Fable', note: 'Most capable; off for now while it is tried out' },
+};
+/** Shown, but not yet choosable. */
+export const TIERS_OFF: Tier[] = ['fable'];
+export const TIER_EFFORT: Record<Tier, Effort> = { haiku: 'low', sonnet: 'medium', opus: 'high', fable: 'high' };
+
+/** The pages with a model picker, and the steps each one's choice covers. */
+export type AiArea = 'search' | 'rules' | 'deck' | 'chat';
+export const AREAS: AiArea[] = ['search', 'rules', 'deck', 'chat'];
+export const AREA_OF: Record<Feature, AiArea> = { search: 'search', rules: 'rules', tagging: 'deck', tagcards: 'deck', chat: 'chat' };
+
+/** Where each page starts: Opus for rules, where a wrong answer costs a game; Haiku for search; Sonnet otherwise. */
+export const DEFAULT_TIER: Record<AiArea, Tier> = { search: 'haiku', rules: 'opus', deck: 'sonnet', chat: 'sonnet' };
+
+export const DEFAULT_MODELS: Record<Feature, string> = Object.fromEntries(
+  FEATURES.map((f) => [f, TIER_MODEL[DEFAULT_TIER[AREA_OF[f]]]]),
+) as Record<Feature, string>;
+
+/** A typical request on each step, for a price before a model has been used there. */
+export const TYPICAL_TOKENS: Record<Feature, { input: number; output: number }> = {
+  search: { input: 3_200, output: 150 },
+  rules: { input: 10_000, output: 1_800 },
+  tagging: { input: 9_500, output: 2_500 },
+  tagcards: { input: 10_000, output: 3_800 },
+  chat: { input: 9_000, output: 800 },
 };
 export const FREE_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 

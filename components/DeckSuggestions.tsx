@@ -49,8 +49,9 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
   };
 
   return (
-    <div className="mt-5 flex flex-col gap-8">
+    <div data-tour="suggestions" className="mt-5 flex flex-col gap-8">
       <Section
+        tour="combos"
         title={`Combos in this deck${insights.combos ? ` (${insights.combos.included.length})` : ''}`}
         subtitle="Every piece is already in the list. From Commander Spellbook."
       >
@@ -73,6 +74,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
       </Section>
 
       <Section
+        tour="one-away"
         title={`One card away${insights.combos ? ` (${insights.combos.toAdd.length})` : ''}`}
         subtitle={`Cards that would complete a combo with what the deck already has, in ${short}'s colours.`}
       >
@@ -114,7 +116,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
         </ul>
       </Section>
 
-      <Section title="Cuts to consider" subtitle="Where to look first when the deck needs room. Prompts, not verdicts.">
+      <Section tour="cuts" title="Cuts to consider" subtitle="Where to look first when the deck needs room. Prompts, not verdicts.">
         {insights.cuts.length === 0 && (
           <p className="text-sm text-[var(--muted)]">Nothing stands out: every role is within its guideline{commander ? '' : ', and without a commander there is no EDHREC data to compare with'}.</p>
         )}
@@ -152,9 +154,9 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
   );
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children, tour }: { title: string; subtitle?: string; children: React.ReactNode; tour?: string }) {
   return (
-    <section>
+    <section data-tour={tour}>
       <h3 className="font-medium">{title}</h3>
       {subtitle && <p className="mb-3 text-sm text-[var(--muted)]">{subtitle}</p>}
       {children}

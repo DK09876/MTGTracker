@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import AddProfile from './AddProfile';
 import SignIn from './SignIn';
 import * as api from '@/lib/api';
-import { getProfile, setProfile, useProfile, type Profile } from '@/lib/profile';
+import { getChosenProfile, setProfile, useProfile, type Profile } from '@/lib/profile';
 import { useMeState } from '@/lib/use-me';
 
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
@@ -31,7 +31,9 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
         // Checked once, against this fresh list - checking on every change
         // raced a profile added a moment ago against the list from before
         // it existed, and threw the new choice away.
-        const remembered = getProfile();
+        // The choice itself, not the tour's sample (which is never listed):
+        // checking that one wiped the real choice during a tour.
+        const remembered = getChosenProfile();
         if (remembered && !found.some((p) => p.id === remembered)) setProfile('');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not reach the server'));

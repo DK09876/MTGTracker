@@ -190,3 +190,6 @@ body {
 }
 @keyframes shine { 60%, 100% { transform: translateX(220%); } }
 @media (prefers-reduced-motion: reduce) { .foil-shine::after { animation: none; display: none; } }
+
+/* A part the guided tour scrolls to clears the sticky header and the tour's banner. */
+[data-tour] { scroll-margin-top: 7.5rem; }

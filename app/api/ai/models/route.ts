@@ -11,8 +11,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { aiState, chooseAppModel, chooseEffort, chooseModel, ModelError, setCaps, testModel } from '@/lib/ai';
-import { FEATURES, type Feature } from '@/lib/models';
+import { aiState, chooseTier, ModelError, setCaps, testModel } from '@/lib/ai';
+import type { AiArea, Tier } from '@/lib/models';
 import { profileOf, requireAdmin, requireProfile } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -31,26 +31,16 @@ export async function PUT(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
   const { profile } = who;
-  const b = await request.json().catch(() => ({})) as { model?: unknown; features?: unknown; effort?: unknown; caps?: unknown; app?: unknown };
-  // The caps and the app's own models are for admins.
-  if (b.caps !== undefined || b.app !== undefined) {
+  const b = await request.json().catch(() => ({})) as { area?: unknown; tier?: unknown; caps?: unknown };
+  // The caps are for admins.
+  if (b.caps !== undefined) {
     const admin = requireAdmin(request);
     if (admin instanceof NextResponse) return admin;
   }
   try {
-    if (typeof b.model === 'string') {
-      const features = Array.isArray(b.features) ? b.features.filter((f): f is Feature => FEATURES.includes(f as Feature)) : [];
-      if (!features.length) return NextResponse.json({ error: 'Say which features use it' }, { status: 400 });
-      chooseModel(profile, b.model, features);
-    }
-    if (typeof b.effort === 'string') chooseEffort(profile, b.effort);
+    // {area, tier}: the model this profile uses on one page.
+    if (typeof b.area === 'string' && typeof b.tier === 'string') chooseTier(profile, b.area as AiArea, b.tier as Tier);
     if (b.caps && typeof b.caps === 'object') setCaps(b.caps as Record<string, unknown>);
-    // {app: {feature: model}}: the model each step uses unless a profile picks its own.
-    if (b.app && typeof b.app === 'object') {
-      for (const [feature, id] of Object.entries(b.app as Record<string, unknown>)) {
-        if (FEATURES.includes(feature as Feature) && typeof id === 'string') chooseAppModel(id, [feature as Feature]);
-      }
-    }
   } catch (error) {
     return refused(error);
   }

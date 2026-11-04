@@ -71,7 +71,7 @@ export default function DecksPage() {
           )}
         </div>
         {!creating && (
-          <button onClick={() => setCreating(true)} className="btn-go rounded-full px-4 py-2 font-semibold">
+          <button data-tour="new-deck" onClick={() => setCreating(true)} className="btn-go rounded-full px-4 py-2 font-semibold">
             ＋ New deck
           </button>
         )}
@@ -145,7 +145,7 @@ export default function DecksPage() {
         <p className="mt-10 text-center text-[var(--muted)]">No decks yet.</p>
       )}
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div data-tour="deck-grid" className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {decks.map((deck) => {
           const art = deck.commander ? deck.commander.image_uris?.art_crop ?? deck.commander.card_faces?.[0]?.image_uris?.art_crop ?? imageOf(deck.commander, 'normal') : null;
           const total = deck.totalCards;

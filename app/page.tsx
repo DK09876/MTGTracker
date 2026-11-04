@@ -6,6 +6,7 @@ import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import FollowUp from '@/components/FollowUp';
+import AiModelPicker from '@/components/AiModelPicker';
 import Interpreted from '@/components/Interpreted';
 import Results from '@/components/Results';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -80,15 +81,28 @@ function loadCurrent(): Current | null {
 
 const THREAD = ' › ';
 
+/** What the page itself had on screen, kept with the search (useSearch) while the app is open. */
+interface KeptPage {
+  query: string;
+  thread: string[];
+  asked: { text: string; previous?: Previous } | null;
+  searched: boolean;
+  live: { thread: string[]; replay: Replay } | null;
+  openSaved: string | null;
+}
+let keptPage: KeptPage | null = null;
+
 export default function SearchPage() {
   const s = useSearch();
   const { answer, views, status, run, showAnswer } = s;
-  const [query, setQuery] = useState('');
-  const [thread, setThread] = useState<string[]>([]);
+  // Back from another page: the search as it was, shown at once.
+  const [back] = useState(() => (s.fromMemory ? keptPage : null));
+  const [query, setQuery] = useState(back?.query ?? '');
+  const [thread, setThread] = useState<string[]>(back?.thread ?? []);
   // The request that produced the current answer, so a search that stopped
   // to ask which commander can carry on from it.
-  const [asked, setAsked] = useState<{ text: string; previous?: Previous } | null>(null);
-  const [searched, setSearched] = useState(false);
+  const [asked, setAsked] = useState<{ text: string; previous?: Previous } | null>(back?.asked ?? null);
+  const [searched, setSearched] = useState(back?.searched ?? false);
 
   const [lists, setLists] = useState<List[]>([]);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
@@ -99,9 +113,10 @@ export default function SearchPage() {
   const [saved, setSaved] = useState<SavedSearch[]>([]);
   // The search on screen, as a session to keep or carry on: what was asked
   // and how to run it. The tab, pages and toggle come from the views.
-  const [live, setLive] = useState<{ thread: string[]; replay: Replay } | null>(null);
+  const [live, setLive] = useState<{ thread: string[]; replay: Replay } | null>(back?.live ?? null);
   // The saved search this is, if it was opened from one or saved.
-  const [openSaved, setOpenSaved] = useState<string | null>(null);
+  const [openSaved, setOpenSaved] = useState<string | null>(back?.openSaved ?? null);
+  useEffect(() => { keptPage = { query, thread, asked, searched, live, openSaved }; }, [query, thread, asked, searched, live, openSaved]);
   const scrollY = useRef(0);
 
   useEffect(() => { api.fetchLists().then(setLists).catch(() => {}); }, []);
@@ -201,6 +216,12 @@ export default function SearchPage() {
     api.recentSearches().then(setRecent).catch(() => {});
     api.savedSearches().then(setSaved).catch(() => {});
     const current = loadCurrent();
+    // Back from another page, the search is already on screen: only the
+    // scroll is put back. Otherwise it is run again, as it was left.
+    if (back) {
+      restoreScroll(current?.session.scrollY);
+      return;
+    }
     // After this render, not in it; cancelled if the page goes before then.
     const timer = current ? setTimeout(() => openSession(current.session, { keep: false, savedId: current.savedId }), 0) : undefined;
     return () => clearTimeout(timer);
@@ -396,6 +417,7 @@ export default function SearchPage() {
       <HistoryPanel label="Search history" newLabel="New search" onNew={newSearch} entries={history} active={activeEntry} {...historyActions} />
       {/* A commander search takes on the commander's colours. */}
       <div className="min-w-0" style={answer?.interpretation.commander ? identityStyle(answer.interpretation.commander.identity) : undefined}>
+      <AiModelPicker area="search" align="right" className="mb-3" />
       <SearchBox
         value={query}
         onChange={setQuery}

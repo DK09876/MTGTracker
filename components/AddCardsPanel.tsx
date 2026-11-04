@@ -124,6 +124,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
       <aside
+        data-tour="add-panel"
         role="dialog"
         aria-modal="true"
         aria-label="Add cards"

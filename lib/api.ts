@@ -46,7 +46,7 @@ import type { Job } from './jobs';
 import type { CardChange, DeckRead, ReadChange, ReadMode } from './reads';
 import type { AiState } from './ai';
 import type { AiCall } from './db';
-import type { Effort, Feature } from './models';
+import type { AiArea, Tier } from './models';
 import type { Caps } from './spend';
 import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
@@ -572,11 +572,8 @@ const changed = (state: AiState) => {
 };
 
 export const aiState = () => fetch(url('ai/models')).then(json<AiState>);
-/** Admins: the model each step uses unless a profile picks its own. */
-export const setAppModels = (app: Partial<Record<Feature, string>>) => send('ai/models', 'PUT', { app }).then(json<AiState>).then(changed);
-export const chooseModel = (model: string, features: Feature[]) =>
-  send('ai/models', 'PUT', { model, features }).then(json<AiState>).then(changed);
-export const chooseEffort = (effort: Effort) => send('ai/models', 'PUT', { effort }).then(json<AiState>).then(changed);
+/** The model this profile uses on one page. */
+export const chooseTier = (area: AiArea, tier: Tier) => send('ai/models', 'PUT', { area, tier }).then(json<AiState>).then(changed);
 export const setCaps = (caps: Partial<Caps>) => send('ai/models', 'PUT', { caps }).then(json<AiState>).then(changed);
 /** Every Claude request in the last `days`, newest first, and profile names for showing who. */
 export const aiUsage = (days = 7) =>

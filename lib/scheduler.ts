@@ -1,6 +1,6 @@
 /**
- * The app's own timers: the self-checks every quarter hour, and nightly
- * work at about 3 AM. Started once per server process from instrumentation.ts;
+ * The app's own timers: the self-checks every quarter hour, nightly work at
+ * about 3 AM, and weekly work at that hour on Sundays. Started once per server process from instrumentation.ts;
  * MTG_SCHEDULER=off turns it off (tests, local checks). Server only.
  */
 
@@ -11,12 +11,18 @@ const FIRST_CHECK_MS = 60_000;
 const NIGHTLY_HOUR = 3;
 
 type Nightly = () => Promise<void>;
-const state = ((globalThis as { __mtgScheduler?: { started: boolean; nightly: Map<string, Nightly>; lastNight: string } }).__mtgScheduler
-  ??= { started: false, nightly: new Map(), lastNight: '' });
+const state = ((globalThis as { __mtgScheduler?: { started: boolean; nightly: Map<string, Nightly>; weekly: Map<string, Nightly>; lastNight: string } }).__mtgScheduler
+  ??= { started: false, nightly: new Map(), weekly: new Map(), lastNight: '' });
+state.weekly ??= new Map();
 
 /** Work to run once a night, by name (so a reload does not add it twice). */
 export function nightly(name: string, work: Nightly): void {
   state.nightly.set(name, work);
+}
+
+/** Work to run once a week, early on Sunday. */
+export function weekly(name: string, work: Nightly): void {
+  state.weekly.set(name, work);
 }
 
 function check() {
@@ -31,7 +37,8 @@ async function maybeNightly(now = new Date()) {
   const night = now.toDateString();
   if (now.getHours() !== NIGHTLY_HOUR || state.lastNight === night) return;
   state.lastNight = night;
-  for (const [name, work] of state.nightly) {
+  const jobs = [...state.nightly, ...(now.getDay() === 0 ? [...state.weekly] : [])];
+  for (const [name, work] of jobs) {
     try {
       await work();
     } catch (error) {

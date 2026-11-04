@@ -4,13 +4,14 @@ import 'mana-font/css/mana.css';
 import Link from 'next/link';
 
 import ErrorBanner from '@/components/ErrorBanner';
+import HelpButton from '@/components/HelpButton';
 import JobTray from '@/components/JobTray';
-import ModelMenu from '@/components/ModelMenu';
 import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
 import { SettingsLink, TabBar, TopLinks } from '@/components/Nav';
 import ServiceWorker from '@/components/ServiceWorker';
 import ThemeApplier from '@/components/ThemeApplier';
+import TourOverlay from '@/components/TourOverlay';
 
 import './globals.css';
 
@@ -56,7 +57,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="ml-auto flex items-center gap-1 text-sm">
               <TopLinks />
               <JobTray />
-              <ModelMenu />
+              <HelpButton />
               <SettingsLink />
               <ProfileSwitcher />
             </div>
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </footer>
         <TabBar />
         <ThemeApplier />
+        <TourOverlay />
         <ServiceWorker />
       </body>
     </html>

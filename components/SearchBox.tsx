@@ -85,6 +85,7 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
 
   return (
     <form
+      data-tour="search-box"
       onSubmit={(e) => { e.preventDefault(); setOpen(false); onSubmit(value); }}
       className="flex gap-2"
     >
