@@ -23,6 +23,8 @@ export default function Tip({ children, label = 'More about this', className = '
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState<{ x: number; y: number; above: boolean } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
+  // Opened by a click (or tap) it stays until the next one; opened by hover it closes on leaving.
+  const pinned = useRef(false);
   const id = useId();
 
   const place = () => {
@@ -37,9 +39,10 @@ export default function Tip({ children, label = 'More about this', className = '
 
   useEffect(() => {
     if (!open) return;
-    const away = (e: Event) => { if (!button.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const move = () => setOpen(false);
+    const close = () => { pinned.current = false; setOpen(false); };
+    const away = (e: Event) => { if (!button.current?.contains(e.target as Node)) close(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    const move = close;
     document.addEventListener('pointerdown', away);
     document.addEventListener('keydown', esc);
     window.addEventListener('scroll', move, true);
@@ -55,10 +58,14 @@ export default function Tip({ children, label = 'More about this', className = '
         aria-describedby={open ? id : undefined}
         aria-expanded={open}
         onMouseEnter={show}
-        onMouseLeave={() => setOpen(false)}
+        onMouseLeave={() => { if (!pinned.current) setOpen(false); }}
         onFocus={show}
-        onBlur={() => setOpen(false)}
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (open) setOpen(false); else show(); }}
+        onBlur={() => { pinned.current = false; setOpen(false); }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (pinned.current) { pinned.current = false; setOpen(false); } else { pinned.current = true; show(); }
+        }}
         className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[var(--border)] align-middle text-[10px] font-semibold leading-none text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)] ${className}`}
       >
         i
