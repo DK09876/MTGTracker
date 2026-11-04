@@ -29,7 +29,6 @@ const tab = (t: string) => `[data-tour-tab="${t}"]`;
 const deck = (id: string) => `/decks/${id}`;
 const closeCard = '?[data-tour="card-modal"] [aria-label="Close"]';
 const closeAdd = '?[data-tour="add-panel"] [aria-label="Close"]';
-const buildStep = (n: number) => `[data-tour="build-steps"] button:nth-child(${n})`;
 
 /** A deck, tab by tab and how to use each - the deck's own tour, and the second half of Decks'. */
 const DECK_STEPS: TourStep[] = [
@@ -40,10 +39,11 @@ const DECK_STEPS: TourStep[] = [
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
   { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Edit the whole list as text, rename the deck, change its commander, show it on your profile (decks are private until you do), or delete it.' },
 
-  { click: [tab('build'), buildStep(1)], target: 'build-steps', title: 'Build: a checklist', body: 'Seven steps from the commander\'s style to a final check, each marked done, needs work, or to do. Click a step for what to do about it. All worked out from the cards, no AI.' },
-  { click: [tab('build'), buildStep(4)], target: 'build-fill', title: 'Fill the gaps', body: 'Pick a role the deck is short on. Cards for it are ranked by how often this commander\'s decks play them; tick "From my collection first" to see what you own - and which box it is in - before what you would buy. Set a price cap, then Add.' },
-  { click: [tab('build'), buildStep(5)], target: 'build-mana', title: 'The mana', body: 'How many lands Karsten\'s formula wants for this curve, and each colour\'s sources against what its hungriest spell needs. The button copies the decklist and opens Salubrious Snail\'s tool to check how often each spell is castable on time.' },
-  { click: [tab('build'), buildStep(6)], target: 'cut-workbench', title: 'Cuts', body: 'Over 100? Every card is weighed, with its reasons - a role you have too many of, nothing the commander cares about, rarely played - and cards your tags mark as the plan are protected. Tick some, see the roles they would leave, and cut them to the maybeboard, with undo.' },
+  { click: [tab('build')], target: 'build-issues', title: 'Build: what to look at', body: 'The few things worth fixing, in plain words: over 100, a role well short of the usual count, no clear way to win, too few lands or sources of a colour. Each says why, shows the cards behind it, and has the fix right there. Hide one that is fine for this deck. All from the cards, no AI.' },
+  { target: 'build-roles', title: 'Every role', body: 'Ramp, draw, removal and the rest against the usual counts - the green band - with ways to win at the bottom. Click a role for its cards.' },
+  { click: [tab('build'), '?[data-tour="build-roles"]:not(:has([data-tour="build-fill"])) [data-tour="role-find"]'], target: 'build-fill', title: 'Find cards', body: 'Cards for a role, ranked by how well they fit this commander and how much Commander plays them. Tick "From my collection first" to see what you own - and which box it is in - before what you would buy. Set a price cap, then Add.' },
+  { target: 'build-mana', title: 'The mana', body: 'How many lands Karsten\'s formula wants for this curve, and each colour\'s sources against what its hungriest spell needs. The button copies the decklist and opens Salubrious Snail\'s tool to check each spell.' },
+  { click: [tab('build'), '?[data-tour="open-cuts"][aria-expanded="false"]'], target: 'cut-workbench', title: 'The cut list', body: 'Over 100, or making room? Every card is weighed, with its reasons - a role you have too many of, nothing the commander cares about, rarely played - and cards your tags mark as the plan are protected. Tick some, see the roles they would leave, and cut them to the maybeboard, with undo.' },
 
   { click: [tab('chat'), '[data-tour="chat-list"] [data-tour-entry]'], target: 'chat-thread', title: 'Chat about the deck', body: 'Claude reads the deck, its brief and its roles, and looks things up - Scryfall, your collection, EDHREC - shown above each answer. What it suggests comes as Add and Cut buttons; nothing changes until you press one.' },
   { target: 'chat-composer', title: 'Ask anything', body: 'Type a question or tap a starter - what to cut, upgrades from your collection, whether the deck can win. Every chat is saved on the left; replies keep going if you leave the page.' },
@@ -127,7 +127,7 @@ export const GUIDES: Guide[] = [
     match: (p) => /^\/(decks|lists)\/[^/]+$/.test(p),
     title: 'A deck',
     help: [
-      'Cards: the list, grouped and sorted how you like. Build: a checklist to build by. Chat: ask Claude about the deck.',
+      'Cards: the list, grouped and sorted how you like. Build: what to fix, every role, and the mana. Chat: ask Claude about the deck.',
       'Tags: your own categories and the brief. Health: curve, colours, roles, bracket and how it wins. Playtest: goldfish two thousand games, find the best opening hand, or play it by hand. Suggestions: combos and cuts. Collection: the physical deck.',
       'The ⋯ menu edits as text, renames, changes the commander, and shows the deck on your profile.',
     ],

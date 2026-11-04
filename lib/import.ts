@@ -1,10 +1,13 @@
 /**
  * Turning a pasted decklist into cards.
  *
- * Each line is looked up by its exact printing when it names one (set and
- * collector number), then - for anything Scryfall does not know by that
- * printing - by name. What still cannot be found is reported by the line
- * as written, so it can be fixed and pasted again.
+ * Each line is looked up first in the copy of Scryfall's cards kept on the
+ * Pi, by name - instant. A line naming a printing (set and collector number)
+ * the copy does not hold either waits for Scryfall, or, when the caller
+ * says so, takes the copy's printing now and is listed in `later` to be
+ * swapped for the exact one in the background. Lines the copy does not know
+ * go to Scryfall by printing, then by name. What still cannot be found is
+ * reported by the line as written, so it can be fixed and pasted again.
  *
  * The commander comes from a "Commander" section if the list has one.
  * Otherwise, when no commander has been picked, the first card is taken
@@ -29,6 +32,15 @@ export interface Resolved {
   unreadable: string[];
   /** Lines left out: tokens and the like. */
   skipped: number;
+  /** Cards taken from the local copy for now, and the exact printing each line named. */
+  later: Array<{ cardId: string; set: string; collectorNumber: string }>;
+}
+
+/** The Pi's copy of Scryfall's cards, and whether a named printing may wait. */
+export interface Local {
+  byName: (names: string[]) => ScryfallCard[];
+  /** Take the copy's printing now and fix it later, rather than wait for Scryfall. */
+  printingsLater: boolean;
 }
 
 type Collection = (identifiers: Identifier[]) => Promise<{ cards: ScryfallCard[]; notFound: Identifier[] }>;
@@ -51,16 +63,30 @@ export function canLead(card: ScryfallCard): boolean {
 }
 
 export async function resolveDecklist(
-  text: string, collection: Collection, { commanderPicked }: { commanderPicked: string | null },
+  text: string, collection: Collection, { commanderPicked, local }: { commanderPicked: string | null; local?: Local },
 ): Promise<Resolved> {
   const { entries, unreadable } = parseDecklist(text);
   const wanted = entries.filter((e) => e.section !== 'skip');
   const skipped = entries.length - wanted.length;
 
-  // First pass: exact printings where given, names otherwise.
   const found = new Map<Entry, ScryfallCard>();
-  const byPrinting = await lookUp(wanted, collection, true);
-  for (const [entry, card] of byPrinting) found.set(entry, card);
+  const later: Resolved['later'] = [];
+  if (local) {
+    const byName = new Map(local.byName(wanted.map((e) => e.name)).map((c) => [front(c.name), c]));
+    for (const e of wanted) {
+      const card = byName.get(front(e.name));
+      if (!card) continue;
+      const named = e.set && e.collectorNumber ? printingKey(e.set, e.collectorNumber) : null;
+      if (!named || named === printingKey(card.set ?? '', card.collector_number ?? '')) found.set(e, card);
+      else if (local.printingsLater) {
+        found.set(e, card);
+        if (!later.some((l) => l.cardId === card.id)) later.push({ cardId: card.id, set: e.set!, collectorNumber: e.collectorNumber! });
+      }
+    }
+  }
+  const ask = wanted.filter((e) => !found.has(e));
+  // First pass: exact printings where given, names otherwise.
+  if (ask.length) for (const [entry, card] of await lookUp(ask, collection, true)) found.set(entry, card);
   // Second pass: printings Scryfall did not know, by name.
   const retry = wanted.filter((e) => !found.has(e));
   if (retry.length) for (const [entry, card] of await lookUp(retry, collection, false)) found.set(entry, card);
@@ -90,7 +116,7 @@ export async function resolveDecklist(
     if (existing) existing.quantity += entry.quantity;
     else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board });
   }
-  return { cards, commander, commanderFinish, missing, unreadable, skipped };
+  return { cards, commander, commanderFinish, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
 }
 
 async function lookUp(entries: Entry[], collection: Collection, printings: boolean): Promise<Map<Entry, ScryfallCard>> {

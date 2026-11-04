@@ -264,6 +264,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               items={[
                 { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
+                { label: `Duplicate ${deck ? 'deck' : 'list'}`, onClick: async () => { const copy = await api.duplicateList(id); router.push(`${deck ? '/decks' : '/lists'}/${copy.id}`); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
                 ...(deck ? [{
                   label: shown ? 'Make private' : 'Show on my profile',

@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!body.decklist?.trim()) return NextResponse.json({ error: 'Paste a decklist first' }, { status: 400 });
 
   try {
-    const imported = await importInto(owned.list, body.decklist);
+    const imported = await importInto(owned.list, body.decklist, owned.profile);
     warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported });
   } catch (error) {

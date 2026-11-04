@@ -156,6 +156,8 @@ export const fetchLists = (kind?: ListKind) =>
 
 export interface CommanderOption {
   id: string;
+  /** For finding the card in the Pi's own copy, without asking Scryfall. */
+  oracleId?: string | null;
   name: string;
   typeLine: string;
   image: string | null;
@@ -165,11 +167,11 @@ export const searchCommanders = (q: string, signal?: AbortSignal) =>
   fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
 
-export const createDeck = (name: string, commanderId: string | null, decklist: string, starter?: { ownedFirst: boolean }) =>
+export const createDeck = (name: string, commander: CommanderOption | null, decklist: string, starter?: { ownedFirst: boolean }) =>
   fetch(url('lists'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
+    body: JSON.stringify({ name, kind: 'deck', commanderId: commander?.id ?? null, commanderOracleId: commander?.oracleId ?? null, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
   }).then(json<{ list: List; imported?: ImportSummary }>).finally(jobsChanged);
 
 /** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
@@ -218,6 +220,10 @@ export const renameList = (id: string, name: string) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   }).then(json<{ list: List }>);
+
+export const duplicateList = (id: string) =>
+  fetch(url(`lists/${id}/duplicate`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(json<{ list: List }>).then((b) => b.list);
 
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);

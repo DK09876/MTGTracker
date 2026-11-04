@@ -46,7 +46,7 @@ export default function DecksPage() {
     setBusy(true);
     setError(null);
     try {
-      const { list, imported: result } = await api.createDeck(deckName, commander?.id ?? null, decklist,
+      const { list, imported: result } = await api.createDeck(deckName, commander, decklist,
         commander && !decklist.trim() && starter ? { ownedFirst } : undefined);
       // Show what an import did before moving on; otherwise go straight in.
       if (result && (result.missing.length || result.unreadable.length)) {

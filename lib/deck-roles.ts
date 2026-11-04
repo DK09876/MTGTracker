@@ -24,6 +24,12 @@ function db() {
   return d;
 }
 
+/** Carry a deck's role corrections and keep-stars over to its copy. */
+export function copyDeckRoles(fromId: string, toId: string): void {
+  db().run('INSERT OR IGNORE INTO deck_role_overrides (listId, oracleId, role, has) SELECT ?, oracleId, role, has FROM deck_role_overrides WHERE listId = ?', [toId, fromId]);
+  db().run('INSERT OR IGNORE INTO deck_keeps (listId, oracleId) SELECT ?, oracleId FROM deck_keeps WHERE listId = ?', [toId, fromId]);
+}
+
 export interface RoleOverride { oracleId: string; role: string; has: boolean }
 
 export function overrides(listId: string): RoleOverride[] {

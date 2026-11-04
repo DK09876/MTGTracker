@@ -279,3 +279,33 @@ describe('saved searches', () => {
     expect(db.savedSearches('dk')).toEqual([]);
   });
 });
+
+describe('duplicating a deck', () => {
+  it('copies the cards, commander, brief and tags, private and for the same profile only', async () => {
+    const db = await load();
+    db.addProfile('dk', 'DK');
+    db.addProfile('kevin', 'Kevin');
+    const deck = db.createList('dk', 'Azula', '', { kind: 'deck', commander: card('azula', 'Fire Lord Azula') });
+    db.addCardToList(deck.id, card('ring', 'Sol Ring'), 1, 'foil');
+    db.addCardToList(deck.id, card('bolt', 'Lightning Bolt'), 1, 'nonfoil', 'maybe');
+    db.setTagBrief(deck.id, 'Copy spells.');
+    const tag = db.createTag(deck.id, { name: 'Copy', color: '#e0b64a', status: 'accepted', origin: 'manual', kind: 'engine' });
+    db.setCardTag(deck.id, 'ring', tag.id, true);
+
+    expect(db.duplicateList(deck.id, 'kevin', 'Stolen')).toBeNull();
+    const id = db.duplicateList(deck.id, 'dk', 'Azula (copy)')!;
+    const copy = db.getList(id, 'dk')!;
+    expect(copy).toMatchObject({ name: 'Azula (copy)', kind: 'deck', commander: { name: 'Fire Lord Azula' } });
+    expect(db.cardsInList(id).map((c) => [c.card.name, c.finish, c.board])).toEqual(
+      db.cardsInList(deck.id).map((c) => [c.card.name, c.finish, c.board]),
+    );
+    const tags = db.deckTags(id);
+    expect(tags.brief).toBe('Copy spells.');
+    expect(tags.tags.map((t) => t.name)).toEqual(['Copy']);
+    expect(tags.tags[0].id).not.toBe(tag.id);
+    expect(tags.cardTags).toMatchObject([{ key: 'ring', tagId: tags.tags[0].id, on: true }]);
+    // Changing the copy leaves the original alone.
+    db.deleteTag(id, tags.tags[0].id);
+    expect(db.deckTags(deck.id).tags).toHaveLength(1);
+  });
+});

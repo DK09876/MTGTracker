@@ -1,12 +1,35 @@
 /**
  * Importing a pasted decklist into a list, on the server: resolve every
- * line against Scryfall, add what was found, and set the commander if the
- * deck has none and the list names or implies one.
+ * line - from the Pi's copy of Scryfall's cards, so it is instant - add what
+ * was found, and set the commander if the deck has none and the list names
+ * or implies one. Printings the copy does not hold are fetched from Scryfall
+ * afterwards, in the background, and swapped in.
  */
 
-import { addCardToList, replaceListCards, setCommander, type List } from './db';
-import { resolveDecklist } from './import';
+import { localCards } from './card-store';
+import { addCardToList, database, replaceListCards, setCommander, updateListCard, type List } from './db';
+import { resolveDecklist, type Resolved } from './import';
+import { startJob } from './jobs';
 import { collection } from './scryfall';
+
+const key = (set: string, number: string) => `${set.toLowerCase()}/${number.toLowerCase()}`;
+
+/** Swap the copy's printings for the ones the decklist named, in the background. */
+function fixPrintings(listId: string, profileId: string | null, later: Resolved['later']): void {
+  if (!later.length) return;
+  startJob({ kind: 'printings', label: 'Matching the printings in the list', subject: `${later.length} card${later.length === 1 ? '' : 's'}`, profileId, listId, errorLevel: () => 'warn' },
+    async ({ progress }) => {
+      progress('Asking Scryfall for the exact printings');
+      const { cards } = await collection(later.map((l) => ({ set: l.set, collector_number: l.collectorNumber })));
+      const byKey = new Map(cards.map((c) => [key(c.set ?? '', c.collector_number ?? ''), c]));
+      let swapped = 0;
+      for (const l of later) {
+        const printing = byKey.get(key(l.set, l.collectorNumber));
+        if (printing && updateListCard(listId, l.cardId, { printing })) swapped += 1;
+      }
+      return { swapped, of: later.length };
+    });
+}
 
 export interface ImportSummary {
   /** Distinct cards added, and copies counting duplicates. */
@@ -19,8 +42,11 @@ export interface ImportSummary {
   skipped: number;
 }
 
-export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, text: string): Promise<ImportSummary> {
-  const resolved = await resolveDecklist(text, collection, { commanderPicked: list.commander?.name ?? null });
+export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, text: string, profileId: string | null = null): Promise<ImportSummary> {
+  const resolved = await resolveDecklist(text, collection, {
+    commanderPicked: list.commander?.name ?? null,
+    local: { byName: localCards, printingsLater: true },
+  });
   const takeCommander = list.kind === 'deck' && !list.commander && resolved.commander;
   if (takeCommander) setCommander(list.id, resolved.commander, resolved.commanderFinish ?? 'nonfoil');
   // A commander picked separately still takes "*F*" from its own line in the paste.
@@ -28,11 +54,21 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     setCommander(list.id, list.commander, resolved.commanderFinish);
   }
 
-  for (const { card, quantity, finish, board } of resolved.cards) addCardToList(list.id, card, quantity, finish, board);
+  // One transaction for the lot: a hundred separate writes take seconds.
+  const db = database();
+  db.run('BEGIN');
+  try {
+    for (const { card, quantity, finish, board } of resolved.cards) addCardToList(list.id, card, quantity, finish, board);
+    db.run('COMMIT');
+  } catch (error) {
+    db.run('ROLLBACK');
+    throw error;
+  }
   // A plain list has no header, so a commander found in the paste stays a card in it.
   if (list.kind !== 'deck' && resolved.commander) {
     addCardToList(list.id, resolved.commander, 1, resolved.commanderFinish ?? 'nonfoil');
   }
+  fixPrintings(list.id, profileId, resolved.later);
 
   return {
     added: resolved.cards.length,
@@ -57,7 +93,11 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
 export async function replaceWith(
   list: Pick<List, 'id' | 'kind' | 'commander' | 'commanderFinish'>, text: string,
 ): Promise<ImportSummary & { applied: boolean }> {
-  const resolved = await resolveDecklist(text, collection, { commanderPicked: list.commander?.name ?? null });
+  // Replacing keeps exact printings: a line naming one the copy lacks waits for Scryfall.
+  const resolved = await resolveDecklist(text, collection, {
+    commanderPicked: list.commander?.name ?? null,
+    local: { byName: localCards, printingsLater: false },
+  });
   const summary = {
     added: resolved.cards.length,
     copies: resolved.cards.reduce((n, c) => n + c.quantity, 0),

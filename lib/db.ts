@@ -396,6 +396,59 @@ export function createList(
 }
 
 /**
+ * A copy of a list or deck for the same profile: its cards, boards and
+ * finishes, the commander, the brief and its tags. Not copied: which boxes
+ * copies were pulled from (the copy starts as cards to pull), chats and
+ * saved reads, and being on the profile - a copy starts private. Per-deck
+ * role corrections and keep-stars are copied by deck-roles.ts.
+ */
+export function duplicateList(listId: string, profileId: string, name: string): string | null {
+  const database = open();
+  const from = database.get('SELECT * FROM lists WHERE id = ? AND profileId = ?', [listId, profileId]) as Record<string, string | null> | null;
+  if (!from) return null;
+  const id = randomUUID();
+  const stamp = now();
+  database.run('BEGIN');
+  try {
+    database.run(
+      `INSERT INTO lists (id, profileId, kind, name, note, commanderId, commanderFinish, tagBrief, tagOverview, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, profileId, from.kind, name, from.note ?? '', from.commanderId, from.commanderFinish ?? 'nonfoil', from.tagBrief ?? '', from.tagOverview ?? '', stamp, stamp],
+    );
+    database.run(
+      `INSERT INTO list_cards (listId, cardId, quantity, addedAt, finish, board, proxies)
+       SELECT ?, cardId, quantity, ?, finish, board, proxies FROM list_cards WHERE listId = ?`, [id, stamp, listId],
+    );
+    // Tags get new ids, and the cards' tags follow them.
+    const tags = database.all('SELECT * FROM deck_tags WHERE listId = ?', [listId]) as Array<Record<string, string | number | null>>;
+    const newId = new Map<string, string>();
+    for (const t of tags) {
+      const tagId = randomUUID();
+      newId.set(String(t.id), tagId);
+      database.run(
+        `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [tagId, id, t.name, t.description, t.color, t.kind, t.status, t.origin, t.position, t.examples, stamp],
+      );
+    }
+    const cardTags = database.all('SELECT * FROM deck_card_tags WHERE listId = ?', [listId]) as Array<Record<string, string | number>>;
+    for (const ct of cardTags) {
+      const tagId = newId.get(String(ct.tagId));
+      if (!tagId) continue;
+      database.run(
+        'INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, ct.cardKey, tagId, ct.source, ct.isOn, ct.reason],
+      );
+    }
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return id;
+}
+
+/**
  * Make a card already in the deck its commander: it leaves the 99 (one
  * copy of it) and takes the commander slot with its finish. For a flat
  * decklist, where the commander is one line among the rest.

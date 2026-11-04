@@ -1,27 +1,15 @@
 /**
- * The Build tab's checklist, worked out from the cards without a model:
- * what kind of commander it is, whether the deck has a plan, which roles
- * are short of the usual counts, how many lands Karsten's formula wants,
- * and whether the deck is the right size. Pure.
+ * The Build tab, worked out from the cards without a model: what kind of
+ * commander it is, the few things worth fixing - each said in plain words,
+ * with why it matters and the cards behind it - every role against the
+ * usual counts, and the mana against Karsten's numbers. Pure.
  *
- * The steps follow docs/deckbuilding-reference.md: classify the commander
- * first, then the plan, the skeleton of roles, filling the gaps, the mana,
- * cuts down to 100, and a final check.
+ * What counts follows docs/deckbuilding-reference.md: the deck's size, the
+ * skeleton of roles, a way to win, the lands and the colour sources.
  */
 
-import type { RoleCount } from './roles';
+import type { RoleCount, RoleGroup } from './roles';
 import type { ScryfallCard } from './scryfall';
-
-export type StepId = 'style' | 'plan' | 'skeleton' | 'fill' | 'mana' | 'cuts' | 'check';
-export type StepStatus = 'done' | 'todo' | 'warn';
-
-export interface BuildStep {
-  id: StepId;
-  title: string;
-  status: StepStatus;
-  /** One line for the checklist. */
-  summary: string;
-}
 
 export interface Gap {
   role: string;
@@ -30,12 +18,39 @@ export interface Gap {
   want: [number, number];
 }
 
+/** One thing worth looking at, most pressing first. */
+export interface Issue {
+  /** Stable for a deck, so it can be hidden: 'size', 'role:ramp', 'finisher', 'lands', 'colors', 'plan'. */
+  id: string;
+  /** 'fix': off the usual by a fair way. 'consider': worth a look, a guideline only. */
+  level: 'fix' | 'consider';
+  title: string;
+  why: string;
+  /** The cards behind it, when there are some to show. */
+  cards: string[];
+  /** What fixes it: find cards for a role, open the cut list, or go to the tags. */
+  action: { kind: 'fill'; role: string; label: string } | { kind: 'cuts'; label: string } | { kind: 'tags'; label: string } | null;
+}
+
+export interface RoleRow {
+  role: string;
+  label: string;
+  group: RoleGroup;
+  have: number;
+  want: [number, number] | null;
+  cards: string[];
+}
+
 export interface BuildPlan {
-  steps: BuildStep[];
   style: { label: string; note: string } | null;
+  issues: Issue[];
   gaps: Gap[];
-  /** Every role with a guideline, short ones first: what Fill the gaps can look for. */
+  /** Every role with a guideline, short ones first: what Fill can look for. */
   targets: Gap[];
+  /** Every role the deck has cards in, or a guideline for. */
+  roles: RoleRow[];
+  /** Cards that end the game: finisher roles, and cards you tagged as a win condition. */
+  finishers: string[];
   lands: { have: number; want: number; averageMv: number; cheap: number };
   /** Each colour's sources against Karsten's table, from the Health analysis. */
   colors: Array<{ color: string; sources: number; needed: number | null; neededFor: string | null }>;
@@ -74,6 +89,17 @@ export function karstenLands(averageMv: number, cheapDrawAndRamp: number): numbe
   return Math.max(37, Math.round(31.42 + 3.13 * averageMv - 0.28 * cheapDrawAndRamp));
 }
 
+// Why each role with a guideline matters, for the issue that says it is short.
+const WHY: Record<string, string> = {
+  ramp: 'Ramp puts you a turn or two ahead of the table and gets the commander out early.',
+  draw: 'Card advantage keeps your hand full after turn five, when a deck without it runs out of things to do.',
+  removal: 'Spot removal answers the one creature or artifact that would otherwise beat you.',
+  wipe: 'Board wipes reset a game the table is winning and you are not.',
+};
+
+/** Roles that close out a game. */
+export const FINISHING = ['wincon', 'finisher', 'extra-turn', 'extra-combat', 'overrun', 'drain'];
+
 export function buildPlan(input: {
   commander: ScryfallCard | null;
   cards: Array<{ card: ScryfallCard; quantity: number }>;
@@ -83,49 +109,88 @@ export function buildPlan(input: {
   size: number;
   colors?: BuildPlan['colors'];
   brief: string;
-  savedReads: number;
+  /** Cards the owner tagged as a win condition on the Tags tab. */
+  wincons?: string[];
 }): BuildPlan {
   const style = commanderStyle(input.commander);
   const roles = input.roles ?? [];
   const gaps: Gap[] = roles.filter((r) => r.target && r.count < r.target[0])
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }));
-  const finishers = roles.filter((r) => ['finisher', 'wincon'].includes(r.id)).reduce((n, r) => n + r.count, 0);
-  if (input.roles && finishers === 0) gaps.push({ role: 'finisher', label: 'Finishers', have: 0, want: [2, 4] });
+  const finishers = [...new Set([...roles.filter((r) => FINISHING.includes(r.id)).flatMap((r) => r.cards), ...(input.wincons ?? [])])].sort();
 
   const cheapNames = new Set(roles.filter((r) => ['ramp', 'draw'].includes(r.id)).flatMap((r) => r.cards));
   const cheap = input.cards.filter((c) => cheapNames.has(c.card.name) && (c.card.cmc ?? 0) <= 2).reduce((n, c) => n + c.quantity, 0);
   const want = karstenLands(input.averageMv, cheap);
-  const landsOff = input.lands - want;
+  const colors = input.colors ?? [];
 
-  const steps: BuildStep[] = [
-    { id: 'style', title: 'Commander style', status: style ? 'done' : 'todo', summary: style ? style.label : 'Pick a commander' },
-    {
-      id: 'plan', title: 'Plan', status: input.brief.trim() ? 'done' : 'todo',
-      summary: input.brief.trim() ? `Brief written${input.savedReads ? ` · ${input.savedReads} saved read${input.savedReads === 1 ? '' : 's'}` : ''}` : 'Write how it wins, or draft it',
-    },
-    {
-      id: 'skeleton', title: 'Skeleton', status: !input.roles ? 'todo' : gaps.length ? 'warn' : 'done',
-      summary: !input.roles ? 'Reading roles…' : gaps.length ? `${gaps.length} role${gaps.length === 1 ? '' : 's'} below the guideline` : 'Every role at its guideline',
-    },
-    { id: 'fill', title: 'Fill the gaps', status: gaps.length ? 'warn' : 'done', summary: gaps.length ? gaps.slice(0, 3).map((g) => g.label).join(', ') : 'Nothing short' },
-    {
-      id: 'mana', title: 'Mana', status: Math.abs(landsOff) <= 1 ? 'done' : 'warn',
-      summary: `${input.lands} lands · formula says ${want}`,
-    },
-    {
-      id: 'cuts', title: 'Cuts', status: input.size === 100 ? 'done' : 'warn',
-      summary: input.size === 100 ? '100 cards' : input.size > 100 ? `${input.size - 100} over 100` : `${100 - input.size} short of 100`,
-    },
-    { id: 'check', title: 'Check', status: 'todo', summary: 'Bracket, combos, win read' },
-  ];
+  const issues: Issue[] = [];
+  const over = input.size - 100;
+  if (over > 0) {
+    issues.push({
+      id: 'size', level: 'fix', title: `${over} card${over === 1 ? '' : 's'} over 100`,
+      why: 'A Commander deck is exactly 100 cards, the commander included. The cut list weighs every card and says why it could go.',
+      cards: [], action: { kind: 'cuts', label: 'Open the cut list' },
+    });
+  } else if (over < 0) {
+    issues.push({
+      id: 'size', level: 'fix', title: `${-over} card${over === -1 ? '' : 's'} short of 100`,
+      why: gaps.length ? `Start with what the deck is light on - ${gaps.map((g) => g.label.toLowerCase()).join(', ')} - then cards that fit the commander.` : 'Every role is at its usual count, so add cards that fit the commander, or lands.',
+      cards: [], action: { kind: 'fill', role: gaps[0]?.role ?? 'ramp', label: 'Find cards' },
+    });
+  }
+  if (input.roles) {
+    for (const r of roles.filter((x) => x.target && x.count < x.target[0])) {
+      const [lo, hi] = r.target!;
+      issues.push({
+        id: `role:${r.id}`, level: r.count < lo - 2 ? 'fix' : 'consider',
+        title: `${r.label}: ${r.count}, most decks run ${lo}-${hi}`,
+        why: `${WHY[r.id] ?? ''} ${r.count ? `These ${r.count} count:` : 'Nothing in the deck counts yet.'}`.trim(),
+        cards: r.cards, action: { kind: 'fill', role: r.id, label: `Find ${r.label.toLowerCase()}` },
+      });
+    }
+    if (!finishers.length) {
+      issues.push({
+        id: 'finisher', level: 'consider', title: 'No clear way to win found',
+        why: 'Nothing reads as a finisher - no overruns, extra turns, drain, or cards Scryfall marks as winning the game - and none of your tags are a win condition. If the deck wins by attacking with its creatures or the commander, tag those cards as a win condition on the Tags tab and this goes away.',
+        cards: [], action: { kind: 'fill', role: 'finisher', label: 'Find finishers' },
+      });
+    }
+  }
+  if (input.lands < want - 1) {
+    issues.push({
+      id: 'lands', level: input.lands < want - 3 ? 'fix' : 'consider', title: `${input.lands} lands, the formula suggests ${want}`,
+      why: `Karsten's formula, from the spells' average mana value (${input.averageMv.toFixed(2)}) and the ${cheap} cheap ramp and draw spells. Play more lands, or more ramp and draw at two mana or less: every four of those is worth about one land.`,
+      cards: [], action: { kind: 'fill', role: 'ramp', label: 'Find cheap ramp' },
+    });
+  } else if (input.lands > want + 2) {
+    issues.push({
+      id: 'lands', level: 'consider', title: `${input.lands} lands, the formula suggests ${want}`,
+      why: `For a curve this low (average mana value ${input.averageMv.toFixed(2)}), a land or two could be a spell instead.`,
+      cards: [], action: null,
+    });
+  }
+  const short = colors.filter((x) => x.needed !== null && x.sources < x.needed - 1);
+  if (short.length) {
+    const one = (n: number) => String(Math.round(n * 10) / 10);
+    issues.push({
+      id: 'colors', level: short.some((c) => c.needed! - c.sources > 4) ? 'fix' : 'consider',
+      title: `Short of ${short.map((c) => `{${c.color}}`).join('')} sources for the hungriest spells`,
+      why: `${short.map((c) => `{${c.color}} ${one(c.sources)} of ${c.needed}, set by ${c.neededFor}`).join('; ')}. Karsten's table says how many sources a spell's colours need to cast it on curve in most games. Swap basics or single-colour lands for ones that make more of these colours - or, if one spell sets a bar far above the rest, ask whether it is worth it.`,
+      cards: [], action: null,
+    });
+  }
+  if (!input.brief.trim()) {
+    issues.push({
+      id: 'plan', level: 'consider', title: 'No plan written down',
+      why: 'Optional: a sentence on how the deck wins helps the AI on the Tags and Chat tabs, and the cut list protects the cards you tag as the plan.',
+      cards: [], action: { kind: 'tags', label: 'Write the brief' },
+    });
+  }
+  issues.sort((a, b) => (a.level === b.level ? 0 : a.level === 'fix' ? -1 : 1));
+
   const targets = [...gaps, ...roles.filter((r) => r.target && r.count >= r.target[0])
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }))];
-  const colors = input.colors ?? [];
-  const shortColors = colors.filter((c) => c.needed !== null && c.sources < c.needed - 1);
-  const mana = steps.find((x) => x.id === 'mana')!;
-  if (shortColors.length) {
-    mana.status = 'warn';
-    mana.summary += ` · short on ${shortColors.map((c) => c.color).join('')}`;
-  }
-  return { steps, style, gaps, targets, colors, lands: { have: input.lands, want, averageMv: input.averageMv, cheap }, size: input.size };
+  const rows: RoleRow[] = roles.filter((r) => r.target || r.count > 0)
+    .map((r) => ({ role: r.id, label: r.label, group: r.group, have: r.count, want: r.target ?? null, cards: r.cards }));
+  return { style, issues, gaps, targets, roles: rows, finishers, colors, lands: { have: input.lands, want, averageMv: input.averageMv, cheap }, size: input.size };
 }

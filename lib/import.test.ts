@@ -107,3 +107,34 @@ describe('canLead', () => {
     expect(canLead(card('Some Station', 'x', '3', { type_line: 'Legendary Artifact — Spacecraft' }))).toBe(false);
   });
 });
+
+describe('resolving from the local copy first', () => {
+  // The copy holds one printing of each card: Bolt's default, not the promo.
+  const copy = [kratos, boltDefault, mountain, solRing];
+  const byName = (names: string[]) => copy.filter((c) => names.some((n) => n.toLowerCase() === c.name.toLowerCase()));
+
+  it('asks Scryfall nothing when the copy has every card', async () => {
+    const ask = fakeCollection();
+    const result = await resolveDecklist('1 Kratos, God of War\n1 Sol Ring\n10 Mountain', ask, { commanderPicked: null, local: { byName, printingsLater: true } });
+    expect(ask).not.toHaveBeenCalled();
+    expect(result.commander?.name).toBe('Kratos, God of War');
+    expect(result.cards.map((c) => [c.card.name, c.quantity])).toEqual([['Sol Ring', 1], ['Mountain', 10]]);
+    expect(result.later).toEqual([]);
+  });
+
+  it('takes the copy\'s printing now and lists the named one for later', async () => {
+    const ask = fakeCollection();
+    const result = await resolveDecklist('1 Lightning Bolt (PF19) 1\n1 Sol Ring (SOC) 128', ask, { commanderPicked: 'Kratos, God of War', local: { byName, printingsLater: true } });
+    expect(ask).not.toHaveBeenCalled();
+    expect(result.cards.map((c) => c.card.set)).toEqual(['lea', 'soc']);
+    expect(result.later).toEqual([{ cardId: boltDefault.id, set: 'pf19', collectorNumber: '1' }]);
+  });
+
+  it('waits for the exact printing when it may not be fixed later, and asks Scryfall for unknown cards', async () => {
+    const ask = fakeCollection();
+    const result = await resolveDecklist('1 Lightning Bolt (PF19) 1\n1 Sol Ring', ask, { commanderPicked: 'Kratos, God of War', local: { byName: () => [solRing], printingsLater: false } });
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(result.cards.map((c) => c.card.set)).toEqual(['pf19', 'soc']);
+    expect(result.later).toEqual([]);
+  });
+});
