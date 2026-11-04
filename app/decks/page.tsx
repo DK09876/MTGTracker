@@ -16,6 +16,7 @@ import { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
+import { readDeckBox } from '@/lib/deck-links';
 import { identityStyle } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
@@ -42,8 +43,9 @@ export default function DecksPage() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    const deckName = name.trim() || commander?.name;
-    if (!deckName) { setError('Give the deck a name or pick a commander'); return; }
+    // A link brings its own name; otherwise the commander's.
+    const deckName = name.trim() || commander?.name || (box.kind === 'link' ? '' : null);
+    if (deckName === null || deckName === undefined) { setError('Give the deck a name or pick a commander'); return; }
     setBusy(true);
     setError(null);
     try {
@@ -62,6 +64,9 @@ export default function DecksPage() {
       setBusy(false);
     }
   };
+
+  const box = readDeckBox(decklist);
+  const blocked = box.kind === 'both' || box.kind === 'links' || box.kind === 'unknown-link';
 
   return (
     <div>
@@ -99,17 +104,29 @@ export default function DecksPage() {
           </label>
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-[var(--muted)]">
-              Import a decklist <span className="opacity-70">(optional — paste from Moxfield, Archidekt, Arena or MTGO)</span>
+              Bring a deck <span className="opacity-70">(optional) - paste its list, or a link to it on Moxfield or Archidekt</span>
             </span>
             <textarea
               value={decklist}
               onChange={(e) => setDecklist(e.target.value)}
               rows={8}
-              placeholder={'1x Kratos, God of War (SLD) 2207\n1x Sol Ring (SOC) 128\n33x Mountain (ACR) 107'}
+              placeholder={'https://moxfield.com/decks/…\n\nor a list:\n1x Kratos, God of War (SLD) 2207\n1x Sol Ring (SOC) 128\n33x Mountain (ACR) 107'}
               spellCheck={false}
               className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
             />
-            {!commander && decklist.trim() && (
+            {box.kind === 'link' && (
+              <span data-tour="deck-link" className="text-xs text-emerald-400">
+                A {box.link!.site === 'moxfield' ? 'Moxfield' : 'Archidekt'} link: the deck - its name, commander, boards and printings - is fetched when you create it. Public and unlisted decks only.
+              </span>
+            )}
+            {blocked && (
+              <span role="alert" className="text-xs text-amber-300">
+                {box.kind === 'both' ? 'There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.'
+                  : box.kind === 'links' ? 'There are two links here. Keep the one for this deck.'
+                    : 'That link is not one I can read yet (Moxfield and Archidekt are). Paste the list instead.'}
+              </span>
+            )}
+            {!commander && box.kind === 'list' && (
               <span className="text-xs text-[var(--muted)]">
                 No commander picked: the list&apos;s &ldquo;Commander&rdquo; section is used, or its first card if that can be one —
                 otherwise you can pick it from the deck&apos;s legendary cards afterwards.
@@ -124,7 +141,7 @@ export default function DecksPage() {
                   Start with a suggested list
                   <span className="block text-xs text-[var(--muted)]">
                     About 99 cards: ramp, draw, removal and protection first, then what fits {commander.name.split(',')[0]} best, and lands
-                    for its colours. No AI, no Game Changers - a starting point to tune with Build.
+                    for its colours. No AI, no Game Changers - a starting point to tune on the Tune tab.
                   </span>
                 </span>
               </label>
@@ -139,10 +156,10 @@ export default function DecksPage() {
           {error && <p className="text-sm text-red-400">{error}</p>}
           <div className="flex gap-2">
             <button
-              disabled={busy}
+              disabled={busy || blocked}
               className="rounded-xl bg-[var(--accent)] px-4 py-2 font-medium text-[#221c08] hover:brightness-110 disabled:opacity-60"
             >
-              {busy ? (decklist.trim() ? 'Importing…' : 'Creating…') : 'Create deck'}
+              {busy ? (box.kind === 'link' ? 'Fetching the deck…' : decklist.trim() ? 'Importing…' : 'Creating…') : 'Create deck'}
             </button>
             <button
               type="button"
