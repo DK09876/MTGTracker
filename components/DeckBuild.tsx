@@ -142,7 +142,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
             </div>
           </Detail>
         )}
-        {current === 'cuts' && <Cuts listId={listId} version={version} onMove={onMove} onTab={onTab} />}
+        {current === 'cuts' && <Cuts listId={listId} cards={cards} version={version} onMove={onMove} onTab={onTab} />}
         {current === 'check' && (
           <Detail title="Check">
             <p>Look over the bracket, the combos it has and the free win read, then save a read of the finished deck.</p>
@@ -249,7 +249,7 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
   );
 }
 
-function Cuts({ listId, version, onMove, onTab }: { listId: string; version: string; onMove: Props['onMove']; onTab: Props['onTab'] }) {
+function Cuts({ listId, cards, version, onMove, onTab }: { listId: string; cards: ListedCard[]; version: string; onMove: Props['onMove']; onTab: Props['onTab'] }) {
   const [plan, setPlan] = useState<{ version: string; plan: api.CutPlan | 'failed' } | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -267,10 +267,23 @@ function Cuts({ listId, version, onMove, onTab }: { listId: string; version: str
 
   const over = current.size - 100;
   const chosen = current.candidates.filter((c) => picked.has(c.cardId));
+  // Cuts should keep the curve where it is or lower it (3/3 Elk).
+  const spellCount = Math.max(1, Math.round(current.size - 1 - 37));
+  const mvAfter = chosen.length
+    ? (current.averageMv * spellCount - chosen.reduce((n, c) => n + c.cmc, 0)) / Math.max(1, spellCount - chosen.length)
+    : current.averageMv;
   const left = Math.max(0, over - chosen.length);
   // The role counts as they would be after these cuts.
   const after = current.roles.map((r) => ({ ...r, now: r.count - chosen.filter((c) => c.roles.includes(r.id)).length }))
     .filter((r) => r.now !== r.count);
+  // A ★ keeps a card for good: it leaves the list at once.
+  const star = async (c: api.CutPlan['candidates'][number]) => {
+    const card = cards.find((x) => x.card.id === c.cardId)?.card;
+    if (!card || !current || typeof current === 'string') return;
+    await api.keepCard(listId, card.oracle_id ?? card.id, true);
+    setPicked((p) => { const n = new Set(p); n.delete(c.cardId); return n; });
+    setPlan({ version, plan: { ...current, candidates: current.candidates.filter((x) => x.cardId !== c.cardId), protectedCards: [...current.protectedCards, c.name] } });
+  };
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const cut = async () => {
@@ -311,12 +324,25 @@ function Cuts({ listId, version, onMove, onTab }: { listId: string; version: str
           <button onClick={putBack} disabled={busy} className="text-[var(--accent)] hover:underline">Undo</button>
         </p>
       )}
-      <p className="text-sm text-[var(--muted)]">
-        The cards worth a look first, and why. Cuts go to the maybeboard, so nothing is lost.
-        {current.protectedCards.length > 0 && <> {current.protectedCards.length} card{current.protectedCards.length === 1 ? ' is' : 's are'} left out because your tags mark {current.protectedCards.length === 1 ? 'it' : 'them'} as a win condition, engine or payoff.</>}
-      </p>
-      {after.length > 0 && (
+      <div className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm">
+        <p>
+          <span className="font-semibold">Type {current.type.type} deck.</span>{' '}
+          <span className="text-[var(--muted)]">{current.type.why}</span>
+        </p>
+        {current.curve && <p className="text-[var(--muted)]"><span className="text-[var(--foreground)]">Look here first:</span> {current.curve}.</p>}
+        <p className="text-[var(--muted)]">
+          Then interaction, then {current.type.type === 'B' ? 'the cards outside the theme' : 'ramp or draw'}; lands only if you run more than the formula wants.
+          Cuts go to the maybeboard, so nothing is lost.
+          {current.protectedCards.length > 0 && <> {current.protectedCards.length} card{current.protectedCards.length === 1 ? ' is' : 's are'} kept out by your tags or a ★.</>}
+        </p>
+      </div>
+      {(after.length > 0 || chosen.length > 0) && (
         <div className="flex flex-wrap gap-2 text-xs">
+          {chosen.length > 0 && (
+            <span className={`rounded-full border px-2.5 py-0.5 ${mvAfter > current.averageMv + 0.02 ? 'border-amber-400/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)]'}`}>
+              Average mana value {current.averageMv.toFixed(2)} → {mvAfter.toFixed(2)}{mvAfter > current.averageMv + 0.02 ? ' (heavier)' : ''}
+            </span>
+          )}
           {after.map((r) => {
             const low = r.now < r.target[0];
             return (
@@ -333,14 +359,24 @@ function Cuts({ listId, version, onMove, onTab }: { listId: string; version: str
         <ul className="flex flex-col gap-2">
           {current.candidates.slice(0, 30).map((c) => (
             <li key={c.cardId}>
-              <label className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-2.5 ${picked.has(c.cardId) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}>
-                <input type="checkbox" checked={picked.has(c.cardId)} onChange={() => toggle(c.cardId)} className="mt-1" />
-                {c.image ? <Image src={c.image} alt="" width={40} height={56} className="rounded" unoptimized /> : <span className="h-14 w-10 rounded bg-[var(--surface-hover)]" />}
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{c.name}</span>
-                  <span className="block text-xs text-[var(--muted)]">{c.reasons.join(' · ')}</span>
-                </span>
-              </label>
+              <div className={`flex items-start gap-3 rounded-2xl border p-2.5 ${picked.has(c.cardId) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}>
+                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                  <input type="checkbox" checked={picked.has(c.cardId)} onChange={() => toggle(c.cardId)} className="mt-1" />
+                  {c.image ? <Image src={c.image} alt="" width={40} height={56} className="rounded" unoptimized /> : <span className="h-14 w-10 rounded bg-[var(--surface-hover)]" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{c.name}</span>
+                    <span className="block text-xs text-[var(--muted)]">{c.reasons.join(' · ')}</span>
+                  </span>
+                </label>
+                <button
+                  onClick={() => star(c)}
+                  aria-label={`Keep ${c.name}: never offer it as a cut`}
+                  title="Keep it: never offer it as a cut"
+                  className="rounded-full px-2 py-1 text-base text-[var(--muted)] hover:text-[var(--accent)]"
+                >
+                  ☆
+                </button>
+              </div>
             </li>
           ))}
         </ul>

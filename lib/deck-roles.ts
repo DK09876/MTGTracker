@@ -14,6 +14,8 @@ let ready = false;
 function db() {
   const d = database();
   if (!ready) {
+    // Cards the owner starred to keep: never offered as a cut.
+    d.run(`CREATE TABLE IF NOT EXISTS deck_keeps (listId TEXT NOT NULL, oracleId TEXT NOT NULL, PRIMARY KEY (listId, oracleId))`);
     d.run(`CREATE TABLE IF NOT EXISTS deck_role_overrides (
       listId TEXT NOT NULL, oracleId TEXT NOT NULL, role TEXT NOT NULL, has INTEGER NOT NULL,
       PRIMARY KEY (listId, oracleId, role))`);
@@ -60,4 +62,13 @@ export function withOverrides(roles: RoleCount[], cards: Array<{ card: ScryfallC
 export async function deckRoles(listId: string, main: ListedCard[] = cardsInList(listId).filter((c) => c.board === 'main')): Promise<RoleCount[]> {
   const roles = await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles });
   return withOverrides(roles, main, overrides(listId));
+}
+
+export function keeps(listId: string): Set<string> {
+  return new Set((db().all('SELECT oracleId FROM deck_keeps WHERE listId = ?', [listId]) as Array<{ oracleId: string }>).map((r) => r.oracleId));
+}
+
+export function setKeep(listId: string, oracleId: string, keep: boolean): void {
+  if (keep) db().run('INSERT OR IGNORE INTO deck_keeps (listId, oracleId) VALUES (?, ?)', [listId, oracleId]);
+  else db().run('DELETE FROM deck_keeps WHERE listId = ? AND oracleId = ?', [listId, oracleId]);
 }

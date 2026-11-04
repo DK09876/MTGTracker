@@ -36,7 +36,7 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
-import type { CutCandidate } from './cut-score';
+import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
 import type { ThemeId } from './themes';
@@ -410,9 +410,15 @@ export interface CutPlan {
   size: number;
   candidates: Array<CutCandidate & { image: string | null }>;
   protectedCards: string[];
+  type: DeckType;
+  /** Where the curve is overloaded, in words; null when it is not. */
+  curve: string | null;
+  averageMv: number;
   roles: Array<{ id: string; label: string; count: number; target: [number, number] }>;
 }
 export const cutPlan = (listId: string) => fetch(url(`lists/${listId}/cuts`)).then(json<CutPlan>);
+/** Star a card so it is never offered as a cut. */
+export const keepCard = (listId: string, oracleId: string, keep: boolean) => send(`lists/${listId}/cuts`, 'PUT', { oracleId, keep }).then(json<{ ok: true }>);
 
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>

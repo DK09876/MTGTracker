@@ -25,6 +25,8 @@ const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = [
   { name: 'life gain', commander: /\bgain life|\blifelink/i, card: /\bgain \d+ life|\blifelink|\bwhenever you gain life/i },
   { name: 'discard', commander: /\bdiscard/i, card: /\bdiscard (a|your hand|two)|\bmadness\b|\bloot/i },
   { name: 'flying', commander: /\bflying\b/i, card: /\bflying\b/i },
+  { name: 'snow', commander: /\bsnow\b/i, card: /\bSnow\b|\bsnow\b/ },
+  { name: 'curses', commander: /\bcurses?\b/i, card: /\bCurse\b/ },
   { name: 'casting from exile', commander: /\bcast [^.]*from exile|\bforetell|\bcascade/i, card: /\bcascade\b|\bforetell\b|\bcast [^.]*from exile/i },
 ];
 
