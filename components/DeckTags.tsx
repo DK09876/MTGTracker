@@ -18,7 +18,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import DeckBrief from './DeckBrief';
 import type { Entry } from './DeckCards';
 import AiModelPicker from './AiModelPicker';
 import * as api from '@/lib/api';
@@ -36,6 +35,8 @@ interface Props {
   tags: Tags | null;
   onTags: (tags: Tags) => void;
   onSelect: (card: ScryfallCard) => void;
+  /** Send the owner to the Plan tab, where the brief now lives. */
+  onPlan: () => void;
 }
 
 const POLL_MS = 2_500;
@@ -48,7 +49,7 @@ const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] p
 const button = 'rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
 const primary = 'rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
-export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Props) {
+export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPlan }: Props) {
   const [instructions, setInstructions] = useState('');
   const [boards, setBoards] = useState<Board[]>(['main']);
   const [error, setError] = useState<string | null>(null);
@@ -162,7 +163,11 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect }: Pr
       {budget && <BudgetLine budget={budget} />}
       <AiModelPicker area="deck" />
 
-      <DeckBrief listId={listId} tags={tags} onTags={onTags} />
+      <div data-tour="brief" className="flex max-w-3xl flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+        <span className="text-[var(--muted)]">The plan the tagger reads:</span>
+        <span className="min-w-0 flex-[1_1_20rem]">{tags.brief.trim() || 'Not written yet.'}</span>
+        <button onClick={onPlan} className="text-[var(--accent)] hover:underline">Edit on the Plan tab</button>
+      </div>
 
       <section className="flex flex-col gap-3">
         <h3 data-tour="suggest-tags" className="font-medium">1 · Suggest tags</h3>

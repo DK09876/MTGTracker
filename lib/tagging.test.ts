@@ -185,4 +185,10 @@ describe('briefMessage modes', () => {
     expect(briefMessage({ ...input, mode: 'build' })).toMatch(/keep their intent[\s\S]*Storm off rituals\./);
     expect(briefMessage({ ...input, mode: 'check' })).toMatch(/to check against the cards[\s\S]*Storm off rituals\./);
   });
+
+  it('adds the owner\'s instructions for this read, last, only when there are some', async () => {
+    const { briefMessage } = await import('./tagging');
+    expect(briefMessage({ ...input, instructions: 'Casual table: no infinite combos.' })).toMatch(/owner's instructions for this read[\s\S]*Casual table: no infinite combos\.\n"""$/);
+    expect(briefMessage({ ...input, instructions: '  ' })).not.toContain('instructions');
+  });
 });

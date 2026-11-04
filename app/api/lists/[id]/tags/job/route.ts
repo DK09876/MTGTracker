@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
 import { currentBudget } from '@/lib/ai';
 import { deckTags } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
-import { requireList } from '@/lib/profile-route';
+import { requireList, requirePlan } from '@/lib/profile-route';
 import { currentJob, startJob, stopJob } from '@/lib/tag-job-server';
 import type { JobParams } from '@/lib/tag-jobs';
 import { StepError } from '@/lib/tag-steps';
@@ -35,6 +35,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
+  // The tagger tags by the plan, so it waits for one.
+  const locked = requirePlan(id);
+  if (locked) return locked;
   let b: { kind?: unknown; instructions?: unknown; boards?: unknown; mode?: unknown; scope?: unknown; audit?: unknown };
   try {
     b = await request.json();

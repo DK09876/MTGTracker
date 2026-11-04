@@ -7,6 +7,7 @@
  */
 
 import { cachedRoles, cardsInList, database, saveRoles, type ListedCard } from './db';
+import { targetsFor } from './deck-plan';
 import { countRoles, ROLES, type RoleCount } from './roles';
 import { searchCards, type ScryfallCard } from './scryfall';
 
@@ -67,7 +68,15 @@ export function withOverrides(roles: RoleCount[], cards: Array<{ card: ScryfallC
 /** A deck's main-board roles, corrections included. */
 export async function deckRoles(listId: string, main: ListedCard[] = cardsInList(listId).filter((c) => c.board === 'main')): Promise<RoleCount[]> {
   const roles = await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles });
-  return withOverrides(roles, main, overrides(listId));
+  // The guideline ranges are the deck's plan's: its styles' numbers, or the owner's.
+  const targets = targetsFor(listId, commanderOf(listId), main);
+  return withOverrides(roles, main, overrides(listId)).map((r) => (r.target && targets[r.id] ? { ...r, target: targets[r.id] } : r));
+}
+
+/** A deck's commander, by list id alone. */
+function commanderOf(listId: string): ScryfallCard | null {
+  const r = db().get('SELECT c.data FROM lists l JOIN cards c ON c.id = l.commanderId WHERE l.id = ?', [listId]) as { data: string } | null;
+  return r ? JSON.parse(r.data) as ScryfallCard : null;
 }
 
 export function keeps(listId: string): Set<string> {

@@ -92,12 +92,12 @@ export function cardsToTag(deck: TaggingDeck, cardTags: Array<{ key: string; on:
 }
 
 /** Draft the brief: how the deck wins - or that it does not - and its plan. Nothing is saved; the owner edits it. */
-export async function briefStep(model: JsonModel, at: StepDeck, options?: CallOptions, mode: BriefMode = 'build'): Promise<DraftedBrief & { model: string }> {
+export async function briefStep(model: JsonModel, at: StepDeck, options?: CallOptions, mode: BriefMode = 'build', instructions = ''): Promise<DraftedBrief & { model: string }> {
   const { deck, context } = read(at);
   const answer = await model({
     step: mode === 'check' ? 'check the brief' : 'draft the brief',
     system: mode === 'check' ? BRIEF_SYSTEM + BRIEF_CHECK : BRIEF_SYSTEM,
-    user: briefMessage({ ...context, mode }), schema: BRIEF_SCHEMA, thinking: 'high',
+    user: briefMessage({ ...context, mode, instructions }), schema: BRIEF_SCHEMA, thinking: 'high',
   }, options);
   return { ...parseBrief(answer.data, deck.cards), model: answer.model };
 }

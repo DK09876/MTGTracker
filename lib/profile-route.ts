@@ -8,6 +8,8 @@
 
 import { NextResponse } from 'next/server';
 
+import { planConfirmed } from './deck-plan';
+
 import { access, guarded, signedIn } from './auth';
 import { getList, knownProfile, type List } from './db';
 
@@ -54,4 +56,13 @@ export function requireList(request: Request, id: string): { profile: string; li
   if (who instanceof NextResponse) return who;
   const list = getList(id, who.profile);
   return list ? { profile: who.profile, list } : NextResponse.json({ error: 'No such list' }, { status: 404 });
+}
+
+/**
+ * The AI steps for a deck - chat, AI tagging, Claude's reviews - wait for
+ * its plan: they read it. Answers 409 with `plan: true` until it is
+ * confirmed, so the page can send the owner to the Plan tab.
+ */
+export function requirePlan(listId: string): NextResponse | null {
+  return planConfirmed(listId) ? null : NextResponse.json({ error: 'Confirm the deck\'s plan first: everything here reads it.', plan: true }, { status: 409 });
 }

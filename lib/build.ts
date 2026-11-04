@@ -10,6 +10,7 @@
 
 import type { RoleCount, RoleGroup } from './roles';
 import type { ScryfallCard } from './scryfall';
+import { detectStyles } from './styles';
 
 export interface Gap {
   role: string;
@@ -57,27 +58,11 @@ export interface BuildPlan {
   size: number;
 }
 
-// What a commander rewards, read from its text: the first that fits names
-// its style (reference: "classify the commander's style first").
-const STYLES: Array<{ label: string; note: string; test: RegExp }> = [
-  { label: 'Spells engine', note: 'Rewards casting instants and sorceries: cheap spells, rituals and copy effects are the deck.', test: /whenever you cast (an? )?(instant|sorcery|noncreature)|copy (that|target) (instant|sorcery|spell)|magecraft/i },
-  { label: 'Aristocrats', note: 'Rewards creatures dying or being sacrificed: fodder, sac outlets and death payoffs.', test: /whenever (a|another) (creature|nontoken creature)[^.]* dies|sacrifice (a|another) creature/i },
-  { label: 'Go wide', note: 'Makes or rewards many creatures: token makers, anthems and overruns.', test: /create[^.]* (creature )?tokens?|for each creature you control/i },
-  { label: 'Voltron', note: 'Wins with commander damage: equipment, auras and protection for one creature.', test: /equipped|enchanted creature|attach|aura/i },
-  { label: 'Combat', note: 'Rewards attacking: evasion, extra combats and ways to push damage through.', test: /whenever [^.]* attacks|combat damage to a player|extra combat/i },
-  { label: '+1/+1 counters', note: 'Spreads and multiplies counters: counter makers, doublers and payoffs.', test: /\+1\/\+1 counter/i },
-  { label: 'Graveyard', note: 'Uses the graveyard: self-mill, reanimation and recursion.', test: /from your graveyard|mill|return target creature card/i },
-  { label: 'Lands', note: 'Rewards land drops: extra lands, fetches and landfall payoffs.', test: /landfall|whenever a land enters|play an additional land/i },
-  { label: 'Artifacts', note: 'Rewards artifacts: rocks, treasures and artifact payoffs.', test: /artifact/i },
-  { label: 'Card draw', note: 'Rewards drawing cards: wheels, draw engines and draw payoffs.', test: /whenever you draw/i },
-  { label: 'Lifegain', note: 'Rewards gaining life: lifelink, gain-life triggers and payoffs.', test: /whenever you gain life/i },
-];
-
+/** What a commander rewards, read from its text alone (styles.ts reads the deck's cards too). */
 export function commanderStyle(commander: ScryfallCard | null): { label: string; note: string } | null {
   if (!commander) return null;
-  const text = [commander.oracle_text, ...(commander.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
-  const found = STYLES.find((s) => s.test.test(text));
-  return found ? { label: found.label, note: found.note } : { label: 'Value', note: 'No single thing it rewards: a deck of strong cards built around what it does.' };
+  const { primary } = detectStyles(commander, []);
+  return { label: primary.label, note: primary.note };
 }
 
 /**
@@ -111,9 +96,12 @@ export function buildPlan(input: {
   brief: string;
   /** Cards the owner tagged as a win condition on the Tags tab. */
   wincons?: string[];
+  /** The deck's plan: its style and the ranges it uses in place of the usual ones. */
+  style?: { label: string; note: string } | null;
+  targets?: Record<string, [number, number]>;
 }): BuildPlan {
-  const style = commanderStyle(input.commander);
-  const roles = input.roles ?? [];
+  const style = input.style !== undefined ? input.style : commanderStyle(input.commander);
+  const roles = (input.roles ?? []).map((r) => (r.target && input.targets?.[r.id] ? { ...r, target: input.targets[r.id] } : r));
   const gaps: Gap[] = roles.filter((r) => r.target && r.count < r.target[0])
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }));
   const finishers = [...new Set([...roles.filter((r) => FINISHING.includes(r.id)).flatMap((r) => r.cards), ...(input.wincons ?? [])])].sort();

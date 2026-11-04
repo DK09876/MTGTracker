@@ -13,6 +13,7 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckPlan from '@/components/DeckPlan';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
@@ -43,7 +44,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'build' | DeckTab>('cards');
+  const [section, setSection] = useState<DeckTab>('cards');
+  // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
+  const [planConfirmed, setPlanConfirmed] = useState(true);
+  const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
   const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -61,6 +65,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setCards(data.cards);
     setDraftName(data.list.name);
     setShown(!!data.public);
+    setPlanConfirmed(data.planConfirmed !== false);
   }, [id]);
 
   // A starter list being built for this deck in the background: the page
@@ -94,6 +99,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setCards(data.cards);
         setDraftName(data.list.name);
         setShown(!!data.public);
+        setPlanConfirmed(data.planConfirmed !== false);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load that list');
       } finally {
@@ -374,7 +380,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {deck && (
         <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['suggestions', 'Suggestions'], ['chat', 'Chat'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -383,13 +389,26 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               onClick={() => setSection(value)}
               className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
             >
+              {value === 'chat' && !planConfirmed && <span aria-hidden>🔒 </span>}
               {label}
+              {value === 'plan' && !planConfirmed && section !== 'plan' && <span className="ml-1.5 rounded-full bg-amber-300/15 px-1.5 text-xs font-semibold text-amber-300">start here</span>}
             </button>
           ))}
         </div>
       )}
 
-      {deck && section === 'build' ? (
+      {deck && section === 'plan' ? (
+        tags ? (
+          <DeckPlan
+            listId={id}
+            tags={tags}
+            onTags={setTags}
+            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+            onPlan={onPlan}
+            onTab={(tab) => setSection(tab)}
+          />
+        ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+      ) : deck && section === 'tune' ? (
         <DeckBuild
           listId={id}
           cards={cards}
@@ -399,6 +418,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onMove={moveCard}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
         />
+      ) : deck && section === 'chat' && !planConfirmed ? (
+        <div data-tour="chat-locked" className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <h3 className="font-display text-lg font-semibold">Chat starts with the plan</h3>
+          <p className="text-sm text-[var(--muted)]">Claude answers better when it knows what the deck is for. The plan is already drafted from the cards - read it, change anything, and confirm it.</p>
+          <button onClick={() => setSection('plan')} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Go to Plan</button>
+        </div>
       ) : deck && section === 'chat' ? (
         <DeckChat
           listId={id}
@@ -407,7 +432,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onRemove={(cardId) => changeQuantity(cardId, 0)}
         />
       ) : deck && section === 'tags' ? (
-        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
+        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => setSection('plan')} />
       ) : deck && section === 'collection' ? (
         <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
       ) : deck && section === 'suggestions' ? (

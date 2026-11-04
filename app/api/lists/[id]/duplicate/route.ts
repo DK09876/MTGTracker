@@ -1,12 +1,13 @@
 /**
  * POST {name?}: a copy of the deck or list for the same profile - cards,
- * commander, brief, tags and role corrections - private, and with no
+ * commander, plan, brief, tags and role corrections - private, and with no
  * copies pulled from boxes yet. Answers with the new list.
  */
 
 import { NextResponse } from 'next/server';
 
 import { duplicateList, getList } from '@/lib/db';
+import { copyPlan } from '@/lib/deck-plan';
 import { copyDeckRoles } from '@/lib/deck-roles';
 import { requireList } from '@/lib/profile-route';
 
@@ -22,5 +23,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const copy = duplicateList(id, owned.profile, name.slice(0, 120));
   if (!copy) return NextResponse.json({ error: 'No such list' }, { status: 404 });
   copyDeckRoles(id, copy);
+  copyPlan(id, copy);
   return NextResponse.json({ list: getList(copy, owned.profile) }, { status: 201 });
 }

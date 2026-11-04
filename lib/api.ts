@@ -229,7 +229,7 @@ export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const fetchList = (id: string) =>
-  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[]; public?: boolean }>);
+  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean }>);
 
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
@@ -453,8 +453,8 @@ export interface DeckReads {
   job: Job | null;
 }
 export const deckReads = (listId: string) => fetch(url(`lists/${listId}/reads`)).then(json<DeckReads>);
-export const startRead = (listId: string, mode: ReadMode) =>
-  send(`lists/${listId}/reads`, 'POST', { mode }).then(json<{ job: Job }>).finally(jobsChanged);
+export const startRead = (listId: string, mode: ReadMode, instructions = '') =>
+  send(`lists/${listId}/reads`, 'POST', { mode, instructions }).then(json<{ job: Job }>).finally(jobsChanged);
 export const keepRead = (listId: string, id: string, saved: boolean) => send(`lists/${listId}/reads`, 'PATCH', { id, saved }).then(json<{ ok: true }>);
 export const dropRead = (listId: string, id: string) =>
   fetch(url(`lists/${listId}/reads?read=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
@@ -606,3 +606,27 @@ export const setCaps = (caps: Partial<Caps>) => send('ai/models', 'PUT', { caps 
 export const aiUsage = (days = 7) =>
   fetch(url(`ai/usage?days=${days}`)).then(json<{ calls: AiCall[]; names: Record<string, string>; days: number }>);
 export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);
+
+/** A deck's plan: what it does, its styles, the ranges it uses, how it wins. */
+export interface DeckPlanState {
+  brief: string;
+  /** A first brief drafted from the cards, until one is written. */
+  draft: string;
+  confirmed: boolean;
+  detected: { primary: string; secondary: string | null; support: Record<string, number> };
+  style: string;
+  style2: string | null;
+  chosen: { style: boolean; style2: boolean };
+  targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
+  wins: { tagged: string[]; finishers: string[] };
+  styles: Array<{ id: string; label: string; note: string; cards: number }>;
+}
+export interface PlanChange {
+  brief?: string;
+  style?: string | null;
+  style2?: string | null;
+  targets?: Record<string, [number, number] | null>;
+  confirm?: boolean;
+}
+export const deckPlan = (listId: string) => fetch(url(`lists/${listId}/plan`)).then(json<DeckPlanState>);
+export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);

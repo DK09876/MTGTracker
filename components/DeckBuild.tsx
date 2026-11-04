@@ -19,7 +19,7 @@ import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 import { ROLE_GROUPS, ROLES } from '@/lib/roles';
 
-export type DeckTab = 'cards' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
+export type DeckTab = 'cards' | 'plan' | 'tune' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
 
 interface Props {
   listId: string;
@@ -125,7 +125,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
             onAction={() => {
               const a = issue.action;
               if (!a) return;
-              if (a.kind === 'tags') onTab('tags');
+              if (a.kind === 'tags') onTab('plan');
               else if (a.kind === 'cuts') toggle({ at: issue.id, kind: 'cuts' });
               else toggle({ at: issue.id, kind: 'fill', role: a.role });
             }}
