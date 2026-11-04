@@ -1,5 +1,5 @@
 /**
- * The Build tab, worked out from the cards without a model: what kind of
+ * The Tune tab's Add view, worked out from the cards without a model: what kind of
  * commander it is, the few things worth fixing - each said in plain words,
  * with why it matters and the cards behind it - every role against the
  * usual counts, and the mana against Karsten's numbers. Pure.

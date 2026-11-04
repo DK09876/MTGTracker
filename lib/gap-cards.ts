@@ -4,7 +4,7 @@
  * commander (fit.ts) and how much Commander plays them, EDHREC's numbers
  * for the commander nudging when it is on; with where the profile already
  * has a copy. From the card data on the Pi; no
- * model. Used by the Build tab and the deck chat. Server only.
+ * model. Used by the Tune tab and the deck chat. Server only.
  */
 
 import { localCardsByOracle, localCards, searchLocalText } from './card-store';
