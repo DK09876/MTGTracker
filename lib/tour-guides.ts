@@ -36,13 +36,14 @@ const DECK_STEPS: TourStep[] = [
   { path: deck, click: [tab('cards')], target: 'deck-tabs', title: 'A deck\'s tabs', body: 'Everything about a deck lives in these tabs. This is the sample deck, a Grixis spellslinger; nothing in it can be changed, so press anything.' },
   { click: [closeAdd, tab('cards')], target: 'boards', title: 'Main, maybe and side', body: 'The 99 are the main board. The maybeboard holds cards you are considering; the sideboard, cards you swap in. Move a card between them from its card.' },
   { target: 'card-tools', title: 'Filter, view, group, sort', body: 'Filter with Scryfall syntax - t:creature, cmc<=2, usd>5. Switch between pictures and a text list, group by type, mana value, your tags or the automatic roles, and sort.' },
-  { click: [closeCard, tab('cards'), '[data-tour="card-grid"] button'], target: 'card-modal', title: 'Open any card', body: 'Its text, rulings and printings. Pick a cheaper or foil printing, change how many, move it to another board, and put your tags on it here.' },
+  { click: [closeCard, tab('cards'), '[data-tour="card-grid"] button'], target: 'card-modal', title: 'Open any card', body: 'Its text, rulings and printings. Pick a cheaper or foil printing, change how many, move it to another board, put your tags on it, and correct its roles for this deck if Scryfall has them wrong.' },
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
   { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Edit the whole list as text, rename the deck, change its commander, show it on your profile (decks are private until you do), or delete it.' },
 
   { click: [tab('build'), buildStep(1)], target: 'build-steps', title: 'Build: a checklist', body: 'Seven steps from the commander\'s style to a final check, each marked done, needs work, or to do. Click a step for what to do about it. All worked out from the cards, no AI.' },
   { click: [tab('build'), buildStep(4)], target: 'build-fill', title: 'Fill the gaps', body: 'Pick a role the deck is short on. Cards for it are ranked by how often this commander\'s decks play them; tick "From my collection first" to see what you own - and which box it is in - before what you would buy. Set a price cap, then Add.' },
-  { click: [tab('build'), buildStep(5)], target: 'build-mana', title: 'The mana', body: 'How many lands Karsten\'s formula wants for this curve, against what the deck runs. The button copies the decklist and opens Salubrious Snail\'s tool to check how often each spell is castable on time.' },
+  { click: [tab('build'), buildStep(5)], target: 'build-mana', title: 'The mana', body: 'How many lands Karsten\'s formula wants for this curve, and each colour\'s sources against what its hungriest spell needs. The button copies the decklist and opens Salubrious Snail\'s tool to check how often each spell is castable on time.' },
+  { click: [tab('build'), buildStep(6)], target: 'cut-workbench', title: 'Cuts', body: 'Over 100? Every card is weighed, with its reasons - a role you have too many of, nothing the commander cares about, rarely played - and cards your tags mark as the plan are protected. Tick some, see the roles they would leave, and cut them to the maybeboard, with undo.' },
 
   { click: [tab('chat'), '[data-tour="chat-list"] [data-tour-entry]'], target: 'chat-thread', title: 'Chat about the deck', body: 'Claude reads the deck, its brief and its roles, and looks things up - Scryfall, your collection, EDHREC - shown above each answer. What it suggests comes as Add and Cut buttons; nothing changes until you press one.' },
   { target: 'chat-composer', title: 'Ask anything', body: 'Type a question or tap a starter - what to cut, upgrades from your collection, whether the deck can win. Every chat is saved on the left; replies keep going if you leave the page.' },
@@ -111,7 +112,7 @@ export const GUIDES: Guide[] = [
       'Decks are private until you show one on your profile.',
     ],
     steps: [
-      { target: 'new-deck', title: 'Make a deck', body: 'Start from a commander, or paste a decklist (Moxfield, Archidekt and plain text all work). The cards come from Scryfall, and their roles are read in the background.' },
+      { target: 'new-deck', title: 'Make a deck', body: 'Start from a commander - with a suggested starter list if you like: roles first, then what fits the commander, then lands for its colours - or paste a decklist from Moxfield, Archidekt or plain text.' },
       { target: 'deck-grid', title: 'Your decks', body: 'Each deck in its commander\'s colours, with its card count and value. Next, the tour opens the sample deck and goes through every tab.' },
       ...DECK_STEPS,
     ],

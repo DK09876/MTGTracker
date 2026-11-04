@@ -11,6 +11,7 @@
 
 import { karstenLands } from './build';
 import { allLocalCards } from './card-store';
+import { sourcesNeeded } from './health';
 import { database } from './db';
 import { fitOf, fitProfile, popularity } from './fit';
 import { holdings } from './gap-cards';
@@ -33,12 +34,19 @@ const ALWAYS = ['Sol Ring', 'Arcane Signet', 'Command Tower'];
 
 const isLand = (c: ScryfallCard) => /\bLand\b/.test((c.type_line ?? '').split('//')[0]);
 
-/** The colours a land makes: Scryfall's list, or read from "Add {U} or {R}". */
+const LAND_TYPE: Record<string, string> = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
+
+/**
+ * The colours a land makes: Scryfall's list, or read from "Add {U} or {R}";
+ * a fetch land counts for the basic types it can find.
+ */
 function makes(card: ScryfallCard): string[] {
-  if (card.produced_mana) return card.produced_mana;
   const text = card.oracle_text ?? '';
+  const fetched = /search your library for an? [^.]*card/i.test(text)
+    ? COLORS.filter((c) => new RegExp(`\\b${LAND_TYPE[c]}\\b`).test(text)) : [];
+  if (card.produced_mana) return [...new Set([...card.produced_mana, ...fetched])];
   if (/any color/i.test(text)) return [...COLORS];
-  return COLORS.filter((c) => new RegExp(`Add[^.]*\\{${c}\\}`).test(text));
+  return [...new Set([...COLORS.filter((c) => new RegExp(`Add[^.]*\\{${c}\\}`).test(text)), ...fetched])];
 }
 
 export interface Starter {
@@ -52,7 +60,13 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   const identity = new Set(commander.color_identity ?? []);
   const fit = fitProfile(commander);
   const owned = ownedFirst ? holdings(profileId, null) : new Map<string, string>();
-  const legal = pool.filter((c) => c.legalities?.commander === 'legal' && !c.game_changer
+  // Spells that ask for three or more of one colour are hard to cast in a
+  // deck of three or more colours (Karsten); a starter leaves them out.
+  // So are two of a colour on a one- or two-drop.
+  const pipsOf = (c: ScryfallCard, col: string) => (c.mana_cost ?? '').match(new RegExp(`\\{${col}\\}`, 'g'))?.length ?? 0;
+  const hungry = (c: ScryfallCard) => identity.size >= 3
+    && COLORS.some((col) => pipsOf(c, col) >= 3 || (pipsOf(c, col) >= 2 && (c.cmc ?? 0) <= 2));
+  const legal = pool.filter((c) => c.legalities?.commander === 'legal' && !c.game_changer && !hungry(c)
     && c.name !== commander.name && (c.color_identity ?? []).every((x) => identity.has(x)));
 
   const rolesOf = new Map<string, string[]>();
@@ -63,31 +77,42 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   const textRoles = ROLES.filter((r) => r.text);
   const textOf = (c: ScryfallCard) => [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
   const rolesFor = (c: ScryfallCard) => [...(rolesOf.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(textOf(c))).map((r) => r.id)];
-  const score = (c: ScryfallCard) => fitOf(c, fit).score * 0.55 + popularity(c) * 0.45 + (owned.has(c.oracle_id ?? '') ? 0.25 : 0);
+  const ownedBonus = (c: ScryfallCard) => (owned.has(c.oracle_id ?? '') ? 0.25 : 0);
+  // The plan's cards by fit; staples (the role slots, lands) by how much Commander plays them.
+  const score = (c: ScryfallCard) => fitOf(c, fit).score * 0.55 + popularity(c) * 0.45 + ownedBonus(c);
+  const staple = (c: ScryfallCard) => popularity(c) * 0.75 + fitOf(c, fit).score * 0.25 + ownedBonus(c);
   const spells = legal.filter((c) => !isLand(c)).map((c) => ({ card: c, score: score(c), roles: rolesFor(c) }))
     .sort((a, b) => b.score - a.score);
 
   const chosen = new Map<string, ScryfallCard>();
+  // The staples and role picks are kept whatever the land count turns out to be.
+  const core = new Set<string>();
   for (const name of ALWAYS) {
     const c = legal.find((x) => x.name === name);
-    if (c && !isLand(c)) chosen.set(c.name, c);
+    if (c && !isLand(c)) { chosen.set(c.name, c); core.add(c.name); }
   }
   // Roles first, the best-fitting cards in each; cheap ramp before dear.
   for (const { role, count } of QUOTAS) {
     const have = [...chosen.values()].filter((c) => rolesFor(c).includes(role)).length;
     const pickFrom = spells.filter((s) => s.roles.includes(role) && !chosen.has(s.card.name)
-      && (role !== 'ramp' || (s.card.cmc ?? 9) <= 3) && (role !== 'draw' || !s.roles.includes('cantrip') || s.roles.length > 1));
-    for (const s of pickFrom.slice(0, Math.max(0, count - have))) chosen.set(s.card.name, s.card);
+      && (role !== 'ramp' || (s.card.cmc ?? 9) <= 3) && (role !== 'draw' || !s.roles.includes('cantrip') || s.roles.length > 1))
+      .sort((a, b) => staple(b.card) - staple(a.card));
+    for (const s of pickFrom.slice(0, Math.max(0, count - have))) { chosen.set(s.card.name, s.card); core.add(s.card.name); }
   }
-  // Then the plan: what fits the commander best, until the spells are full.
+  // Then the plan: what fits the commander best, until the spells are full -
+  // but not more of a role already at its guideline (Treasure makers count as
+  // ramp and draw, and would pile up).
+  const quota = new Map(QUOTAS.map((q) => [q.role, q.count + 2]));
+  const full = (roles: string[]) => roles.some((r) => quota.has(r)
+    && [...chosen.values()].filter((c) => rolesFor(c).includes(r)).length >= quota.get(r)!);
   const fill = (target: number) => {
-    for (const s of spells) {
-      if (chosen.size >= target) break;
-      if (!chosen.has(s.card.name) && fitOf(s.card, fit).score > 0) chosen.set(s.card.name, s.card);
-    }
-    for (const s of spells) {
-      if (chosen.size >= target) break;
-      if (!chosen.has(s.card.name)) chosen.set(s.card.name, s.card);
+    for (const pass of [true, false]) {
+      for (const s of spells) {
+        if (chosen.size >= target) break;
+        if (chosen.has(s.card.name) || full(s.roles)) continue;
+        if (pass && fitOf(s.card, fit).score === 0) continue;
+        chosen.set(s.card.name, s.card);
+      }
     }
   };
   fill(99 - 37);
@@ -98,8 +123,9 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   const landCount = karstenLands(mv, cheap);
   const spellCount = 99 - landCount;
   if (chosen.size > spellCount) {
-    const keep = new Set(list.sort((a, b) => score(b) - score(a)).slice(0, spellCount).map((c) => c.name));
-    for (const name of [...chosen.keys()]) if (!keep.has(name)) chosen.delete(name);
+    // Trim the plan's weakest; the core stays.
+    const extra = list.filter((c) => !core.has(c.name)).sort((a, b) => score(a) - score(b));
+    for (const c of extra.slice(0, chosen.size - spellCount)) chosen.delete(c.name);
   } else fill(spellCount);
 
   // Lands: Command Tower, lands making two or more of its colours, then basics.
@@ -109,23 +135,39 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
     if (legal.some((c) => c.name === 'Command Tower')) lands.push(['Command Tower', 1]);
     const duals = legal.filter((c) => isLand(c) && !/\bBasic\b/.test(c.type_line ?? '') && c.name !== 'Command Tower'
       && makes(c).filter((m) => identity.has(m)).length >= 2)
-      .sort((a, b) => score(b) - score(a))
-      .slice(0, Math.min(colors.length * 3, 12));
+      // Lands that make only its colours, the most played first.
+      .filter((c) => makes(c).every((m) => identity.has(m) || m === 'C'))
+      .sort((a, b) => staple(b) - staple(a))
+      .slice(0, colors.length >= 4 ? 24 : colors.length === 3 ? 20 : colors.length * 4);
     for (const d of duals) lands.push([d.name, 1]);
   }
   const basicsNeeded = landCount - lands.length;
   if (!colors.length) lands.push(['Wastes', basicsNeeded]);
   else {
-    // Split by how many pips of each colour the spells have.
-    const pips: Record<string, number> = {};
-    for (const c of chosen.values()) for (const col of colors) pips[col] = (pips[col] ?? 0) + ((c.mana_cost ?? '').match(new RegExp(`\\{${col}\\}`, 'g'))?.length ?? 0) + 0.01;
-    const total = colors.reduce((n, c) => n + pips[c], 0);
-    let given = 0;
-    colors.forEach((col, i) => {
-      const n = i === colors.length - 1 ? basicsNeeded - given : Math.round((pips[col] / total) * basicsNeeded);
-      given += n;
-      if (n > 0) lands.push([BASIC[col], n]);
-    });
+    // Basics go where sources are still most needed: each colour wants what
+    // Karsten's table says for its hungriest spell, less what the other
+    // lands (and, at three quarters, the rocks) already make of it.
+    const want: Record<string, number> = Object.fromEntries(colors.map((c) => [c, 0]));
+    for (const card of chosen.values()) {
+      const gold = colors.filter((c) => pipsOf(card, c) > 0).length > 1;
+      for (const c of colors) if (pipsOf(card, c)) want[c] = Math.max(want[c], sourcesNeeded(pipsOf(card, c), card.cmc ?? 1, gold));
+    }
+    const have: Record<string, number> = Object.fromEntries(colors.map((c) => [c, 0]));
+    for (const [name] of lands) {
+      const land = name === 'Command Tower' ? colors : makes(legal.find((x) => x.name === name)!);
+      for (const c of colors) if (land.includes(c)) have[c] += 1;
+    }
+    for (const card of chosen.values()) {
+      const made = (card.produced_mana ?? []).filter((m) => identity.has(m));
+      for (const c of made) have[c] += 0.75;
+    }
+    const counts: Record<string, number> = Object.fromEntries(colors.map((c) => [c, 0]));
+    for (let i = 0; i < basicsNeeded; i++) {
+      const short = (c: string) => (want[c] || 1) - have[c] - counts[c];
+      const next = colors.reduce((best, c) => (short(c) > short(best) ? c : best), colors[0]);
+      counts[next] += 1;
+    }
+    for (const c of colors) if (counts[c]) lands.push([BASIC[c], counts[c]]);
   }
 
   return {

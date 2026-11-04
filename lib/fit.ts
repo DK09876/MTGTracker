@@ -28,7 +28,10 @@ const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = [
   { name: 'casting from exile', commander: /\bcast [^.]*from exile|\bforetell|\bcascade/i, card: /\bcascade\b|\bforetell\b|\bcast [^.]*from exile/i },
 ];
 
-const textOf = (c: ScryfallCard) => [c.type_line, c.oracle_text, ...(c.card_faces ?? []).flatMap((f) => [f.type_line, f.oracle_text])].filter(Boolean).join('\n');
+// Reminder text in brackets is left out: Azula's "(A copy of a permanent
+// spell becomes a token.)" is not about tokens.
+const textOf = (c: ScryfallCard) => [c.type_line, c.oracle_text, ...(c.card_faces ?? []).flatMap((f) => [f.type_line, f.oracle_text])]
+  .filter(Boolean).join('\n').replace(/\([^)]*\)/g, '');
 
 // Creature types worth matching: the ones on the commander's type line or named in its text.
 const TYPE_WORDS = /\b(Dragon|Elf|Elves|Goblin|Zombie|Vampire|Wizard|Merfolk|Angel|Demon|Eldrazi|Dinosaur|Cat|Dog|Knight|Soldier|Warrior|Rogue|Cleric|Spirit|Sliver|Human|Faerie|Elemental|Giant|Pirate|Ninja|Samurai|Artificer|Construct|Thopter|Treefolk|Hydra|Beast|Snake|Rat|Squirrel|Bird|Insect|Spider|Horror)s?\b/g;
