@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   }
 
   const kind = kindOf(body.kind) ?? 'list';
-  // A link in the deck box brings the deck - and its name - from Moxfield or Archidekt.
+  // A link in the deck box brings the deck - and its name - from Archidekt.
   let linked: Awaited<ReturnType<typeof deckText>> | null = null;
   try {
     if (body.decklist?.trim()) linked = await deckText(body.decklist);

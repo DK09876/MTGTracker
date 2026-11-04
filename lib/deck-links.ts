@@ -1,5 +1,9 @@
 /**
- * A deck from a link: Moxfield and Archidekt, public or unlisted.
+ * A deck from a link: Archidekt, public or unlisted. Moxfield links are
+ * recognised but not fetched: Moxfield's bot protection refuses apps like
+ * this one (tested 2026-11-04: 403 to Node's fetch from the Pi and the Mac),
+ * and we do not try to get around that - the owner is told how to copy the
+ * list from Moxfield instead.
  *
  * The link is fetched once, when the owner pastes their own deck's link -
  * never crawled - and turned into the decklist text the importer already
@@ -26,9 +30,10 @@ const UA = 'MTGTracker/0.1 (personal deck app; fetches a deck when its owner pas
 /** A Moxfield or Archidekt deck link, or null for anything else. */
 export function parseDeckLink(text: string): DeckLink | null {
   const t = text.trim();
-  const mox = t.match(/^https?:\/\/(?:www\.)?moxfield\.com\/decks\/([A-Za-z0-9_-]{6,})/i);
+  // With or without https:// - people paste both.
+  const mox = t.match(/^(?:https?:\/\/)?(?:www\.)?moxfield\.com\/decks\/([A-Za-z0-9_-]{6,})/i);
   if (mox) return { site: 'moxfield', id: mox[1], url: t };
-  const arch = t.match(/^https?:\/\/(?:www\.)?archidekt\.com\/(?:api\/)?decks\/(\d+)/i);
+  const arch = t.match(/^(?:https?:\/\/)?(?:www\.)?archidekt\.com\/(?:api\/)?decks\/(\d+)/i);
   if (arch) return { site: 'archidekt', id: arch[1], url: t };
   return null;
 }
@@ -39,7 +44,7 @@ export function parseDeckLink(text: string): DeckLink | null {
  */
 export function readDeckBox(text: string): { kind: 'empty' | 'list' | 'link' | 'both' | 'links' | 'unknown-link'; link: DeckLink | null } {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const urls = lines.filter((l) => /^https?:\/\//i.test(l));
+  const urls = lines.filter((l) => /^https?:\/\//i.test(l) || /^(www\.)?[a-z0-9-]+\.(com|net|org|io)\//i.test(l));
   if (!lines.length) return { kind: 'empty', link: null };
   if (!urls.length) return { kind: 'list', link: null };
   if (urls.length > 1) return { kind: 'links', link: null };
@@ -102,6 +107,9 @@ export function fromArchidekt(data: { name?: string; categories?: Array<{ name: 
   };
 }
 
+/** Moxfield links are not read (see the top of this file); this says what to do instead. */
+export const MOXFIELD_REFUSES = 'Moxfield links aren\'t supported. On Moxfield, open the deck and use Export → Copy for MTGO, then paste the list here.';
+
 const HOW_TO_COPY: Record<DeckSite, string> = {
   moxfield: 'On Moxfield, open the deck, then More → Export → Copy for MTGO, and paste the list here instead.',
   archidekt: 'On Archidekt, open the deck, then Export → Text, and paste the list here instead.',
@@ -137,6 +145,7 @@ export async function deckText(box: string, fetcher: typeof fetch = fetch): Prom
   if (read.kind === 'both') throw new DeckLinkError('There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.');
   if (read.kind === 'links') throw new DeckLinkError('There are two links here. Keep the one for this deck.');
   if (read.kind === 'unknown-link') throw new DeckLinkError('That link is not one I can read yet (Moxfield and Archidekt are). Paste the list instead.');
+  if (read.kind === 'link' && read.link!.site === 'moxfield') throw new DeckLinkError(MOXFIELD_REFUSES);
   if (read.kind === 'link') {
     const deck = await fetchDeckLink(read.link!, fetcher);
     return { text: deck.text, name: deck.name, site: deck.site };

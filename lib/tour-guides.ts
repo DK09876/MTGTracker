@@ -37,7 +37,7 @@ const DECK_STEPS: TourStep[] = [
   { target: 'card-tools', title: 'Filter, view, group, sort', body: 'Filter with Scryfall syntax - t:creature, cmc<=2, usd>5. Switch between pictures and a text list, group by type, mana value or tags - yours and the built-in ones - and sort.' },
   { click: [closeCard, tab('cards'), '[data-tour="card-grid"] button'], target: 'card-modal', title: 'Open any card', body: 'Its text, rulings and printings. Pick a cheaper or foil printing, change how many, move it to another board, put your tags on it, and correct its built-in tags for this deck if Scryfall has them wrong.' },
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
-  { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Import a list or a Moxfield or Archidekt link over the deck, export it, change the card size, rename, duplicate, change the commander, show it on your profile (decks are private until you do), or delete it.' },
+  { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Import a list (from Moxfield, Arena or MTGO) or an Archidekt link over the deck, export it, change the card size, rename, duplicate, change the commander, show it on your profile (decks are private until you do), or delete it.' },
 
   { click: [tab('plan')], target: 'brief', title: 'Plan: what the deck does', body: 'The first thing to settle. A sentence or two on how the deck wins - drafted for you from the cards, or by Claude with your instructions. Everything else reads it: what to add and cut, how cards are tagged, what Chat knows.' },
   { target: 'plan-style', title: 'Its style', body: 'Read from the commander and the deck\'s own cards - this one is a spells deck. Change the main or second style if it reads the deck wrong; it moves the usual counts and the cut list keeps cards that fit it.' },
@@ -118,7 +118,7 @@ export const GUIDES: Guide[] = [
     match: (p) => p === '/decks',
     title: 'Decks',
     help: [
-      'Your Commander decks. Make one from a commander, a pasted list, or a Moxfield or Archidekt link. Each deck\'s ⋯ duplicates or deletes it.',
+      'Your Commander decks. Make one from a commander, a pasted list, or an Archidekt link. Each deck\'s ⋯ duplicates or deletes it.',
       'Open a deck for its tabs: Cards, Plan, Tune, Tags, Health, Playtest, Chat, Collection. Start with Plan.',
       'Decks are private until you show one on your profile.',
     ],

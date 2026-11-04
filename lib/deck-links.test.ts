@@ -8,6 +8,10 @@ describe('deck links', () => {
     expect(parseDeckLink('https://moxfield.com/decks/VuAN39a1AEiTQ5j8Okefag')).toMatchObject({ site: 'moxfield', id: 'VuAN39a1AEiTQ5j8Okefag' });
     expect(parseDeckLink('https://www.archidekt.com/decks/123456/my_deck')).toMatchObject({ site: 'archidekt', id: '123456' });
     expect(parseDeckLink('https://tappedout.net/mtg-decks/x/')).toBeNull();
+    // Pasted without https:// too.
+    expect(parseDeckLink('moxfield.com/decks/VuAN39a1AEiTQ5j8Okefag')).toMatchObject({ site: 'moxfield' });
+    expect(parseDeckLink('www.archidekt.com/decks/123')).toMatchObject({ site: 'archidekt', id: '123' });
+    expect(readDeckBox('archidekt.com/decks/123').kind).toBe('link');
   });
 
   it('asks the owner to keep one when the box has a link and a list, or two links', () => {
@@ -73,5 +77,8 @@ describe('the deck box', () => {
     expect(never).not.toHaveBeenCalled();
     const ok = vi.fn(async () => new Response(JSON.stringify({ name: 'Fungus', cards: [] , categories: [] }), { status: 200 }));
     await expect(deckText('https://archidekt.com/decks/1', ok as unknown as typeof fetch)).rejects.toThrow(/no cards/);
+    // Moxfield refuses apps, so its links are not fetched at all: the owner is told how to copy the list.
+    await expect(deckText('https://moxfield.com/decks/VuAN39a1AEiTQ5j8Okefag', never as unknown as typeof fetch)).rejects.toThrow(/Copy for MTGO/);
+    expect(never).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,7 @@ import { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
-import { readDeckBox } from '@/lib/deck-links';
+import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { identityStyle } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
@@ -67,7 +67,8 @@ export default function DecksPage() {
   };
 
   const box = readDeckBox(decklist);
-  const blocked = box.kind === 'both' || box.kind === 'links' || box.kind === 'unknown-link';
+  const moxfield = box.kind === 'link' && box.link!.site === 'moxfield';
+  const blocked = box.kind === 'both' || box.kind === 'links' || box.kind === 'unknown-link' || moxfield;
 
   return (
     <div>
@@ -105,7 +106,7 @@ export default function DecksPage() {
           </label>
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-[var(--muted)]">
-              Bring a deck <span className="opacity-70">(optional) - paste its list, or a link to it on Moxfield or Archidekt</span>
+              Bring a deck <span className="opacity-70">(optional) - paste its list (Moxfield, Arena, MTGO), or a link to it on Archidekt</span>
             </span>
             <textarea
               value={decklist}
@@ -115,16 +116,17 @@ export default function DecksPage() {
               spellCheck={false}
               className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
             />
-            {box.kind === 'link' && (
+            {box.kind === 'link' && !moxfield && (
               <span data-tour="deck-link" className="text-xs text-emerald-400">
-                A {box.link!.site === 'moxfield' ? 'Moxfield' : 'Archidekt'} link: the deck - its name, commander, boards and printings - is fetched when you create it. Public and unlisted decks only.
+                An Archidekt link: the deck - its name, commander, boards and printings - is fetched when you create it. Public and unlisted decks only.
               </span>
             )}
             {blocked && (
               <span role="alert" className="text-xs text-amber-300">
-                {box.kind === 'both' ? 'There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.'
+                {moxfield ? MOXFIELD_REFUSES
+                  : box.kind === 'both' ? 'There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.'
                   : box.kind === 'links' ? 'There are two links here. Keep the one for this deck.'
-                    : 'That link is not one I can read yet (Moxfield and Archidekt are). Paste the list instead.'}
+                    : 'That link is not one I can read (Archidekt links are). Paste the list instead.'}
               </span>
             )}
             {!commander && box.kind === 'list' && (

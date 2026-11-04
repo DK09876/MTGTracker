@@ -28,7 +28,7 @@ import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
-import { readDeckBox } from '@/lib/deck-links';
+import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -361,7 +361,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {importing && (
         <form onSubmit={saveText} className="mt-4 flex flex-col gap-2">
           <p className="text-sm text-[var(--muted)]">
-            Edit the list, paste a new one over it, or replace it all with a link to a Moxfield or Archidekt deck.
+            Edit the list, paste a new one over it (from Moxfield, Arena or MTGO), or replace it all with a link to an Archidekt deck.
             Saving makes the {deck ? 'deck' : 'list'} exactly this — same format as Moxfield, Archidekt, Arena and MTGO.
           </p>
           <textarea
@@ -377,11 +377,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             const box = readDeckBox(decklist);
             if (box.kind === 'both') return <p role="alert" className="text-xs text-amber-300">There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.</p>;
             if (box.kind === 'links') return <p role="alert" className="text-xs text-amber-300">There are two links here. Keep the one for this deck.</p>;
-            if (box.kind === 'link') return <p className="text-xs text-emerald-400">Saving fetches that {box.link!.site === 'moxfield' ? 'Moxfield' : 'Archidekt'} deck and makes this deck exactly that.</p>;
+            if (box.kind === 'link' && box.link!.site === 'moxfield') return <p role="alert" className="text-xs text-amber-300">{MOXFIELD_REFUSES}</p>;
+            if (box.kind === 'link') return <p className="text-xs text-emerald-400">Saving fetches that Archidekt deck and makes this deck exactly that.</p>;
             return null;
           })()}
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <button disabled={importBusy || ['both', 'links'].includes(readDeckBox(decklist).kind)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
+            <button disabled={importBusy || ['both', 'links'].includes(readDeckBox(decklist).kind) || readDeckBox(decklist).link?.site === 'moxfield'} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
               {importBusy ? 'Saving…' : 'Save'}
             </button>
             <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
