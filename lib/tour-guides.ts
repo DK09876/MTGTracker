@@ -62,6 +62,11 @@ const DECK_STEPS: TourStep[] = [
   { target: 'roles', title: 'Roles against the guidelines', body: 'How many of each role the deck runs against common Commander counts. Click a role\'s name to see its cards.' },
   { target: 'hands', title: 'Opening hands', body: 'The odds of a keepable seven and of hitting land drops, from the real list.' },
 
+  { click: [tab('playtest'), '[data-tour-mode="goldfish"]', '[data-tour="goldfish-play"]'], target: 'goldfish-stats', title: 'Playtest: goldfish', body: 'Two thousand games alone, on autopilot: what turn the commander comes down, how often a land drop is missed, the mana each turn and how many sevens are mulliganed. Change the deck and play again - arrows show what got better or worse.' },
+  { target: 'goldfish-stuck', title: 'Stuck in hand', body: 'Cards still in hand after turn eight in a good share of the games they were drawn - too expensive, or a colour the lands cannot make often enough. Good places to look for cuts.' },
+  { click: [tab('playtest'), '[data-tour-mode="best"]', '?[data-tour="best-find"]:not(:disabled)'], target: 'best-hand-cards', title: 'The best hand', body: 'The strongest seven the deck can open with, found by trying hands a card at a time and playing each out. It shows which cards make the deck\'s ideal start.' },
+  { click: [tab('playtest'), '[data-tour-mode="play"]', '?[data-tour="play-draw"]'], target: 'play-table', title: 'Play it yourself', body: 'Draw a seven, mulligan, then click cards to play them, click again to tap, and go turn by turn. The commander waits in the command zone with its tax. Nothing here changes the deck.' },
+
   { click: [tab('suggestions')], target: 'combos', title: 'Combos it has', body: 'Every combo already in the list, from Commander Spellbook, and what each one makes.' },
   { target: 'one-away', title: 'One card away', body: 'Cards that would finish a combo with what the deck already holds, the ones completing the most first. Add one straight from here.' },
   { target: 'cuts', title: 'Cuts to consider', body: 'Where to look first when the deck needs room: roles it is over on, and cards this commander\'s decks rarely play. Prompts, not verdicts.' },
@@ -108,7 +113,7 @@ export const GUIDES: Guide[] = [
     title: 'Decks',
     help: [
       'Your Commander decks. Make one from a commander, or paste or import a decklist.',
-      'Open a deck for its tabs: Cards, Build, Chat, Tags, Health, Suggestions, Collection.',
+      'Open a deck for its tabs: Cards, Build, Chat, Tags, Health, Playtest, Suggestions, Collection.',
       'Decks are private until you show one on your profile.',
     ],
     steps: [
@@ -123,7 +128,7 @@ export const GUIDES: Guide[] = [
     title: 'A deck',
     help: [
       'Cards: the list, grouped and sorted how you like. Build: a checklist to build by. Chat: ask Claude about the deck.',
-      'Tags: your own categories and the brief. Health: curve, colours, roles, bracket and how it wins. Suggestions: combos and cuts. Collection: the physical deck.',
+      'Tags: your own categories and the brief. Health: curve, colours, roles, bracket and how it wins. Playtest: goldfish two thousand games, find the best opening hand, or play it by hand. Suggestions: combos and cuts. Collection: the physical deck.',
       'The ⋯ menu edits as text, renames, changes the commander, and shows the deck on your profile.',
     ],
     steps: DECK_STEPS,

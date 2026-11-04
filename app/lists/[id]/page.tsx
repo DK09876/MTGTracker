@@ -13,6 +13,7 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
@@ -372,7 +373,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {deck && (
         <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -418,6 +419,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onMove={moveCard}
           onRemove={(cardId) => changeQuantity(cardId, 0)}
         />
+      ) : deck && section === 'playtest' ? (
+        <DeckPlaytest listId={id} commander={list.commander} cards={cards.filter((c) => c.board === 'main')} />
       ) : deck && section === 'health' ? (
         <DeckHealth
           listId={id}

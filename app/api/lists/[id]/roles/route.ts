@@ -7,7 +7,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { cachedRoles, cardsInList, saveRoles } from '@/lib/db';
+import { cachedRoles, cardsInList, saveRoles, type List } from '@/lib/db';
 import { overrides, setOverride } from '@/lib/deck-roles';
 import { requireList } from '@/lib/profile-route';
 import { countRoles, ROLE_GROUPS, ROLES } from '@/lib/roles';
@@ -16,8 +16,11 @@ import { searchCards } from '@/lib/scryfall';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-async function cardRoles(listId: string, oracleId: string) {
-  const card = cardsInList(listId).find((c) => (c.card.oracle_id ?? c.card.id) === oracleId);
+async function cardRoles(list: List, oracleId: string) {
+  const listId = list.id;
+  // The commander is in the deck too, though not among its listed cards.
+  const commander = list.commander && (list.commander.oracle_id ?? list.commander.id) === oracleId ? { card: list.commander, quantity: 1 } : null;
+  const card = commander ?? cardsInList(listId).find((c) => (c.card.oracle_id ?? c.card.id) === oracleId);
   if (!card) return null;
   const found = await countRoles([card], { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles });
   const mine = overrides(listId).filter((o) => o.oracleId === oracleId);
@@ -32,7 +35,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const roles = await cardRoles(id, new URL(request.url).searchParams.get('card') ?? '');
+  const roles = await cardRoles(owned.list, new URL(request.url).searchParams.get('card') ?? '');
   return roles ? NextResponse.json({ roles }) : NextResponse.json({ error: 'That card is not in this deck' }, { status: 404 });
 }
 
@@ -43,6 +46,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const b = await request.json().catch(() => ({})) as { oracleId?: string; role?: string; has?: boolean | null };
   if (!b.oracleId || !b.role || !ROLES.some((r) => r.id === b.role)) return NextResponse.json({ error: 'Say which card and role' }, { status: 400 });
   setOverride(id, b.oracleId, b.role, typeof b.has === 'boolean' ? b.has : null);
-  const roles = await cardRoles(id, b.oracleId);
+  const roles = await cardRoles(owned.list, b.oracleId);
   return roles ? NextResponse.json({ roles }) : NextResponse.json({ error: 'That card is not in this deck' }, { status: 404 });
 }
