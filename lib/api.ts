@@ -37,6 +37,7 @@ import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
 import type { CutReview } from './cut-review';
+import type { GoldfishSettings } from './goldfish';
 import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
@@ -647,3 +648,15 @@ export const changePlan = (listId: string, change: PlanChange) => send(`lists/${
 export const cutReview = (listId: string) => fetch(url(`lists/${listId}/cuts/review`)).then(json<{ review: CutReview | null; job: Job | null }>);
 export const startCutReview = (listId: string, instructions: string) =>
   send(`lists/${listId}/cuts/review`, 'POST', { instructions }).then(json<{ job: Job }>).finally(jobsChanged);
+
+/** A deck's playtest settings, presets, and each card's tags by name. */
+export interface PlaytestState {
+  settings: GoldfishSettings;
+  presets: Array<{ name: string; settings: GoldfishSettings }>;
+  saved: boolean;
+  cardTags: Record<string, string[]>;
+  tagNames: string[];
+}
+export const deckPlaytest = (listId: string) => fetch(url(`lists/${listId}/playtest`)).then(json<PlaytestState>);
+export const savePlaytest = (listId: string, change: { settings?: GoldfishSettings; presets?: PlaytestState['presets'] }) =>
+  send(`lists/${listId}/playtest`, 'PUT', change).then(json<{ settings: GoldfishSettings; presets: PlaytestState['presets'] }>);

@@ -12,7 +12,7 @@
  * cards or copy spells; it measures how the mana and curve hold up.
  */
 
-import { DEFAULT_KEEP, keeps, type KeepRule } from './keep';
+import { cleanKeep, DEFAULT_KEEP, keeps, type KeepRule } from './keep';
 import type { ScryfallCard } from './scryfall';
 
 const COLORS = ['W', 'U', 'B', 'R', 'G'] as const;
@@ -477,4 +477,37 @@ export function bestHand(deck: SimCard[], commander: SimCard | null, opts: { bea
 /** A deck's cards as the simulator sees them, one entry per copy. */
 export function simDeck(cards: Array<{ card: ScryfallCard; quantity: number }>, tagsOf: (card: ScryfallCard) => string[] = () => []): SimCard[] {
   return cards.flatMap(({ card, quantity }) => Array.from({ length: quantity }, () => simCard(card, tagsOf(card))));
+}
+
+/** Settings as sent by the page, kept to what makes sense. */
+export function cleanGoldfishSettings(raw: unknown): GoldfishSettings {
+  const r = (raw ?? {}) as Partial<GoldfishSettings>;
+  const int = (v: unknown, lo: number, hi: number, d: number) => (Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi ? (v as number) : d);
+  const order = (Array.isArray(r.order) ? r.order : []).filter((s): s is PlayStep => !!s && (['mana', 'commander', 'biggest', 'cheapest'].includes(s.kind) || (s.kind === 'tag' && typeof (s as { tag?: unknown }).tag === 'string')))
+    .slice(0, 10);
+  const checks = (Array.isArray(r.checks) ? r.checks : []).filter((c): c is Check => !!c && Number.isInteger(c.turn) && c.turn >= 1 && c.turn <= 12 && (
+    c.kind === 'commander'
+    || (c.kind === 'mana' && Number.isInteger(c.amount) && c.amount >= 1 && c.amount <= 20)
+    || (c.kind === 'card' && (c.how === 'hand' || c.how === 'cast') && (typeof c.tag === 'string' || typeof c.name === 'string'))))
+    .slice(0, 8)
+    .map((c) => ({ ...c, good: !!c.good }));
+  return {
+    games: [500, 1000, 2000, 5000, 10000].includes(r.games as number) ? r.games! : DEFAULT_SETTINGS.games,
+    turns: int(r.turns, 4, 12, DEFAULT_SETTINGS.turns),
+    drawFirst: r.drawFirst !== false,
+    keep: cleanKeep(r.keep),
+    maxMulligans: int(r.maxMulligans, 0, 4, DEFAULT_SETTINGS.maxMulligans),
+    freeFirst: r.freeFirst !== false,
+    bottom: r.bottom === 'lands' ? 'lands' : 'expensive',
+    order: order.length ? order : DEFAULT_ORDER,
+    checks,
+  };
+}
+
+/** A deck's first goals: its commander on curve, and the flip turn's mana a turn early. */
+export function startingChecks(commanderMv: number | null, flip: number): Check[] {
+  return [
+    ...(commanderMv !== null ? [{ kind: 'commander' as const, turn: Math.min(12, Math.max(2, Math.round(commanderMv) + 1)), good: true }] : []),
+    { kind: 'mana' as const, amount: flip, turn: Math.min(12, Math.max(3, flip - 1)), good: true },
+  ];
 }

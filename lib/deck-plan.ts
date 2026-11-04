@@ -10,6 +10,7 @@
 
 import { cleanSettings, NO_SETTINGS, type CutSettings } from './cut-rules';
 import { database } from './db';
+import { cleanGoldfishSettings, DEFAULT_SETTINGS, startingChecks, type GoldfishSettings } from './goldfish';
 import { ROLES } from './roles';
 import type { ScryfallCard } from './scryfall';
 import { detectStyles, styleById, styleTargets, type Detected, type Style } from './styles';
@@ -166,6 +167,7 @@ export function changePlan(listId: string, change: PlanChange): void {
 
 /** Copy a plan to a duplicated deck. */
 export function copyPlan(fromId: string, toId: string): void {
+  playDb().run('INSERT OR IGNORE INTO deck_playtest (listId, settings, presets, updatedAt) SELECT ?, settings, presets, updatedAt FROM deck_playtest WHERE listId = ?', [toId, fromId]);
   rulesDb().run('INSERT OR IGNORE INTO deck_cut_rules (listId, settings, updatedAt) SELECT ?, settings, updatedAt FROM deck_cut_rules WHERE listId = ?', [toId, fromId]);
   db().run(`INSERT OR IGNORE INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, extra, updatedAt)
     SELECT ?, style, style2, targets, draft, confirmedAt, extra, updatedAt FROM deck_plans WHERE listId = ?`, [toId, fromId]);
@@ -221,4 +223,40 @@ export function setCutSettings(listId: string, settings: CutSettings): CutSettin
 export function planStyles(listId: string, commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): Style[] {
   const p = planFor(listId, '', commander, cards);
   return [p.style, ...(p.style2 ? [p.style2] : [])].filter((s) => s.id !== 'value');
+}
+
+// --- Playtest settings and presets ---------------------------------------------
+
+let playReady = false;
+function playDb() {
+  const d = database();
+  if (!playReady) {
+    d.run(`CREATE TABLE IF NOT EXISTS deck_playtest (listId TEXT PRIMARY KEY, settings TEXT NOT NULL, presets TEXT NOT NULL DEFAULT '[]', updatedAt TEXT NOT NULL)`);
+    playReady = true;
+  }
+  return d;
+}
+
+export interface PlaytestPreset { name: string; settings: GoldfishSettings }
+
+/** The deck's goldfish settings (its keep rule included), or a start from its plan. */
+export function playtestFor(listId: string, commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): { settings: GoldfishSettings; presets: PlaytestPreset[]; saved: boolean } {
+  const r = playDb().get('SELECT settings, presets FROM deck_playtest WHERE listId = ?', [listId]) as { settings: string; presets: string } | null;
+  if (r) return { settings: cleanGoldfishSettings(JSON.parse(r.settings)), presets: (JSON.parse(r.presets) as PlaytestPreset[]).map((p) => ({ name: p.name, settings: cleanGoldfishSettings(p.settings) })), saved: true };
+  const flip = planFor(listId, '', commander, cards).flip.value;
+  return { settings: { ...DEFAULT_SETTINGS, checks: startingChecks(commander?.cmc ?? null, flip) }, presets: [], saved: false };
+}
+
+export function savePlaytest(listId: string, change: { settings?: unknown; presets?: unknown }, current: { settings: GoldfishSettings; presets: PlaytestPreset[] }): { settings: GoldfishSettings; presets: PlaytestPreset[] } {
+  const settings = change.settings !== undefined ? cleanGoldfishSettings(change.settings) : current.settings;
+  const presets = change.presets !== undefined
+    ? (Array.isArray(change.presets) ? change.presets : []).filter((p): p is PlaytestPreset => !!p && typeof p.name === 'string' && p.name.trim() !== '')
+      .slice(0, 12).map((p) => ({ name: p.name.trim().slice(0, 40), settings: cleanGoldfishSettings(p.settings) }))
+    : current.presets;
+  playDb().run(
+    `INSERT INTO deck_playtest (listId, settings, presets, updatedAt) VALUES (?, ?, ?, ?)
+     ON CONFLICT(listId) DO UPDATE SET settings = excluded.settings, presets = excluded.presets, updatedAt = excluded.updatedAt`,
+    [listId, JSON.stringify(settings), JSON.stringify(presets), new Date().toISOString()],
+  );
+  return { settings, presets };
 }

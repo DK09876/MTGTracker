@@ -13,11 +13,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import KeepRule from './KeepRule';
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { ListedCard } from '@/lib/db';
 import { geek, seenBy } from '@/lib/geek';
 import type { Warning } from '@/lib/health';
+import type { KeepRule as KeepRuleType } from '@/lib/keep';
 import { atLeast } from '@/lib/odds';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
@@ -178,7 +180,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         </div>
       </Section>
 
-      {stats && <GeekStats stats={stats} library={health.hand.library} roles={Array.isArray(roles) ? roles : []} />}
+      {stats && <GeekStats stats={stats} library={health.hand.library} roles={Array.isArray(roles) ? roles : []} keep={<HealthKeep listId={listId} cards={cards} version={version} />} />}
     </div>
   );
 }
@@ -271,17 +273,13 @@ function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
  * hypergeometric odds from the library; the one assumption - nobody skips
  * the first draw in multiplayer - is said where it applies.
  */
-function GeekStats({ stats, library, roles }: { stats: ReturnType<typeof geek>; library: number; roles: RoleCount[] }) {
+function GeekStats({ stats, library, roles, keep }: { stats: ReturnType<typeof geek>; library: number; roles: RoleCount[]; keep: React.ReactNode }) {
   return (
     <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <summary className="cursor-pointer font-medium">Geek stats <span className="text-sm font-normal text-[var(--muted)]">— the deck in numbers</span></summary>
       <div className="mt-4 flex flex-col gap-7">
-        <GeekBlock title="Mulligans" note="A hand of 2–5 lands counts as keepable. In multiplayer the first mulligan is free.">
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Keep your seven" value={pct(stats.keep.seven)} />
-            <Stat label="With the free mulligan" value={pct(stats.keep.withFreeMulligan)} />
-            <Stat label="By a second mulligan" value={pct(stats.keep.withTwoMulligans)} />
-          </div>
+        <GeekBlock title="Mulligans" note="Your keep rule: the lands a seven needs, and any cards it must have. Playtest mulligans by the same rule. In multiplayer the first mulligan is free.">
+          {keep}
         </GeekBlock>
 
         <GeekBlock title="Hitting land drops" note="Chance of having played a land every turn so far. By turn N you have seen 7 + N cards: in multiplayer Commander nobody skips the first draw.">
@@ -576,4 +574,23 @@ function Columns({ data, format, unit, name }: {
       </details>
     </div>
   );
+}
+
+/** The keep rule, read and saved with the deck's playtest settings. */
+function HealthKeep({ listId, cards, version }: { listId: string; cards: ListedCard[]; version: string }) {
+  const [state, setState] = useState<api.PlaytestState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.deckPlaytest(listId).then((p) => { if (!cancelled) setState(p); }).catch(() => { if (!cancelled) setError('Couldn\'t read the keep rule just now.'); });
+    return () => { cancelled = true; };
+  }, [listId, version]);
+  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (!state) return <p className="text-sm text-[var(--muted)]">Reading the keep rule…</p>;
+  const save = async (keep: KeepRuleType) => {
+    const settings = { ...state.settings, keep };
+    setState({ ...state, settings });
+    try { await api.savePlaytest(listId, { settings }); } catch { setError('Couldn\'t save the keep rule.'); }
+  };
+  return <KeepRule rule={state.settings.keep} cards={cards} cardTags={state.cardTags} tagNames={state.tagNames} mulligans={state.settings.maxMulligans} onChange={save} />;
 }
