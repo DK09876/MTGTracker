@@ -226,6 +226,8 @@ export interface AssignInput extends DeckContext {
   tags: Tag[];
   /** The keys of the cards to tag this call; the rest of the deck is context. */
   batch: string[];
+  /** The owner's instructions for this run. */
+  instructions?: string;
 }
 
 export interface Assignment {
@@ -278,6 +280,7 @@ export function assignMessage(input: AssignInput): string {
     '',
     `Tag these ${batch.size} cards:`,
     ...input.cards.filter((c) => batch.has(c.key)).map((c) => describeCard(c, c.key)),
+    ...(input.instructions?.trim() ? ['', `The owner's instructions for this run - follow them:\n"""\n${input.instructions.trim()}\n"""`] : []),
   ].join('\n');
 }
 

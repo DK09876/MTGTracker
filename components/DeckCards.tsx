@@ -63,12 +63,14 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
   }, [prefs]);
 
   // A plain list has no tags or roles; it groups as it did before.
-  const groupBy: GroupBy = !isDeck && (prefs.groupBy === 'tag' || prefs.groupBy === 'role') ? 'type' : prefs.groupBy;
+  // Roles and tags are one idea now: grouping by "role" is grouping by tags, built-in ones included.
+  const asked: GroupBy = prefs.groupBy === 'role' ? 'tag' : prefs.groupBy;
+  const groupBy: GroupBy = !isDeck && asked === 'tag' ? 'type' : asked;
 
-  // Roles are looked up only when someone groups by them.
+  // The built-in tags (Scryfall's roles) are looked up only when someone groups by tags.
   const [roles, setRoles] = useState<RoleCount[] | null>(null);
   useEffect(() => {
-    if (!isDeck || groupBy !== 'role') return;
+    if (!isDeck || groupBy !== 'tag') return;
     let cancelled = false;
     api.deckRoles(listId).then((r) => { if (!cancelled) setRoles(r); }).catch(() => {});
     return () => { cancelled = true; };
@@ -76,20 +78,19 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
 
   const onCard = useMemo(() => tagsByCard(tags ?? { brief: '', overview: '', tags: [], cardTags: [] }), [tags]);
   const categories = useMemo((): Categories | undefined => {
-    if (groupBy === 'tag' && tags) {
-      return {
-        of: (card) => (onCard.get(tagKey(card)) ?? []).map(({ tag }) => tag.id),
-        order: tags.tags.filter((t) => t.status === 'accepted').map((t) => ({ key: t.id, label: t.name, color: t.color })),
-        none: 'Untagged',
-      };
-    }
-    if (groupBy === 'role' && roles) {
+    if (groupBy === 'tag' && tags && roles) {
+      // Your tags first, then the built-in ones from Scryfall, then lands.
       const byName = new Map<string, string[]>();
-      for (const r of roles) for (const name of r.cards) byName.set(name, [...(byName.get(name) ?? []), r.id]);
+      for (const r of roles) for (const name of r.cards) byName.set(name, [...(byName.get(name) ?? []), `role:${r.id}`]);
       return {
-        of: (card) => (primaryType(card) === 'Lands' ? ['lands'] : byName.get(card.name) ?? []),
-        order: [...roles.map((r) => ({ key: r.id, label: r.label })), { key: 'lands', label: 'Lands' }],
-        none: 'No role',
+        of: (card) => primaryType(card) === 'Lands' ? ['lands']
+          : [...(onCard.get(tagKey(card)) ?? []).map(({ tag }) => tag.id), ...(byName.get(card.name) ?? [])],
+        order: [
+          ...tags.tags.filter((t) => t.status === 'accepted').map((t) => ({ key: t.id, label: t.name, color: t.color })),
+          ...roles.filter((r) => r.count > 0).map((r) => ({ key: `role:${r.id}`, label: `${r.label} · auto` })),
+          { key: 'lands', label: 'Lands' },
+        ],
+        none: 'Untagged',
       };
     }
     return undefined;
@@ -98,7 +99,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
   const onBoard = isDeck ? entries.filter((e) => e.board === board) : entries;
   const { results: shown, unsupported } = filterCards(onBoard, filter);
   const groups = groupCards(shown, groupBy, prefs.sortBy, categories);
-  const waiting = (groupBy === 'tag' && !tags) || (groupBy === 'role' && !roles);
+  const waiting = groupBy === 'tag' && (!tags || !roles);
   const noTags = groupBy === 'tag' && tags && !tags.tags.some((t) => t.status === 'accepted');
   const copies = (b: Board) => entries.filter((e) => e.board === b).reduce((n, e) => n + e.quantity, 0);
 
@@ -150,8 +151,7 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
         <select aria-label="Group by" value={groupBy} onChange={(e) => setPrefs((p) => ({ ...p, groupBy: e.target.value as GroupBy }))} className={select('')}>
           <option value="type">Group: type</option>
           <option value="mv">Group: mana value</option>
-          {isDeck && <option value="tag">Group: my tags</option>}
-          {isDeck && <option value="role">Group: role (automatic)</option>}
+          {isDeck && <option value="tag">Group: tags</option>}
           <option value="none">No groups</option>
         </select>
         <select aria-label="Sort by" value={prefs.sortBy} onChange={(e) => setPrefs((p) => ({ ...p, sortBy: e.target.value as SortBy }))} className={select('')}>
@@ -176,13 +176,13 @@ export default function DeckCards({ listId, entries, tags, version, isDeck, onSe
         </p>
       )}
       {waiting && onBoard.length > 0 && (
-        <p className="mt-3 text-xs text-[var(--muted)]">{groupBy === 'role' ? 'Looking up roles…' : 'Loading tags…'}</p>
+        <p className="mt-3 text-xs text-[var(--muted)]">Loading tags…</p>
       )}
       {noTags && (
-        <p className="mt-3 text-xs text-[var(--muted)]">This deck has no tags yet — make some in the Tags tab, or open a card to tag it.</p>
+        <p className="mt-3 text-xs text-[var(--muted)]">None of your own tags yet - the built-in ones are shown; make your own on the Tags tab, or open a card to tag it.</p>
       )}
-      {(groupBy === 'tag' || groupBy === 'role') && categories && (
-        <p className="mt-3 text-xs text-[var(--muted)]">A card with several {groupBy === 'tag' ? 'tags' : 'roles'} is listed under each.</p>
+      {groupBy === 'tag' && categories && (
+        <p className="mt-3 text-xs text-[var(--muted)]">Your tags first, then the built-in ones from Scryfall (marked auto). A card with several tags is listed under each.</p>
       )}
       {onBoard.length > 0 && !shown.length && (
         <p className="mt-10 text-center text-[var(--muted)]">Nothing here matches that filter.</p>

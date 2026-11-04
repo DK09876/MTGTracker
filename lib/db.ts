@@ -890,13 +890,15 @@ export function setCardTag(listId: string, cardKey: string, tagId: string, on: b
  * The model's tags for these cards replace its earlier ones on them. What
  * the owner set by hand - tags on and tags taken off - is left alone.
  */
-export function applyModelTags(listId: string, cardKeys: string[], found: Array<{ key: string; tagId: string; reason: string }>): number {
+export function applyModelTags(listId: string, cardKeys: string[], found: Array<{ key: string; tagId: string; reason: string }>, onlyTags?: string[]): number {
   const database = open();
   let added = 0;
   database.run('BEGIN');
   try {
     for (const key of cardKeys) {
-      database.run(`DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND source = 'ai'`, [listId, key]);
+      // A run limited to some tags leaves the model's other tags on these cards alone.
+      if (onlyTags) for (const tagId of onlyTags) database.run(`DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ? AND source = 'ai'`, [listId, key, tagId]);
+      else database.run(`DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND source = 'ai'`, [listId, key]);
     }
     for (const { key, tagId, reason } of found) {
       if (database.get('SELECT 1 FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, key, tagId])) continue;

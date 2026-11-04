@@ -36,13 +36,14 @@ export function startJob(list: List, params: JobParams, profile: string): TagJob
   const job = newJob(list.id, params);
   launch(job, {
     propose: (instructions, o) => proposeStep(model, at, instructions, o),
-    assign: (keys, o) => assignStep(cardModel, at, keys, o),
+    assign: (keys, o) => assignStep(cardModel, at, keys, o, { tagIds: params.tagIds, instructions: params.instructions }),
     audit: (ids, o) => auditStep(cardModel, at, ids, o),
-    plan: (scope) => {
+    plan: (p) => {
       const tags = deckTags(list.id);
+      const accepted = tags.tags.filter((t) => t.status === 'accepted').map((t) => t.id);
       return {
-        cards: cardsToTag(taggingDeck(list, params.boards), tags.cardTags, scope),
-        tags: tags.tags.filter((t) => t.status === 'accepted').map((t) => t.id),
+        cards: cardsToTag(taggingDeck(list, p.boards), tags.cardTags, p.scope ?? 'all', { missingTag: p.missingTag, picked: p.picked }),
+        tags: p.tagIds?.length ? accepted.filter((id) => p.tagIds!.includes(id)) : accepted,
       };
     },
     save: (j) => {

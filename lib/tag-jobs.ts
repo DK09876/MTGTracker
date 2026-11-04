@@ -20,6 +20,7 @@ import type { Board } from './decklist';
 import { BATCHES, modelLabel, type Mode } from './quota';
 
 export type JobKind = 'propose' | 'tag';
+export type TagScope = 'all' | 'untagged' | 'missing' | 'picked';
 export type JobStatus = 'running' | 'done' | 'failed' | 'stopped' | 'interrupted';
 
 export interface JobParams {
@@ -29,7 +30,13 @@ export interface JobParams {
   instructions?: string;
   /** Tag: batch sizes, which cards, and whether to recheck each tag after. */
   mode?: Mode;
-  scope?: 'all' | 'untagged';
+  /** Which cards: all, those with no tag yet, those without one chosen tag, or ones the owner picked. */
+  scope?: TagScope;
+  /** For 'missing': the tag they lack. For 'picked': the card keys. */
+  missingTag?: string;
+  picked?: string[];
+  /** Only these tags are put on (and taken off); all accepted tags when absent. */
+  tagIds?: string[];
   audit?: boolean;
 }
 
@@ -73,7 +80,7 @@ export interface JobDeps {
   assign: (keys: string[], options: CallOptions) => Promise<{ added: number; skipped: number; model: string | null }>;
   audit: (tagIds: string[], options: CallOptions) => Promise<{ added: number; removed: number; model: string | null }>;
   /** The cards to tag, by key, and the accepted tags' ids - read when the job starts. */
-  plan: (scope: 'all' | 'untagged') => { cards: string[]; tags: string[] };
+  plan: (params: JobParams) => { cards: string[]; tags: string[] };
   save: (job: TagJob) => void;
   now?: () => number;
 }
@@ -136,7 +143,7 @@ export async function runJob(job: TagJob, deps: JobDeps, signal: AbortSignal): P
       log('info', `${modelLabel(r.model)} suggested ${plural(r.proposed, 'tag')}`);
     } else {
       const size = BATCHES[job.params.mode ?? 'free'];
-      const { cards, tags } = deps.plan(job.params.scope ?? 'all');
+      const { cards, tags } = deps.plan(job.params);
       const cardBatches = evenBatches(cards, size.cards);
       job.total = cards.length;
       log('info', `Tagging ${plural(cards.length, 'card')} with ${plural(tags.length, 'tag')} in ${plural(cardBatches.length, 'batch')}`);

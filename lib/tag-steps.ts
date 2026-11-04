@@ -9,6 +9,7 @@ import type { CallOptions, JsonModel } from './ai';
 import { applyModelAudit, applyModelTags, deckTags, replaceProposals, type List } from './db';
 import type { Board } from './decklist';
 import { taggingDeck, type TaggingDeck } from './tag-deck';
+import type { TagScope } from './tag-jobs';
 import {
   ASSIGN_SCHEMA, ASSIGN_SYSTEM, assignMessage, AUDIT_SCHEMA, AUDIT_SYSTEM, auditMessage, BRIEF_CHECK, BRIEF_SCHEMA, BRIEF_SYSTEM, briefMessage, parseBrief,
   type BriefMode, type DraftedBrief,
@@ -48,18 +49,20 @@ export async function proposeStep(model: JsonModel, at: StepDeck, instructions: 
 }
 
 /** Tag a batch of cards, given by tag key, with the accepted tags. */
-export async function assignStep(model: JsonModel, at: StepDeck, keys: string[], options?: CallOptions) {
-  const { deck, accepted, context } = read(at);
+export async function assignStep(model: JsonModel, at: StepDeck, keys: string[], options?: CallOptions, only: { tagIds?: string[]; instructions?: string } = {}) {
+  const { deck, accepted: all, context } = read(at);
+  // A run limited to some tags puts on - and takes off - only those.
+  const accepted = only.tagIds?.length ? all.filter((t) => only.tagIds!.includes(t.id)) : all;
   if (!accepted.length) throw new StepError('Accept some tags first');
   const batch = keys.map((k) => deck.refOf.get(k)).filter((r): r is string => !!r);
   if (!batch.length) return { tagged: 0, skipped: keys.length, added: 0, model: null };
-  const input = { ...context, tags: accepted, batch };
+  const input = { ...context, tags: accepted, batch, instructions: only.instructions };
   const answer = await model({ step: 'tag cards', system: ASSIGN_SYSTEM, user: assignMessage(input), schema: ASSIGN_SCHEMA }, options);
   const { assignments, answered } = parseAssignments(answer.data, accepted, batch, deck.cards);
   // Only cards the model answered for lose their old model tags; a card it
   // skipped keeps what it had rather than being wiped.
   const added = applyModelTags(at.list.id, answered.map((r) => deck.keyOf.get(r)!),
-    assignments.map((a) => ({ ...a, key: deck.keyOf.get(a.key)! })));
+    assignments.map((a) => ({ ...a, key: deck.keyOf.get(a.key)! })), only.tagIds?.length ? accepted.map((t) => t.id) : undefined);
   return { tagged: answered.length, skipped: batch.length - answered.length, added, model: answer.model };
 }
 
@@ -85,10 +88,19 @@ export async function auditStep(model: JsonModel, at: StepDeck, tagIds: string[]
   return { ...result, model: answer.model };
 }
 
-/** The cards to tag, by tag key: all of them, or those with no tag on yet. */
-export function cardsToTag(deck: TaggingDeck, cardTags: Array<{ key: string; on: boolean }>, scope: 'all' | 'untagged'): string[] {
-  const tagged = new Set(cardTags.filter((l) => l.on).map((l) => l.key));
-  return deck.cards.map((c) => deck.keyOf.get(c.key)!).filter((k) => scope === 'all' || !tagged.has(k));
+/**
+ * The cards to tag, by tag key: all of them, those with no tag on yet,
+ * those without one chosen tag, or the ones the owner picked.
+ */
+export function cardsToTag(
+  deck: TaggingDeck, cardTags: Array<{ key: string; tagId: string; on: boolean }>, scope: TagScope,
+  opts: { missingTag?: string; picked?: string[] } = {},
+): string[] {
+  const keys = deck.cards.map((c) => deck.keyOf.get(c.key)!);
+  if (scope === 'untagged') { const tagged = new Set(cardTags.filter((l) => l.on).map((l) => l.key)); return keys.filter((k) => !tagged.has(k)); }
+  if (scope === 'missing') { const has = new Set(cardTags.filter((l) => l.on && l.tagId === opts.missingTag).map((l) => l.key)); return keys.filter((k) => !has.has(k)); }
+  if (scope === 'picked') { const picked = new Set(opts.picked ?? []); return keys.filter((k) => picked.has(k)); }
+  return keys;
 }
 
 /** Draft the brief: how the deck wins - or that it does not - and its plan. Nothing is saved; the owner edits it. */
