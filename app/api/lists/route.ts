@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
 
 import { localCardsByOracle } from '@/lib/card-store';
 
-import { createList, getList, listLists, type ListKind } from '@/lib/db';
+import { createList, getList, listLists, renameList, type ListKind } from '@/lib/db';
 import { deckText, DeckLinkError } from '@/lib/deck-links';
 import { importInto } from '@/lib/import-into';
 import { requireProfile } from '@/lib/profile-route';
@@ -57,7 +57,9 @@ export async function POST(request: Request) {
     if (error instanceof DeckLinkError) return NextResponse.json({ error: error.message }, { status: 400 });
     throw error;
   }
-  const name = (body.name ?? '').trim() || linked?.name || '';
+  // A pasted deck with no name takes its commander's once read; 'New deck' until then.
+  const unnamed = !(body.name ?? '').trim() && !linked?.name && kind === 'deck' && !!linked?.text.trim();
+  const name = (body.name ?? '').trim() || linked?.name || (unnamed ? 'New deck' : '');
   if (!name) return NextResponse.json({ error: 'A list needs a name' }, { status: 400 });
 
   try {
@@ -68,6 +70,7 @@ export async function POST(request: Request) {
     const list = createList(who.profile, name, (body.note ?? '').trim(), { kind, commander });
     const imported = linked?.text.trim() ? await importInto(list, linked.text, who.profile) : undefined;
     if (imported) warmRoles(list, who.profile);
+    if (unnamed && imported?.commander) renameList(list.id, imported.commander);
     // A starter list, built in the background: the deck opens at once and fills in.
     if (!imported && body.starter && commander) {
       const profile = who.profile;

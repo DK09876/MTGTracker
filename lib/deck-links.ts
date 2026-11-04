@@ -144,7 +144,7 @@ export async function deckText(box: string, fetcher: typeof fetch = fetch): Prom
   const read = readDeckBox(box);
   if (read.kind === 'both') throw new DeckLinkError('There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.');
   if (read.kind === 'links') throw new DeckLinkError('There are two links here. Keep the one for this deck.');
-  if (read.kind === 'unknown-link') throw new DeckLinkError('That link is not one I can read yet (Moxfield and Archidekt are). Paste the list instead.');
+  if (read.kind === 'unknown-link') throw new DeckLinkError('That link is not one I can read (Archidekt links are). Paste the list instead.');
   if (read.kind === 'link' && read.link!.site === 'moxfield') throw new DeckLinkError(MOXFIELD_REFUSES);
   if (read.kind === 'link') {
     const deck = await fetchDeckLink(read.link!, fetcher);
@@ -152,3 +152,24 @@ export async function deckText(box: string, fetcher: typeof fetch = fetch): Prom
   }
   return { text: box, name: null, site: null };
 }
+
+/**
+ * What a pasted list can hold, shown as the box's placeholder: the boards
+ * by heading, and a printing or foil on a line. Other shapes read too - see
+ * parseDecklist.
+ */
+export const DECKLIST_EXAMPLE = [
+  'Commander',
+  '1 Kratos, God of War',
+  '',
+  'Deck',
+  '1x Sol Ring (SOC) 128',
+  '1 Lightning Bolt *F*',
+  '33 Mountain',
+  '',
+  'Sideboard',
+  '1 Blasphemous Act',
+  '',
+  'Maybeboard',
+  '1 Lightning Greaves',
+].join('\n');

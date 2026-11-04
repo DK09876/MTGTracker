@@ -22,6 +22,7 @@ import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
 import DeckTags from '@/components/DeckTags';
+import PasteFormats from '@/components/PasteFormats';
 import ImportResult from '@/components/ImportResult';
 import { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
@@ -29,7 +30,7 @@ import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
-import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
+import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -216,11 +217,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   };
 
   /** Save the text back: the list becomes exactly what it says. */
-  const saveText = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveText = async (e?: React.FormEvent, text = decklist) => {
+    e?.preventDefault();
     setImportBusy(true);
     try {
-      const { imported: result, ok } = await api.replaceDecklist(id, decklist);
+      const { imported: result, ok } = await api.replaceDecklist(id, text);
       setImported(result);
       setRejected(!ok);
       if (ok) {
@@ -408,15 +409,15 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {importing && (
         <form onSubmit={saveText} className="mt-4 flex flex-col gap-2">
           <p className="text-sm text-[var(--muted)]">
-            Edit the list, paste a new one over it (from Moxfield, Arena or MTGO), or replace it all with a link to an Archidekt deck.
-            Saving makes the {deck ? 'deck' : 'list'} exactly this — same format as Moxfield, Archidekt, Arena and MTGO.
+            Edit the list, paste a new one over it (a text export from Arena, MTGO, Archidekt, Moxfield and most sites), or replace it all with a link to an Archidekt deck.
+            Saving makes the {deck ? 'deck' : 'list'} exactly this. Moxfield links aren&apos;t supported - use its Export and paste the list. <PasteFormats />
           </p>
           <textarea
             value={decklist}
             onChange={(e) => { setDecklist(e.target.value); setRejected(false); }}
             rows={Math.min(24, Math.max(8, decklist.split('\n').length + 1))}
             autoFocus
-            placeholder={'1 Sol Ring (SOC) 128\n33 Mountain (ACR) 107'}
+            placeholder={DECKLIST_EXAMPLE}
             spellCheck={false}
             className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
           />
@@ -459,7 +460,19 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           {exported === 'copied' ? 'Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.' : 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'}
         </p>
       )}
-      {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
+      {imported && (rejected || imported.commander) && (
+        <ImportResult
+          result={imported}
+          applied={!rejected}
+          // Replacing waits for every line, so a typo never silently drops a card; this is the way past that, on purpose.
+          onDropProblems={rejected ? () => {
+            const bad = new Set([...imported.missing, ...imported.unreadable]);
+            const kept = decklist.split(/\r?\n/).filter((l) => !bad.has(l.trim())).join('\n');
+            setDecklist(kept);
+            void saveText(undefined, kept);
+          } : undefined}
+        />
+      )}
 
       {building && (
         <p className="mt-4 flex items-center gap-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-2.5 text-sm">

@@ -85,6 +85,18 @@ describe('resolveDecklist', () => {
     expect(result.commander).toBeNull();
   });
 
+  it('keeps a picked commander over the list\'s when asked, and puts the list\'s in the deck', async () => {
+    const text = 'Commander\n1 Kratos, God of War\n\nDeck\n1 Lightning Bolt';
+    const kept = await resolveDecklist(text, fakeCollection(), { commanderPicked: 'Fire Lord Azula', keepPicked: true });
+    expect(kept.commander).toBeNull();
+    expect(kept.outvoted).toBe('Kratos, God of War');
+    expect(kept.cards.map((c) => c.card.name)).toContain('Kratos, God of War');
+    // Replacing a deck's list still lets the list's Commander section set it.
+    const replaced = await resolveDecklist(text, fakeCollection(), { commanderPicked: 'Fire Lord Azula' });
+    expect(replaced.commander?.name).toBe('Kratos, God of War');
+    expect(replaced.outvoted).toBeNull();
+  });
+
   it('makes one request per pass, not one per card', async () => {
     const collection = fakeCollection();
     await resolveDecklist('1 Lightning Bolt (XYZ) 1\n33 Mountain (ACR) 107\n1 Kratos, God of War (SLD) 2207', collection, { commanderPicked: null });

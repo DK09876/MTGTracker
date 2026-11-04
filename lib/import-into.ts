@@ -37,6 +37,8 @@ export interface ImportSummary {
   copies: number;
   /** The commander taken from the list, if one was. */
   commander: string | null;
+  /** A commander the list named that lost to the deck's own, and so went into the deck. */
+  outvoted?: string | null;
   missing: string[];
   unreadable: string[];
   skipped: number;
@@ -45,6 +47,7 @@ export interface ImportSummary {
 export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, text: string, profileId: string | null = null): Promise<ImportSummary> {
   const resolved = await resolveDecklist(text, collection, {
     commanderPicked: list.commander?.name ?? null,
+    keepPicked: true,
     local: { byName: localCards, printingsLater: true },
   });
   const takeCommander = list.kind === 'deck' && !list.commander && resolved.commander;
@@ -74,6 +77,7 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     added: resolved.cards.length,
     copies: resolved.cards.reduce((n, c) => n + c.quantity, 0),
     commander: takeCommander ? resolved.commander!.name : null,
+    outvoted: resolved.outvoted,
     missing: resolved.missing,
     unreadable: resolved.unreadable,
     skipped: resolved.skipped,

@@ -26,6 +26,8 @@ export interface Resolved {
   commander: ScryfallCard | null;
   /** The finish of the commander's line, including a picked commander's. */
   commanderFinish: Finish | null;
+  /** A commander the list named that lost to the picked one, and so sits in the deck. */
+  outvoted: string | null;
   /** Lines that named a card Scryfall could not find. */
   missing: string[];
   /** Lines that could not be read as a card at all. */
@@ -63,7 +65,12 @@ export function canLead(card: ScryfallCard): boolean {
 }
 
 export async function resolveDecklist(
-  text: string, collection: Collection, { commanderPicked, local }: { commanderPicked: string | null; local?: Local },
+  text: string, collection: Collection, { commanderPicked, keepPicked = false, local }: {
+    commanderPicked: string | null;
+    /** The picked commander stays even when the list names another; that one joins the deck. */
+    keepPicked?: boolean;
+    local?: Local;
+  },
 ): Promise<Resolved> {
   const { entries, unreadable } = parseDecklist(text);
   const wanted = entries.filter((e) => e.section !== 'skip');
@@ -96,7 +103,9 @@ export async function resolveDecklist(
 
   let commander: ScryfallCard | null = null;
   const named = resolved.find((r) => r.entry.section === 'commander');
-  if (named) commander = named.card;
+  // The list's commander loses to a picked one only when asked; it is then just a card in the deck.
+  const outvoted = named && keepPicked && commanderPicked && front(named.card.name) !== front(commanderPicked) ? named : null;
+  if (named && !outvoted) commander = named.card;
   else if (!commanderPicked && resolved[0]?.entry.section === 'main' && canLead(resolved[0].card)) commander = resolved[0].card;
   let commanderFinish: Finish | null = null;
 
@@ -116,7 +125,7 @@ export async function resolveDecklist(
     if (existing) existing.quantity += entry.quantity;
     else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board });
   }
-  return { cards, commander, commanderFinish, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
+  return { cards, commander, commanderFinish, outvoted: outvoted?.card.name ?? null, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
 }
 
 async function lookUp(entries: Entry[], collection: Collection, printings: boolean): Promise<Map<Entry, ScryfallCard>> {

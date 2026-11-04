@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * Your decks, and a new one: a name, a commander picked from a search, and
- * optionally a decklist pasted from Moxfield, Archidekt, Arena or MTGO.
+ * Your decks, sorted and filtered, and a new one: a name, a commander
+ * picked from a search, and optionally a pasted list or an Archidekt link.
  */
 
 import Image from 'next/image';
@@ -12,14 +12,48 @@ import { useEffect, useState } from 'react';
 
 import CommanderPicker from '@/components/CommanderPicker';
 import ImportResult from '@/components/ImportResult';
-import { IdentitySymbols } from '@/components/ManaCost';
+import ManaCost, { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
+import PasteFormats from '@/components/PasteFormats';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
-import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
+import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
+import { parseDecklist } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
+
+type Sort = 'recent' | 'name' | 'commander' | 'price' | 'created';
+const SORTS: Array<[Sort, string]> = [['recent', 'Recently edited'], ['name', 'Name'], ['commander', 'Commander'], ['price', 'Price'], ['created', 'Newest']];
+const COLOURS = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
+// How the grid is sorted and which colours it shows, remembered in this browser.
+const VIEW_KEY = 'mtg-decks-view';
+interface View { sort: Sort; colours: string[]; short: boolean }
+const DEFAULT_VIEW: View = { sort: 'recent', colours: [], short: false };
+
+function loadView(): View {
+  try { return { ...DEFAULT_VIEW, ...(JSON.parse(localStorage.getItem(VIEW_KEY) ?? 'null') as Partial<View> | null) }; } catch { return DEFAULT_VIEW; }
+}
+
+/** The decks the toolbar lets through, in its order. Colours: the deck has every one picked; C is colourless. */
+function shownDecks(decks: List[], view: View, query: string): List[] {
+  const q = query.trim().toLowerCase();
+  const out = decks.filter((d) => {
+    if (q && !d.name.toLowerCase().includes(q) && !(d.commander?.name.toLowerCase().includes(q))) return false;
+    if (view.short && d.totalCards === 100) return false;
+    const id = d.commander?.color_identity ?? [];
+    if (view.colours.includes('C')) return id.length === 0 && view.colours.length === 1;
+    return view.colours.every((c) => id.includes(c));
+  });
+  const by: Record<Sort, (a: List, b: List) => number> = {
+    recent: (a, b) => b.updatedAt.localeCompare(a.updatedAt),
+    created: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    name: (a, b) => a.name.localeCompare(b.name),
+    commander: (a, b) => (a.commander?.name ?? '~').localeCompare(b.commander?.name ?? '~') || a.name.localeCompare(b.name),
+    price: (a, b) => b.totalValue - a.totalValue,
+  };
+  return out.sort(by[view.sort]);
+}
 
 export default function DecksPage() {
   const router = useRouter();
@@ -37,6 +71,15 @@ export default function DecksPage() {
   const [ownedFirst, setOwnedFirst] = useState(true);
   const [busy, setBusy] = useState(false);
   const [imported, setImported] = useState<{ id: string; result: ImportSummary } | null>(null);
+  const [view, setView] = useState<View>(() => (typeof window === 'undefined' ? DEFAULT_VIEW : loadView()));
+  const [query, setQuery] = useState('');
+  const changeView = (patch: Partial<View>) => setView((v) => {
+    const next = { ...v, ...patch };
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(next)); } catch { /* fine */ }
+    return next;
+  });
+  const shown = shownDecks(decks, view, query);
+  const filtered = !!query.trim() || view.colours.length > 0 || view.short;
 
   useEffect(() => {
     api.fetchLists('deck').then(setDecks).catch((e) => setError(e.message)).finally(() => setLoading(false));
@@ -45,15 +88,16 @@ export default function DecksPage() {
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     // A link brings its own name; otherwise the commander's.
-    const deckName = name.trim() || commander?.name || (box.kind === 'link' ? '' : null);
-    if (deckName === null || deckName === undefined) { setError('Give the deck a name or pick a commander'); return; }
+    // A link or a list brings its own name (a list takes its commander's).
+    const deckName = name.trim() || commander?.name || (box.kind === 'link' || box.kind === 'list' ? '' : null);
+    if (deckName === null || deckName === undefined) { setError('Pick a commander, or paste a list or a link'); return; }
     setBusy(true);
     setError(null);
     try {
       const { list, imported: result } = await api.createDeck(deckName, commander, decklist,
         commander && !decklist.trim() && starter ? { ownedFirst } : undefined);
       // Show what an import did before moving on; otherwise go straight in.
-      if (result && (result.missing.length || result.unreadable.length)) {
+      if (result && (result.missing.length || result.unreadable.length || result.outvoted)) {
         setDecks((prev) => [...prev, list]);
         setImported({ id: list.id, result });
       } else {
@@ -68,6 +112,9 @@ export default function DecksPage() {
 
   const box = readDeckBox(decklist);
   const moxfield = box.kind === 'link' && box.link!.site === 'moxfield';
+  // The list's own Commander line, to warn when a different commander is picked.
+  const listCommander = box.kind === 'list' ? parseDecklist(decklist).entries.find((e) => e.section === 'commander')?.name ?? null : null;
+  const clash = !!commander && !!listCommander && listCommander.split(' // ')[0].toLowerCase() !== commander.name.split(' // ')[0].toLowerCase();
   const blocked = box.kind === 'both' || box.kind === 'links' || box.kind === 'unknown-link' || moxfield;
 
   return (
@@ -106,13 +153,15 @@ export default function DecksPage() {
           </label>
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-[var(--muted)]">
-              Bring a deck <span className="opacity-70">(optional) - paste its list (Moxfield, Arena, MTGO), or a link to it on Archidekt</span>
+              Bring a deck <span className="opacity-70">(optional) - paste its list, or a link to it on Archidekt. Moxfield links aren&apos;t supported: use its Export and paste the list.</span>{' '}
+              <PasteFormats />
             </span>
             <textarea
               value={decklist}
-              onChange={(e) => setDecklist(e.target.value)}
-              rows={8}
-              placeholder={'https://moxfield.com/decks/…\n\nor a list:\n1x Kratos, God of War (SLD) 2207\n1x Sol Ring (SOC) 128\n33x Mountain (ACR) 107'}
+              onChange={(e) => { setDecklist(e.target.value); setError(null); }}
+              // Tall enough for the whole example while empty.
+              rows={decklist.trim() ? 10 : 16}
+              placeholder={`https://archidekt.com/decks/…\n\nor a list:\n${DECKLIST_EXAMPLE}`}
               spellCheck={false}
               className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
             />
@@ -131,8 +180,13 @@ export default function DecksPage() {
             )}
             {!commander && box.kind === 'list' && (
               <span className="text-xs text-[var(--muted)]">
-                No commander picked: the list&apos;s &ldquo;Commander&rdquo; section is used, or its first card if that can be one —
-                otherwise you can pick it from the deck&apos;s legendary cards afterwards.
+                No commander picked: {listCommander ? <>the list&apos;s commander, {listCommander}, is used</> : <>the list&apos;s first card is used if it can be a commander - otherwise you can pick one from the deck&apos;s legendary cards afterwards</>}.
+                {!name.trim() && ' The deck is named after its commander.'}
+              </span>
+            )}
+            {clash && (
+              <span className="text-xs text-amber-300">
+                The list names {listCommander} as its commander, but you picked {commander!.name}. Yours is used, and {listCommander} goes in the deck as a card.
               </span>
             )}
           </label>
@@ -190,8 +244,57 @@ export default function DecksPage() {
         <p className="mt-10 text-center text-[var(--muted)]">No decks yet.</p>
       )}
 
-      <div data-tour="deck-grid" className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {decks.map((deck) => {
+      {decks.length > 1 && (
+        <div data-tour="deck-sort" className="mt-6 flex flex-wrap items-center gap-2 text-sm">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Find a deck or commander"
+            aria-label="Find a deck or commander"
+            className="w-full rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 outline-none focus:border-[var(--accent)] sm:w-64"
+          />
+          <div role="group" aria-label="Colours" className="flex items-center gap-1">
+            {COLOURS.map((c) => {
+              const on = view.colours.includes(c);
+              return (
+                <button
+                  key={c}
+                  aria-pressed={on}
+                  title={c === 'C' ? 'Colourless' : `Has ${c}`}
+                  aria-label={c === 'C' ? 'Colourless' : `Has ${c}`}
+                  onClick={() => changeView({ colours: on ? view.colours.filter((x) => x !== c) : c === 'C' ? ['C'] : [...view.colours.filter((x) => x !== 'C'), c] })}
+                  className={`rounded-full p-1 transition ${on ? 'bg-[var(--accent)]/25 ring-1 ring-[var(--accent)]' : 'opacity-55 hover:opacity-100'}`}
+                >
+                  <ManaCost cost={`{${c}}`} size={18} />
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs">
+            <input type="checkbox" checked={view.short} onChange={(e) => changeView({ short: e.target.checked })} />
+            Not 100 yet
+          </label>
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-[var(--muted)]">
+            Sort
+            <select
+              value={view.sort}
+              onChange={(e) => changeView({ sort: e.target.value as Sort })}
+              className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+            >
+              {SORTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+          {filtered && (
+            <p className="basis-full text-xs text-[var(--muted)]">
+              {shown.length ? `Showing ${shown.length} of ${decks.length}.` : 'No decks match.'}{' '}
+              <button onClick={() => { setQuery(''); changeView({ colours: [], short: false }); }} className="underline hover:text-[var(--foreground)]">Clear</button>
+            </p>
+          )}
+        </div>
+      )}
+
+      <div data-tour="deck-grid" className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(16.5rem,1fr))] gap-3">
+        {shown.map((deck) => {
           const art = deck.commander ? deck.commander.image_uris?.art_crop ?? deck.commander.card_faces?.[0]?.image_uris?.art_crop ?? imageOf(deck.commander, 'normal') : null;
           const total = deck.totalCards;
           const identity = deck.commander?.color_identity ?? [];
@@ -201,19 +304,22 @@ export default function DecksPage() {
             <Link
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
-              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition duration-200 hover:-translate-y-[3px] hover:border-[color-mix(in_srgb,var(--c1)_55%,var(--border))] hover:shadow-[0_16px_34px_color-mix(in_srgb,var(--c1)_22%,transparent)] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
             >
-              {/* The art is never scaled - scaling it inside a lifting tile, over a blurred glow, showed seams. It brightens instead. */}
-              <div className="relative h-32 overflow-hidden bg-[var(--surface)]">
-                {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover brightness-[0.82] transition-[filter] duration-200 group-hover:brightness-100" unoptimized />
+              {/* Nothing on the tile moves or is filtered on hover - a lift, a scale or a brightness filter
+                  each left seams on the art's edges. A shade over the art fades out instead.
+                  The art is framed from near its top, where the faces are. */}
+              <div className="relative h-36 overflow-hidden bg-[var(--surface)]">
+                {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover object-[50%_22%]" unoptimized />
                   : <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />}
+                <div aria-hidden className="absolute inset-0 bg-black/20 transition-opacity duration-200 group-hover:opacity-0" />
                 <div aria-hidden className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[var(--surface)]" />
                 <span className="absolute left-3 top-3"><IdentitySymbols identity={identity.join('')} size={18} /></span>
               </div>
-              <div className="relative -mt-6 flex flex-1 flex-col gap-1 px-4 pb-4">
-                <p className="font-display text-xl font-extrabold leading-tight">{deck.name}</p>
+              <div className="relative -mt-5 flex flex-1 flex-col gap-0.5 px-3.5 pb-3.5">
+                <p className="truncate font-display text-lg font-extrabold leading-tight" title={deck.name}>{deck.name}</p>
                 <p className="truncate text-sm text-[var(--muted)]">{deck.commander?.name ?? 'No commander'}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-bold tabular-nums">
+                <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs font-bold tabular-nums">
                   <span className={`rounded-full px-2.5 py-1 ${total === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{total} / 100</span>
                   {deck.totalValue > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${deck.totalValue.toFixed(2)}</span>}
                 </div>
