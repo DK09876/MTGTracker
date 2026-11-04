@@ -1,14 +1,16 @@
 /**
  * Cards to fill a role in a deck - in the role, in the commander's colours,
- * legal, not already in the deck - ranked by how often the commander's
- * decks play them on EDHREC (or how popular they are in Commander), with
- * where the profile already has a copy. From the card data on the Pi; no
+ * legal, not already in the deck - ranked by how well they fit the
+ * commander (fit.ts) and how much Commander plays them, EDHREC's numbers
+ * for the commander nudging when it is on; with where the profile already
+ * has a copy. From the card data on the Pi; no
  * model. Used by the Build tab and the deck chat. Server only.
  */
 
 import { localCardsByOracle, localCards, searchLocalText } from './card-store';
 import { cardsInList, database, type List } from './db';
 import { commanderPage, edhrecEnabled } from './edhrec';
+import { fitOf, fitProfile, popularity } from './fit';
 import { ROLES } from './roles';
 import { imageOf, type ScryfallCard } from './scryfall';
 
@@ -50,7 +52,7 @@ export function heldByName(profileId: string, exceptList: string | null, names: 
 }
 
 export async function gapCards(list: List, profileId: string, roleId: string, opts: { owned: boolean; max: number | null; show?: number }):
-  Promise<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }> {
+  Promise<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }> {
   const role = ROLES.find((r) => r.id === roleId);
   if (!role) throw new Error(`No such role: ${roleId}`);
   const candidates = role.text && !role.tag
@@ -69,22 +71,29 @@ export async function gapCards(list: List, profileId: string, roleId: string, op
     && !inDeck.has(front(c.name))
     && (opts.max === null || Number(c.prices?.usd ?? 0) <= opts.max));
 
+  // Fit with the commander first, then how much Commander plays it; EDHREC's
+  // share for this commander, when it is on, only nudges.
+  const profile = fitProfile(list.commander);
   const scored = fits.map((c) => {
     const stats = page?.stats.get(front(c.name)) ?? page?.stats.get(c.name);
-    return { card: c, inclusion: stats?.inclusion ?? null, rank: (c as { edhrec_rank?: number }).edhrec_rank ?? 1e9, held: where.get(c.oracle_id ?? '') ?? null };
-  }).sort((a, b) => (opts.owned ? Number(!!b.held) - Number(!!a.held) : 0)
-    || (b.inclusion ?? -1) - (a.inclusion ?? -1)
-    || a.rank - b.rank);
+    const fit = fitOf(c, profile);
+    const inclusion = stats?.inclusion ?? null;
+    const score = fit.score * 0.55 + popularity(c) * 0.45 + (inclusion ?? 0) * 0.3;
+    return { card: c, fit, inclusion, score, rank: (c as { edhrec_rank?: number }).edhrec_rank ?? null, held: where.get(c.oracle_id ?? '') ?? null };
+  }).sort((a, b) => (opts.owned ? Number(!!b.held) - Number(!!a.held) : 0) || b.score - a.score);
+
+  const why = (s: (typeof scored)[number]) => [
+    s.fit.matches.length ? `Fits ${profile!.commander}: ${s.fit.matches.join(', ')}` : '',
+    s.inclusion !== null ? `in ${Math.round(s.inclusion * 100)}% of ${profile?.commander ?? 'its'} decks on EDHREC` : s.rank ? `#${s.rank.toLocaleString()} in Commander` : '',
+  ].filter(Boolean).join(' · ') || 'In the role, in your colours';
 
   return {
     role: { id: role.id, label: role.label },
-    source: page ? 'edhrec' : 'popularity',
+    source: page ? 'edhrec' : 'fit',
     cards: scored.slice(0, opts.show ?? 12).map((s) => ({
       id: s.card.id, name: s.card.name, image: imageOf(s.card, 'small'), price: s.card.prices?.usd ?? null,
       typeLine: s.card.type_line ?? '', cmc: s.card.cmc ?? 0, held: s.held,
-      why: s.inclusion !== null
-        ? `In ${Math.round(s.inclusion * 100)}% of ${front(list.commander!.name)} decks on EDHREC`
-        : `Popular in Commander (#${s.rank.toLocaleString()} on EDHREC)`,
+      why: why(s),
     })),
   };
 }

@@ -369,6 +369,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           commander={list.commander?.name ?? null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
+          onMove={moveCard}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
         />
       ) : deck && section === 'chat' ? (

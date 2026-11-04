@@ -36,6 +36,7 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
+import type { CutCandidate } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
 import type { ThemeId } from './themes';
@@ -405,10 +406,18 @@ export const cardRoles = (listId: string, oracleId: string) =>
 export const correctRole = (listId: string, oracleId: string, role: string, has: boolean | null) =>
   send(`lists/${listId}/roles`, 'PUT', { oracleId, role, has }).then(json<{ roles: CardRole[] }>).then((r) => r.roles);
 
+export interface CutPlan {
+  size: number;
+  candidates: Array<CutCandidate & { image: string | null }>;
+  protectedCards: string[];
+  roles: Array<{ id: string; label: string; count: number; target: [number, number] }>;
+}
+export const cutPlan = (listId: string) => fetch(url(`lists/${listId}/cuts`)).then(json<CutPlan>);
+
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
-    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'popularity'; cards: GapCard[] }>);
+    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
 export const deckChats = (listId: string) => fetch(url(`lists/${listId}/chats`)).then(json<{ chats: ChatSummary[] }>);
