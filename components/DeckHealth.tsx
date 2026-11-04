@@ -123,7 +123,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         )}
       </Section>
 
-      <Section tour="roles" title="Roles" subtitle="How many of each kind of card, against common Commander guidelines. Tags from Scryfall.">
+      <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from Scryfall.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
           <RoleRow label="Lands" count={health.lands} target={landTarget} />
           {roles === 'loading' && (
@@ -132,7 +132,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
             </p>
           )}
           {roles === 'failed' && (
-            <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the role tags — try again in a moment.</p>
+            <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the built-in tags — try again in a moment.</p>
           )}
           {Array.isArray(roles) && (Object.keys(ROLE_GROUPS) as RoleGroup[]).map((g) => {
             // A role the deck has none of is only worth a row if there is a guideline for it.
@@ -376,7 +376,7 @@ function Calculator({ library, roles }: { library: number; roles: RoleCount[] })
             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1"
             defaultValue=""
           >
-            <option value="">(or a role…)</option>
+            <option value="">(or a built-in tag…)</option>
             {roles.map((r) => <option key={r.id} value={r.count}>{r.label} ({r.count})</option>)}
           </select>
         )}

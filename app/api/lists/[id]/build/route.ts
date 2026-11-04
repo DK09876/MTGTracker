@@ -29,6 +29,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const winTags = new Set(tags.tags.filter((t) => t.kind === 'wincon').map((t) => t.id));
   const winKeys = new Set(tags.cardTags.filter((t) => t.on && winTags.has(t.tagId)).map((t) => t.key));
   const pool = list.commander ? [{ card: list.commander }, ...main] : main;
+  const plan = planFor(id, tags.brief, list.commander, main);
   const wincons = pool.filter((c) => winKeys.has(c.card.oracle_id ?? c.card.id)).map((c) => c.card.name);
   return NextResponse.json(buildPlan({
     commander: list.commander,
@@ -40,7 +41,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     colors: health.colors.map((c) => ({ color: c.color, sources: c.sources, needed: c.needed, neededFor: c.neededFor })),
     brief: tags.brief,
     wincons,
-    // The plan's styles, as the owner set them.
-    style: (() => { const p = planFor(id, tags.brief, list.commander, main); return { label: p.style2 ? `${p.style.label} + ${p.style2.label}` : p.style.label, note: p.style.note }; })(),
+    // The plan's styles, flip turn and land range, as the owner set them.
+    style: { label: plan.style2 ? `${plan.style.label} + ${plan.style2.label}` : plan.style.label, note: plan.style.note },
+    landRange: plan.lands,
+    flip: plan.flip.value,
   }));
 }

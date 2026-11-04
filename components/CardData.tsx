@@ -49,7 +49,7 @@ export default function CardData() {
           </div>
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
             <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Cards kept</p>
-            <p className="text-sm font-medium">{status.cards.toLocaleString()} <span className="font-normal text-[var(--muted)]">· {status.tagged.toLocaleString()} with roles</span></p>
+            <p className="text-sm font-medium">{status.cards.toLocaleString()} <span className="font-normal text-[var(--muted)]">· {status.tagged.toLocaleString()} with built-in tags</span></p>
           </div>
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
             <p className="text-xs uppercase tracking-wide text-[var(--muted)]">Prices updated</p>

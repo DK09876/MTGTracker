@@ -16,10 +16,12 @@
  * button. A busy model ends the job at once rather than being waited on.
  */
 
+import Tip from './Tip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
 import AiModelPicker from './AiModelPicker';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
 import { modelLabel, requestsFor, tagRunCost, type Budget, type Mode } from '@/lib/quota';
@@ -211,6 +213,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
           <button onClick={propose} disabled={proposing || running} className={primary}>
             {proposing ? 'Suggesting…' : proposed.length ? 'Suggest again' : accepted.length ? 'Suggest more tags' : 'Suggest tags'}
           </button>
+          <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.proposeTags.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
           <span className="text-[var(--muted)]">Include:</span>
           {(['maybe', 'side'] as Board[]).map((b) => (
             <label key={b} className="flex items-center gap-1.5 text-[var(--muted)]">
@@ -435,6 +438,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
           >
             Tag {targetCount} card{targetCount === 1 ? '' : 's'} with {useTags.length} tag{useTags.length === 1 ? '' : 's'}
           </button>
+          <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.tagCards.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
           {!accepted.length && <span className="text-sm text-[var(--muted)]">Keep or make some tags first.</span>}
         </div>
         {job?.params.kind === 'tag' && panel}
@@ -460,11 +464,11 @@ function BasicRoles({ listId }: { listId: string }) {
   return (
     <section data-tour="basic-roles" className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 data-section="Built-in tags" className="font-medium">Basic roles <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
+        <h3 data-section="Built-in tags" className="font-medium">Built-in tags <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
         <span className="text-xs text-[var(--muted)]">From Scryfall&apos;s card tags · the Health tab has the full table</span>
       </div>
-      {roles === 'loading' && <p className="text-sm text-[var(--muted)]">Reading the cards&apos; roles… the first time takes up to a minute.</p>}
-      {roles === 'failed' && <p className="text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the roles just now.</p>}
+      {roles === 'loading' && <p className="text-sm text-[var(--muted)]">Reading the cards&apos; built-in tags… the first time takes up to a minute.</p>}
+      {roles === 'failed' && <p className="text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the built-in tags just now.</p>}
       {shown.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {shown.map((r) => (

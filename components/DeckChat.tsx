@@ -8,9 +8,11 @@
  * background, so the page can be left while Claude thinks.
  */
 
+import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { DeckChat as Chat } from '@/lib/deck-chat';
 import type { ListedCard } from '@/lib/db';
@@ -187,6 +189,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
             placeholder={chat ? 'Ask a follow-up…' : 'Ask about this deck…'}
             className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
+          <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
           <button type="submit" disabled={replying || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
       </section>

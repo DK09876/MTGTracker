@@ -626,6 +626,10 @@ export interface DeckPlanState {
   targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
   wins: { tagged: string[]; finishers: string[] };
   styles: Array<{ id: string; label: string; note: string; cards: number }>;
+  flip: { value: number; mine: boolean };
+  lands: [number, number];
+  landsDefault: [number, number];
+  packages: Array<{ tagId: string; name: string; kind: string | null; size: number; count: number }>;
 }
 export interface PlanChange {
   brief?: string;
@@ -633,6 +637,8 @@ export interface PlanChange {
   style2?: string | null;
   targets?: Record<string, [number, number] | null>;
   confirm?: boolean;
+  flip?: number | null;
+  packages?: Record<string, number | null>;
 }
 export const deckPlan = (listId: string) => fetch(url(`lists/${listId}/plan`)).then(json<DeckPlanState>);
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);

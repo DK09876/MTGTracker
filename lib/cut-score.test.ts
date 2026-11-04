@@ -102,8 +102,10 @@ describe('cutCandidates', () => {
       expect(withPlan.candidates.find((c) => c.name === 'Wheel of Misfortune')?.why.map((w) => w.rule) ?? ['kept']).not.toContain('norole');
     });
 
-    it('does not count impulse draw as card advantage, nor charge it for draw being over', () => {
-      const { candidates } = cutCandidates({ ...base, tags: null });
+    it('counts impulse draw as card draw, unless the owner turns that off', () => {
+      const plain = cutCandidates({ ...base, tags: null });
+      expect(plain.candidates.find((c) => c.name === 'Real Draw')!.reasons.join(' ')).toMatch(/draw: 4, more than 1–2/);
+      const { candidates } = cutCandidates({ ...base, tags: null, settings: { rules: { impulse: { on: true } }, custom: [] } });
       const impulse = candidates.find((c) => c.name === 'Impulse');
       expect(impulse?.why.some((w) => w.rule === 'over') ?? false).toBe(false);
       // Three real draw cards against 1-2, not four.
@@ -129,5 +131,42 @@ describe('cutCandidates', () => {
       expect(protectedCards).toContain('Pet Dragon');
       expect(candidates.some((c) => c.name === 'Pet Dragon')).toBe(false);
     });
+  });
+});
+
+describe('packages, engines and the mana rules', () => {
+  const tag = (id: string, name: string, kind: string | null = null) => ({ id, name, description: '', color: '#fff', kind, status: 'accepted', origin: 'manual', position: 0, examples: [] });
+  const on = (key: string, tagId: string) => ({ key: `o-${key}`, tagId, source: 'manual', on: true, reason: '' });
+  const base = { roles: [], fit: null, commander: null, commanderRoles: [], keep: new Set<string>(), stats: null, lands: { have: 37, want: 37 } };
+
+  it('trims a theme package over its size and keeps one at its size', () => {
+    const tokens = Array.from({ length: 10 }, (_, i) => card(`Token ${i}`, 'Creature', 'Create a token.', { cmc: 3, edhrec_rank: 30_000 }));
+    const wheels = Array.from({ length: 3 }, (_, i) => card(`Wheel ${i}`, 'Sorcery', 'Each player discards their hand.', { cmc: 3, edhrec_rank: 30_000 }));
+    const tags = { brief: '', overview: '', tags: [tag('t', 'Tokens'), tag('w', 'Wheels')], cardTags: [...tokens.map((c) => on(c.card.name, 't')), ...wheels.map((c) => on(c.card.name, 'w'))] };
+    const { candidates } = cutCandidates({ ...base, cards: [...tokens, ...wheels], tags: tags as never });
+    const token = candidates.find((c) => c.name === 'Token 0')!;
+    expect(token.why.find((w) => w.rule === 'package-over')?.text).toBe('Tokens: 10, more than its 8');
+    expect(candidates.some((c) => c.name.startsWith('Wheel') && !c.why.some((w) => w.rule === 'package-short'))).toBe(false);
+    // A key theme sized 16 is no longer over.
+    const sized = cutCandidates({ ...base, cards: [...tokens, ...wheels], tags: tags as never, packages: { t: 16 } });
+    expect(sized.candidates.find((c) => c.name === 'Token 0')?.why.some((w) => w.rule === 'package-over') ?? false).toBe(false);
+  });
+
+  it('keeps enablers while there are few, and trims payoffs that outnumber them', () => {
+    const en = Array.from({ length: 2 }, (_, i) => card(`Enabler ${i}`, 'Creature', 'Whenever you gain life, scry 1.', { cmc: 2, edhrec_rank: 30_000 }));
+    const pay = Array.from({ length: 4 }, (_, i) => card(`Payoff ${i}`, 'Creature', 'Whenever you gain life, each opponent loses 1 life.', { cmc: 5, edhrec_rank: 30_000 }));
+    const tags = { brief: '', overview: '', tags: [tag('e', 'Lifegain', 'enabler'), tag('p', 'Drain', 'payoff')], cardTags: [...en.map((c) => on(c.card.name, 'e')), ...pay.map((c) => on(c.card.name, 'p'))] };
+    const { candidates } = cutCandidates({ ...base, cards: [...en, ...pay], tags: tags as never, packages: { e: 16, p: 2 } });
+    expect(candidates.find((c) => c.name === 'Payoff 0')!.why.some((w) => w.rule === 'payoffs')).toBe(true);
+    const enabler = candidates.find((c) => c.name === 'Enabler 0');
+    expect(enabler?.why.some((w) => w.rule === 'enablers') ?? true).toBe(true);
+  });
+
+  it('trims slow ramp and sorcery-speed single-target removal', () => {
+    const cards = [card('Big Ramp', 'Sorcery', 'Search for two lands.', { cmc: 5 }), card('Snipe', 'Sorcery', 'Destroy target creature.', { cmc: 2 })];
+    const roles = [role('ramp', ['Big Ramp']), role('removal', ['Snipe'])];
+    const { candidates } = cutCandidates({ ...base, cards, roles, tags: null });
+    expect(candidates.find((c) => c.name === 'Big Ramp')!.why.map((w) => w.rule)).toContain('slowramp');
+    expect(candidates.find((c) => c.name === 'Snipe')!.why.map((w) => w.rule)).toContain('sorcery');
   });
 });

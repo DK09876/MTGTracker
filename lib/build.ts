@@ -52,7 +52,8 @@ export interface BuildPlan {
   roles: RoleRow[];
   /** Cards that end the game: finisher roles, and cards you tagged as a win condition. */
   finishers: string[];
-  lands: { have: number; want: number; averageMv: number; cheap: number };
+  /** Lands: what the deck runs, the plan's range (from its flip turn), and Karsten's formula as a second opinion. */
+  lands: { have: number; want: number; averageMv: number; cheap: number; range: [number, number]; flip: number | null };
   /** Each colour's sources against Karsten's table, from the Health analysis. */
   colors: Array<{ color: string; sources: number; needed: number | null; neededFor: string | null }>;
   size: number;
@@ -99,6 +100,9 @@ export function buildPlan(input: {
   /** The deck's plan: its style and the ranges it uses in place of the usual ones. */
   style?: { label: string; note: string } | null;
   targets?: Record<string, [number, number]>;
+  /** The plan's land range and the flip turn it comes from. */
+  landRange?: [number, number];
+  flip?: number;
 }): BuildPlan {
   const style = input.style !== undefined ? input.style : commanderStyle(input.commander);
   const roles = (input.roles ?? []).map((r) => (r.target && input.targets?.[r.id] ? { ...r, target: input.targets[r.id] } : r));
@@ -131,7 +135,7 @@ export function buildPlan(input: {
       const [lo, hi] = r.target!;
       issues.push({
         id: `role:${r.id}`, level: r.count < lo - 2 ? 'fix' : 'consider',
-        title: `${r.label}: ${r.count}, most decks run ${lo}-${hi}`,
+        title: `${r.label}: ${r.count}, the plan wants ${lo}-${hi}`,
         why: `${WHY[r.id] ?? ''} ${r.count ? `These ${r.count} count:` : 'Nothing in the deck counts yet.'}`.trim(),
         cards: r.cards, action: { kind: 'fill', role: r.id, label: `Find ${r.label.toLowerCase()}` },
       });
@@ -144,16 +148,18 @@ export function buildPlan(input: {
       });
     }
   }
-  if (input.lands < want - 1) {
+  const range = input.landRange ?? [want - 1, want + 1];
+  const second = input.landRange ? ` Karsten's formula, a second opinion, says ${want} for this curve (average mana value ${input.averageMv.toFixed(2)}, ${cheap} cheap ramp and draw spells).` : '';
+  if (input.lands < range[0]) {
     issues.push({
-      id: 'lands', level: input.lands < want - 3 ? 'fix' : 'consider', title: `${input.lands} lands, the formula suggests ${want}`,
-      why: `Karsten's formula, from the spells' average mana value (${input.averageMv.toFixed(2)}) and the ${cheap} cheap ramp and draw spells. Play more lands, or more ramp and draw at two mana or less: every four of those is worth about one land.`,
+      id: 'lands', level: input.lands < range[0] - 2 ? 'fix' : 'consider', title: `${input.lands} lands, the plan wants ${range[0]}-${range[1]}`,
+      why: `${input.flip ? `A deck that needs ${input.flip} mana to get going runs about ${range[0]}-${range[1]} lands.` : 'Too few lands means missed land drops.'} Play more lands, or more cheap ramp: a two-mana rock gets you ahead where a land only keeps up.${second}`,
       cards: [], action: { kind: 'fill', role: 'ramp', label: 'Find cheap ramp' },
     });
-  } else if (input.lands > want + 2) {
+  } else if (input.lands > range[1]) {
     issues.push({
-      id: 'lands', level: 'consider', title: `${input.lands} lands, the formula suggests ${want}`,
-      why: `For a curve this low (average mana value ${input.averageMv.toFixed(2)}), a land or two could be a spell instead.`,
+      id: 'lands', level: 'consider', title: `${input.lands} lands, the plan wants ${range[0]}-${range[1]}`,
+      why: `A land or two could be a spell instead.${second}`,
       cards: [], action: null,
     });
   }
@@ -173,5 +179,5 @@ export function buildPlan(input: {
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }))];
   const rows: RoleRow[] = roles.filter((r) => r.target || r.count > 0)
     .map((r) => ({ role: r.id, label: r.label, group: r.group, have: r.count, want: r.target ?? null, cards: r.cards }));
-  return { style, issues, gaps, targets, roles: rows, finishers, colors, lands: { have: input.lands, want, averageMv: input.averageMv, cheap }, size: input.size };
+  return { style, issues, gaps, targets, roles: rows, finishers, colors, lands: { have: input.lands, want, averageMv: input.averageMv, cheap, range, flip: input.flip ?? null }, size: input.size };
 }

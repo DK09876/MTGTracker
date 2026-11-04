@@ -66,13 +66,16 @@ export interface CutInput {
   /** EDHREC's numbers for the commander, when it is on. */
   stats: Map<string, CardStats> | null;
   lands: { have: number; want: number };
+  /** Theme package sizes by tag id (8 when not set). */
+  packages?: Record<string, number>;
   /** The deck's own rule settings (cut-rules.ts). */
   settings?: CutSettings;
   /** The plan's styles: cards that do what they are about are kept. */
   styles?: Array<{ label: string; test: RegExp }>;
 }
 
-const PROTECTING = new Set(['wincon', 'engine', 'payoff']);
+// Payoffs are not protected outright: a deck can have too many (the 'payoffs' rule).
+const PROTECTING = new Set(['wincon', 'engine']);
 // A tag for the cards that are the fun of the deck (3/3 Elk: do not cut those for generic ones).
 const PET = /^(pets?|pet cards?|fun|favou?rites?)$/i;
 // Impulse draw: exile from the top and play it for a while.
@@ -145,7 +148,18 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
   // Red's "exile the top card, you may play it" counts as card advantage on
   // Scryfall, but it is not the draw the range is about: those cards neither
   // fill the draw count here nor pay for it being over.
-  const impulse = new Set(cards.filter((c) => IMPULSE.test(textOf(c.card)) && !DRAWS.test(textOf(c.card))).map((c) => c.card.name));
+  const impulse = new Set(ruleOn(settings, 'impulse') ? cards.filter((c) => IMPULSE.test(textOf(c.card)) && !DRAWS.test(textOf(c.card))).map((c) => c.card.name) : []);
+
+  // Theme packages: each of the owner's theme tags, its size and how full it is.
+  const inMain = new Set(cards.map((c) => c.card.oracle_id ?? c.card.id));
+  const themeTags = accepted.filter((t) => t.kind !== 'wincon' && !PET.test(t.name));
+  const members = new Map(themeTags.map((t) => [t.id, on.filter((ct) => ct.tagId === t.id && inMain.has(ct.key)).length]));
+  const sizeOf = (tagId: string) => input.packages?.[tagId] ?? 8;
+  const enablerTags = new Set(accepted.filter((t) => t.kind === 'enabler').map((t) => t.id));
+  const payoffTags = new Set(accepted.filter((t) => t.kind === 'payoff').map((t) => t.id));
+  const keysWith = (ids: Set<string>) => new Set(on.filter((ct) => ids.has(ct.tagId) && inMain.has(ct.key)).map((ct) => ct.key));
+  const enablers = keysWith(enablerTags);
+  const payoffs = keysWith(payoffTags);
   const countOf = (r: RoleCount) => (r.id === 'draw' ? r.cards.filter((n) => !impulse.has(n)).reduce((n, name) => n + (cards.find((c) => c.card.name === name)?.quantity ?? 1), 0) : r.count);
   const count = (id: string) => { const r = roles.find((x) => x.id === id); return r ? countOf(r) : 0; };
 
@@ -194,7 +208,19 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
       if (r.target && n <= r.target[0]) rule('needed', `Needed: ${r.label.toLowerCase()} ${n} of ${r.target[0]}–${r.target[1]}`);
     }
 
-    // Utility, in Commander Template's order: interaction first...
+    // Theme packages: over its size the extras go first; at or under it, keep.
+    const packs = (tagsOf.get(key) ?? []).map((name) => themeTags.find((t) => t.name === name)).filter((t): t is NonNullable<typeof t> => !!t);
+    const overPack = packs.find((t) => (members.get(t.id) ?? 0) > sizeOf(t.id));
+    const shortPack = packs.find((t) => (members.get(t.id) ?? 0) <= sizeOf(t.id));
+    if (shortPack) rule('package-short', `${shortPack.name}: ${members.get(shortPack.id)} of ${sizeOf(shortPack.id)} - the package needs it`);
+    else if (overPack) rule('package-over', `${overPack.name}: ${members.get(overPack.id)}, more than its ${sizeOf(overPack.id)}`);
+    // Engines: enablers are the backbone; payoffs should be about half as many.
+    if (enablers.has(key) && enablers.size < 12) rule('enablers', `An enabler, and the deck has ${enablers.size} of about 12`);
+    if (payoffs.has(key) && !enablers.has(key) && payoffs.size > enablers.size / 2) {
+      rule('payoffs', `${payoffs.size} payoffs for ${enablers.size} enablers: too many to fire`, Math.min(1.5, Math.max(0.5, (card.cmc ?? 3) / 4)));
+    }
+
+    // Utility, in this order: interaction first...
     if (ids.includes('removal') && !ids.includes('wipe')) {
       if (count('removal') > 8 && narrow(card)) rule('interaction', 'Narrow removal: interaction is the first utility to trim');
       else if (count('removal') > 10 && !flexible(card)) rule('interaction', 'Interaction is the first utility to trim', 0.5);
@@ -202,6 +228,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
     }
     // ...keeping a board wipe or two...
     if (ids.includes('wipe') && wipesLeft <= 2) rule('wipes', 'One of the last board wipes');
+    if (ids.includes('removal') && !ids.includes('wipe') && /\bSorcery\b/.test(card.type_line ?? '') && !/\beach\b|\ball\b/i.test(text)) rule('sorcery', 'Single-target removal at sorcery speed');
     // ...then ramp or draw, by the commander's cost.
     if (secondary && ids.includes(secondary) && count(secondary) > 10 && !f.matches.length) {
       rule('cmdcost', secondary === 'ramp' ? `${commander?.name.split(',')[0]} is cheap: ramp is the next to trim` : `${commander?.name.split(',')[0]} costs ${cmdMv}: draw is the next to trim`);
@@ -231,6 +258,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
     // The curve: cuts from an overloaded mana value, and dear ones before cheap ones.
     const b = bucket(card.cmc ?? 0);
     if (heavy.has(b)) rule('curve', `The curve is heavy at ${b} mana`);
+    if (ids.some((r) => ['ramp', 'rock', 'dork', 'land-ramp'].includes(r)) && (card.cmc ?? 0) >= 4) rule('slowramp', `Ramp costing ${card.cmc}: it arrives when you should be casting spells`);
     if ((card.cmc ?? 0) >= 6 && !finisher) rule('costly', `Costs ${card.cmc} and does not end the game`);
     else if ((card.cmc ?? 0) >= 5 && averageMv > 3.3 && !finisher) rule('highcurve', `The curve is high (average ${averageMv.toFixed(1)}): a 5-drop out brings it down`);
 
@@ -250,7 +278,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
 
     const score = why.reduce((n, r) => n + r.delta, 0);
     if (score > 0) {
-      const shown = why.filter((r) => r.delta > 0 || r.rule === 'needed' || r.rule === 'theme' || r.rule === 'style' || r.rule === 'staple').map((r) => r.text);
+      const shown = why.filter((r) => r.delta > 0 || ['needed', 'theme', 'style', 'staple', 'package-short', 'enablers'].includes(r.rule)).map((r) => r.text);
       candidates.push({ cardId: card.id, name: card.name, score: Math.round(score * 10) / 10, reasons: shown, why, roles: ids, cmc: card.cmc ?? 0 });
     }
   }

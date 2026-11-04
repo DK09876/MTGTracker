@@ -8,7 +8,7 @@
 import { karstenLands } from './build';
 import { cutCandidates } from './cut-score';
 import { cachedRoles, cardsInList, deckTags, saveRoles, type List } from './db';
-import { cutSettings, planStyles } from './deck-plan';
+import { cutSettings, planFor, planStyles } from './deck-plan';
 import { deckRoles, keeps } from './deck-roles';
 import { commanderPage, edhrecEnabled } from './edhrec';
 import { fitProfile } from './fit';
@@ -30,11 +30,14 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>) {
     : [];
   const settings = cutSettings(list.id);
   const styles = planStyles(list.id, list.commander, main);
+  const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
   const result = cutCandidates({
     cards: main, roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,
     tags, keep: keeps(list.id), stats: page?.stats ?? null,
-    lands: { have: health.lands, want },
+    // Lands are offered only over the plan's range (its flip turn's), never to make room.
+    lands: { have: health.lands, want: Math.max(want, plan.lands[1]) - 1 },
+    packages: plan.packages,
     settings, styles,
   });
   return { ...result, main, health, roles, settings, styles, tags };

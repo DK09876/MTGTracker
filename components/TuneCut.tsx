@@ -14,8 +14,10 @@ import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
+import Tip from './Tip';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
-import { CUT_RULES, describeCustom, type CustomRule, type CutSettings } from '@/lib/cut-rules';
+import { CUT_RULES, describeCustom, RULE_GROUPS, type CustomRule, type CutSettings } from '@/lib/cut-rules';
 import type { CutReview, ReviewItem } from '@/lib/cut-review';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
@@ -231,7 +233,6 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
     }
   };
   const setRule = (id: string, change: { on?: boolean; weight?: number }) => save({ ...draft, rules: { ...draft.rules, [id]: { ...draft.rules[id], ...change } } });
-  const sources = [...new Set(CUT_RULES.map((r) => r.source))];
 
   return (
     <div data-tour="cut-rules" className="flex flex-col gap-4">
@@ -240,21 +241,22 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
         {saving && <span className="ml-2">Saving…</span>}
       </p>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-      {sources.map((src) => (
-        <section key={src} className="flex flex-col gap-1.5">
-          <h4 data-section={src} className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{src}</h4>
-          {CUT_RULES.filter((r) => r.source === src).map((r) => {
+      {RULE_GROUPS.map((group) => (
+        <section key={group} className="flex flex-col gap-1.5">
+          <h4 data-section={group} className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{group}</h4>
+          {CUT_RULES.filter((r) => r.group === group).map((r) => {
             const mine = draft.rules[r.id] ?? {};
-            const on = mine.on !== false;
+            const on = mine.on ?? !r.offByDefault;
+            const toggleOnly = r.protects || r.weight === 0;
             const weight = mine.weight ?? r.weight;
             return (
               <div key={r.id} className={`flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm ${on ? '' : 'opacity-60'}`}>
                 <input type="checkbox" checked={on} onChange={(e) => setRule(r.id, { on: e.target.checked })} aria-label={`Use: ${r.label}`} />
                 <span className="min-w-0 flex-[1_1_16rem]">
-                  {r.label}
-                  <span className={`ml-2 text-xs ${r.toward === 'cut' ? 'text-[#ffb4a8]' : 'text-[#9fe0ad]'}`}>{r.protects ? 'protects' : r.toward === 'cut' ? 'toward cutting' : 'toward keeping'}</span>
+                  {r.label} <Tip label={`Why: ${r.label}`}>{r.why}</Tip>
+                  <span className={`ml-2 text-xs ${r.toward === 'cut' && !toggleOnly ? 'text-[#ffb4a8]' : 'text-[#9fe0ad]'}`}>{r.protects ? 'never cut' : toggleOnly ? (on ? 'on' : 'off') : r.toward === 'cut' ? 'toward cutting' : 'toward keeping'}</span>
                 </span>
-                {!r.protects && (
+                {!toggleOnly && (
                   <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
                     <input type="range" min={0} max={3} step={0.1} value={weight} disabled={!on} aria-label={`How much it counts: ${r.label}`}
                       onChange={(e) => setDraft({ ...draft, rules: { ...draft.rules, [r.id]: { ...mine, weight: Number(e.target.value) } } })}
@@ -348,6 +350,7 @@ function Review({ listId, state, planConfirmed, onPlan, onStarted }: {
         <button onClick={start} disabled={running} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-60">
           {running ? `${state?.job?.detail || 'Reviewing'}…` : review ? 'Review again' : 'Ask Claude to review'}
         </button>
+        <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.cutReview.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
         <AiModelPicker area="deck" />
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}

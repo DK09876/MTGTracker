@@ -13,12 +13,14 @@
  * It opens on Cut when the deck is over 100 and on Add otherwise.
  */
 
+import Tip from './Tip';
 import Image from 'next/image';
 import { Fragment, useEffect, useState } from 'react';
 
 import DeckSuggestions from './DeckSuggestions';
 import ManaCost from './ManaCost';
 import TuneCut from './TuneCut';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { BuildPlan, Issue, RoleRow } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
@@ -135,7 +137,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
         {shown.length === 0 && (
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
             <span aria-hidden className="font-bold text-emerald-400">✓</span>
-            <span className="min-w-0 flex-[1_1_20rem]">{plan.size} cards, every role at its usual count, enough lands and colour sources. See how it plays on the Playtest tab.</span>
+            <span className="min-w-0 flex-[1_1_20rem]">{plan.size} cards, every built-in tag in its range, enough lands and colour sources. See how it plays on the Playtest tab.</span>
             <button onClick={() => onTab('playtest')} className={BUTTON}>Playtest</button>
           </div>
         )}
@@ -161,7 +163,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
       <div className="flex flex-wrap items-start gap-5">
         <section data-tour="build-roles" className="flex min-w-0 flex-[1_1_28rem] flex-col gap-3">
-          <h3 data-section="Roles" className="font-display text-xl font-semibold">Roles</h3>
+          <h3 data-section="Built-in tags" className="font-display text-xl font-semibold">Built-in tags</h3>
           <Roles rows={plan.roles} finishers={plan.finishers} onFind={(role) => toggle({ at: 'roles', kind: 'fill', role })} />
           {panel('roles')}
         </section>
@@ -212,7 +214,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
       <section data-tour="tune-ideas" className="flex max-w-3xl flex-col gap-2">
         <h3 data-section="Ideas from Claude" className="font-display text-xl font-semibold">Ideas from Claude</h3>
-        <p className="text-sm text-[var(--muted)]">Claude reads the plan, the roles and the cards, and suggests what to add, each with an Add button. It opens in Chat, where you can keep asking.</p>
+        <p className="text-sm text-[var(--muted)]">Claude reads the plan, the tags and the cards, and suggests what to add, each with an Add button. It opens in Chat, where you can keep asking.</p>
         <label className="flex flex-col gap-1 text-sm">
           Your instructions <span className="text-xs text-[var(--muted)]">(optional)</span>
           <textarea value={ideas} onChange={(e) => setIdeas(e.target.value)} rows={2} maxLength={1000}
@@ -222,6 +224,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
         <div>
           <button onClick={() => onAsk(`Suggest cards to add that fit the plan and fill what the deck is short on.${ideas.trim() ? ` ${ideas.trim()}` : ''}`)}
             className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">{planConfirmed ? 'Ask Claude for ideas' : 'Ask Claude (after the plan)'}</button>
+          <span className="ml-2"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
         </div>
       </section>
       </>)}
@@ -300,7 +303,7 @@ function Roles({ rows, finishers, onFind }: { rows: RoleRow[]; finishers: string
         </div>
       ))}
       <p className="text-xs text-[var(--muted)]">
-        {finishers.length ? `Ways to win: ${finishers.join(', ')}.` : 'No finishers found.'} Roles come from Scryfall&apos;s card tags; correct a card&apos;s roles from its card. Counts are guidelines - a deck&apos;s plan may want more or fewer.
+        {finishers.length ? `Ways to win: ${finishers.join(', ')}.` : 'No finishers found.'} Built-in tags come from Scryfall; correct a card&apos;s from its card. The ranges are the plan&apos;s - change them on the Plan tab, where your theme packages are too.
       </p>
     </div>
   );

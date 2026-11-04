@@ -22,15 +22,18 @@ function db() {
     d.run(`CREATE TABLE IF NOT EXISTS deck_plans (
       listId TEXT PRIMARY KEY, style TEXT, style2 TEXT, targets TEXT NOT NULL DEFAULT '{}',
       draft TEXT NOT NULL DEFAULT '', confirmedAt TEXT, updatedAt TEXT NOT NULL)`);
+    // Added later: the flip turn and theme package sizes, as JSON.
+    try { d.run(`ALTER TABLE deck_plans ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'`); } catch { /* already there */ }
     ready = true;
   }
   return d;
 }
 
-interface Row { style: string | null; style2: string | null; targets: string; draft: string; confirmedAt: string | null }
+interface Row { style: string | null; style2: string | null; targets: string; draft: string; confirmedAt: string | null; extra: string }
+interface Extra { flip?: number; packages?: Record<string, number> }
 
 function row(listId: string): Row | null {
-  return db().get('SELECT style, style2, targets, draft, confirmedAt FROM deck_plans WHERE listId = ?', [listId]) as Row | null;
+  return db().get('SELECT style, style2, targets, draft, confirmedAt, extra FROM deck_plans WHERE listId = ?', [listId]) as Row | null;
 }
 
 /** The usual counts every deck starts from (roles.ts). */
@@ -48,6 +51,25 @@ export interface Plan {
   chosen: { style: boolean; style2: boolean };
   /** Every role with a guideline: the range in use, the style's, and whether the owner set it. */
   targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
+  /** The flip turn: the mana the deck needs before it starts doing its thing. */
+  flip: { value: number; mine: boolean };
+  /** How many lands: the owner's range, else the flip turn's. */
+  lands: [number, number];
+  landsDefault: [number, number];
+  /** Theme package sizes the owner set, by tag id (8 otherwise). */
+  packages: Record<string, number>;
+}
+
+/**
+ * The usual counts for a deck that needs `flip` mana to get going: 12 ramp
+ * and 36 lands at 4, about one more ramp card per mana above that and one
+ * fewer below, and a land per two mana.
+ */
+export function flipTargets(flip: number): { ramp: [number, number]; lands: [number, number] } {
+  const f = Math.max(1, Math.min(10, Math.round(flip)));
+  const ramp = Math.max(6, 12 + (f - 4));
+  const lands = 36 + Math.round((f - 4) / 2);
+  return { ramp: [ramp - 1, ramp + 1], lands: [lands - 1, lands + 1] };
 }
 
 export function planFor(listId: string, brief: string, commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): Plan {
@@ -57,7 +79,10 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
   // The detected second style stays when the owner picks the main one, unless they are the same.
   const auto2 = found.secondary && found.secondary.id !== style.id ? found.secondary : found.primary.id !== style.id ? found.primary : null;
   const style2 = r?.style2 === '' ? null : styleById(r?.style2) ?? auto2;
-  const fromStyle = styleTargets(BASE_TARGETS, style, style2);
+  const extra = JSON.parse(r?.extra ?? '{}') as Extra;
+  const flip = extra.flip ?? Math.max(1, Math.min(10, commander?.cmc ?? 4));
+  const fromFlip = flipTargets(flip);
+  const fromStyle = styleTargets({ ...BASE_TARGETS, ramp: fromFlip.ramp }, style, style2);
   const mine = JSON.parse(r?.targets ?? '{}') as Record<string, [number, number]>;
   return {
     brief,
@@ -70,6 +95,10 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     targets: ROLES.filter((x) => x.target).map((x) => ({
       role: x.id, label: x.label, range: mine[x.id] ?? fromStyle[x.id], styleRange: fromStyle[x.id], mine: !!mine[x.id],
     })),
+    flip: { value: flip, mine: extra.flip !== undefined },
+    lands: mine.lands ?? fromFlip.lands,
+    landsDefault: fromFlip.lands,
+    packages: extra.packages ?? {},
   };
 }
 
@@ -81,12 +110,12 @@ export function targetsFor(listId: string, commander: ScryfallCard | null, cards
 function upsert(listId: string, change: Partial<Row>): void {
   const now = new Date().toISOString();
   const r = row(listId);
-  const next = { style: null, style2: null, targets: '{}', draft: '', confirmedAt: null, ...r, ...change };
+  const next = { style: null, style2: null, targets: '{}', draft: '', confirmedAt: null, extra: '{}', ...r, ...change };
   db().run(
-    `INSERT INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, extra, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(listId) DO UPDATE SET style = excluded.style, style2 = excluded.style2, targets = excluded.targets,
-       draft = excluded.draft, confirmedAt = excluded.confirmedAt, updatedAt = excluded.updatedAt`,
-    [listId, next.style, next.style2, next.targets, next.draft, next.confirmedAt, now],
+       draft = excluded.draft, confirmedAt = excluded.confirmedAt, extra = excluded.extra, updatedAt = excluded.updatedAt`,
+    [listId, next.style, next.style2, next.targets, next.draft, next.confirmedAt, next.extra, now],
   );
 }
 
@@ -99,6 +128,10 @@ export interface PlanChange {
   targets?: Record<string, [number, number] | null>;
   draft?: string;
   confirm?: boolean;
+  /** The flip turn, or null to go back to the commander's mana value. */
+  flip?: number | null;
+  /** A theme package's size by tag id, or null for the default 8. */
+  packages?: Record<string, number | null>;
 }
 
 export function changePlan(listId: string, change: PlanChange): void {
@@ -109,13 +142,24 @@ export function changePlan(listId: string, change: PlanChange): void {
   if (change.targets) {
     const mine = JSON.parse(r?.targets ?? '{}') as Record<string, [number, number]>;
     for (const [role, range] of Object.entries(change.targets)) {
-      if (!BASE_TARGETS[role]) continue;
+      if (!BASE_TARGETS[role] && role !== 'lands') continue;
       if (range === null) delete mine[role];
       else if (Array.isArray(range) && range.length === 2 && range.every((n) => Number.isInteger(n) && n >= 0 && n <= 99) && range[0] <= range[1]) mine[role] = range;
     }
     patch.targets = JSON.stringify(mine);
   }
   if (change.draft !== undefined) patch.draft = change.draft.slice(0, 4000);
+  if (change.flip !== undefined || change.packages) {
+    const extra = JSON.parse(r?.extra ?? '{}') as Extra;
+    if (change.flip === null) delete extra.flip;
+    else if (typeof change.flip === 'number' && Number.isInteger(change.flip) && change.flip >= 1 && change.flip <= 10) extra.flip = change.flip;
+    for (const [tagId, size] of Object.entries(change.packages ?? {})) {
+      extra.packages = extra.packages ?? {};
+      if (size === null) delete extra.packages[tagId];
+      else if (Number.isInteger(size) && size >= 1 && size <= 40) extra.packages[tagId] = size;
+    }
+    patch.extra = JSON.stringify(extra);
+  }
   if (change.confirm) patch.confirmedAt = new Date().toISOString();
   upsert(listId, patch);
 }
@@ -123,8 +167,8 @@ export function changePlan(listId: string, change: PlanChange): void {
 /** Copy a plan to a duplicated deck. */
 export function copyPlan(fromId: string, toId: string): void {
   rulesDb().run('INSERT OR IGNORE INTO deck_cut_rules (listId, settings, updatedAt) SELECT ?, settings, updatedAt FROM deck_cut_rules WHERE listId = ?', [toId, fromId]);
-  db().run(`INSERT OR IGNORE INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, updatedAt)
-    SELECT ?, style, style2, targets, draft, confirmedAt, updatedAt FROM deck_plans WHERE listId = ?`, [toId, fromId]);
+  db().run(`INSERT OR IGNORE INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, extra, updatedAt)
+    SELECT ?, style, style2, targets, draft, confirmedAt, extra, updatedAt FROM deck_plans WHERE listId = ?`, [toId, fromId]);
 }
 
 /**

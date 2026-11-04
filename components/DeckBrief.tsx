@@ -12,8 +12,10 @@
  * their routes compare with the newest read.
  */
 
+import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import { modelLabel } from '@/lib/quota';
 import type { DeckRead, ReadMode, WinLine } from '@/lib/reads';
@@ -30,7 +32,7 @@ interface Props {
 const POLL_MS = 2_500;
 
 const MODES: Array<{ mode: ReadMode; label: string; note: string; free?: boolean }> = [
-  { mode: 'quick', label: 'Quick read', note: 'How it wins from combos and roles, without AI.', free: true },
+  { mode: 'quick', label: 'Quick read', note: 'How it wins from combos and built-in tags, without AI.', free: true },
   { mode: 'scratch', label: 'Draft from scratch', note: 'Reads the cards and ignores what you wrote.' },
   { mode: 'build', label: 'Build on my brief', note: 'Keeps your words and fills in what is missing.' },
   { mode: 'check', label: 'Check my brief', note: 'Where the cards and your plan disagree.' },
@@ -124,7 +126,7 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
   return (
     <section data-tour="brief" className="flex flex-col gap-3">
       <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
-        <h3 data-section="What it does" className="font-medium">What this deck does</h3>
+        <h3 data-section="What it does" className="flex items-center gap-2 font-medium">What this deck does <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.brief.map((x) => <li key={x}>{x}</li>)}</ul></Tip></h3>
         <div className="relative" ref={menuRef}>
           <div data-tour="draft-menu" className="btn-go inline-flex overflow-hidden rounded-full text-sm font-semibold">
             <button onClick={() => start(tags.brief.trim() ? 'build' : 'scratch')} disabled={running} className="px-3.5 py-1.5 disabled:opacity-60">
