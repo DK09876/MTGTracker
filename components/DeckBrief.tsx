@@ -43,7 +43,7 @@ const by = (r: DeckRead) => (r.model ? modelLabel(r.model).replace(/^Claude /, '
 
 export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props) {
   const [brief, setBrief] = useState<string | null>(null);
-  const [reads, setReads] = useState<api.DeckReads | null>(null);
+  const [reads, setReads] = useState<api.DeckReads | null>(() => api.peek<api.DeckReads>(api.paths.reads(listId)) ?? null);
   const [menu, setMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The owner's words for the model, on top of everything it is sent anyway.

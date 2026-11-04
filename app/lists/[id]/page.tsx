@@ -38,21 +38,23 @@ import { imageOf, priceOf } from '@/lib/scryfall';
 export default function ListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [list, setList] = useState<List | null>(null);
-  const [cards, setCards] = useState<ListedCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Opened before this visit: shown at once from last time while it is read again.
+  const seen = api.peek<api.ListPage>(api.paths.list(id));
+  const [list, setList] = useState<List | null>(seen?.list ?? null);
+  const [cards, setCards] = useState<ListedCard[]>(seen?.cards ?? []);
+  const [loading, setLoading] = useState(!seen);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [draftName, setDraftName] = useState('');
+  const [draftName, setDraftName] = useState(seen?.list.name ?? '');
   const [addOpen, setAddOpen] = useState(false);
   const [section, setSection] = useState<DeckTab>('cards');
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
-  const [planConfirmed, setPlanConfirmed] = useState(true);
+  const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
   const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
-  const [tags, setTags] = useState<Tags | null>(null);
+  const [tags, setTags] = useState<Tags | null>(() => api.peek<Tags>(api.paths.tags(id)) ?? null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -68,7 +70,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const setCardSize = (v: CardSize) => { setCardSizeState(v); try { localStorage.setItem('mtg-card-size', v); } catch { /* fine */ } };
 
   // Whether others can see this deck on the owner's profile; private until made public.
-  const [shown, setShown] = useState(false);
+  const [shown, setShown] = useState(!!seen?.public);
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
     setList(data.list);
@@ -110,6 +112,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setDraftName(data.list.name);
         setShown(!!data.public);
         setPlanConfirmed(data.planConfirmed !== false);
+        // Read the other tabs now, side by side, so opening one is instant.
+        if (data.list.kind === 'deck') {
+          const later: Array<Promise<unknown>> = [api.deckPlan(id), api.buildPlan(id), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
+          if (data.cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + 1 > 100) later.push(api.cutPlan(id));
+          void Promise.allSettled(later);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load that list');
       } finally {

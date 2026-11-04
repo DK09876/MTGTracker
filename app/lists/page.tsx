@@ -7,8 +7,8 @@ import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 
 export default function ListsPage() {
-  const [lists, setLists] = useState<List[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [lists, setLists] = useState<List[]>(() => api.peekLists('list') ?? []);
+  const [loading, setLoading] = useState(() => !api.peekLists('list'));
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 

@@ -43,8 +43,9 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
   // Saving the rules changes the list, so it is part of what the list is read for.
   const [rulesVersion, setRulesVersion] = useState(0);
   const key = `${version}:${rulesVersion}`;
-  const [plan, setPlan] = useState<{ key: string; plan: api.CutPlan | 'failed' } | null>(null);
-  const [review, setReview] = useState<{ review: CutReview | null; job: Job | null } | null>(null);
+  // What the list was last time, shown at once while it is weighed again.
+  const [plan, setPlan] = useState<{ key: string; plan: api.CutPlan | 'failed' } | null>(() => { const p = api.peek<api.CutPlan>(api.paths.cuts(listId)); return p ? { key, plan: p } : null; });
+  const [review, setReview] = useState<{ review: CutReview | null; job: Job | null } | null>(() => api.peek(api.paths.review(listId)) ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +62,9 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
     return () => clearInterval(timer);
   }, [reviewing, loadReview]);
 
-  const current = plan?.key === key ? plan.plan : null;
+  // The last list stays on screen while a fresh one is weighed - an undo in it survives.
+  const current = plan?.plan ?? null;
+  const refreshing = !!plan && plan.key !== key;
   const verdicts = new Map((review?.review?.items ?? []).map((i) => [i.name, i]));
 
   return (
@@ -74,6 +77,7 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
           </button>
         ))}
       </div>
+      {refreshing && <p role="status" className="text-xs text-[var(--muted)]">Updating the list…</p>}
       {!current ? <p className="text-sm text-[var(--muted)]">Weighing every card…</p>
         : current === 'failed' ? <p className="text-sm text-red-400">Couldn&apos;t weigh the cards just now.</p>
           : view === 'list' ? (

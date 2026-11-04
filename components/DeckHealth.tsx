@@ -41,9 +41,9 @@ interface Props {
 }
 
 export default function DeckHealth({ listId, commander, cards, version }: Props) {
-  const [data, setData] = useState<api.DeckHealth | null>(null);
-  const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>('loading');
-  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>('loading');
+  const [data, setData] = useState<api.DeckHealth | null>(() => api.peek<api.DeckHealth>(api.paths.health(listId)) ?? null);
+  const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>(() => api.peek<{ roles: RoleCount[] }>(api.paths.roles(listId))?.roles ?? 'loading');
+  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>(() => api.peek<api.DeckInsights>(api.paths.insights(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
 
   // The stored-card checks answer at once; roles and the bracket follow on their own.

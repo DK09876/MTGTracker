@@ -33,7 +33,7 @@ const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'D
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 export default function DeckChat({ listId, cards, onAdd, onRemove, question = '' }: Props) {
-  const [chats, setChats] = useState<api.ChatSummary[] | null>(null);
+  const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
   const [replying, setReplying] = useState(false);

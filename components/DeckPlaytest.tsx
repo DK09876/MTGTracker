@@ -38,7 +38,7 @@ const one = (x: number) => x.toFixed(1);
 export default function DeckPlaytest({ listId, commander, cards }: Props) {
   const [mode, setMode] = useState<Mode>('goldfish');
   // The deck's settings, presets, and each card's tags - read once, saved as they change.
-  const [state, setState] = useState<api.PlaytestState | null>(null);
+  const [state, setState] = useState<api.PlaytestState | null>(() => api.peek<api.PlaytestState>(api.paths.playtest(listId)) ?? null);
   useEffect(() => {
     let cancelled = false;
     api.deckPlaytest(listId).then((p) => { if (!cancelled) setState(p); }).catch(() => { if (!cancelled) setState({ settings: DEFAULT_SETTINGS, presets: [], saved: false, cardTags: {}, tagNames: [] }); });

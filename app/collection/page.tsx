@@ -32,7 +32,7 @@ const money = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigi
 const boxName = (name: string) => name || 'Unsorted';
 
 export default function CollectionPage() {
-  const [state, setState] = useState<api.CollectionState | null>(null);
+  const [state, setState] = useState<api.CollectionState | null>(() => api.peekCollection() ?? null);
   const [error, setError] = useState<string | null>(null);
   const [where, setWhere] = useState<Where>({ kind: 'all' });
   const [filter, setFilter] = useState('');

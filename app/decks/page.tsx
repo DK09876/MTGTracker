@@ -23,8 +23,9 @@ import { imageOf } from '@/lib/scryfall';
 
 export default function DecksPage() {
   const router = useRouter();
-  const [decks, setDecks] = useState<List[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Shown at once from last time, then refreshed.
+  const [decks, setDecks] = useState<List[]>(() => api.peekLists('deck') ?? []);
+  const [loading, setLoading] = useState(() => !api.peekLists('deck'));
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);

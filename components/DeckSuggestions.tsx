@@ -29,7 +29,7 @@ interface Props {
 const front = (name: string) => name.split(' // ')[0];
 
 export default function DeckSuggestions({ listId, cards, commander, version, onAdd, onMove, onRemove, combosOnly = false }: Props) {
-  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>('loading');
+  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>(() => api.peek<api.DeckInsights>(api.paths.insights(listId)) ?? 'loading');
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   useEffect(() => {

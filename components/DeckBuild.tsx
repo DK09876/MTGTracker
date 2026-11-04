@@ -72,7 +72,7 @@ function WithSymbols({ text }: { text: string }) {
 type Open = { at: string; kind: 'fill'; role: string } | { at: string; kind: 'cuts' } | null;
 
 export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, onTab, tagNames, planConfirmed, brief, onAsk }: Props) {
-  const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>('loading');
+  const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>(() => api.peek<BuildPlan>(api.paths.build(listId)) ?? 'loading');
   const [open, setOpen] = useState<Open>(null);
   const [hidden, setHidden] = useState<string[]>(() => readHidden(listId));
   const [showHidden, setShowHidden] = useState(false);

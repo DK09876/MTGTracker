@@ -29,7 +29,7 @@ interface Props {
 
 
 export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab }: Props) {
-  const [plan, setPlan] = useState<api.DeckPlanState | 'loading' | 'failed'>('loading');
+  const [plan, setPlan] = useState<api.DeckPlanState | 'loading' | 'failed'>(() => api.peek<api.DeckPlanState>(api.paths.plan(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
