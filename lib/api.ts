@@ -36,6 +36,8 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
+import type { CutReview } from './cut-review';
+import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
@@ -421,10 +423,14 @@ export interface CutPlan {
   curve: string | null;
   averageMv: number;
   roles: Array<{ id: string; label: string; count: number; target: [number, number] }>;
+  /** The deck's own rule settings. */
+  settings: CutSettings;
 }
 export const cutPlan = (listId: string) => fetch(url(`lists/${listId}/cuts`)).then(json<CutPlan>);
 /** Star a card so it is never offered as a cut. */
 export const keepCard = (listId: string, oracleId: string, keep: boolean) => send(`lists/${listId}/cuts`, 'PUT', { oracleId, keep }).then(json<{ ok: true }>);
+/** Save the deck's own cut rules. */
+export const saveCutSettings = (listId: string, settings: CutSettings) => send(`lists/${listId}/cuts`, 'PATCH', { settings }).then(json<{ settings: CutSettings }>);
 
 export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
@@ -630,3 +636,8 @@ export interface PlanChange {
 }
 export const deckPlan = (listId: string) => fetch(url(`lists/${listId}/plan`)).then(json<DeckPlanState>);
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
+
+/** Claude's last review of the cut list, and the job if one is running. */
+export const cutReview = (listId: string) => fetch(url(`lists/${listId}/cuts/review`)).then(json<{ review: CutReview | null; job: Job | null }>);
+export const startCutReview = (listId: string, instructions: string) =>
+  send(`lists/${listId}/cuts/review`, 'POST', { instructions }).then(json<{ job: Job }>).finally(jobsChanged);

@@ -78,4 +78,56 @@ describe('cutCandidates', () => {
     const flexScore = candidates.find((c) => c.name === 'Beast Within')?.score ?? 0;
     expect(flexScore).toBeLessThan(snipe.score);
   });
+
+  describe('rules and the plan (Kevin\'s Jiang Yanggu deck)', () => {
+    const jiang = { name: 'Jiang Yanggu, Alone', type_line: 'Legendary Creature', cmc: 5, oracle_text: 'Whenever a creature you control attacks a player alone, discard a card, then draw a card.' } as ScryfallCard;
+    const deck = [
+      card('Wheel of Misfortune', 'Sorcery', 'Each player secretly chooses a number. Each player discards their hand, then draws seven cards.', { cmc: 3 }),
+      card('Impulse', 'Instant', 'Exile the top two cards of your library. Until the end of your next turn, you may play those cards.', { cmc: 3 }),
+      card('Real Draw', 'Sorcery', 'Draw three cards.', { cmc: 3 }),
+      card('Draw Two', 'Sorcery', 'Draw two cards.', { cmc: 3 }),
+      card('Pet Dragon', 'Creature — Dragon', 'Flying', { cmc: 6, edhrec_rank: 30_000 }),
+      card('Fatty', 'Creature — Beast', 'Trample', { cmc: 6, edhrec_rank: 30_000 }),
+    ];
+    // Four draw cards by Scryfall's count, against a range of 1-2.
+    const draw = role('draw', ['Wheel of Misfortune', 'Impulse', 'Real Draw', 'Draw Two'], [1, 2]);
+    const base = { cards: deck, roles: [draw], fit: fitProfile(jiang), commander: jiang, commanderRoles: ['draw'], keep: new Set<string>(), stats: null, lands: { have: 37, want: 37 } };
+    const discard = { label: 'Discard', test: /\bdiscards? (a|their|your) (card|hand)|each player discards/i };
+
+    it('keeps cards that fit the plan\'s style, like wheels in a discard deck', () => {
+      const without = cutCandidates({ ...base, tags: null });
+      const withPlan = cutCandidates({ ...base, tags: null, styles: [discard] });
+      const score = (r: typeof without, n: string) => r.candidates.find((c) => c.name === n)?.score ?? 0;
+      expect(score(withPlan, 'Wheel of Misfortune')).toBeLessThan(score(without, 'Wheel of Misfortune'));
+      expect(withPlan.candidates.find((c) => c.name === 'Wheel of Misfortune')?.why.map((w) => w.rule) ?? ['kept']).not.toContain('norole');
+    });
+
+    it('does not count impulse draw as card advantage, nor charge it for draw being over', () => {
+      const { candidates } = cutCandidates({ ...base, tags: null });
+      const impulse = candidates.find((c) => c.name === 'Impulse');
+      expect(impulse?.why.some((w) => w.rule === 'over') ?? false).toBe(false);
+      // Three real draw cards against 1-2, not four.
+      expect(candidates.find((c) => c.name === 'Real Draw')!.reasons.join(' ')).toMatch(/draw: 3 \(not counting impulse draw\), more than 1–2/);
+    });
+
+    it('names each reason\'s rule, and follows the owner\'s switches, weights and rules', () => {
+      const plain = cutCandidates({ ...base, tags: null });
+      const fatty = plain.candidates.find((c) => c.name === 'Fatty')!;
+      expect(fatty.why.map((w) => w.rule)).toEqual(expect.arrayContaining(['costly', 'rare']));
+      const off = cutCandidates({ ...base, tags: null, settings: { rules: { costly: { on: false }, rare: { weight: 2 } }, custom: [] } });
+      const fatty2 = off.candidates.find((c) => c.name === 'Fatty')!;
+      expect(fatty2.why.some((w) => w.rule === 'costly')).toBe(false);
+      expect(fatty2.why.find((w) => w.rule === 'rare')!.delta).toBeCloseTo(2 * 0.67, 1);
+      const mine = cutCandidates({ ...base, tags: null, settings: { rules: {}, custom: [{ when: 'card', value: 'Fatty', then: 'protect' }, { when: 'mv-at-least', value: '3', then: 1 }] } });
+      expect(mine.protectedCards).toContain('Fatty');
+      expect(mine.candidates.find((c) => c.name === 'Real Draw')!.why.some((w) => w.rule === 'custom' && w.delta === 1)).toBe(true);
+    });
+
+    it('never offers cards tagged Pet', () => {
+      const tags = { brief: '', overview: '', tags: [{ id: 't1', name: 'Pet', description: '', color: '#fff', kind: null, status: 'accepted', origin: 'manual', position: 0, examples: [] }], cardTags: [{ key: 'o-Pet Dragon', tagId: 't1', source: 'manual', on: true, reason: '' }] };
+      const { protectedCards, candidates } = cutCandidates({ ...base, tags: tags as never });
+      expect(protectedCards).toContain('Pet Dragon');
+      expect(candidates.some((c) => c.name === 'Pet Dragon')).toBe(false);
+    });
+  });
 });

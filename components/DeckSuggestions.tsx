@@ -22,11 +22,13 @@ interface Props {
   onAdd: (cardId: string, board: Board) => Promise<void>;
   onMove: (cardId: string, board: Board) => void;
   onRemove: (cardId: string) => void;
+  /** Only the combos, inside Tune → Add (its cuts are the cut list's job now). */
+  combosOnly?: boolean;
 }
 
 const front = (name: string) => name.split(' // ')[0];
 
-export default function DeckSuggestions({ listId, cards, commander, version, onAdd, onMove, onRemove }: Props) {
+export default function DeckSuggestions({ listId, cards, commander, version, onAdd, onMove, onRemove, combosOnly = false }: Props) {
   const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>('loading');
   const [added, setAdded] = useState<Set<string>>(new Set());
 
@@ -116,7 +118,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
         </ul>
       </Section>
 
-      <Section tour="cuts" title="Cuts to consider" subtitle="Where to look first when the deck needs room. Prompts, not verdicts.">
+      {!combosOnly && <Section tour="cuts" title="Cuts to consider" subtitle="Where to look first when the deck needs room. Prompts, not verdicts.">
         {insights.cuts.length === 0 && (
           <p className="text-sm text-[var(--muted)]">Nothing stands out: every role is within its guideline{commander ? '' : ', and without a commander there is no EDHREC data to compare with'}.</p>
         )}
@@ -149,7 +151,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
             </div>
           ))}
         </div>
-      </Section>
+      </Section>}
     </div>
   );
 }

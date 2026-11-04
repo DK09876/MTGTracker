@@ -8,6 +8,7 @@
  * confirmed. Server only.
  */
 
+import { cleanSettings, NO_SETTINGS, type CutSettings } from './cut-rules';
 import { database } from './db';
 import { ROLES } from './roles';
 import type { ScryfallCard } from './scryfall';
@@ -121,6 +122,7 @@ export function changePlan(listId: string, change: PlanChange): void {
 
 /** Copy a plan to a duplicated deck. */
 export function copyPlan(fromId: string, toId: string): void {
+  rulesDb().run('INSERT OR IGNORE INTO deck_cut_rules (listId, settings, updatedAt) SELECT ?, settings, updatedAt FROM deck_cut_rules WHERE listId = ?', [toId, fromId]);
   db().run(`INSERT OR IGNORE INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, updatedAt)
     SELECT ?, style, style2, targets, draft, confirmedAt, updatedAt FROM deck_plans WHERE listId = ?`, [toId, fromId]);
 }
@@ -142,4 +144,37 @@ export function planConfirmed(listId: string): boolean {
   if (r) return !!r.confirmedAt;
   const b = database().get('SELECT tagBrief FROM lists WHERE id = ?', [listId]) as { tagBrief: string } | null;
   return !!b?.tagBrief.trim();
+}
+
+// --- The cut list's rules, as this deck's owner set them ---------------------
+
+let rulesReady = false;
+function rulesDb() {
+  const d = database();
+  if (!rulesReady) {
+    d.run('CREATE TABLE IF NOT EXISTS deck_cut_rules (listId TEXT PRIMARY KEY, settings TEXT NOT NULL, updatedAt TEXT NOT NULL)');
+    rulesReady = true;
+  }
+  return d;
+}
+
+export function cutSettings(listId: string): CutSettings {
+  const r = rulesDb().get('SELECT settings FROM deck_cut_rules WHERE listId = ?', [listId]) as { settings: string } | null;
+  return r ? cleanSettings(JSON.parse(r.settings)) : NO_SETTINGS;
+}
+
+export function setCutSettings(listId: string, settings: CutSettings): CutSettings {
+  const clean = cleanSettings(settings);
+  rulesDb().run(
+    `INSERT INTO deck_cut_rules (listId, settings, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(listId) DO UPDATE SET settings = excluded.settings, updatedAt = excluded.updatedAt`,
+    [listId, JSON.stringify(clean), new Date().toISOString()],
+  );
+  return clean;
+}
+
+/** The plan's styles, as the cut list reads them. */
+export function planStyles(listId: string, commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): Style[] {
+  const p = planFor(listId, '', commander, cards);
+  return [p.style, ...(p.style2 ? [p.style2] : [])].filter((s) => s.id !== 'value');
 }

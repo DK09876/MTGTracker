@@ -48,6 +48,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
   const [planConfirmed, setPlanConfirmed] = useState(true);
   const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
+  // A question from Tune, waiting in a new chat.
+  const [chatQuestion, setChatQuestion] = useState('');
   const [tags, setTags] = useState<Tags | null>(null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -380,7 +382,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {deck && (
         <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['suggestions', 'Suggestions'], ['chat', 'Chat'], ['collection', 'Collection']] as const).map(([value, label]) => (
+          {([['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['chat', 'Chat'], ['collection', 'Collection']] as const).map(([value, label]) => (
             <button
               key={value}
               role="tab"
@@ -417,6 +419,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
           onMove={moveCard}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
+          planConfirmed={planConfirmed}
+          brief={tags?.brief ?? ''}
+          onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
         />
       ) : deck && section === 'chat' && !planConfirmed ? (
         <div data-tour="chat-locked" className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -426,6 +432,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </div>
       ) : deck && section === 'chat' ? (
         <DeckChat
+          key={chatQuestion}
+          question={chatQuestion}
           listId={id}
           cards={cards}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}

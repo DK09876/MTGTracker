@@ -22,19 +22,21 @@ interface Props {
   cards: ListedCard[];
   onAdd: (cardId: string, board: Board) => Promise<void>;
   onRemove: (cardId: string) => Promise<void> | void;
+  /** A question to start a new chat with, ready to send (from Tune). */
+  question?: string;
 }
 
 const POLL_MS = 2_000;
 const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?'];
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
+export default function DeckChat({ listId, cards, onAdd, onRemove, question = '' }: Props) {
   const [chats, setChats] = useState<api.ChatSummary[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
   const [replying, setReplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(question);
   const end = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);

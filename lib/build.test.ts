@@ -31,7 +31,7 @@ describe('build', () => {
     expect(plan.gaps.map((g) => g.role)).toEqual(['ramp', 'removal']);
     expect(plan.targets.map((g) => g.role)).toEqual(['ramp', 'removal', 'draw']);
     expect(plan.issues.map((i) => [i.id, i.level])).toEqual([
-      ['size', 'fix'], ['role:removal', 'fix'], ['role:ramp', 'consider'], ['finisher', 'consider'], ['plan', 'consider'],
+      ['size', 'fix'], ['role:removal', 'fix'], ['role:ramp', 'consider'], ['finisher', 'consider'],
     ]);
     expect(plan.issues[0]).toMatchObject({ title: '1 card over 100', action: { kind: 'cuts' } });
     expect(plan.issues.find((i) => i.id === 'role:ramp')?.cards).toHaveLength(9);

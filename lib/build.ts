@@ -167,13 +167,6 @@ export function buildPlan(input: {
       cards: [], action: null,
     });
   }
-  if (!input.brief.trim()) {
-    issues.push({
-      id: 'plan', level: 'consider', title: 'No plan written down',
-      why: 'Optional: a sentence on how the deck wins helps the AI on the Tags and Chat tabs, and the cut list protects the cards you tag as the plan.',
-      cards: [], action: { kind: 'tags', label: 'Write the brief' },
-    });
-  }
   issues.sort((a, b) => (a.level === b.level ? 0 : a.level === 'fix' ? -1 : 1));
 
   const targets = [...gaps, ...roles.filter((r) => r.target && r.count >= r.target[0])

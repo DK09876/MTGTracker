@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 
 import { buildPlan } from '@/lib/build';
 import { cardsInList, deckTags } from '@/lib/db';
+import { planFor } from '@/lib/deck-plan';
 import { analyse } from '@/lib/health';
 import { requireList } from '@/lib/profile-route';
 
@@ -39,5 +40,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     colors: health.colors.map((c) => ({ color: c.color, sources: c.sources, needed: c.needed, neededFor: c.neededFor })),
     brief: tags.brief,
     wincons,
+    // The plan's styles, as the owner set them.
+    style: (() => { const p = planFor(id, tags.brief, list.commander, main); return { label: p.style2 ? `${p.style.label} + ${p.style2.label}` : p.style.label, note: p.style.note }; })(),
   }));
 }
