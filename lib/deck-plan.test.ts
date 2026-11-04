@@ -34,7 +34,10 @@ describe('the plan', () => {
     expect([p.style.id, p.confirmed, p.chosen.style]).toEqual(['landfall', false, false]);
     expect(p.targets.find((t) => t.role === 'ramp')).toMatchObject({ range: [12, 15], mine: false });
 
-    plan.changePlan(deck.id, { style: 'spells', style2: '', targets: { ramp: [8, 9], wipe: [5, 1] } });
+    plan.changePlan(deck.id, { style: 'spells' });
+    // Picking the main style keeps the detected one as the second.
+    expect(plan.planFor(deck.id, '', lands, cards).style2?.id).toBe('landfall');
+    plan.changePlan(deck.id, { style2: '', targets: { ramp: [8, 9], wipe: [5, 1] } });
     p = plan.planFor(deck.id, '', lands, cards);
     expect([p.style.id, p.style2, p.chosen]).toEqual(['spells', null, { style: true, style2: true }]);
     expect(p.targets.find((t) => t.role === 'ramp')).toMatchObject({ range: [8, 9], styleRange: [8, 10], mine: true });

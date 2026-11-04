@@ -53,7 +53,9 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
   const r = row(listId);
   const found: Detected = detectStyles(commander, cards);
   const style = styleById(r?.style) ?? found.primary;
-  const style2 = r?.style2 === '' ? null : styleById(r?.style2) ?? (r?.style ? null : found.secondary);
+  // The detected second style stays when the owner picks the main one, unless they are the same.
+  const auto2 = found.secondary && found.secondary.id !== style.id ? found.secondary : found.primary.id !== style.id ? found.primary : null;
+  const style2 = r?.style2 === '' ? null : styleById(r?.style2) ?? auto2;
   const fromStyle = styleTargets(BASE_TARGETS, style, style2);
   const mine = JSON.parse(r?.targets ?? '{}') as Record<string, [number, number]>;
   return {
