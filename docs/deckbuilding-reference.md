@@ -175,6 +175,18 @@ From a second playlist, [MTG Deck cuts](https://www.youtube.com/playlist?list=PL
 - **Pet cards (C3):** let the owner mark favourites that are never cut; that is why we play.
 - **Method (C1, C3):** rebuilding a deck the other way round (additive vs subtractive) shows which cards get squeezed out; one-in-one-out does not solve not knowing which card is weakest; goldfishing at 100 cards is how to tell.
 
+## Commander Template's Academy (read 2026-11-04)
+
+Read in the owner's browser from commandertemplate.com/academy (How to Build Commander, Ramp, Card Draw, Removal, Engines, Multipliers, Operational Threshold). The app follows these ideas without naming the site on the page; the rules' explanations are in `lib/cut-rules.ts` and `components/DeckPlan.tsx`.
+
+- **Base template:** 36 lands, 12 ramp, 10 card draw, 10 interaction, and about 32 theme cards in four packages of 8 ("8 by 8"). Eight cards in 99 give a 46% chance of one in the opening seven and 62% by turn 4 (11 cards seen, drawing every turn); 16 give 87%. 36 lands + 12 ramp = 48 sources, a 75% chance of three in the opening seven. → `lib/roles.ts` defaults, the Plan tab's theme packages, the `package-over`/`package-short` cut rules.
+- **Operational threshold ("flip turn"):** the mana the deck needs before it stops setting up and starts executing - by default the commander's mana value, adjustable. Land, ramp and draw counts follow it; lower needs less ramp. → `flipTargets()` in `lib/deck-plan.ts` (ramp 12 at 4, one more per mana above; lands 36 at 4, one more per two mana), and Playtest's first goal.
+- **Ramp:** acceleration and fixing. Two-mana rocks are the workhorses; three is the top end. Too much ramp with too few lands is "hot garbage". → `slowramp` rule (4+ mana ramp).
+- **Card draw:** dig (Impulse), steady card advantage (Rhystic Study), refill (Windfall, 1-2 of these). Dig counts as draw → impulse draw counts again; the `impulse` rule (off by default) excludes it for decks that need that.
+- **Removal:** stay proactive; single-target removal is poor value four-handed; prefer flexible and instant speed; 1-2 board wipes inside the 10. → wipes 1-2, `sorcery` rule.
+- **Engines:** enablers (make the resource; cheap, self-sufficient, repeatable) at least 12; payoffs (turn it into a win) about 6, fewer than enablers; ~3 multipliers. → `enablers` and `payoffs` rules; payoffs no longer protected outright.
+- **Multipliers:** about 3-4 per theme, reachable by turns 5-6; secondary to enablers.
+
 ## Power level, stax, salt and free spells
 
 None of the videos define the brackets; the app's bracket floor comes from Wizards' rules and Commander Spellbook, and its stax and free-spell tags need the friend's curated lists.
@@ -277,6 +289,8 @@ The AI explains numbers the app computes; it never calculates them itself. These
 The Scryfall-based tagging and the win guess are built on a local branch and tested on a local Test profile; they are not deployed yet.
 
 ## Sources
+
+- Commander Template Academy, by Lily (founder): https://commandertemplate.com/academy - how-to-build-commander, ramp, card-draw, removal, engines, multipliers, operational-threshold.
 
 The playlist: [EDH deck building](https://www.youtube.com/playlist?list=PLsvebAO5gV5nlWhcgjNf9UDPMad4DWQCa), 19 videos, transcribed on 31 October 2026.
 
