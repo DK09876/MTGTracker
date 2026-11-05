@@ -26,7 +26,7 @@ import { sectionsOf } from './sections';
 import { combosInDeck, estimateBracket, type BracketReport, type Combo, type DeckList } from './spellbook';
 import { STYLES, VALUE } from './styles';
 import { PROPOSAL_PARTS, type PlanSuggestion } from './tagging';
-import { nextColor, tagKey } from './tags';
+import { isJobTag, nextColor, tagKey } from './tags';
 import { guessWinRoutes } from './wincons';
 
 // --- what Commander Spellbook says, kept until the deck changes ----------------
@@ -169,7 +169,11 @@ export async function planState(list: List): Promise<PlanState> {
   // Themes: detected ones (open, kept as a tag, or dropped) and the owner's own theme tags.
   const tc = s.themes ?? { dropped: [], kept: {}, sizes: {} };
   const inMain = new Set(main.map((c) => tagKey(c.card)));
-  const ownThemeTags = tags.tags.filter((t) => t.status === 'accepted' && t.kind !== 'wincon' && !PET.test(t.name));
+  const nameByKey = new Map(main.map((c) => [tagKey(c.card), c.card.name]));
+  const tagMembers = (tagId: string) => tags.cardTags.filter((ct) => ct.on && ct.tagId === tagId).map((ct) => nameByKey.get(ct.key)).filter((n): n is string => !!n);
+  const jobLists = roles.filter((r) => ['ramp', 'draw', 'removal', 'counter', 'wipe', 'protection', 'recursion', 'tutor', 'interaction'].includes(r.id));
+  // Job tags (Ramp, Draw, Removal...) stay tags, but they are not themes: the built-in jobs count them.
+  const ownThemeTags = tags.tags.filter((t) => t.status === 'accepted' && t.kind !== 'wincon' && !PET.test(t.name) && !isJobTag(t.name, tagMembers(t.id), jobLists));
   const keptIds = new Set(Object.values(tc.kept));
   const tagCount = (tagId: string) => tags.cardTags.filter((ct) => ct.on && ct.tagId === tagId && inMain.has(ct.key)).length;
   const kindCount = (tagId: string) => (tags.tags.find((t) => t.id === tagId)?.kind ?? null);

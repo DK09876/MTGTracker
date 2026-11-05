@@ -60,6 +60,26 @@ export const TAG_KINDS: Record<TagKind, string> = {
   other: 'Other',
 };
 
+/**
+ * A tag that names one of the jobs every deck needs - Ramp, Draw, Removal,
+ * Wipes - rather than something this deck is about. The built-in tags
+ * already count those, so a job tag is kept as a tag but is not a theme
+ * package with a size, and is not counted as a theme.
+ */
+const JOB_TAG = /^(mana )?(ramp|rocks?|mana rocks?|dorks?|mana dorks?|land ramp|fixing|(card )?draw|card advantage|cantrips?|removal|spot removal|targeted removal|interaction|(board ?)?wipes?|boardwipes?|sweepers?|counter ?spells?|counters|protection|recursion|tutors?|lands?|utility lands?)$/i;
+
+export function isJobTag(name: string, members: string[] = [], jobCards: Array<{ id: string; cards: string[] }> = []): boolean {
+  if (JOB_TAG.test(name.trim())) return true;
+  // Or most of its cards are one built-in job's cards.
+  if (members.length >= 4) {
+    for (const j of jobCards) {
+      const inJob = new Set(j.cards);
+      if (members.filter((m) => inJob.has(m)).length / members.length >= 0.8) return true;
+    }
+  }
+  return false;
+}
+
 export const TAG_KIND_HINTS: Record<TagKind, string> = {
   wincon: 'Actually ends the game',
   engine: 'Keeps making value every turn',

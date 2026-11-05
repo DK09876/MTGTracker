@@ -26,7 +26,7 @@ import { jobsOf } from './deck-numbers';
 import { CUT_RULES, customApplies, describeCustom, NO_SETTINGS, ruleOn, weightOf, type CutSettings } from './cut-rules';
 import type { RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
-import type { DeckTags } from './tags';
+import { isJobTag, type DeckTags } from './tags';
 
 export interface CutCandidate {
   cardId: string;
@@ -77,6 +77,7 @@ export interface CutInput {
 const PROTECTING = new Set(['wincon', 'engine']);
 // A tag for the cards that are the fun of the deck (3/3 Elk: do not cut those for generic ones).
 const PET = /^(pets?|pet cards?|fun|favou?rites?)$/i;
+const JOB_ROLE_IDS = new Set(['ramp', 'draw', 'removal', 'counter', 'wipe', 'protection', 'recursion', 'tutor', 'interaction']);
 const FINISHING = new Set(['wincon', 'finisher', 'extra-turn', 'extra-combat', 'overrun', 'drain']);
 const isLand = (c: ScryfallCard) => /\bLand\b/.test((c.type_line ?? '').split('//')[0]);
 const textOf = (c: ScryfallCard) => [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n').replace(/\([^)]*\)/g, '');
@@ -142,7 +143,11 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
 
   // Theme packages: each of the owner's theme tags, its size and how full it is.
   const inMain = new Set(cards.map((c) => c.card.oracle_id ?? c.card.id));
-  const themeTags = accepted.filter((t) => t.kind !== 'wincon' && !PET.test(t.name));
+  const nameByKey = new Map(cards.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));
+  // Job tags (Ramp, Draw, Removal...) are counted by the built-in jobs, not as theme packages.
+  const jobLists = roles.filter((r) => JOB_ROLE_IDS.has(r.id));
+  const namesOfTag = (tagId: string) => on.filter((ct) => ct.tagId === tagId).map((ct) => nameByKey.get(ct.key)).filter((n): n is string => !!n);
+  const themeTags = accepted.filter((t) => t.kind !== 'wincon' && !PET.test(t.name) && !isJobTag(t.name, namesOfTag(t.id), jobLists));
   const members = new Map(themeTags.map((t) => [t.id, on.filter((ct) => ct.tagId === t.id && inMain.has(ct.key)).length]));
   const sizeOf = (tagId: string) => input.packages?.[tagId] ?? 8;
   const enablerTags = new Set(accepted.filter((t) => t.kind === 'enabler').map((t) => t.id));

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isImpulse, isRepeatableRemoval, jobs, karstenLands, landNumber, rampRange, sourceWeight, withJobs } from './deck-numbers';
+import { drawKind, isImpulse, isRepeatableRemoval, jobs, karstenLands, landNumber, rampRange, sourceWeight, withJobs } from './deck-numbers';
 import type { RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
 
@@ -119,5 +119,41 @@ describe('colour sources', () => {
     expect(sourceWeight(ritual, 4)).toBe(0);
     expect(sourceWeight(cultivate, 3)).toBe(0.75);
     expect(sourceWeight(treasure, 3)).toBe(0.25);
+  });
+});
+
+// Real cards from Kevin's and DK's decks, where card draw read 28 and 15 before looting was told apart.
+describe('what counts as card draw', () => {
+  const real = (name: string, type_line: string, oracle_text: string, extra: Partial<ScryfallCard> = {}) => card(name, type_line, oracle_text, extra);
+  it('calls looting and rummaging selection, not draw', () => {
+    expect(drawKind(real('Faithless Looting', 'Sorcery', 'Draw two cards, then discard two cards.\nFlashback {2}{R}'))).toBe('selection');
+    expect(drawKind(real('Laughing Mad', 'Instant', 'As an additional cost to cast this spell, discard a card.\nDraw two cards.'))).toBe('selection');
+    expect(drawKind(real('Cool but Rude', 'Enchantment — Class', 'Whenever you attack, you may discard a card. If you do, draw a card.'))).toBe('selection');
+    expect(drawKind(real('Matzalantli, the Great Door', 'Legendary Artifact', '{T}: Draw a card, then discard a card.'))).toBe('selection');
+    expect(drawKind(real('Three Steps Ahead', 'Instant', 'Spree\n+ {1}{U} — Counter target spell.\n+ {2} — Draw two cards, then discard a card.'))).toBe('selection');
+    expect(drawKind(real('Steal the Show', 'Sorcery', 'Choose one or both —\n• Target player discards any number of cards, then draws that many cards.\n• Steal the Show deals damage equal to the number of instant and sorcery cards in your graveyard to target creature or planeswalker.'))).toBe('selection');
+    expect(drawKind(real('Ivora, Insatiable Heir', 'Legendary Creature', 'Trample\nWhen Ivora enters and whenever it deals combat damage to a player, create a Blood token. (It\'s an artifact with "{1}, {T}, Discard a card, Sacrifice this token: Draw a card.")'))).toBe('selection');
+    expect(drawKind(real('Magmakin Artillerist', 'Creature', 'Whenever you discard one or more cards, this creature deals that much damage to each opponent.\nCycling {1}{R} ({1}{R}, Discard this card: Draw a card.)', { keywords: ['Cycling'] }))).toBe('selection');
+  });
+  it('does not count draws an opponent makes', () => {
+    expect(drawKind(real('Acolyte Hybrid', 'Creature', 'Whenever this creature attacks, destroy up to one target artifact. If an artifact is destroyed this way, its controller draws a card.'))).toBe('selection');
+  });
+  it('counts real draw, wheels and refills', () => {
+    expect(drawKind(real("Night's Whisper", 'Sorcery', 'You draw two cards and you lose 2 life.'))).toBe('draw');
+    expect(drawKind(real('Wheel of Misfortune', 'Sorcery', 'Each player secretly chooses a number of 0 or greater, then all players reveal those numbers simultaneously and determine the highest and lowest numbers revealed this way. Wheel of Misfortune deals damage equal to the highest number to each player who chose that number. Each player who didn\'t choose the lowest number discards their hand, then draws seven cards.'))).toBe('draw');
+    expect(drawKind(real('Change of Fortune', 'Sorcery', "Discard your hand, then draw a card for each card you've discarded this turn."))).toBe('draw');
+    expect(drawKind(real("Khorvath's Fury", 'Sorcery', 'For each player, choose friend or foe. Each friend discards all cards from their hand, then draws that many cards plus one.'))).toBe('draw');
+    expect(drawKind(real('Brainsurge', 'Instant', 'Draw four cards, then put two cards from your hand on top of your library in any order.'))).toBe('draw');
+    expect(drawKind(real('Monument to Endurance', 'Artifact', "Whenever you discard a card, choose one that hasn't been chosen this turn —\n• Draw a card.\n• Create a Treasure token.\n• Each opponent loses 3 life."))).toBe('draw');
+  });
+  it('leaves cards without a draw of their own to their tags', () => {
+    expect(drawKind(real('Dig Through Time', 'Instant', 'Delve\nLook at the top seven cards of your library. Put two of them into your hand and the rest on the bottom of your library in any order.'))).toBeNull();
+  });
+});
+
+describe('removal that can be used again', () => {
+  it('is not removal that sacrifices itself', () => {
+    expect(isRepeatableRemoval(card('Sunset Strikemaster', 'Creature — Human Monk', '{T}: Add {R}.\n{2}{R}, {T}, Sacrifice this creature: It deals 6 damage to target creature with flying.'))).toBe(false);
+    expect(isRepeatableRemoval(card('Goblin Tinkerer', 'Creature — Goblin Artificer', '{R}, {T}: Destroy target artifact. That artifact deals damage equal to its mana value to this creature.'))).toBe(true);
   });
 });

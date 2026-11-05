@@ -102,6 +102,77 @@ export function isImpulse(card: ScryfallCard): boolean {
   return IMPULSE.test(text) && !DRAWS.test(text);
 }
 
+const WORD_N: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+const num = (w: string): number | null => (w in WORD_N ? WORD_N[w] : /^\d+$/.test(w) ? Number(w) : null);
+
+/**
+ * Whether a card's draw leaves you with more cards, or only swaps cards
+ * ("selection"): looting and rummaging - discard one, draw one - and spells
+ * that draw two for a discard leave your hand the same size, so they are
+ * not card draw. Wheels and "discard your hand, then draw N" refill a hand
+ * and count. Draws someone else makes (an opponent, "its controller") don't
+ * count for you, and a card that only cycles is selection too.
+ *
+ * Reads each ability on its own: draws minus discards (and cards put back
+ * from your hand), minus the spell itself for an instant or sorcery. 'draw'
+ * when any ability leaves you up a card, 'selection' when every ability
+ * that draws leaves you even or behind, null when the text has no draw of
+ * its own to judge (the card's tags said card advantage for another reason:
+ * returning cards from the graveyard, looking at cards and keeping two).
+ */
+export function drawKind(card: ScryfallCard): 'draw' | 'selection' | null {
+  const front = (card.card_faces?.[0] ?? card) as { type_line?: string };
+  const spell = /\b(Instant|Sorcery)\b/.test(front.type_line ?? typeOf(card).split('//')[0]);
+  const text = textOf(card);
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  // An additional cost to cast it is paid once, for the whole spell.
+  const extraCost = lines.filter((l) => /^as an additional cost to cast this spell,[^.]*\bdiscard (a|one|two) cards?/i.test(l))
+    .reduce((n, l) => n + (num((l.match(/discard (a|one|two) cards?/i)?.[1] ?? 'a').toLowerCase()) ?? 1), 0);
+  let any = false;
+  let up = false;
+  for (const raw of lines) {
+    // One ability per line: "you may discard a card. If you do, draw a card" is one swap.
+    {
+      const line = raw.replace(/^•\s*/, '');
+      if (!/\bdraws?\b/i.test(line)) continue;
+      any = true;
+      // Someone else's draw: "its controller draws", "target opponent draws", "that player draws".
+      const mine = line.replace(/\b(its controller|their controller|that player|target opponent|each opponent|an opponent|target player)\s+(may\s+)?draws?\b[^.]*/gi, '');
+      const draws = [...mine.matchAll(/\b(?:you |each player |players? )?(?:may )?draws? (a card for each|cards? for each|cards equal to|that many|a|an|one|two|three|four|five|six|seven|eight|\d+|x)\b(?: cards?)?( plus one)?/gi)];
+      if (!draws.length) continue;
+      let drawn = 0;
+      let variable = false;
+      let thatMany = false;
+      for (const m of draws) {
+        const w = m[1].toLowerCase();
+        if (w === 'that many') { if (m[2]) variable = true; else thatMany = true; continue; }
+        const n = num(w);
+        if (n === null) variable = true; else drawn += n;
+        if (m[2]) drawn += 1;
+      }
+      // Discarding a whole hand, then drawing a fixed number or more: a refill.
+      const hand = /\bdiscards? (your|their|all the cards in (your|their)) hands?|discard all the cards in your hand|discard your hand/i.test(line);
+      if (hand && (variable || drawn >= 3)) { up = true; continue; }
+      if (variable && !thatMany) { up = true; continue; }
+      let discarded = extraCost;
+      for (const m of line.matchAll(/\bdiscards? (a|an|one|two|three|\d+|x|up to (?:one|two|three)|any number of)\b(?: cards?)?/gi)) {
+        const w = m[1].toLowerCase().replace(/^up to /, '');
+        discarded += w === 'any number of' || w === 'x' ? 0 : num(w) ?? 1;
+      }
+      for (const m of line.matchAll(/\bput (a|one|two|three) cards? from your hand on (top|the bottom)/gi)) discarded += num(m[1].toLowerCase()) ?? 1;
+      if (thatMany) continue; // "discard any number, then draw that many": even
+      const net = drawn - discarded - (spell ? 1 : 0);
+      if (net > 0) up = true;
+    }
+  }
+  if (any) return up ? 'draw' : 'selection';
+  // A Blood token is a rummage: discard a card, draw a card.
+  if (/\bcreate[^.]*\bBlood tokens?\b/i.test(text)) return 'selection';
+  if ((card.keywords ?? []).some((k) => /^(cycling|\w+cycling)$/i.test(k)) && !/\b(return|put)[^.]*\binto your hand\b/i.test(text)) return 'selection';
+  if (spell && /\bput (one|a card) of them into your hand\b/i.test(text) && !/\bput (two|three)\b[^.]*into your hand/i.test(text)) return 'selection';
+  return null;
+}
+
 /**
  * Removal that can be used again: a permanent with an activated ability
  * (cost, then a colon) or an every-turn trigger that destroys, exiles,
@@ -111,8 +182,11 @@ export function isRepeatableRemoval(card: ScryfallCard): boolean {
   if (/\b(Instant|Sorcery)\b/.test(typeOf(card).split('//')[0])) return false;
   const text = textOf(card);
   const hits = /(destroy|exile|return) (target|another target|up to one target)[^.]*(creature|permanent|artifact|enchantment|planeswalker|nonland)|deals? (\d+|x) damage to (any target|target (creature|planeswalker|player))/i;
+  const self = new RegExp(`sacrifice (this|${(card.name.split(' // ')[0].split(',')[0]).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i');
   return text.split('\n').some((line) => {
     const colon = line.indexOf(':');
+    // "Sacrifice this creature: deal 6 damage" works once.
+    if (colon > 0 && colon < 80 && self.test(line.slice(0, colon))) return false;
     if (colon > 0 && colon < 60 && hits.test(line.slice(colon))) return true;
     return /^(at the beginning of (your|each)|whenever)/i.test(line.trim()) && hits.test(line);
   });
@@ -229,11 +303,21 @@ export function jobs(input: JobInput): Job[] {
   // Card draw, with impulse draw apart.
   const drawAll = membersOf(['draw']);
   const impulse = drawAll.filter((n) => isImpulse(byName.get(n)!.card));
-  const draw = drawAll.filter((n) => !impulse.includes(n));
+  const selection = drawAll.filter((n) => !impulse.includes(n) && drawKind(byName.get(n)!.card) === 'selection');
+  const draw = drawAll.filter((n) => !impulse.includes(n) && !selection.includes(n));
   const drawCount = draw.reduce((n, name) => n + qty(name), 0);
   job('draw', draw, drawCount, range('draw', BASE_RANGES.draw), {
-    inputs: [`Cards Scryfall tags as card advantage, cantrips left out: ${drawAll.length}`, `Of those, impulse draw: ${impulse.length}`],
-    steps: [`${drawAll.length} − ${impulse.length} impulse = ${drawCount}.`, 'Impulse draw is counted on its own: it digs, but what it exiles has to be played soon, so it does not refill your hand.', ...fromStep('draw')],
+    inputs: [
+      `Cards Scryfall tags as card advantage, cantrips left out: ${drawAll.length}`,
+      `Of those, impulse draw: ${impulse.length}`,
+      `Of those, looting and rummaging (a card in for a card out): ${selection.length}${selection.length ? ` (${selection.slice(0, 3).join(', ')}${selection.length > 3 ? '…' : ''})` : ''}`,
+    ],
+    steps: [
+      `${drawAll.length} − ${impulse.length} impulse − ${selection.length} looting = ${drawCount}.`,
+      'Impulse draw is counted on its own: it digs, but what it exiles has to be played soon, so it does not refill your hand.',
+      'Looting and rummaging swap a card for a card, so your hand stays the same size: they are not card draw. Wheels and refills are.',
+      ...fromStep('draw'),
+    ],
   });
   job('impulse', impulse, impulse.reduce((n, name) => n + qty(name), 0), null, {
     inputs: [`Card advantage that exiles cards to play them: ${impulse.length}`],
