@@ -121,7 +121,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
       </div>
 
       {view === 'cut' ? (
-        <TuneCut listId={listId} cards={cards} version={version} tagNames={tagNames} planConfirmed={planConfirmed} onMove={onMove} onPlan={() => onTab('plan')} />
+        <TuneCut listId={listId} cards={cards} version={version} tagNames={tagNames} planConfirmed={planConfirmed} onMove={onMove} onPlan={() => onTab('plan')} onAsk={onAsk} />
       ) : (<>
       <section data-tour="build-issues" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

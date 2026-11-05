@@ -36,7 +36,7 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
-import type { CutReview } from './cut-review';
+import type { CutReview, ReviewItem, ReviewMode, Tier as CardTier } from './cut-review-shared';
 import type { GoldfishSettings } from './goldfish';
 import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
@@ -703,10 +703,14 @@ export interface PlanChange {
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 
-/** Claude's last review of the cut list, and the job if one is running. */
-export const cutReview = (listId: string) => get<{ review: CutReview | null; job: Job | null }>(paths.review(listId));
-export const startCutReview = (listId: string, instructions: string) =>
-  send(`lists/${listId}/cuts/review`, 'POST', { instructions }).then(json<{ job: Job }>).finally(jobsChanged);
+/** Claude's last review of the cut list, what the owner has done about it since, and the job if one is running. */
+export interface CutReviewState { review: CutReview | null; settled?: { cut: string[]; kept: string[] }; job: Job | null }
+export const cutReview = (listId: string) => get<CutReviewState>(paths.review(listId));
+export const startCutReview = (listId: string, instructions: string, mode: ReviewMode = 'top') =>
+  spending(send(`lists/${listId}/cuts/review`, 'POST', { instructions, mode }).then(json<{ job: Job }>).finally(jobsChanged));
+/** Disagree with a card's rating: Claude re-rates it with the reason. S or A also stars it to keep. */
+export const rerateCut = (listId: string, name: string, tier: CardTier | null, reason: string) =>
+  spending(send(`lists/${listId}/cuts/review/rerate`, 'POST', { name, tier, reason }).then(json<{ item: ReviewItem; kept: boolean }>));
 
 /** A deck's playtest settings, presets, and each card's tags by name. */
 export interface PlaytestState {

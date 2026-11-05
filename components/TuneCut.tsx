@@ -6,8 +6,9 @@
  * The list is the rules added up (lib/cut-rules.ts); every reason on a card
  * names its rule, and the Rules view switches, reweights or adds to them for
  * this deck. Claude's review reads the plan and says, for the top of the
- * list, whether it agrees - it never cuts anything itself. Cuts go to the
- * maybeboard, with undo.
+ * list, whether it agrees - or rates the whole deck in tiers - and each of
+ * its verdicts can be acted on (cut, ★ keep, discuss) or disputed. It never
+ * cuts anything itself. Cuts go to the maybeboard, with undo.
  */
 
 import Image from 'next/image';
@@ -18,7 +19,7 @@ import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import { CUT_RULES, describeCustom, RULE_GROUPS, type CustomRule, type CutSettings } from '@/lib/cut-rules';
-import type { CutReview, ReviewItem } from '@/lib/cut-review';
+import { reviewSize, TIERS, type CutReview, type ReviewItem, type ReviewMode, type Tier } from '@/lib/cut-review-shared';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 import type { Job } from '@/lib/jobs';
@@ -32,20 +33,22 @@ interface Props {
   planConfirmed: boolean;
   onMove: (cardId: string, board: Board) => Promise<void> | void;
   onPlan: () => void;
+  /** Discuss a verdict in the deck's Chat. */
+  onAsk?: (question: string) => void;
 }
 
 type View = 'list' | 'rules' | 'claude';
 const RULE_NAME = new Map(CUT_RULES.map((r) => [r.id, r.label]));
 const POLL_MS = 2_500;
 
-export default function TuneCut({ listId, cards, version, tagNames, planConfirmed, onMove, onPlan }: Props) {
+export default function TuneCut({ listId, cards, version, tagNames, planConfirmed, onMove, onPlan, onAsk }: Props) {
   const [view, setView] = useState<View>('list');
   // Saving the rules changes the list, so it is part of what the list is read for.
   const [rulesVersion, setRulesVersion] = useState(0);
   const key = `${version}:${rulesVersion}`;
   // What the list was last time, shown at once while it is weighed again.
   const [plan, setPlan] = useState<{ key: string; plan: api.CutPlan | 'failed' } | null>(() => { const p = api.peek<api.CutPlan>(api.paths.cuts(listId)); return p ? { key, plan: p } : null; });
-  const [review, setReview] = useState<{ review: CutReview | null; job: Job | null } | null>(() => api.peek(api.paths.review(listId)) ?? null);
+  const [review, setReview] = useState<api.CutReviewState | null>(() => api.peek(api.paths.review(listId)) ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,7 +89,9 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
           ) : view === 'rules' ? (
             <Rules listId={listId} settings={current.settings} tagNames={tagNames} onSaved={() => setRulesVersion((n) => n + 1)} />
           ) : (
-            <Review listId={listId} state={review} planConfirmed={planConfirmed} onPlan={onPlan} onStarted={(job) => setReview((r) => ({ review: r?.review ?? null, job }))} />
+            <Review listId={listId} cards={cards} over={current.size - 100} state={review} planConfirmed={planConfirmed} onPlan={onPlan}
+              onMove={onMove} onAsk={onAsk} onChanged={() => { void loadReview(); setRulesVersion((n) => n + 1); }}
+              onStarted={(job) => setReview((r) => ({ review: r?.review ?? null, settled: r?.settled, job }))} />
           )}
     </div>
   );
@@ -212,7 +217,7 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
 
 function Verdict({ item }: { item: ReviewItem }) {
   const style = item.verdict === 'cut' ? 'bg-[#ffb4a8]/15 text-[#ffb4a8]' : item.verdict === 'keep' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-[var(--surface-hover)] text-[var(--muted)]';
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${style}`}>Claude: {item.verdict === 'cut' ? 'agrees, cut' : item.verdict === 'keep' ? 'keep it' : 'unsure'}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${style}`}>Claude: {item.tier ? `tier ${item.tier}` : item.verdict === 'cut' ? 'agrees, cut' : item.verdict === 'keep' ? 'keep it' : 'unsure'}</span>;
 }
 
 // --- The rules ------------------------------------------------------------------
@@ -315,15 +320,26 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
 
 // --- Claude's review --------------------------------------------------------------
 
-function Review({ listId, state, planConfirmed, onPlan, onStarted }: {
-  listId: string; state: { review: CutReview | null; job: Job | null } | null; planConfirmed: boolean;
-  onPlan: () => void; onStarted: (job: Job) => void;
+type Acted = Record<string, 'cut' | 'kept'>;
+const TIER_TONE: Record<Tier, string> = { S: '#f2dfa0', A: '#6ee7b7', B: '#5aa8e6', C: '#ffb4a8' };
+
+function Review({ listId, cards, over, state, planConfirmed, onPlan, onStarted, onMove, onAsk, onChanged }: {
+  listId: string; cards: ListedCard[]; over: number; state: api.CutReviewState | null; planConfirmed: boolean;
+  onPlan: () => void; onStarted: (job: Job) => void; onMove: Props['onMove']; onAsk?: (question: string) => void;
+  /** After a re-rate: read the review again. */
+  onChanged: () => void;
 }) {
   const [instructions, setInstructions] = useState('');
+  const [mode, setMode] = useState<ReviewMode>(() => state?.review?.mode ?? 'top');
   const [error, setError] = useState<string | null>(null);
+  // What was done from this screen, with undo; what was done before comes from the server (settled).
+  const [acted, setActed] = useState<Acted>({});
+  const [busy, setBusy] = useState(false);
   const running = state?.job?.status === 'running';
   const failed = state?.job && state.job.status !== 'running' && state.job.status !== 'done' ? state.job : null;
   const review = state?.review;
+  const main = cards.filter((c) => (c.board ?? 'main') === 'main');
+  const size = reviewSize(over);
 
   if (!planConfirmed) {
     return (
@@ -335,15 +351,53 @@ function Review({ listId, state, planConfirmed, onPlan, onStarted }: {
   }
   const start = async () => {
     setError(null);
-    try { onStarted((await api.startCutReview(listId, instructions)).job); } catch (e) { setError(e instanceof Error ? e.message : 'Could not start it'); }
+    try { onStarted((await api.startCutReview(listId, instructions, mode)).job); setActed({}); } catch (e) { setError(e instanceof Error ? e.message : 'Could not start it'); }
   };
+
+  // Where each reviewed card stands: still to decide, cut, or kept for good.
+  const entryOf = (name: string) => main.find((c) => c.card.name === name);
+  const stateOf = (name: string): 'open' | 'cut' | 'kept' => acted[name] ?? (state?.settled?.kept.includes(name) ? 'kept' : !entryOf(name) || state?.settled?.cut.includes(name) ? 'cut' : 'open');
+  const act = async (name: string, what: 'cut' | 'keep' | 'undo') => {
+    const entry = entryOf(name) ?? cards.find((c) => c.card.name === name);
+    if (!entry) return;
+    setBusy(true);
+    try {
+      if (what === 'cut') { await onMove(entry.card.id, 'maybe'); setActed((a) => ({ ...a, [name]: 'cut' })); }
+      else if (what === 'keep') { await api.keepCard(listId, entry.card.oracle_id ?? entry.card.id, true); setActed((a) => ({ ...a, [name]: 'kept' })); }
+      else {
+        const was = stateOf(name);
+        if (was === 'cut') await onMove(entry.card.id, 'main');
+        if (was === 'kept') await api.keepCard(listId, entry.card.oracle_id ?? entry.card.id, false);
+        setActed((a) => { const n = { ...a }; delete n[name]; return n; });
+      }
+    } finally { setBusy(false); }
+  };
+  const cutMany = async (names: string[]) => { for (const n of names) await act(n, 'cut'); };
+  const discuss = onAsk ? (item: ReviewItem) => onAsk(`About ${item.name}: in the cut review you said ${item.tier ? `tier ${item.tier}` : `"${item.verdict}"`} - ${item.why} I'd like to talk it through.`) : undefined;
+  const settledBefore = (state?.settled?.cut.length ?? 0) + (state?.settled?.kept.length ?? 0);
 
   return (
     <div data-tour="cut-review" className="flex flex-col gap-4">
-      <p className="max-w-3xl text-sm text-[var(--muted)]">
-        Claude reads the plan, the styles, your tags and the top 30 of the list - with each card&apos;s text and why it is there - and says for each whether it agrees.
-        It never cuts anything; its notes appear next to each card in Suggestions.
-      </p>
+      <div role="radiogroup" aria-label="What Claude reviews" className="grid max-w-3xl gap-2 sm:grid-cols-2">
+        {([
+          ['top', `The top of the cut list · ${size} cards`, `About twice what you're over${over > 0 ? ` (${over})` : ''}. Cards you've cut or ★ kept have left the list.`],
+          ['whole', `The whole deck · ${main.length} cards, in tiers`, 'Every card S, A, B or C against your plan, with a way to disagree. A longer request: about four times a quick one, around a minute.'],
+        ] as const).map(([m, title, note]) => (
+          <button key={m} role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
+            className={`rounded-2xl border px-3.5 py-2.5 text-left text-sm ${mode === m ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}>
+            <b>{title}</b>
+            <span className="mt-0.5 block text-xs text-[var(--muted)]">{note}</span>
+          </button>
+        ))}
+      </div>
+      {review && (
+        <p className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-sm">
+          <b>Last time</b> <span className="text-[var(--muted)]">({new Date(review.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})</span>{' '}
+          {settledBefore
+            ? <>you cut {state?.settled?.cut.length ?? 0} and kept {state?.settled?.kept.length ?? 0} of what Claude looked at. Those won&apos;t come up again, and the next review is told what it said before so it doesn&apos;t repeat itself.</>
+            : <>nothing has been cut or ★ kept from it yet. Use the buttons below - the next review is told what it said and skips what you&apos;ve settled.</>}
+        </p>
+      )}
       <label className="flex max-w-3xl flex-col gap-1 text-sm">
         Your instructions <span className="text-xs text-[var(--muted)]">(optional, added to everything above)</span>
         <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={2} maxLength={2000}
@@ -352,30 +406,148 @@ function Review({ listId, state, planConfirmed, onPlan, onStarted }: {
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <button onClick={start} disabled={running} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-60">
-          {running ? `${state?.job?.detail || 'Reviewing'}…` : review ? 'Review again' : 'Ask Claude to review'}
+          {running ? `${state?.job?.detail || 'Reviewing'}…` : mode === 'whole' ? 'Rate the whole deck' : review ? `Review the next ${size}` : `Review the top ${size}`}
         </button>
         <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.cutReview.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
         <AiModelPicker area="deck" />
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {failed && <p className="text-sm text-red-400">The review did not finish: {failed.error}</p>}
-      {review && (
-        <section data-section="Claude's notes" data-section-count={String(review.items.length)} className="flex flex-col gap-2">
-          <p className="text-xs text-[var(--muted)]">
-            {new Date(review.at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-            {review.instructions && <> · your instructions: &ldquo;{review.instructions}&rdquo;</>}
-          </p>
-          <ul className="flex flex-col gap-1.5">
-            {review.items.map((i) => (
-              <li key={i.name} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
-                <span className="font-medium">{i.name}</span>
-                <Verdict item={i} />
-                <span className="w-full text-[var(--muted)]">{i.why}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {review && (review.mode === 'whole'
+        ? <Tiers listId={listId} review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} onChanged={onChanged} />
+        : <Verdicts review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} />)}
     </div>
+  );
+}
+
+type Act = (name: string, what: 'cut' | 'keep' | 'undo') => Promise<void>;
+
+/** Where a reviewed card stands, with undo. */
+function Done({ name, how, busy, onAct }: { name: string; how: 'cut' | 'kept'; busy: boolean; onAct: Act }) {
+  return (
+    <span className="flex shrink-0 items-center gap-2 text-xs">
+      <span className={how === 'cut' ? 'font-semibold text-[#ffb4a8]' : 'font-semibold text-emerald-300'}>{how === 'cut' ? 'Cut - on the maybeboard' : 'Kept ★ never cut'}</span>
+      <button onClick={() => onAct(name, 'undo')} disabled={busy} className="text-[var(--muted)] underline hover:text-[var(--foreground)]">Undo</button>
+    </span>
+  );
+}
+
+function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss }: {
+  review: CutReview; stateOf: (name: string) => 'open' | 'cut' | 'kept'; busy: boolean; onAct: Act;
+  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void;
+}) {
+  const agreed = review.items.filter((i) => i.verdict === 'cut' && stateOf(i.name) === 'open').map((i) => i.name);
+  const cutNow = review.items.filter((i) => stateOf(i.name) === 'cut').length;
+  return (
+    <section data-section="Claude's notes" data-section-count={String(review.items.length)} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-sm">
+        <span>{review.items.length} cards reviewed · {cutNow ? `${cutNow} cut so far` : `Claude agrees on ${agreed.length} cut${agreed.length === 1 ? '' : 's'}`}{review.instructions && <span className="text-[var(--muted)]"> · your instructions: &ldquo;{review.instructions}&rdquo;</span>}</span>
+        {agreed.length > 0 && (
+          <button onClick={() => onCutMany(agreed)} disabled={busy} className="btn-go ml-auto rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">Cut the {agreed.length} Claude agrees on</button>
+        )}
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {review.items.map((i) => {
+          const at = stateOf(i.name);
+          return (
+            <li key={i.name} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm ${at !== 'open' ? 'opacity-60' : ''}`}>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex flex-wrap items-baseline gap-x-3"><span className="font-medium">{i.name}</span><Verdict item={i} /></span>
+                <span className="text-[var(--muted)]">{i.why}</span>
+              </span>
+              {at === 'open' ? (
+                <span className="flex shrink-0 gap-1.5">
+                  <button onClick={() => onAct(i.name, 'cut')} disabled={busy} className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${i.verdict === 'cut' ? 'bg-[#ffb4a8] text-[#1c0d06]' : 'border border-[var(--border)]'}`}>Cut it</button>
+                  <button onClick={() => onAct(i.name, 'keep')} disabled={busy} className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${i.verdict === 'keep' ? 'bg-emerald-300 text-[#04170d]' : 'border border-[var(--border)]'}`}>Keep ★</button>
+                  {onDiscuss && <button onClick={() => onDiscuss(i)} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Discuss</button>}
+                </span>
+              ) : <Done name={i.name} how={at} busy={busy} onAct={onAct} />}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function Tiers({ listId, review, stateOf, busy, onAct, onCutMany, onDiscuss, onChanged }: {
+  listId: string; review: CutReview; stateOf: (name: string) => 'open' | 'cut' | 'kept'; busy: boolean; onAct: Act;
+  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void; onChanged: () => void;
+}) {
+  const [tab, setTab] = useState<Tier | 'all'>('all');
+  const [open, setOpen] = useState<string | null>(null);
+  const [want, setWant] = useState<Tier | null>(null);
+  const [reason, setReason] = useState('');
+  const [rerating, setRerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const items = review.items.filter((i) => i.tier);
+  const count = (t: Tier) => items.filter((i) => i.tier === t).length;
+  const shown = TIERS.flatMap((t) => (tab === 'all' || tab === t ? items.filter((i) => i.tier === t) : []));
+  const cTier = items.filter((i) => i.tier === 'C' && stateOf(i.name) === 'open').map((i) => i.name);
+  const rerate = async (item: ReviewItem) => {
+    setRerating(true);
+    setError(null);
+    try { await api.rerateCut(listId, item.name, want, reason); setOpen(null); setReason(''); onChanged(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not re-rate it'); }
+    finally { setRerating(false); }
+  };
+  return (
+    <section data-section="Tiers" data-section-count={String(items.length)} className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {(['all', ...TIERS] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} aria-pressed={tab === t}
+            style={t !== 'all' ? { color: TIER_TONE[t], borderColor: tab === t ? TIER_TONE[t] : undefined } : undefined}
+            className={`rounded-full border px-3.5 py-1.5 text-sm font-semibold ${tab === t ? 'bg-[var(--surface-hover)]' : 'border-[var(--border)]'} ${t === 'all' && tab === t ? 'border-[var(--accent)]' : ''}`}>
+            {t === 'all' ? 'All' : t} <span className="opacity-70">{t === 'all' ? items.length : count(t)}</span>
+          </button>
+        ))}
+        {review.instructions && <span className="text-xs text-[var(--muted)]">your instructions: &ldquo;{review.instructions}&rdquo;</span>}
+        {cTier.length > 0 && (
+          <button onClick={() => onCutMany(cTier)} disabled={busy} className="btn-go ml-auto rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">Cut the {cTier.length} C-tier</button>
+        )}
+      </div>
+      {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+      <ul className="grid gap-2 lg:grid-cols-2">
+        {shown.map((i) => {
+          const at = stateOf(i.name);
+          const isOpen = open === i.name;
+          return (
+            <li key={i.name} className={`flex flex-col rounded-xl border bg-[var(--surface)] px-3 py-2.5 text-sm ${isOpen ? 'border-[var(--accent)]' : 'border-[var(--border)]'} ${at !== 'open' ? 'opacity-60' : ''}`}>
+              <div className="flex items-start gap-2.5">
+                <span aria-label={`Tier ${i.tier}`} style={{ background: TIER_TONE[i.tier!] }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-extrabold text-[#15110a]">{i.tier}</span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="font-medium">{i.name}</span>
+                  <span className="text-[var(--muted)]">{i.why}</span>
+                  {i.disputed && <span className="text-xs text-emerald-300">Re-rated{i.disputed.from ? ` from ${i.disputed.from}` : ''} with your reason{i.tier === 'S' || i.tier === 'A' ? ' - now ★ kept, so it is never offered as a cut' : ''}.</span>}
+                </span>
+                {at === 'open'
+                  ? <button onClick={() => { setOpen(isOpen ? null : i.name); setWant(null); setReason(''); }} className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{isOpen ? 'Close' : 'Disagree'}</button>
+                  : <Done name={i.name} how={at} busy={busy} onAct={onAct} />}
+              </div>
+              {isOpen && (
+                <div className="mt-2.5 flex flex-col gap-2 border-t border-dashed border-[var(--border)] pt-2.5">
+                  <span className="flex items-center gap-1.5 text-xs text-[var(--muted)]">It should be
+                    {TIERS.map((t) => (
+                      <button key={t} onClick={() => setWant(t)} aria-pressed={want === t} style={{ color: TIER_TONE[t], borderColor: want === t ? TIER_TONE[t] : undefined }}
+                        className={`h-7 w-8 rounded-md border text-xs font-extrabold ${want === t ? 'bg-[var(--surface-hover)]' : 'border-[var(--border)]'}`}>{t}</button>
+                    ))}
+                  </span>
+                  <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} aria-label="Why"
+                    placeholder="Why? e.g. it's my only way to recast wheels"
+                    className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 outline-none focus:border-[var(--accent)]" />
+                  <span className="flex flex-wrap gap-2">
+                    <button onClick={() => rerate(i)} disabled={rerating || (!want && !reason.trim())} className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[#221c08] disabled:opacity-50">
+                      {rerating ? 'Re-rating…' : 'Re-rate with my reason'}
+                    </button>
+                    {i.tier === 'C' && <button onClick={() => onAct(i.name, 'cut')} disabled={busy} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs">Cut it</button>}
+                    {onDiscuss && <button onClick={() => onDiscuss(i)} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs">Discuss in Chat</button>}
+                  </span>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
