@@ -20,12 +20,14 @@ import { Fragment, useEffect, useState } from 'react';
 import DeckSuggestions from './DeckSuggestions';
 import ManaCost from './ManaCost';
 import PlanLine from './PlanLine';
+import FlaggedZone from './FlaggedZone';
 import TuneCut from './TuneCut';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { BuildPlan, Issue, RoleRow } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
+import type { Flag } from '@/lib/health';
 import { ROLE_GROUPS, ROLES } from '@/lib/roles';
 
 export type DeckTab = 'cards' | 'plan' | 'tune' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
@@ -36,8 +38,16 @@ interface Props {
   commander: string | null;
   version: string;
   onAdd: (cardId: string, board: Board) => Promise<void>;
-  /** Move a card between boards: cuts go to the maybeboard, so nothing is lost. */
+  /** Move a card between boards: cuts go to the section for cards that came out, so nothing is lost. */
   onMove: (cardId: string, board: Board) => Promise<void> | void;
+  /** That section, and its name. */
+  cutTo: Board;
+  cutName: string;
+  /** Cards the deck can't have as it stands, and how each is fixed. */
+  flags: Flag[];
+  onFix: (flag: Flag) => Promise<void> | void;
+  /** Cards in the deck now, the commanders included. */
+  deckSize: number;
   onTab: (tab: DeckTab) => void;
   /** The deck's tag names, for writing cut rules. */
   tagNames: string[];
@@ -72,7 +82,7 @@ function WithSymbols({ text }: { text: string }) {
 /** Where a Find or Cuts panel is open: under an issue, under the roles, or at the bottom. */
 type Open = { at: string; kind: 'fill'; role: string } | { at: string; kind: 'cuts' } | null;
 
-export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, onTab, tagNames, planConfirmed, brief, onAsk }: Props) {
+export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, cutTo, cutName, flags, onFix, deckSize, onTab, tagNames, planConfirmed, brief, onAsk }: Props) {
   const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>(() => api.peek<BuildPlan>(api.paths.build(listId)) ?? 'loading');
   const [open, setOpen] = useState<Open>(null);
   const [hidden, setHidden] = useState<string[]>(() => readHidden(listId));
@@ -125,8 +135,10 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
       </div>
 
       {view === 'cut' ? (
-        <TuneCut listId={listId} cards={cards} version={version} tagNames={tagNames} planConfirmed={planConfirmed} onMove={onMove} onPlan={() => onTab('plan')} onAsk={onAsk} />
+        <TuneCut listId={listId} cards={cards} version={version} tagNames={tagNames} planConfirmed={planConfirmed} onMove={onMove} onPlan={() => onTab('plan')} onAsk={onAsk}
+          cutTo={cutTo} cutName={cutName} flags={flags} onFix={onFix} deckSize={deckSize} />
       ) : (<>
+      <FlaggedZone flags={flags} cutName={cutName} onFix={onFix} />
       <section data-tour="build-issues" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 data-section="To look at" className="font-display text-xl font-semibold">

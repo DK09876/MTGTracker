@@ -22,6 +22,9 @@ import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
 import DeckTags from '@/components/DeckTags';
+import FlaggedZone from '@/components/FlaggedZone';
+import GameChangerLine from '@/components/GameChangerLine';
+import SlotQuestions from '@/components/SlotQuestions';
 import PasteFormats from '@/components/PasteFormats';
 import ImportResult from '@/components/ImportResult';
 import { IdentitySymbols } from '@/components/ManaCost';
@@ -30,6 +33,9 @@ import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
+import type { Slot, SlotQuestion } from '@/lib/commanders';
+import { deckFlags, type Flag } from '@/lib/health';
+import { boardName, cutBoard, DEFAULT_SECTIONS, type DeckSection } from '@/lib/sections-shared';
 import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
@@ -53,7 +59,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [section, setSection] = useState<DeckTab>('cards');
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
   const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
-  const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
+  // A deck's sections beyond Main, and what an import left to ask about its second commander or companion.
+  const [sections, setSections] = useState<DeckSection[]>(seen?.sections?.length ? seen.sections : DEFAULT_SECTIONS);
+  const [questions, setQuestions] = useState<SlotQuestion[]>(seen?.slotQuestions ?? []);
+  // The bracket the plan aims for, which the Cards tab checks the Game Changers against.
+  const [bracket, setBracket] = useState<number | null>(() => api.peek<api.DeckPlanState>(api.paths.plan(id))?.bracket ?? null);
+  const onPlan = useCallback((p: api.DeckPlanState) => { setPlanConfirmed(p.confirmed); setBracket(p.bracket ?? null); }, []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
 
@@ -77,7 +88,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [imported, setImported] = useState<ImportSummary | null>(null);
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [exported, setExported] = useState<'copied' | 'failed' | null>(null);
+  const [exported, setExported] = useState<'copied' | 'copied-own' | 'failed' | null>(null);
 
 
   // Whether others can see this deck on the owner's profile; private until made public.
@@ -89,6 +100,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setDraftName(data.list.name);
     setShown(!!data.public);
     setPlanConfirmed(data.planConfirmed !== false);
+    if (data.sections?.length) setSections(data.sections);
+    setQuestions(data.slotQuestions ?? []);
   }, [id]);
 
   // A starter list being built for this deck in the background: the page
@@ -123,9 +136,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setDraftName(data.list.name);
         setShown(!!data.public);
         setPlanConfirmed(data.planConfirmed !== false);
+        if (data.sections?.length) setSections(data.sections);
+        setQuestions(data.slotQuestions ?? []);
         // Read the other tabs now, side by side, so opening one is instant.
         if (data.list.kind === 'deck') {
-          const later: Array<Promise<unknown>> = [api.deckPlan(id), api.buildPlan(id), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
+          const later: Array<Promise<unknown>> = [api.deckPlan(id).then((p) => { if (!cancelled) setBracket(p.bracket ?? null); }), api.buildPlan(id), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
           if (data.cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + 1 > 100) later.push(api.cutPlan(id));
           void Promise.allSettled(later);
         }
@@ -171,16 +186,26 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // The commander is one of the 100: it leads the main board, and the
   // counts and value include it - "100 / 100", never "99 cards". The
   // sideboard and maybeboard are not in the deck, so not in the totals.
+  // A second commander leads with the first: shown with it, never offered as a cut.
+  const listed: Entry[] = cards.map((c) => (deck && c.slot === 'partner' ? { ...c, commander: true } : c));
   const entries: Entry[] = deck && list.commander
-    ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, board: 'main', commander: true }, ...cards]
-    : cards;
+    ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, board: 'main', commander: true }, ...listed]
+    : listed;
+  const partner = deck ? cards.find((c) => c.slot === 'partner')?.card ?? null : null;
+  const companion = deck ? cards.find((c) => c.slot === 'companion')?.card ?? null : null;
+  // Cuts and moved-out cards go to the section for cards that came out (the Sideboard unless changed).
+  const cutTo = cutBoard(sections);
+  const cutName = boardName(sections, cutTo);
+  // Until the owner says which card is the second commander, the deck's colours aren't known: colour flags wait for the answer.
+  const partnerAsked = questions.some((q) => q.kind === 'partner');
+  const flags: Flag[] = deck ? deckFlags({ commander: list.commander, cards: cards.filter((c) => c.board === 'main') }).filter((f) => !(partnerAsked && f.kind === 'colours')) : [];
   const main = entries.filter((e) => !deck || e.board === 'main');
   const value = main.reduce((sum, c) => sum + (priceOf(c.card, c.finish) ?? 0) * c.quantity, 0);
   const copies = main.reduce((sum, c) => sum + c.quantity, 0);
   const unique = main.length;
   const deckSize = copies;
-  const maybe = entries.filter((e) => e.board === 'maybe').reduce((n, e) => n + e.quantity, 0);
-  const side = entries.filter((e) => e.board === 'side').reduce((n, e) => n + e.quantity, 0);
+  // Each section beyond Main with cards in it, for the header.
+  const sectionCounts = sections.map((x) => ({ ...x, n: entries.filter((e) => e.board === x.id).reduce((n, e) => n + e.quantity, 0) })).filter((x) => x.n > 0);
   // By name, so another printing of a card still counts as "in the deck".
   const inDeck = new Map<string, Board>(entries.map((e) => [e.card.name.split(' // ')[0], e.board]));
   const selectedEntry = selected ? cards.find((c) => c.card.id === selected.id) : undefined;
@@ -194,6 +219,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     } finally {
       await load().catch(() => {});
     }
+  };
+  const fixFlag = (f: Flag) => (f.kind === 'copies' ? changeQuantity(f.cardId, Number.isFinite(f.limit) ? f.limit! : f.quantity) : moveCard(f.cardId, cutTo));
+  const changeSlot = async (cardId: string, slot: Slot | null) => {
+    try { await api.setSlot(id, { cardId, slot }); } finally { await load().catch(() => {}); }
   };
 
   // "Edit as text": the deck as it stands, in the same format it imports.
@@ -228,7 +257,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const heroArt = list.commander ? list.commander.image_uris?.art_crop ?? list.commander.card_faces?.[0]?.image_uris?.art_crop ?? null : null;
 
   return (
-    <div style={deck && list.commander ? identityStyle(list.commander.color_identity ?? []) : undefined}>
+    <div style={deck && list.commander ? identityStyle([...new Set([...(list.commander.color_identity ?? []), ...(partner?.color_identity ?? [])])]) : undefined}>
       <Link href={deck ? '/decks' : '/lists'} className="relative z-10 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
         ← All {deck ? 'decks' : 'lists'}
       </Link>
@@ -286,8 +315,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             )}
             {deck && list.commander && !changingCommander && (
               <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--foreground)]/85">
-                <IdentitySymbols identity={(list.commander.color_identity ?? []).join('')} size={17} />
+                <IdentitySymbols identity={[...new Set([...(list.commander.color_identity ?? []), ...(partner?.color_identity ?? [])])].join('')} size={17} />
                 <button onClick={() => setSelected(list.commander)} className="hover:underline">{list.commander.name}</button>
+                {partner && <><span aria-hidden className="text-[var(--muted)]">&amp;</span><button onClick={() => setSelected(partner)} className="hover:underline">{partner.name}</button></>}
+                {companion && <span className="text-[var(--muted)]">· companion <button onClick={() => setSelected(companion)} className="text-[var(--foreground)]/85 hover:underline">{companion.name}</button></span>}
               </p>
             )}
             <p className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold tabular-nums">
@@ -296,8 +327,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 : <span className="rounded-full bg-white/5 px-2.5 py-1">{copies} card{copies === 1 ? '' : 's'}</span>}
               {value > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>}
               {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
-              {maybe > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{maybe} maybe</span>}
-              {side > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{side} sideboard</span>}
+              {sectionCounts.map((x) => <span key={x.id} className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{x.n} in {x.name}</span>)}
               {deck && shown && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">Public</span>}
             </p>
           </div>
@@ -314,7 +344,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                   onClick: async () => {
                     try {
                       await navigator.clipboard.writeText(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
-                      setExported('copied');
+                      setExported(cards.some((c) => c.board.startsWith('s-')) ? 'copied-own' : 'copied');
                     } catch { setExported('failed'); }
                     setTimeout(() => setExported(null), 2500);
                   },
@@ -431,7 +461,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {exported && (
         <p role="status" className="mt-3 text-sm text-[var(--muted)]">
-          {exported === 'copied' ? 'Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.' : 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'}
+          {exported === 'failed'
+            ? 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'
+            : `Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.${exported === 'copied-own'
+              ? ` Your own sections (${sections.filter((x) => !x.builtIn).map((x) => x.name).join(', ')}) aren't in it: other sites only know a sideboard and a maybeboard. Importing a list keeps them.`
+              : ''}`}
         </p>
       )}
       {imported && (rejected || imported.commander) && (
@@ -454,6 +488,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           Building a starter list - roles first, then what fits the commander, then lands. The cards appear here when it is done.
         </p>
       )}
+      {deck && <SlotQuestions listId={id} questions={questions} cards={cards} onAnswered={load} />}
       <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
       {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
       <div className="min-w-0">
@@ -476,6 +511,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
           onMove={moveCard}
+          cutTo={cutTo}
+          cutName={cutName}
+          flags={flags}
+          onFix={fixFlag}
+          deckSize={deckSize}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
           tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
           planConfirmed={planConfirmed}
@@ -495,10 +535,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           listId={id}
           cards={cards}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
-          onRemove={(cardId) => changeQuantity(cardId, 0)}
+          onMove={moveCard}
+          cutTo={cutTo}
+          cutName={cutName}
         />
       ) : deck && section === 'tags' ? (
-        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => setSection('plan')} />
+        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => setSection('plan')} sections={sections} />
       ) : deck && section === 'collection' ? (
         <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
       ) : deck && section === 'suggestions' ? (
@@ -522,6 +564,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         />
       ) : (
         <>
+        {deck && <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />}
+        {deck && <GameChangerLine names={entries.filter((e) => e.board === 'main' && e.card.game_changer).map((e) => e.card.name)} bracket={bracket} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0 }); }} />}
         {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }} />}
         <DeckCards
           listId={id}
@@ -535,6 +579,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onSelect={setSelected}
           onQuantity={changeQuantity}
           onMove={moveCard}
+          sections={sections}
+          onSections={deck ? setSections : undefined}
+          commander={deck ? list.commander : null}
+          onSlot={deck ? changeSlot : undefined}
         />
         </>
       )}
@@ -559,6 +607,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 card={selectedEntry.card}
                 finish={selectedEntry.finish}
                 board={selectedEntry.board}
+                sections={sections}
                 isDeck={deck}
                 onChanged={async (printingId) => {
                   const data = await api.fetchList(id);

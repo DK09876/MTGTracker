@@ -140,7 +140,7 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
                       </span>
                       {id && (
                         <span className="flex gap-1">
-                          <button onClick={() => onMove(id, 'maybe')} className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface-hover)]">To maybe</button>
+                          <button onClick={() => onMove(id, 'side')} className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface-hover)]">To sideboard</button>
                           <button onClick={() => onRemove(id)} className="rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:text-red-400">Remove</button>
                         </span>
                       )}

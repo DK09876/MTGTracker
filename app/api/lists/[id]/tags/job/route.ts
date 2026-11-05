@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { currentBudget } from '@/lib/ai';
 import { deckTags } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
+import { hasBoard } from '@/lib/sections';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { currentJob, startJob, stopJob } from '@/lib/tag-job-server';
 import type { JobParams } from '@/lib/tag-jobs';
@@ -20,7 +21,6 @@ import { StepError } from '@/lib/tag-steps';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BOARDS = new Set<Board>(['main', 'side', 'maybe']);
 
 const state = (id: string, profile: string) => ({ job: currentJob(id), tags: deckTags(id), budget: currentBudget(profile, 'tagging') });
 
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
   if (b.kind !== 'propose' && b.kind !== 'tag') return NextResponse.json({ error: 'Unknown kind' }, { status: 400 });
-  const boards = Array.isArray(b.boards) ? b.boards.filter((x): x is Board => BOARDS.has(x as Board)) : [];
+  const boards = Array.isArray(b.boards) ? b.boards.filter((x): x is Board => hasBoard(id, x)) : [];
   const job: JobParams = b.kind === 'propose'
     ? { kind: 'propose', boards: boards.length ? boards : ['main'], instructions: typeof b.instructions === 'string' ? b.instructions.slice(0, 4000) : '' }
     : {

@@ -33,3 +33,11 @@ export const verdictOfTier = (t: Tier): ReviewItem['verdict'] => (t === 'C' ? 'c
 
 /** How many of the list's top cards a quick review reads: about twice what the deck is over, 20 to 60. */
 export const reviewSize = (over: number) => Math.max(20, Math.min(60, over * 2));
+
+/**
+ * The cards a bulk cut takes, best first: no more than the deck is over
+ * 100, so "cut them all" never leaves it short. At 100 or under, none.
+ */
+export function capCuts(names: string[], over: number): string[] {
+  return over > 0 ? names.slice(0, over) : [];
+}

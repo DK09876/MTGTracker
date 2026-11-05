@@ -8,6 +8,7 @@
  */
 
 import { localCardsByOracle, localCards, searchLocalText } from './card-store';
+import { deckIdentity } from './commanders';
 import { cardsInList, database, type List } from './db';
 import { commanderPage, edhrecEnabled } from './edhrec';
 import { fitOf, fitProfile, popularity } from './fit';
@@ -59,8 +60,10 @@ export async function gapCards(list: List, profileId: string, roleId: string, op
     ? searchLocalText(role.text)
     : localCardsByOracle((database().all('SELECT oracleId FROM card_roles WHERE role = ?', [role.id]) as Array<{ oracleId: string }>).map((r) => r.oracleId));
 
-  const identity = new Set(list.commander?.color_identity ?? []);
-  const inDeck = new Set(cardsInList(list.id).map((c) => front(c.card.name)));
+  const listed = cardsInList(list.id);
+  // Both commanders' colours, when the deck has two.
+  const identity = deckIdentity([list.commander, listed.find((c) => c.slot === 'partner')?.card]);
+  const inDeck = new Set(listed.map((c) => front(c.card.name)));
   if (list.commander) inDeck.add(front(list.commander.name));
   const where = holdings(profileId, list.id);
   const page = list.commander && edhrecEnabled() ? await commanderPage(list.commander.name).catch(() => null) : null;

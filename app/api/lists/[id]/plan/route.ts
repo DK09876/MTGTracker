@@ -4,7 +4,7 @@
  * GET: the brief (or a draft of one), the main and second style as detected
  * and as chosen, every role's range, the cards it wins with, and whether
  * the plan is confirmed.
- * PUT {brief?, style?, style2?, targets?, confirm?}: change any of it;
+ * PUT {brief?, style?, style2?, targets?, confirm?, flip?, packages?, bracket?}: change any of it;
  * confirm saves the brief (the draft, if none was written) and unlocks the
  * AI steps.
  */
@@ -45,6 +45,8 @@ async function read(id: string, commander: Parameters<typeof planFor>[2]) {
     style2: plan.style2?.id ?? null,
     wins,
     packages,
+    // Game Changers in the deck (commanders included), against the bracket aimed for.
+    gameChangers: [...(commander ? [commander] : []), ...main.map((c) => c.card)].filter((c) => c.game_changer === true).map((c) => c.name),
     styles: [...STYLES, VALUE].map((s) => ({ id: s.id, label: s.label, note: s.note, cards: plan.detected.support[s.id] ?? 0 })),
   };
 }
@@ -68,6 +70,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!brief) return NextResponse.json({ error: 'Write a sentence on what the deck does first' }, { status: 400 });
     if (!now.brief.trim()) setTagBrief(id, brief);
   }
-  changePlan(id, { style: body.style, style2: body.style2, targets: body.targets, confirm: body.confirm, flip: body.flip, packages: body.packages });
+  changePlan(id, { style: body.style, style2: body.style2, targets: body.targets, confirm: body.confirm, flip: body.flip, packages: body.packages, bracket: body.bracket });
   return NextResponse.json(await read(id, owned.list.commander));
 }

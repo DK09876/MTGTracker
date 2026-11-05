@@ -22,7 +22,9 @@ import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, Rule
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
+import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
+import type { DeckSection, Purpose } from './sections-shared';
 import type { BracketFloor } from './bracket';
 import type { CutGroup } from './cuts';
 import type { Health } from './health';
@@ -284,7 +286,7 @@ export const placeDeck = (listId: string, folderId: string | null) =>
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
-export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean };
+export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean; sections?: DeckSection[]; slotQuestions?: SlotQuestion[] };
 export const fetchList = async (id: string) => {
   const before = peek<ListPage>(paths.list(id));
   const now = await get<ListPage>(paths.list(id));
@@ -317,6 +319,21 @@ export const updateCard = (listId: string, cardId: string, change: { board?: Boa
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cardId, ...change }),
   }).then(json<{ ok: true }>);
+
+// --- a deck's sections, second commander and companion ---------------------------
+
+export const addSection = (listId: string, name: string, purpose: Purpose) =>
+  fetch(url(`lists/${listId}/sections`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, purpose }) })
+    .then(json<{ section: DeckSection; sections: DeckSection[] }>);
+export const changeSection = (listId: string, id: string, change: { name?: string; purpose?: Purpose }) =>
+  fetch(url(`lists/${listId}/sections`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...change }) })
+    .then(json<{ sections: DeckSection[] }>);
+export const deleteSection = (listId: string, id: string) =>
+  fetch(url(`lists/${listId}/sections?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ moved: number; sections: DeckSection[] }>);
+/** Make a card the second commander or the companion, or neither (null); or answer an import's question with "neither". */
+export const setSlot = (listId: string, change: { cardId: string; slot: Slot | null } | { dismiss: Slot }) =>
+  fetch(url(`lists/${listId}/slots`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) })
+    .then(json<{ cards: ListedCard[]; questions: SlotQuestion[] }>);
 
 export interface Printing {
   id: string;
@@ -690,6 +707,9 @@ export interface DeckPlanState {
   lands: [number, number];
   landsDefault: [number, number];
   packages: Array<{ tagId: string; name: string; kind: string | null; size: number; count: number }>;
+  /** The bracket aimed for, 1-5, or null until set. */
+  bracket: number | null;
+  gameChangers: string[];
 }
 export interface PlanChange {
   brief?: string;
@@ -699,6 +719,7 @@ export interface PlanChange {
   confirm?: boolean;
   flip?: number | null;
   packages?: Record<string, number | null>;
+  bracket?: number | null;
 }
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);

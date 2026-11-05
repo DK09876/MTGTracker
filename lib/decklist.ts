@@ -23,11 +23,15 @@
 
 import type { Finish, ScryfallCard } from './scryfall';
 
-/** Where a card goes: the commander, one of a deck's boards, or nowhere (tokens). */
-export type Section = 'commander' | 'main' | 'side' | 'maybe' | 'skip';
+/** Where a card goes: the commander, one of a deck's boards, its companion, or nowhere (tokens). */
+export type Section = 'commander' | 'main' | 'side' | 'maybe' | 'companion' | 'skip';
 
-/** A deck's boards. Only main (plus the commander) counts towards 100. */
-export type Board = 'main' | 'side' | 'maybe';
+/**
+ * A deck's sections. Main is the deck, and only main (plus the commander)
+ * counts towards 100. Every deck also has a sideboard and a maybeboard, and
+ * the owner can add their own, whose ids start with "s-" (sections.ts).
+ */
+export type Board = 'main' | 'side' | 'maybe' | `s-${string}`;
 
 export interface Entry {
   quantity: number;
@@ -44,7 +48,9 @@ export interface Entry {
 const HEADINGS: Array<[RegExp, Section]> = [
   [/^commanders?$/, 'commander'],
   [/^(deck|main ?deck|main ?board|mainboard|main)$/, 'main'],
-  [/^(sideboard|side ?board|side|companion)$/, 'side'],
+  [/^(sideboard|side ?board|side)$/, 'side'],
+  // A companion starts outside the game: it is kept with the sideboard, marked as the companion.
+  [/^(companions?)$/, 'companion'],
   [/^(maybe ?board|maybeboard|maybe|considering)$/, 'maybe'],
   [/^(tokens?|attractions?|stickers?)$/, 'skip'],
 ];

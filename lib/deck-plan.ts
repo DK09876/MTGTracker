@@ -31,7 +31,7 @@ function db() {
 }
 
 interface Row { style: string | null; style2: string | null; targets: string; draft: string; confirmedAt: string | null; extra: string }
-interface Extra { flip?: number; packages?: Record<string, number> }
+interface Extra { flip?: number; packages?: Record<string, number>; bracket?: number }
 
 function row(listId: string): Row | null {
   return db().get('SELECT style, style2, targets, draft, confirmedAt, extra FROM deck_plans WHERE listId = ?', [listId]) as Row | null;
@@ -59,6 +59,8 @@ export interface Plan {
   landsDefault: [number, number];
   /** Theme package sizes the owner set, by tag id (8 otherwise). */
   packages: Record<string, number>;
+  /** The bracket the owner is aiming for, 1-5, or null until they say. */
+  bracket: number | null;
 }
 
 /**
@@ -100,6 +102,7 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     lands: mine.lands ?? fromFlip.lands,
     landsDefault: fromFlip.lands,
     packages: extra.packages ?? {},
+    bracket: extra.bracket ?? null,
   };
 }
 
@@ -133,6 +136,8 @@ export interface PlanChange {
   flip?: number | null;
   /** A theme package's size by tag id, or null for the default 8. */
   packages?: Record<string, number | null>;
+  /** The bracket aimed for, 1-5, or null for not set. */
+  bracket?: number | null;
 }
 
 export function changePlan(listId: string, change: PlanChange): void {
@@ -150,10 +155,12 @@ export function changePlan(listId: string, change: PlanChange): void {
     patch.targets = JSON.stringify(mine);
   }
   if (change.draft !== undefined) patch.draft = change.draft.slice(0, 4000);
-  if (change.flip !== undefined || change.packages) {
+  if (change.flip !== undefined || change.packages || change.bracket !== undefined) {
     const extra = JSON.parse(r?.extra ?? '{}') as Extra;
     if (change.flip === null) delete extra.flip;
     else if (typeof change.flip === 'number' && Number.isInteger(change.flip) && change.flip >= 1 && change.flip <= 10) extra.flip = change.flip;
+    if (change.bracket === null) delete extra.bracket;
+    else if (typeof change.bracket === 'number' && Number.isInteger(change.bracket) && change.bracket >= 1 && change.bracket <= 5) extra.bracket = change.bracket;
     for (const [tagId, size] of Object.entries(change.packages ?? {})) {
       extra.packages = extra.packages ?? {};
       if (size === null) delete extra.packages[tagId];

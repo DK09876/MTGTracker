@@ -45,6 +45,19 @@ describe('deck links', () => {
     ]);
   });
 
+  it('keeps Moxfield\'s companion apart from its sideboard', () => {
+    const deck = fromMoxfield({
+      boards: {
+        commanders: { cards: { a: { quantity: 1, card: { name: 'Tymna the Weaver' } } } },
+        companions: { cards: { b: { quantity: 1, card: { name: 'Lurrus of the Dream-Den' } } } },
+        sideboard: { cards: { c: { quantity: 1, card: { name: 'Pyroblast' } } } },
+      },
+    });
+    expect(parseDecklist(deck.text).entries.map((e) => [e.section, e.name])).toEqual([
+      ['commander', 'Tymna the Weaver'], ['side', 'Pyroblast'], ['companion', 'Lurrus of the Dream-Den'],
+    ]);
+  });
+
   it('puts Archidekt cards on boards by their first category', () => {
     const card = (name: string, categories: string[], modifier = 'Normal') => ({ quantity: 1, categories, modifier, card: { collectorNumber: '1', edition: { editioncode: 'tsp' }, oracleCard: { name } } });
     const deck = fromArchidekt({

@@ -8,7 +8,9 @@
  * this deck. Claude's review reads the plan and says, for the top of the
  * list, whether it agrees - or rates the whole deck in tiers - and each of
  * its verdicts can be acted on (cut, ★ keep, discuss) or disputed. It never
- * cuts anything itself. Cuts go to the maybeboard, with undo.
+ * cuts anything itself. Cuts go to the section for cards that came out
+ * (the Sideboard unless the owner changed it), with undo. Cards the deck
+ * can't have at all - flagged - come first.
  */
 
 import Image from 'next/image';
@@ -19,10 +21,12 @@ import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import { CUT_RULES, describeCustom, RULE_GROUPS, type CustomRule, type CutSettings } from '@/lib/cut-rules';
-import { reviewSize, TIERS, type CutReview, type ReviewItem, type ReviewMode, type Tier } from '@/lib/cut-review-shared';
+import { capCuts, reviewSize, TIERS, type CutReview, type ReviewItem, type ReviewMode, type Tier } from '@/lib/cut-review-shared';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 import type { Job } from '@/lib/jobs';
+import FlaggedZone from './FlaggedZone';
+import type { Flag } from '@/lib/health';
 
 interface Props {
   listId: string;
@@ -35,13 +39,21 @@ interface Props {
   onPlan: () => void;
   /** Discuss a verdict in the deck's Chat. */
   onAsk?: (question: string) => void;
+  /** Where cuts go, and its name. */
+  cutTo: Board;
+  cutName: string;
+  /** Cards the deck can't have as it stands: the first filter. */
+  flags: Flag[];
+  onFix: (flag: Flag) => Promise<void> | void;
+  /** Cards in the deck now, the commanders included. */
+  deckSize: number;
 }
 
 type View = 'list' | 'rules' | 'claude';
 const RULE_NAME = new Map(CUT_RULES.map((r) => [r.id, r.label]));
 const POLL_MS = 2_500;
 
-export default function TuneCut({ listId, cards, version, tagNames, planConfirmed, onMove, onPlan, onAsk }: Props) {
+export default function TuneCut({ listId, cards, version, tagNames, planConfirmed, onMove, onPlan, onAsk, cutTo, cutName, flags, onFix, deckSize }: Props) {
   const [view, setView] = useState<View>('list');
   // Saving the rules changes the list, so it is part of what the list is read for.
   const [rulesVersion, setRulesVersion] = useState(0);
@@ -85,11 +97,12 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
         : current === 'failed' ? <p className="text-sm text-red-400">Couldn&apos;t weigh the cards just now.</p>
           : view === 'list' ? (
             <Workbench listId={listId} cards={cards} current={current} verdicts={verdicts} onMove={onMove} onRules={() => setView('rules')}
+              cutTo={cutTo} cutName={cutName} flags={flags} onFix={onFix}
               onKept={(c) => setPlan({ key, plan: { ...current, candidates: current.candidates.filter((x) => x.cardId !== c.cardId), protectedCards: [...current.protectedCards, c.name] } })} />
           ) : view === 'rules' ? (
             <Rules listId={listId} settings={current.settings} tagNames={tagNames} onSaved={() => setRulesVersion((n) => n + 1)} />
           ) : (
-            <Review listId={listId} cards={cards} over={current.size - 100} state={review} planConfirmed={planConfirmed} onPlan={onPlan}
+            <Review listId={listId} cards={cards} over={deckSize - 100} cutTo={cutTo} cutName={cutName} state={review} planConfirmed={planConfirmed} onPlan={onPlan}
               onMove={onMove} onAsk={onAsk} onChanged={() => { void loadReview(); setRulesVersion((n) => n + 1); }}
               onStarted={(job) => setReview((r) => ({ review: r?.review ?? null, settled: r?.settled, job }))} />
           )}
@@ -99,10 +112,19 @@ export default function TuneCut({ listId, cards, version, tagNames, planConfirme
 
 // --- The list -----------------------------------------------------------------
 
-function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }: {
+// A cut candidate is filed under the group of its strongest reason, so the list can be looked at a pile at a time.
+const GROUP_OF = new Map(CUT_RULES.map((r) => [r.id, r.group]));
+const leadGroup = (c: api.CutPlan['candidates'][number]) => {
+  const top = [...c.why].filter((w) => w.delta > 0).sort((a, b) => b.delta - a.delta)[0];
+  return top ? GROUP_OF.get(top.rule) ?? (top.rule === 'lands' ? 'Curve and mana' : 'Your rules') : 'Card quality';
+};
+
+function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept, cutTo, cutName, flags, onFix }: {
   listId: string; cards: ListedCard[]; current: api.CutPlan; verdicts: Map<string, ReviewItem>;
   onMove: Props['onMove']; onRules: () => void; onKept: (c: api.CutPlan['candidates'][number]) => void;
+  cutTo: Board; cutName: string; flags: Flag[]; onFix: Props['onFix'];
 }) {
+  const [filter, setFilter] = useState<string>(() => (flags.length ? 'flagged' : 'all'));
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [undo, setUndo] = useState<string[] | null>(null);
@@ -142,7 +164,7 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
       </div>
       {undo && (
         <p className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
-          {undo.length} moved to the maybeboard.
+          {undo.length} moved to {cutName}.
           <button onClick={async () => { await move(undo, 'main'); setUndo(null); }} disabled={busy} className="text-[var(--accent)] hover:underline">Undo</button>
         </p>
       )}
@@ -151,7 +173,7 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
         {current.curve && <p className="text-[var(--muted)]"><span className="text-[var(--foreground)]">Look here first:</span> {current.curve}.</p>}
         <p className="text-[var(--muted)]">
           Each reason names the rule behind it; <button onClick={onRules} className="text-[var(--accent)] hover:underline">change the rules</button> if one is wrong for this deck.
-          Cuts go to the maybeboard, so nothing is lost.
+          Cuts go to {cutName}, so nothing is lost.
           {current.protectedCards.length > 0 && <> {current.protectedCards.length} card{current.protectedCards.length === 1 ? ' is' : 's are'} kept out by your tags, your rules or a ★.</>}
         </p>
       </div>
@@ -168,11 +190,28 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
           })}
         </div>
       )}
-      {current.candidates.length === 0 ? (
+      <div role="group" aria-label="Look at" className="flex flex-wrap gap-1.5 text-sm">
+        {[
+          ...(flags.length ? [['flagged', 'Flagged', flags.length] as const] : []),
+          ['all', 'Everything', current.candidates.length] as const,
+          ...[...new Set(current.candidates.map(leadGroup))].map((g) => [g, g, current.candidates.filter((c) => leadGroup(c) === g).length] as const),
+        ].map(([id, label, n]) => (
+          <button key={id} onClick={() => setFilter(id)} aria-pressed={filter === id}
+            className={`rounded-full border px-3 py-1 ${filter === id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'} ${id === 'flagged' ? 'font-semibold' : ''}`}>
+            {label} · <span className="tabular-nums">{n}</span>
+          </button>
+        ))}
+        <Tip label="About these filters">
+          Flagged cards can&apos;t be in the deck at all, so they go first. The rest are filed by the strongest reason to cut them: look at one pile at a time.
+        </Tip>
+      </div>
+      {filter === 'flagged' && flags.length > 0 ? (
+        <FlaggedZone flags={flags} cutName={cutName} onFix={onFix} bare />
+      ) : current.candidates.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">Nothing stands out - every card has a job here.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {current.candidates.slice(0, 30).map((c) => {
+          {current.candidates.filter((c) => filter === 'all' || filter === 'flagged' || leadGroup(c) === filter).slice(0, 30).map((c) => {
             const v = verdicts.get(c.name);
             return (
               <li key={c.cardId}>
@@ -206,9 +245,9 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
         </ul>
       )}
       <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 backdrop-blur lg:bottom-4">
-        <button onClick={async () => { const ids = chosen.map((c) => c.cardId); await move(ids, 'maybe'); setUndo(ids); setPicked(new Set()); }}
+        <button onClick={async () => { const ids = chosen.map((c) => c.cardId); await move(ids, cutTo); setUndo(ids); setPicked(new Set()); }}
           disabled={!chosen.length || busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
-          {busy ? 'Moving…' : `Cut ${chosen.length || ''} to the maybeboard`.replace('  ', ' ')}
+          {busy ? 'Moving…' : `Cut ${chosen.length || ''} to ${cutName}`.replace('  ', ' ')}
         </button>
       </div>
     </div>
@@ -323,8 +362,8 @@ function Rules({ listId, settings, tagNames, onSaved }: { listId: string; settin
 type Acted = Record<string, 'cut' | 'kept'>;
 const TIER_TONE: Record<Tier, string> = { S: '#f2dfa0', A: '#6ee7b7', B: '#5aa8e6', C: '#ffb4a8' };
 
-function Review({ listId, cards, over, state, planConfirmed, onPlan, onStarted, onMove, onAsk, onChanged }: {
-  listId: string; cards: ListedCard[]; over: number; state: api.CutReviewState | null; planConfirmed: boolean;
+function Review({ listId, cards, over, cutTo, cutName, state, planConfirmed, onPlan, onStarted, onMove, onAsk, onChanged }: {
+  listId: string; cards: ListedCard[]; over: number; cutTo: Board; cutName: string; state: api.CutReviewState | null; planConfirmed: boolean;
   onPlan: () => void; onStarted: (job: Job) => void; onMove: Props['onMove']; onAsk?: (question: string) => void;
   /** After a re-rate: read the review again. */
   onChanged: () => void;
@@ -362,7 +401,7 @@ function Review({ listId, cards, over, state, planConfirmed, onPlan, onStarted, 
     if (!entry) return;
     setBusy(true);
     try {
-      if (what === 'cut') { await onMove(entry.card.id, 'maybe'); setActed((a) => ({ ...a, [name]: 'cut' })); }
+      if (what === 'cut') { await onMove(entry.card.id, cutTo); setActed((a) => ({ ...a, [name]: 'cut' })); }
       else if (what === 'keep') { await api.keepCard(listId, entry.card.oracle_id ?? entry.card.id, true); setActed((a) => ({ ...a, [name]: 'kept' })); }
       else {
         const was = stateOf(name);
@@ -414,27 +453,46 @@ function Review({ listId, cards, over, state, planConfirmed, onPlan, onStarted, 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {failed && <p className="text-sm text-red-400">The review did not finish: {failed.error}</p>}
       {review && (review.mode === 'whole'
-        ? <Tiers listId={listId} review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} onChanged={onChanged} />
-        : <Verdicts review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} />)}
+        ? <Tiers listId={listId} review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} onChanged={onChanged} over={over} cutName={cutName} />
+        : <Verdicts review={review} stateOf={stateOf} busy={busy} onAct={act} onCutMany={cutMany} onDiscuss={discuss} over={over} cutName={cutName} />)}
     </div>
+  );
+}
+
+/**
+ * "Cut them all", stopping at 100: it takes the best of them, as many as the
+ * deck is over, and says so. At 100 or under there is nothing to cut without
+ * adding something, so it says that instead.
+ */
+function BulkCut({ names, over, what, cutName, busy, onCutMany }: {
+  names: string[]; over: number; what: string; cutName: string; busy: boolean; onCutMany: (names: string[]) => Promise<void>;
+}) {
+  if (!names.length) return null;
+  if (over <= 0) return <span className="ml-auto text-xs text-[var(--muted)]">At {100 + over} cards: each cut now needs a card added.</span>;
+  const take = capCuts(names, over);
+  return (
+    <button onClick={() => onCutMany(take)} disabled={busy} title={`Moves them to ${cutName}`}
+      className="btn-go ml-auto rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">
+      {take.length < names.length ? `Cut ${take.length} of the ${names.length} ${what}, to reach 100` : `Cut the ${names.length} ${what}`}
+    </button>
   );
 }
 
 type Act = (name: string, what: 'cut' | 'keep' | 'undo') => Promise<void>;
 
 /** Where a reviewed card stands, with undo. */
-function Done({ name, how, busy, onAct }: { name: string; how: 'cut' | 'kept'; busy: boolean; onAct: Act }) {
+function Done({ name, how, busy, onAct, cutName }: { name: string; how: 'cut' | 'kept'; busy: boolean; onAct: Act; cutName: string }) {
   return (
     <span className="flex shrink-0 items-center gap-2 text-xs">
-      <span className={how === 'cut' ? 'font-semibold text-[#ffb4a8]' : 'font-semibold text-emerald-300'}>{how === 'cut' ? 'Cut - on the maybeboard' : 'Kept ★ never cut'}</span>
+      <span className={how === 'cut' ? 'font-semibold text-[#ffb4a8]' : 'font-semibold text-emerald-300'}>{how === 'cut' ? `Cut - in ${cutName}` : 'Kept ★ never cut'}</span>
       <button onClick={() => onAct(name, 'undo')} disabled={busy} className="text-[var(--muted)] underline hover:text-[var(--foreground)]">Undo</button>
     </span>
   );
 }
 
-function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss }: {
+function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss, over, cutName }: {
   review: CutReview; stateOf: (name: string) => 'open' | 'cut' | 'kept'; busy: boolean; onAct: Act;
-  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void;
+  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void; over: number; cutName: string;
 }) {
   const agreed = review.items.filter((i) => i.verdict === 'cut' && stateOf(i.name) === 'open').map((i) => i.name);
   const cutNow = review.items.filter((i) => stateOf(i.name) === 'cut').length;
@@ -443,7 +501,7 @@ function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss }: {
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-sm">
         <span>{review.items.length} cards reviewed · {cutNow ? `${cutNow} cut so far` : `Claude agrees on ${agreed.length} cut${agreed.length === 1 ? '' : 's'}`}{review.instructions && <span className="text-[var(--muted)]"> · your instructions: &ldquo;{review.instructions}&rdquo;</span>}</span>
         {agreed.length > 0 && (
-          <button onClick={() => onCutMany(agreed)} disabled={busy} className="btn-go ml-auto rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">Cut the {agreed.length} Claude agrees on</button>
+          <BulkCut names={agreed} over={over} what="Claude agrees on" cutName={cutName} busy={busy} onCutMany={onCutMany} />
         )}
       </div>
       <ul className="flex flex-col gap-1.5">
@@ -461,7 +519,7 @@ function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss }: {
                   <button onClick={() => onAct(i.name, 'keep')} disabled={busy} className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${i.verdict === 'keep' ? 'bg-emerald-300 text-[#04170d]' : 'border border-[var(--border)]'}`}>Keep ★</button>
                   {onDiscuss && <button onClick={() => onDiscuss(i)} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">Discuss</button>}
                 </span>
-              ) : <Done name={i.name} how={at} busy={busy} onAct={onAct} />}
+              ) : <Done name={i.name} how={at} busy={busy} onAct={onAct} cutName={cutName} />}
             </li>
           );
         })}
@@ -470,9 +528,9 @@ function Verdicts({ review, stateOf, busy, onAct, onCutMany, onDiscuss }: {
   );
 }
 
-function Tiers({ listId, review, stateOf, busy, onAct, onCutMany, onDiscuss, onChanged }: {
+function Tiers({ listId, review, stateOf, busy, onAct, onCutMany, onDiscuss, onChanged, over, cutName }: {
   listId: string; review: CutReview; stateOf: (name: string) => 'open' | 'cut' | 'kept'; busy: boolean; onAct: Act;
-  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void; onChanged: () => void;
+  onCutMany: (names: string[]) => Promise<void>; onDiscuss?: (item: ReviewItem) => void; onChanged: () => void; over: number; cutName: string;
 }) {
   const [tab, setTab] = useState<Tier | 'all'>('all');
   const [open, setOpen] = useState<string | null>(null);
@@ -503,7 +561,7 @@ function Tiers({ listId, review, stateOf, busy, onAct, onCutMany, onDiscuss, onC
         ))}
         {review.instructions && <span className="text-xs text-[var(--muted)]">your instructions: &ldquo;{review.instructions}&rdquo;</span>}
         {cTier.length > 0 && (
-          <button onClick={() => onCutMany(cTier)} disabled={busy} className="btn-go ml-auto rounded-full px-3.5 py-1.5 text-sm font-semibold disabled:opacity-60">Cut the {cTier.length} C-tier</button>
+          <BulkCut names={cTier} over={over} what="C-tier" cutName={cutName} busy={busy} onCutMany={onCutMany} />
         )}
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
@@ -522,7 +580,7 @@ function Tiers({ listId, review, stateOf, busy, onAct, onCutMany, onDiscuss, onC
                 </span>
                 {at === 'open'
                   ? <button onClick={() => { setOpen(isOpen ? null : i.name); setWant(null); setReason(''); }} className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{isOpen ? 'Close' : 'Disagree'}</button>
-                  : <Done name={i.name} how={at} busy={busy} onAct={onAct} />}
+                  : <Done name={i.name} how={at} busy={busy} onAct={onAct} cutName={cutName} />}
               </div>
               {isOpen && (
                 <div className="mt-2.5 flex flex-col gap-2 border-t border-dashed border-[var(--border)] pt-2.5">

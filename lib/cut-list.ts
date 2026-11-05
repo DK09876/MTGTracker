@@ -33,7 +33,8 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>) {
   const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
   const result = cutCandidates({
-    cards: main, roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,
+    // A second commander leads the deck with the first: never a cut.
+    cards: main.filter((c) => c.slot !== 'partner'), roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,
     tags, keep: keeps(list.id), stats: page?.stats ?? null,
     // Lands are offered only over the plan's range (its flip turn's), never to make room.
     lands: { have: health.lands, want: Math.max(want, plan.lands[1]) - 1 },

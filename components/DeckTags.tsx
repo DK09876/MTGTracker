@@ -25,6 +25,7 @@ import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
+import { DEFAULT_SECTIONS, type DeckSection } from '@/lib/sections-shared';
 import { modelLabel, requestsFor, tagRunCost, type Budget, type Mode } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import type { TagJob } from '@/lib/tag-jobs';
@@ -40,6 +41,8 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
   /** Send the owner to the Plan tab, where the brief now lives. */
   onPlan: () => void;
+  /** The deck's sections beyond Main, which the tagger can also read. */
+  sections?: DeckSection[];
 }
 
 const POLL_MS = 2_500;
@@ -52,7 +55,7 @@ const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] p
 const button = 'rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
 const primary = 'rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
-export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPlan }: Props) {
+export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPlan, sections = DEFAULT_SECTIONS }: Props) {
   const [instructions, setInstructions] = useState('');
   // Which boards the tagger reads, remembered for this deck in this browser.
   const [boards, setBoardsState] = useState<Board[]>(() => {
@@ -219,10 +222,10 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
           </button>
           <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.proposeTags.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
           <span className="text-[var(--muted)]">Include:</span>
-          {(['maybe', 'side'] as Board[]).map((b) => (
-            <label key={b} className="flex items-center gap-1.5 text-[var(--muted)]">
-              <input type="checkbox" checked={boards.includes(b)} onChange={() => toggleBoard(b)} disabled={running} />
-              {b === 'maybe' ? 'Maybeboard' : 'Sideboard'}
+          {sections.map((s) => (
+            <label key={s.id} className="flex items-center gap-1.5 text-[var(--muted)]">
+              <input type="checkbox" checked={boards.includes(s.id)} onChange={() => toggleBoard(s.id)} disabled={running} />
+              {s.name}
             </label>
           ))}
         </div>

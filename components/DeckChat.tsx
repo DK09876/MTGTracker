@@ -23,7 +23,10 @@ interface Props {
   listId: string;
   cards: ListedCard[];
   onAdd: (cardId: string, board: Board) => Promise<void>;
-  onRemove: (cardId: string) => Promise<void> | void;
+  /** A cut moves the card to the section for cards that came out, so it can come back. */
+  onMove: (cardId: string, board: Board) => Promise<void> | void;
+  cutTo: Board;
+  cutName: string;
   /** A question to start a new chat with, ready to send (from Tune). */
   question?: string;
 }
@@ -32,7 +35,9 @@ const POLL_MS = 2_000;
 const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?'];
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export default function DeckChat({ listId, cards, onAdd, onRemove, question = '' }: Props) {
+export default function DeckChat({ listId, cards, onAdd, onMove, cutTo, cutName, question = '' }: Props) {
+  // Cuts made from here and then put back, by card id.
+  const [undone, setUndone] = useState<Set<string>>(new Set());
   const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
@@ -83,7 +88,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
     if (!chat || !change?.cardId) return;
     try {
       if (change.kind === 'add') await onAdd(change.cardId, 'main');
-      else await onRemove(change.cardId);
+      else await onMove(change.cardId, cutTo);
       setChat((await api.markChange(listId, chat.id, m, c)).chat);
       void loadList();
     } catch (e) {
@@ -145,7 +150,16 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
                     </p>
                     <p className="text-xs text-[var(--muted)]">{c.why}</p>
                   </div>
-                  {c.done ? (
+                  {c.done && c.kind === 'cut' && c.cardId ? (
+                    undone.has(c.cardId)
+                      ? <span className="text-xs text-[var(--muted)]">Back in the deck</span>
+                      : (
+                        <span className="flex items-center gap-2 text-xs">
+                          <span className="text-emerald-400">Moved to {cutName}</span>
+                          <button onClick={async () => { await onMove(c.cardId!, 'main'); setUndone((u) => new Set(u).add(c.cardId!)); }} className="text-[var(--muted)] underline hover:text-[var(--foreground)]">Undo</button>
+                        </span>
+                      )
+                  ) : c.done ? (
                     <span className="text-xs text-emerald-400">Done</span>
                   ) : !c.cardId || (c.kind === 'cut' && !inDeck.has(c.cardId)) ? (
                     <span className="text-xs text-[var(--muted)]">{c.kind === 'add' ? 'Card not found' : 'Not in the deck'}</span>

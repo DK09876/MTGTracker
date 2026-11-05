@@ -22,6 +22,7 @@ import { dirname } from 'path';
 import { Database } from 'node-sqlite3-wasm';
 
 import { giveBack, settle } from './collection';
+import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
 import type { Finish, ScryfallCard } from './scryfall';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
@@ -111,9 +112,18 @@ function open(): Database {
   if (!roleColumns.some((c) => c.name === 'version')) {
     db.run('ALTER TABLE card_roles_checked ADD COLUMN version INTEGER NOT NULL DEFAULT 1');
   }
-  // Main, sideboard or maybeboard. A card sits on one board at a time.
+  // Main, sideboard, maybeboard or one of the owner's sections. A card sits on one board at a time.
   if (!cardColumns.some((c) => c.name === 'board')) {
     db.run(`ALTER TABLE list_cards ADD COLUMN board TEXT NOT NULL DEFAULT 'main'`);
+  }
+  // A deck's second commander (a card on main, one of the 100) or its
+  // companion (on the sideboard, outside the 100): commanders.ts.
+  if (!cardColumns.some((c) => c.name === 'slot')) {
+    db.run('ALTER TABLE list_cards ADD COLUMN slot TEXT');
+  }
+  // What to ask the owner after an import: which card is the second commander or the companion.
+  if (!columns.some((c) => c.name === 'slotQuestions')) {
+    db.run(`ALTER TABLE lists ADD COLUMN slotQuestions TEXT NOT NULL DEFAULT '[]'`);
   }
   // A deck's own tags, and which cards carry them - by oracle id, so a new
   // printing keeps its tags. A row with isOn = 0 is the owner taking a tag
@@ -507,6 +517,8 @@ export function deleteList(id: string): void {
   database.run('DELETE FROM tag_jobs WHERE listId = ?', [id]);
   // Folders keep their own table (deck-folders.ts), made on first use.
   try { database.run('DELETE FROM deck_folder_items WHERE listId = ?', [id]); } catch { /* no folders yet */ }
+  // The owner's own sections (sections.ts), likewise made on first use.
+  try { database.run('DELETE FROM deck_sections WHERE listId = ?', [id]); } catch { /* none yet */ }
   database.run('DELETE FROM lists WHERE id = ?', [id]);
 }
 
@@ -523,6 +535,8 @@ export interface ListedCard {
   finish: Finish;
   board: Board;
   addedAt: string;
+  /** The deck's second commander (on main) or its companion (on the sideboard); commanders.ts. */
+  slot?: Slot | null;
 }
 
 /** The open database, for modules that keep their own tables here (collection.ts). */
@@ -592,7 +606,10 @@ export function replaceListCards(
   const database = open();
   database.run('BEGIN');
   try {
-    database.run('DELETE FROM list_cards WHERE listId = ?', [listId]);
+    // The owner's own sections are not in a decklist's text, so replacing
+    // the list keeps them - unless the new text has the card itself.
+    const ids = items.map((i) => i.card.id);
+    database.run(`DELETE FROM list_cards WHERE listId = ? AND (board NOT LIKE 's-%' OR cardId IN (${ids.map(() => '?').join(',') || "''"}))`, [listId, ...ids]);
     for (const { card, quantity, finish = 'nonfoil', board = 'main' } of items) {
       storeCard(card);
       database.run(
@@ -620,7 +637,12 @@ export function updateListCard(
   if (!row) return false;
   database.run('BEGIN');
   try {
-    if (change.board) database.run('UPDATE list_cards SET board = ? WHERE listId = ? AND cardId = ?', [change.board, listId, cardId]);
+    if (change.board) {
+      database.run('UPDATE list_cards SET board = ? WHERE listId = ? AND cardId = ?', [change.board, listId, cardId]);
+      // Off the main deck a second commander is just a card; off the sideboard, so is a companion.
+      database.run(`UPDATE list_cards SET slot = NULL WHERE listId = ? AND cardId = ?
+        AND ((slot = 'partner' AND board != 'main') OR (slot = 'companion' AND board != 'side'))`, [listId, cardId]);
+    }
     if (change.finish) database.run('UPDATE list_cards SET finish = ? WHERE listId = ? AND cardId = ?', [change.finish, listId, cardId]);
     if (change.printing && change.printing.id !== cardId) {
       storeCard(change.printing);
@@ -651,15 +673,54 @@ export function removeCardFromList(listId: string, cardId: string): void {
   setQuantity(listId, cardId, 0);
 }
 
+/**
+ * Make a card the deck's second commander or its companion, or neither
+ * (null). A deck has one of each: the one before goes back to being a card.
+ * A second commander sits on main, one copy, and counts towards the 100; a
+ * companion sits on the sideboard and does not.
+ */
+export function setSlot(listId: string, cardId: string, slot: Slot | null): boolean {
+  const database = open();
+  const row = database.get('SELECT quantity FROM list_cards WHERE listId = ? AND cardId = ?', [listId, cardId]) as { quantity: number } | null;
+  if (!row) return false;
+  database.run('BEGIN');
+  try {
+    if (slot) {
+      database.run('UPDATE list_cards SET slot = NULL WHERE listId = ? AND slot = ?', [listId, slot]);
+      database.run('UPDATE list_cards SET slot = ?, board = ?, quantity = 1 WHERE listId = ? AND cardId = ?',
+        [slot, slot === 'partner' ? 'main' : 'side', listId, cardId]);
+    } else {
+      database.run('UPDATE list_cards SET slot = NULL WHERE listId = ? AND cardId = ?', [listId, cardId]);
+    }
+    database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
+    settle(listId);
+    database.run('COMMIT');
+  } catch (error) {
+    database.run('ROLLBACK');
+    throw error;
+  }
+  return true;
+}
+
+/** What is still to ask the owner about this deck's second commander and companion. */
+export function slotQuestions(listId: string): SlotQuestion[] {
+  const row = open().get('SELECT slotQuestions FROM lists WHERE id = ?', [listId]) as { slotQuestions: string } | null;
+  try { return JSON.parse(row?.slotQuestions || '[]') as SlotQuestion[]; } catch { return []; }
+}
+
+export function setSlotQuestions(listId: string, questions: SlotQuestion[]): void {
+  open().run('UPDATE lists SET slotQuestions = ? WHERE id = ?', [JSON.stringify(questions), listId]);
+}
+
 export function cardsInList(listId: string): ListedCard[] {
   const rows = open().all(
-    `SELECT c.data, lc.quantity, lc.finish, lc.board, lc.addedAt
+    `SELECT c.data, lc.quantity, lc.finish, lc.board, lc.addedAt, lc.slot
      FROM list_cards lc
      JOIN cards c ON c.id = lc.cardId
      WHERE lc.listId = ?
      ORDER BY c.name`,
     [listId],
-  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; board: Board; addedAt: string }>;
+  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; board: Board; addedAt: string; slot: Slot | null }>;
 
   return rows.map((row) => ({
     card: JSON.parse(row.data) as ScryfallCard,
@@ -667,6 +728,7 @@ export function cardsInList(listId: string): ListedCard[] {
     finish: row.finish,
     board: row.board,
     addedAt: row.addedAt,
+    slot: row.slot === 'partner' || row.slot === 'companion' ? row.slot : null,
   }));
 }
 

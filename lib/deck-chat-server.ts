@@ -6,6 +6,7 @@
 import { planFor } from './deck-plan';
 import { deckRoles } from './deck-roles';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
+import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
 import { commanderPage, edhrecEnabled } from './edhrec';
 import { gapCards, heldByName } from './gap-cards';
@@ -32,7 +33,8 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     const cards = cardsInList(list.id);
     const main = cards.filter((c) => c.board === 'main');
     const roles = await deckRoles(list.id, main).catch(() => null);
-    const identity = (list.commander?.color_identity ?? []).join('') || 'c';
+    // Both commanders' colours, when the deck has two.
+    const identity = [...deckIdentity([list.commander, main.find((c) => c.slot === 'partner')?.card])].join('') || 'c';
     const tags = deckTags(list.id);
     const plan = planFor(list.id, tags.brief, list.commander, main);
     const names = new Map(tags.tags.filter((t) => t.status === 'accepted').map((t) => [t.id, t.name]));

@@ -12,7 +12,9 @@ import { useEffect, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import DeckBrief from './DeckBrief';
+import GameChangerLine from './GameChangerLine';
 import Tip from './Tip';
+import { BRACKETS } from '@/lib/brackets';
 import * as api from '@/lib/api';
 import type { DeckTags } from '@/lib/tags';
 
@@ -90,6 +92,25 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
             onChange={(v) => change({ style2: v })}
           />
         </div>
+      </section>
+
+      <section data-tour="plan-bracket" className="flex flex-col gap-2">
+        <h3 data-section="Bracket" className="flex items-center gap-2 font-medium">
+          Bracket
+          <Tip label="What the bracket does">
+            The power level you&apos;re aiming for, on Wizards&apos; 1-5 scale. For now it checks the deck&apos;s Game Changers: brackets 1 and 2 allow none, bracket 3 up to three, 4 and 5 any number.
+            Not set until you pick one.
+          </Tip>
+        </h3>
+        <div role="radiogroup" aria-label="Bracket you're aiming for" className="flex flex-wrap items-center gap-1.5 text-sm">
+          {[1, 2, 3, 4, 5].map((b) => (
+            <button key={b} role="radio" aria-checked={plan.bracket === b} disabled={busy} onClick={() => change({ bracket: b })} title={BRACKETS[b]}
+              className={`h-8 w-9 rounded-lg border tabular-nums ${plan.bracket === b ? 'border-[var(--accent)] bg-[var(--accent)]/15 font-bold text-[var(--accent)]' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>{b}</button>
+          ))}
+          <span className="ml-1 text-xs text-[var(--muted)]">{plan.bracket ? BRACKETS[plan.bracket] : 'Not set'}</span>
+          {plan.bracket !== null && <button onClick={() => change({ bracket: null })} disabled={busy} className="text-xs text-[var(--accent)] hover:underline">Clear</button>}
+        </div>
+        <GameChangerLine names={plan.gameChangers} bracket={plan.bracket} />
       </section>
 
       <section data-tour="plan-flip" className="flex flex-col gap-2">

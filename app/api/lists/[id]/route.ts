@@ -5,11 +5,12 @@
 
 import { NextResponse } from 'next/server';
 
-import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander } from '@/lib/db';
+import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander, slotQuestions } from '@/lib/db';
 import { planConfirmed } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
 import { isPublic, setPublic } from '@/lib/profile-style';
 import { getCard, ScryfallError } from '@/lib/scryfall';
+import { sectionsOf } from '@/lib/sections';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const owned = requireList(request, id);
     if (owned instanceof NextResponse) return owned;
-    return NextResponse.json({ list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id) });
+    const deck = owned.list.kind === 'deck';
+    return NextResponse.json({
+      list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id),
+      // A deck's sections beyond Main, and what to ask about its second commander or companion.
+      sections: deck ? sectionsOf(id) : [], slotQuestions: deck ? slotQuestions(id) : [],
+    });
   } catch (error) {
     console.error('[list] read failed', error);
     return NextResponse.json({ error: 'Could not read that list' }, { status: 500 });

@@ -74,7 +74,8 @@ export function fromMoxfield(data: { name?: string; boards?: Record<string, MoxB
     text: sections([
       ['Commander', board('commanders')],
       ['Deck', board('mainboard')],
-      ['Sideboard', [...board('sideboard'), ...board('companions')]],
+      ['Sideboard', board('sideboard')],
+      ['Companion', board('companions')],
       ['Maybeboard', board('maybeboard')],
     ]),
   };

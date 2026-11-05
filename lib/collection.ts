@@ -285,7 +285,7 @@ interface Want {
   listed: Array<{ card: ScryfallCard; finish: Finish; commander: boolean }>;
 }
 
-/** What a deck wants, by card: the main board and the commander. Plain lists want nothing. */
+/** What a deck wants, by card: the main board, the commander and the companion. Plain lists want nothing. */
 function wants(listId: string): Map<string, Want> {
   const db = database();
   const list = db.get('SELECT kind, commanderId, commanderFinish FROM lists WHERE id = ?', [listId]) as
@@ -294,7 +294,7 @@ function wants(listId: string): Map<string, Want> {
   if (!list || list.kind !== 'deck') return out;
   const rows = db.all(
     `SELECT c.data, lc.quantity, lc.finish, lc.proxies FROM list_cards lc JOIN cards c ON c.id = lc.cardId
-     WHERE lc.listId = ? AND lc.board = 'main'`, [listId],
+     WHERE lc.listId = ? AND (lc.board = 'main' OR lc.slot = 'companion')`, [listId],
   ) as Array<{ data: string; quantity: number; finish: Finish; proxies: number }>;
   const commander = list.commanderId
     ? db.get('SELECT data FROM cards WHERE id = ?', [list.commanderId]) as { data: string } | null

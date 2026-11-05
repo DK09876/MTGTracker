@@ -11,6 +11,7 @@ import { addCardToList, database, replaceListCards, setCommander, updateListCard
 import { resolveDecklist, type Resolved } from './import';
 import { startJob } from './jobs';
 import { collection } from './scryfall';
+import { settleSlots } from './slots';
 
 const key = (set: string, number: string) => `${set.toLowerCase()}/${number.toLowerCase()}`;
 
@@ -30,6 +31,9 @@ function fixPrintings(listId: string, profileId: string | null, later: Resolved[
       return { swapped, of: later.length };
     });
 }
+
+/** Cards the list itself put under Commander or Companion, by id. */
+const namedIn = (resolved: Resolved) => new Map(resolved.cards.flatMap((c) => (c.named ? [[c.card.id, c.named] as const] : [])));
 
 export interface ImportSummary {
   /** Distinct cards added, and copies counting duplicates. */
@@ -72,6 +76,7 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     addCardToList(list.id, resolved.commander, 1, resolved.commanderFinish ?? 'nonfoil');
   }
   fixPrintings(list.id, profileId, resolved.later);
+  if (list.kind === 'deck') settleSlots(list.id, namedIn(resolved));
 
   return {
     added: resolved.cards.length,
@@ -124,5 +129,6 @@ export async function replaceWith(
     setCommander(list.id, list.commander, resolved.commanderFinish);
   }
   replaceListCards(list.id, cards);
+  if (list.kind === 'deck') settleSlots(list.id, namedIn(resolved));
   return { ...summary, applied: true };
 }

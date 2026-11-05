@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { analyse, fetchedColors, pips } from './health';
+import { analyse, copyLimit, deckFlags, fetchedColors, pips } from './health';
 import type { ScryfallCard } from './scryfall';
 
 const card = (name: string, over: Partial<ScryfallCard> = {}): ScryfallCard =>
@@ -123,5 +123,58 @@ describe('colour sources', () => {
     expect(sourcesNeeded(2, 2, true)).toBe(31);
     // Two pips on a one-drop cannot happen; the first column that exists is used.
     expect(sourcesNeeded(2, 1)).toBe(30);
+  });
+});
+
+describe('copyLimit', () => {
+  it('allows one, any number of basics and Rats, and the number a card names', () => {
+    expect(copyLimit(card('Sol Ring'))).toBe(1);
+    expect(copyLimit(card('Mountain', { type_line: 'Basic Land — Mountain' }))).toBe(Infinity);
+    expect(copyLimit(card('Relentless Rats', { oracle_text: 'A deck can have any number of cards named Relentless Rats.' }))).toBe(Infinity);
+    expect(copyLimit(card('Seven Dwarves', { oracle_text: 'A deck can have up to seven cards named Seven Dwarves.' }))).toBe(7);
+    expect(copyLimit(card('Nazgûl', { oracle_text: 'A deck can have up to nine cards named Nazgûl.' }))).toBe(9);
+  });
+});
+
+describe('deckFlags', () => {
+  const tymna = card('Tymna the Weaver', { color_identity: ['W', 'B'], type_line: 'Legendary Creature — Human Cleric' });
+  const kraum = card('Kraum, Ludevic\'s Opus', { color_identity: ['U', 'R'], type_line: 'Legendary Creature — Zombie Horror' });
+  const bolt = card('Lightning Bolt', { color_identity: ['R'] });
+  const growth = card('Rampant Growth', { color_identity: ['G'] });
+
+  it('flags extra copies, colours outside both commanders, banned and not legal cards', () => {
+    const flags = deckFlags({
+      commander: tymna,
+      cards: [
+        { card: kraum, quantity: 1, slot: 'partner' },
+        { card: bolt, quantity: 1 },
+        { card: growth, quantity: 1 },
+        { card: card('Sol Ring'), quantity: 2 },
+        { card: card('Seven Dwarves', { color_identity: ['R'], oracle_text: 'A deck can have up to seven cards named Seven Dwarves.' }), quantity: 7 },
+        { card: card('Dockside Extortionist', { color_identity: ['R'], legalities: { commander: 'banned' } }), quantity: 1 },
+        { card: card('Chaos Orb', { legalities: { commander: 'not_legal' } }), quantity: 1 },
+      ],
+    });
+    // Bolt is red: Kraum brings red. Rampant Growth is green: neither commander does.
+    expect(flags.map((f) => [f.kind, f.name])).toEqual([
+      ['colours', 'Rampant Growth'],
+      ['copies', 'Sol Ring'],
+      ['banned', 'Dockside Extortionist'],
+      ['not-legal', 'Chaos Orb'],
+    ]);
+    expect(flags.find((f) => f.kind === 'copies')).toMatchObject({ quantity: 2, limit: 1 });
+  });
+
+  it('flags a banned commander, without a move to fix it', () => {
+    const flags = deckFlags({ commander: card('Golos, Tireless Pilgrim', { legalities: { commander: 'banned' } }), cards: [] });
+    expect(flags).toEqual([expect.objectContaining({ kind: 'banned', commander: true })]);
+  });
+
+  it('counts a second commander in the 100 but not in the library', () => {
+    const lands = { card: card('Plains', { type_line: 'Basic Land — Plains' }), quantity: 97 };
+    const health = analyse({ commander: tymna, cards: [{ card: kraum, quantity: 1, slot: 'partner' }, lands, { card: bolt, quantity: 1 }] });
+    expect(health.size).toBe(100);
+    expect(health.hand.library).toBe(98);
+    expect(health.warnings.some((w) => /outside/.test(w.title))).toBe(false);
   });
 });
