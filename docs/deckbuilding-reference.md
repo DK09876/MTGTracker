@@ -80,6 +80,20 @@ One tension is real and stays as a risk check: V4 argues the deck should still w
 
 The creators do push back on each other a little (V13: "reject synergy, embrace cohesion"; V14 calls the synergy obsession limiting), but in practice the ideas fit together. For the app: show these as separate dimensions of a deck, not one score with a winner.
 
+**Brewing angles: what makes a deck unusual (V20).** The rest of this file is about making a deck work. V20 is about making it different from the rest of the table, and it names seven angles. Each one says something about how the app should read a deck that breaks the usual patterns:
+
+| Angle | What it is | What it means for the app |
+| --- | --- | --- |
+| Unpopular commander | A commander few people build (EDHREC rank in the thousands). | EDHREC averages and "played in N decks" are thin or empty. Fall back on Scryfall data and the deck's own cards, and don't call a card wrong for being rare in other lists. |
+| Breaking the colour pie | A colour doing what it usually doesn't: mono-blue sea-monster stompy, mono-red control, flash outside blue. | Style detection must read the cards, not assume a style from the colours. The usual counts may not fit (a mono-red control deck wants more draw and interaction than a red deck usually runs). |
+| Theme deck | A restriction that isn't a creature type: every creature wears a hat, only 1-mana spells, only 7-drops. Not bracket 1 by default; it can still be consistent. | The owner's restriction belongs in the brief. Suggestions and the cut list must keep to it, and lower card quality from a smaller pool is expected, not a fault. |
+| Rube Goldberg combo | A win that needs four to six permanents working together (energy decks, for example). Cards are often mana-inefficient on their own. | The pieces should be marked as protected (wincon or engine) so the cut list doesn't trim them for being slow or weak alone. Expect more draw and tutors, and protection for the board. |
+| Popular commander built "wrong" | A well-known commander pointed at a different plan: Edgar Markov that never attacks, Vivi with only enchantments as non-creature spells. | The plan in the brief wins over what the commander's text suggests. Style detection should offer the commander's usual style, but the owner's choice must drive targets and cuts. |
+| Mechanic deck | Built around one keyword or action: vigilance, flash, sacrifice through mobilize. The more niche, the more distinctive. | Treat the mechanic as the deck's key theme package (a tag), and judge cards on whether they carry it. |
+| Secret commander | The real build-around is in the 99: a card that can't be a commander, or a legend whose colours are too narrow. The command zone card mostly supplies colours. cEDH examples: in a Gaea's Cradle deck the real commander is Gaea's Cradle; in a "slop" deck it is Rhystic Study. | The deck's engine isn't the commander. The plan should allow naming a key card from the 99 that's never cut and that draw and tutors aim for. Commander-dependence checks (V4, V15) don't apply in the usual way. |
+
+For the app overall: all seven come down to the owner's plan overriding the defaults. The brief and the plan's style choice are where these angles go. Tuning and the cut list should follow the plan, not the averages, and a stated restriction should never be cut against.
+
 ## Mana base
 
 Use Frank Karsten's published maths to recommend lands and colour sources; Salubrious Snail's tool then checks the result. Karsten's land formula for Commander (MDFCs counted partly) is:
@@ -315,6 +329,7 @@ The playlist: [EDH deck building](https://www.youtube.com/playlist?list=PLsvebAO
 | V17 | [All Underplayed Utility Lands in Commander](https://www.youtube.com/watch?v=xy16QHJU-ls) | 3/3 Elk | 26:08 |
 | V18 | [Change 3 Cards, Not 20](https://www.youtube.com/watch?v=7tvEAtqkDR0) | Arcane Broadcast | 0:52 |
 | V19 | [Everyone Should Play Mono Blue Control](https://www.youtube.com/watch?v=VqTJWlEfBxo) | The Trinket Mage | 12:04 |
+| V20 | [7 Unique Ways to Build Your Next Commander Deck](https://www.youtube.com/watch?v=oUzQmPljhyk) | Deck Driver MTG | added 4 November 2026, read in full |
 
 The cutting playlist: [MTG Deck cuts](https://www.youtube.com/playlist?list=PLH0UXIPYmReU).
 

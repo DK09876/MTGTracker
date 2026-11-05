@@ -60,6 +60,22 @@ function shownDecks(decks: List[], view: View, query: string, placed: Record<str
   return out.sort(by[view.sort]);
 }
 
+/** The label that rides the pointer while a deck is dragged: its colours and name. */
+function dragChip(name: string, identity: string[]): HTMLElement {
+  const colours = 'WUBRG'.split('').filter((c) => identity.includes(c)).map((c) => MANA[c]);
+  const chip = document.createElement('div');
+  chip.style.cssText = 'position:fixed;top:-1000px;left:-1000px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;'
+    + 'background:#221f1b;border:1px solid #d6aa2e;color:#f0e9dd;font:600 13px Figtree,system-ui,sans-serif;white-space:nowrap;max-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+  const dot = document.createElement('span');
+  dot.style.cssText = `width:12px;height:12px;border-radius:4px;flex-shrink:0;background:${colours.length > 1 ? `linear-gradient(90deg,${colours.join(',')})` : colours[0] ?? '#6c655b'}`;
+  const label = document.createElement('span');
+  label.style.cssText = 'overflow:hidden;text-overflow:ellipsis';
+  label.textContent = name;
+  chip.append(dot, label);
+  document.body.append(chip);
+  return chip;
+}
+
 export default function DecksPage() {
   const router = useRouter();
   // Shown at once from last time, then refreshed.
@@ -101,6 +117,8 @@ export default function DecksPage() {
   // Where the top bar ends: the folder rail sits just under it.
   const navHeight = useNavBottom();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // The deck being dragged to a folder: it dims, and the folders show they take it.
+  const [dragging, setDragging] = useState<string | null>(null);
   // The deck under the pointer tints the page behind the grid.
   const [glow, setGlow] = useState<string[] | null>(null);
   const folderColours: Record<string, string[]> = { all: [], none: [] };
@@ -231,7 +249,7 @@ export default function DecksPage() {
         {decks.length > 0 && (
           // Beside the decks on wide screens, staying put as they scroll.
           <aside className="hidden lg:sticky lg:block" style={{ top: navHeight + 16 }}>
-            <FolderRail {...folderProps} />
+            <FolderRail {...folderProps} dragging={!!dragging} />
           </aside>
         )}
         <div className="min-w-0">
@@ -413,11 +431,20 @@ export default function DecksPage() {
             // Each deck in its commander's colours, its art on the cover; its ⋯ sits beside the link, not in it.
             <div
               key={deck.id}
-              className="relative"
+              className={`relative transition-opacity ${dragging === deck.id ? 'opacity-40' : ''}`}
               onMouseEnter={() => setGlow(identity)}
               onMouseLeave={() => setGlow(null)}
               // Dragged onto a folder in the rail, it goes in it.
-              onDragStart={(e) => { e.dataTransfer.setData(DECK_DRAG, deck.id); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragStart={(e) => {
+                e.dataTransfer.setData(DECK_DRAG, deck.id);
+                e.dataTransfer.effectAllowed = 'move';
+                // A small label rides the pointer instead of a ghost of the whole tile.
+                const chip = dragChip(deck.name, identity);
+                e.dataTransfer.setDragImage(chip, 14, 16);
+                setTimeout(() => chip.remove(), 0);
+                setDragging(deck.id);
+              }}
+              onDragEnd={() => setDragging(null)}
             >
             <Link
               href={`/decks/${deck.id}`}
@@ -428,7 +455,7 @@ export default function DecksPage() {
                   each left seams on the art's edges; the border and glow show it instead.
                   The art is framed from near its top, where the faces are. */}
               <div className="relative h-24 overflow-hidden [mask-image:linear-gradient(to_bottom,black_58%,transparent)] sm:h-36">
-                {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover object-[50%_22%]" unoptimized />
+                {art ? <Image src={art} alt="" width={626} height={457} draggable={false} className="absolute inset-0 h-full w-full object-cover object-[50%_22%]" unoptimized />
                   : <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />}
                 {/* Only the art's bottom fades, under the name, into the tile's own colours (a shade over all of it washed it out). */}
                 <span className="absolute left-2.5 top-2.5 sm:left-3 sm:top-3"><IdentitySymbols identity={identity.join('')} size={16} /></span>
