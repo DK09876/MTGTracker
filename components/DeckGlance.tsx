@@ -114,6 +114,8 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
       }
       case 'colours': {
         if (!h) return null;
+        // No coloured spells yet: nothing to judge.
+        if (!h.colors.some((c) => c.needed !== null)) return stat('Colours', <span className="text-[var(--muted)]">—</span>);
         const short = h.colors.filter((c) => c.needed !== null && c.sources < c.needed - 1);
         return stat('Colours', short.length ? <span className="flex items-center gap-1 text-amber-300">{short.map((c) => <ManaCost key={c.color} cost={`{${c.color}}`} size={14} />)}<span className="text-xs font-normal">needs sources</span></span> : <span className="text-emerald-400">✓ enough</span>);
       }

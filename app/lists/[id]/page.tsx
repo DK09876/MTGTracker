@@ -251,8 +251,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-t from-[var(--background)] via-[var(--background)]/40 to-transparent sm:bg-gradient-to-r sm:from-[var(--background)]/90 sm:via-[var(--background)]/30" />
           </>
         )}
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex items-end justify-between gap-3 max-sm:flex-wrap">
+          <div className="min-w-0 flex-1">
             {renaming ? (
               <form
                 onSubmit={async (e) => {
@@ -276,7 +276,13 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 <button type="button" onClick={() => setRenaming(false)} className="px-2 text-sm text-[var(--muted)]">Cancel</button>
               </form>
             ) : (
-              <h1 className={`font-display font-extrabold leading-[1.05] [text-wrap:balance] ${deck ? `id-text ${section === 'cards' ? 'text-3xl sm:text-4xl' : 'text-2xl sm:text-3xl'}` : 'text-3xl'}`}>{list.name}</h1>
+              <h1
+                title={list.name}
+                // A long name steps down a size and stops at three lines, so it never pushes the deck off the screen.
+                className={`font-display font-extrabold leading-[1.05] [text-wrap:balance] line-clamp-3 ${deck
+                  ? `id-text ${section !== 'cards' || list.name.length > 40 ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'}`
+                  : 'text-3xl'}`}
+              >{list.name}</h1>
             )}
             {deck && list.commander && !changingCommander && (
               <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--foreground)]/85">
@@ -296,7 +302,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </p>
           </div>
 
-          <div className={`flex gap-2 ${deck ? 'absolute right-4 top-4 sm:static' : 'w-full sm:w-auto'}`}>
+          <div className={`flex shrink-0 gap-2 ${deck ? 'absolute right-4 top-4 sm:static' : 'w-full sm:w-auto'}`}>
             <button data-tour="add-cards" onClick={() => setAddOpen(true)} className={`btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none lg:hidden ${deck ? 'max-lg:hidden' : ''}`}>
               ＋ Add cards
             </button>
@@ -354,7 +360,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                   </div>
                 </div>
               )}
-              <p className="mb-1.5 text-sm text-[var(--muted)]">{list.commander ? 'New commander' : 'Or search for one'}</p>
+              <p className="mb-1.5 text-sm text-[var(--muted)]">{list.commander ? 'New commander' : cards.some((c) => canLead(c.card)) ? 'Or search for one' : 'Pick a commander'}</p>
               <CommanderPicker
                 value={null}
                 autoFocus={changingCommander}

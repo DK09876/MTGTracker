@@ -28,7 +28,11 @@ interface Item {
   group: string;
   label: string;
   hint?: string;
+  /** Under the label, smaller: a deck's commander. */
+  sub?: string;
   icon?: React.ReactNode;
+  /** After the hint, at the row's end: a deck's colours. */
+  trail?: React.ReactNode;
   run: () => void;
   /** Words it is found by, beyond its label. */
   words?: string;
@@ -43,6 +47,8 @@ const PAGES: Array<[string, string, string]> = [
   ['/collection/scan', 'Scan cards', 'camera collection'],
   ['/settings', 'Settings', 'ai model budget profile password'],
 ];
+
+const art = (l: List) => l.commander?.image_uris?.art_crop ?? l.commander?.card_faces?.[0]?.image_uris?.art_crop ?? null;
 
 // Ranked: the label starting with it, then a word in it starting with it, then anywhere.
 function score(item: Item, q: string): number {
@@ -101,10 +107,18 @@ export default function CommandPalette() {
       id: `l:${l.id}`,
       group: l.kind === 'deck' ? 'Decks' : 'Lists',
       label: l.name,
-      hint: l.kind === 'deck' ? (l.commander?.name !== l.name ? l.commander?.name : undefined) ?? `${l.totalCards} / 100` : `${l.totalCards} card${l.totalCards === 1 ? '' : 's'}`,
-      icon: l.kind === 'deck' && l.commander
-        ? <IdentitySymbols identity={(l.commander.color_identity ?? []).join('') || 'C'} size={13} />
+      // The commander under the name, not beside it: on a phone the two fought for one line and the name lost.
+      sub: l.kind === 'deck' ? (l.commander ? (l.commander.name !== l.name ? l.commander.name : undefined) : 'No commander yet') : undefined,
+      hint: l.kind === 'deck' ? `${l.totalCards}/100` : `${l.totalCards} card${l.totalCards === 1 ? '' : 's'}`,
+      // A fixed-size picture leads every row, so names line up whatever the colours: five pips in that
+      // slot pushed the name under them.
+      icon: l.kind === 'deck'
+        ? (art(l)
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={art(l)!} alt="" aria-hidden className="h-5 w-7 rounded-[4px] object-cover object-[50%_30%] ring-1 ring-white/10" />
+          : <span aria-hidden className="h-5 w-7 rounded-[4px] bg-[linear-gradient(135deg,var(--surface-hover),var(--border))] ring-1 ring-white/10" />)
         : <span aria-hidden className="text-[var(--muted)]">≡</span>,
+      trail: l.kind === 'deck' && l.commander ? <IdentitySymbols identity={(l.commander.color_identity ?? []).join('') || 'C'} size={12} /> : undefined,
       words: l.commander?.name,
       run: () => go(`/${l.kind === 'deck' ? 'decks' : 'lists'}/${l.id}`),
     }));
@@ -159,7 +173,7 @@ export default function CommandPalette() {
             ref={input}
             value={text}
             onChange={(e) => { setText(e.target.value); setActive(0); }}
-            placeholder="Jump to a deck, page or action - or type a card or question"
+            placeholder="Decks, pages, cards, rules questions…"
             aria-label="Jump to"
             role="combobox"
             aria-expanded
@@ -186,9 +200,13 @@ export default function CommandPalette() {
                   onClick={item.run}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${i === active ? 'bg-[var(--surface-hover)] text-[var(--foreground)]' : 'text-[var(--foreground)]/85'}`}
                 >
-                  <span className="flex w-5 shrink-0 justify-center">{item.icon ?? <span aria-hidden className="text-[var(--muted)]">{item.group === 'Ask' ? '✦' : item.group === 'Actions' ? '＋' : '→'}</span>}</span>
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {item.hint && <span className="shrink-0 truncate text-xs text-[var(--muted)]">{item.hint}</span>}
+                  <span className="flex w-7 shrink-0 items-center justify-center">{item.icon ?? <span aria-hidden className="text-[var(--muted)]">{item.group === 'Ask' ? '✦' : item.group === 'Actions' ? '＋' : '→'}</span>}</span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{item.label}</span>
+                    {item.sub && <span className="truncate text-xs text-[var(--muted)]">{item.sub}</span>}
+                  </span>
+                  {item.hint && <span className="shrink-0 text-xs tabular-nums text-[var(--muted)]">{item.hint}</span>}
+                  {item.trail && <span className="shrink-0">{item.trail}</span>}
                   {i === active && <kbd aria-hidden className="hidden text-[11px] text-[var(--muted)] sm:block">↵</kbd>}
                 </button>
               </div>
