@@ -251,9 +251,9 @@ export default function RulesPage() {
     <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start lg:gap-8">
     <HistoryPanel label="Rules conversations" newLabel="New question" onNew={() => open(null)} entries={history} active={thread?.id ?? null} {...historyActions} />
     <div className="mx-auto w-full max-w-3xl">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="font-display text-3xl font-extrabold">Rules</h1>
-        <AiModelPicker area="rules" align="right" className="ml-auto" />
+        <AiModelPicker area="rules" align="right" className="ml-auto max-sm:order-last max-sm:ml-0 max-sm:basis-full max-sm:flex-wrap max-sm:justify-start" />
         {thread && <button onClick={() => open(null)} className={`${button} lg:hidden`}>New question</button>}
       </div>
       {!thread && (

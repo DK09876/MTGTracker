@@ -86,6 +86,7 @@ export default function AiModelPicker({ area, align = 'left', className = '' }: 
 
   return (
     <div className={`flex items-center gap-3 ${align === 'right' ? 'justify-end' : ''} ${className}`} data-tour="ai-mode">
+      {/* On a phone the cost sits under the tiers rather than squeezed beside them. */}
       {align === 'right' ? <>{line}{buttons}</> : <>{buttons}{line}</>}
     </div>
   );

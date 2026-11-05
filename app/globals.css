@@ -193,3 +193,11 @@ body {
 
 /* A part the guided tour scrolls to clears the sticky header and the tour's banner. */
 [data-tour] { scroll-margin-top: 7.5rem; }
+
+/* Jump targets from a deck's rail land below the sticky header. */
+[data-section] { scroll-margin-top: 5.5rem; }
+
+/* Below lg a deck's tab rail floats above the phone nav; the footer clears it too. */
+@media (width < 64rem) {
+  body:has([data-deck-rail]) > footer { padding-bottom: calc(var(--nav-h) + 4.5rem + max(2rem, env(safe-area-inset-bottom))); }
+}

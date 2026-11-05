@@ -13,18 +13,21 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import KeepRule from './KeepRule';
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { ListedCard } from '@/lib/db';
 import { geek, seenBy } from '@/lib/geek';
 import type { Warning } from '@/lib/health';
+import type { KeepRule as KeepRuleType } from '@/lib/keep';
 import { atLeast } from '@/lib/odds';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
 
 // Series colour: the app's gold, stepped down into the band that reads on
 // the dark surface (validated: lightness band and 3:1 contrast on #1d1a16).
-const SERIES = '#b38f1f';
+// In the commander's colours (the deck page sets --c1..--c3; gold without a commander).
+const SERIES = 'linear-gradient(135deg, var(--c1), var(--c3))';
 const TRACK = '#3a3016';
 // Status colours are fixed and only ever appear beside an icon and a label.
 const STATUS = { good: '#0ca30c', warning: '#fab219', critical: '#d03b3b' };
@@ -39,9 +42,9 @@ interface Props {
 }
 
 export default function DeckHealth({ listId, commander, cards, version }: Props) {
-  const [data, setData] = useState<api.DeckHealth | null>(null);
-  const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>('loading');
-  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>('loading');
+  const [data, setData] = useState<api.DeckHealth | null>(() => api.peek<api.DeckHealth>(api.paths.health(listId)) ?? null);
+  const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>(() => api.peek<{ roles: RoleCount[] }>(api.paths.roles(listId))?.roles ?? 'loading');
+  const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>(() => api.peek<api.DeckInsights>(api.paths.insights(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
 
   // The stored-card checks answer at once; roles and the bracket follow on their own.
@@ -123,7 +126,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         )}
       </Section>
 
-      <Section tour="roles" title="Roles" subtitle="How many of each kind of card, against common Commander guidelines. Tags from Scryfall.">
+      <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from Scryfall.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
           <RoleRow label="Lands" count={health.lands} target={landTarget} />
           {roles === 'loading' && (
@@ -132,7 +135,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
             </p>
           )}
           {roles === 'failed' && (
-            <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the role tags — try again in a moment.</p>
+            <p className="px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the built-in tags — try again in a moment.</p>
           )}
           {Array.isArray(roles) && (Object.keys(ROLE_GROUPS) as RoleGroup[]).map((g) => {
             // A role the deck has none of is only worth a row if there is a guideline for it.
@@ -178,7 +181,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         </div>
       </Section>
 
-      {stats && <GeekStats stats={stats} library={health.hand.library} roles={Array.isArray(roles) ? roles : []} />}
+      {stats && <GeekStats stats={stats} library={health.hand.library} roles={Array.isArray(roles) ? roles : []} keep={<HealthKeep listId={listId} cards={cards} version={version} />} />}
     </div>
   );
 }
@@ -195,7 +198,7 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
   return (
     <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
+        <h3 data-section="How it wins" className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
         <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
       </div>
       {routes.length > 0 && (
@@ -271,17 +274,13 @@ function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
  * hypergeometric odds from the library; the one assumption - nobody skips
  * the first draw in multiplayer - is said where it applies.
  */
-function GeekStats({ stats, library, roles }: { stats: ReturnType<typeof geek>; library: number; roles: RoleCount[] }) {
+function GeekStats({ stats, library, roles, keep }: { stats: ReturnType<typeof geek>; library: number; roles: RoleCount[]; keep: React.ReactNode }) {
   return (
     <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <summary className="cursor-pointer font-medium">Geek stats <span className="text-sm font-normal text-[var(--muted)]">— the deck in numbers</span></summary>
       <div className="mt-4 flex flex-col gap-7">
-        <GeekBlock title="Mulligans" note="A hand of 2–5 lands counts as keepable. In multiplayer the first mulligan is free.">
-          <div className="grid grid-cols-3 gap-3">
-            <Stat label="Keep your seven" value={pct(stats.keep.seven)} />
-            <Stat label="With the free mulligan" value={pct(stats.keep.withFreeMulligan)} />
-            <Stat label="By a second mulligan" value={pct(stats.keep.withTwoMulligans)} />
-          </div>
+        <GeekBlock title="Mulligans" note="Your keep rule: the lands a seven needs, and any cards it must have. Playtest mulligans by the same rule. In multiplayer the first mulligan is free.">
+          {keep}
         </GeekBlock>
 
         <GeekBlock title="Hitting land drops" note="Chance of having played a land every turn so far. By turn N you have seen 7 + N cards: in multiplayer Commander nobody skips the first draw.">
@@ -376,7 +375,7 @@ function Calculator({ library, roles }: { library: number; roles: RoleCount[] })
             className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1"
             defaultValue=""
           >
-            <option value="">(or a role…)</option>
+            <option value="">(or a built-in tag…)</option>
             {roles.map((r) => <option key={r.id} value={r.count}>{r.label} ({r.count})</option>)}
           </select>
         )}
@@ -397,7 +396,7 @@ function Calculator({ library, roles }: { library: number; roles: RoleCount[] })
 function Section({ title, subtitle, children, tour }: { title: string; subtitle?: string; children: React.ReactNode; tour?: string }) {
   return (
     <section data-tour={tour}>
-      <h3 className="font-medium">{title}</h3>
+      <h3 data-section={title} className="font-medium">{title}</h3>
       {subtitle && <p className="mb-3 text-sm text-[var(--muted)]">{subtitle}</p>}
       {children}
     </section>
@@ -576,4 +575,23 @@ function Columns({ data, format, unit, name }: {
       </details>
     </div>
   );
+}
+
+/** The keep rule, read and saved with the deck's playtest settings. */
+function HealthKeep({ listId, cards, version }: { listId: string; cards: ListedCard[]; version: string }) {
+  const [state, setState] = useState<api.PlaytestState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.deckPlaytest(listId).then((p) => { if (!cancelled) setState(p); }).catch(() => { if (!cancelled) setError('Couldn\'t read the keep rule just now.'); });
+    return () => { cancelled = true; };
+  }, [listId, version]);
+  if (error) return <p className="text-sm text-red-400">{error}</p>;
+  if (!state) return <p className="text-sm text-[var(--muted)]">Reading the keep rule…</p>;
+  const save = async (keep: KeepRuleType) => {
+    const settings = { ...state.settings, keep };
+    setState({ ...state, settings });
+    try { await api.savePlaytest(listId, { settings }); } catch { setError('Couldn\'t save the keep rule.'); }
+  };
+  return <KeepRule rule={state.settings.keep} cards={cards} cardTags={state.cardTags} tagNames={state.tagNames} mulligans={state.settings.maxMulligans} onChange={save} />;
 }

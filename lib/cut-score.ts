@@ -23,6 +23,7 @@
 
 import { fitOf, popularity, type FitProfile } from './fit';
 import type { CardStats } from './edhrec';
+import { CUT_RULES, customApplies, describeCustom, NO_SETTINGS, ruleOn, weightOf, type CutSettings } from './cut-rules';
 import type { RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
 import type { DeckTags } from './tags';
@@ -35,6 +36,15 @@ export interface CutCandidate {
   /** The roles it fills, so cutting it can be shown against their counts. */
   roles: string[];
   cmc: number;
+  /** Every reason, with the rule behind it and how much it moved the score. */
+  why: CutReason[];
+}
+
+export interface CutReason {
+  /** A rule id from cut-rules.ts, 'custom' for the owner's own, or 'lands'. */
+  rule: string;
+  delta: number;
+  text: string;
 }
 
 /** Type A: easy to change, cut on quality. Type B: the theme carries it, keep the theme. */
@@ -56,9 +66,21 @@ export interface CutInput {
   /** EDHREC's numbers for the commander, when it is on. */
   stats: Map<string, CardStats> | null;
   lands: { have: number; want: number };
+  /** Theme package sizes by tag id (8 when not set). */
+  packages?: Record<string, number>;
+  /** The deck's own rule settings (cut-rules.ts). */
+  settings?: CutSettings;
+  /** The plan's styles: cards that do what they are about are kept. */
+  styles?: Array<{ label: string; test: RegExp }>;
 }
 
-const PROTECTING = new Set(['wincon', 'engine', 'payoff']);
+// Payoffs are not protected outright: a deck can have too many (the 'payoffs' rule).
+const PROTECTING = new Set(['wincon', 'engine']);
+// A tag for the cards that are the fun of the deck (3/3 Elk: do not cut those for generic ones).
+const PET = /^(pets?|pet cards?|fun|favou?rites?)$/i;
+// Impulse draw: exile from the top and play it for a while.
+const IMPULSE = /exile the top[^.]*\.[^.]*(you may (play|cast)|until (the end of )?(your next turn|turn))/i;
+const DRAWS = /draws? (a|one|two|three|\w+) cards?/i;
 const FINISHING = new Set(['wincon', 'finisher', 'extra-turn', 'extra-combat', 'overrun', 'drain']);
 const isLand = (c: ScryfallCard) => /\bLand\b/.test((c.type_line ?? '').split('//')[0]);
 const front = (name: string) => name.split(' // ')[0];
@@ -107,14 +129,39 @@ const UTILITY = new Set(['ramp', 'rock', 'dork', 'land-ramp', 'draw', 'engine', 
 
 export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; protectedCards: string[]; type: DeckType; curve: string | null } {
   const { cards, roles, fit, commander, commanderRoles, tags, keep, stats, lands } = input;
-  const keyTags = new Set((tags?.tags ?? []).filter((t) => t.status === 'accepted' && t.kind && PROTECTING.has(t.kind)).map((t) => t.id));
+  const settings = input.settings ?? NO_SETTINGS;
+  const w = (id: string) => weightOf(settings, id);
+  const accepted = (tags?.tags ?? []).filter((t) => t.status === 'accepted');
+  const keyTags = new Set(accepted.filter((t) => t.kind && PROTECTING.has(t.kind)).map((t) => t.id));
+  const petTags = new Set(accepted.filter((t) => PET.test(t.name)).map((t) => t.id));
+  const tagName = new Map(accepted.map((t) => [t.id, t.name]));
   const on = (tags?.cardTags ?? []).filter((ct) => ct.on);
   const keyCards = new Set(on.filter((ct) => keyTags.has(ct.tagId)).map((ct) => ct.key));
+  const petCards = new Set(on.filter((ct) => petTags.has(ct.tagId)).map((ct) => ct.key));
+  const tagsOf = new Map<string, string[]>();
+  for (const ct of on) tagsOf.set(ct.key, [...(tagsOf.get(ct.key) ?? []), tagName.get(ct.tagId) ?? '']);
   const anyTag = new Set(on.map((ct) => ct.key));
   const rolesOf = new Map<string, RoleCount[]>();
   for (const r of roles) for (const name of r.cards) rolesOf.set(name, [...(rolesOf.get(name) ?? []), r]);
-  const count = (id: string) => roles.find((r) => r.id === id)?.count ?? 0;
   const type = deckType(cards, fit);
+
+  // Red's "exile the top card, you may play it" counts as card advantage on
+  // Scryfall, but it is not the draw the range is about: those cards neither
+  // fill the draw count here nor pay for it being over.
+  const impulse = new Set(ruleOn(settings, 'impulse') ? cards.filter((c) => IMPULSE.test(textOf(c.card)) && !DRAWS.test(textOf(c.card))).map((c) => c.card.name) : []);
+
+  // Theme packages: each of the owner's theme tags, its size and how full it is.
+  const inMain = new Set(cards.map((c) => c.card.oracle_id ?? c.card.id));
+  const themeTags = accepted.filter((t) => t.kind !== 'wincon' && !PET.test(t.name));
+  const members = new Map(themeTags.map((t) => [t.id, on.filter((ct) => ct.tagId === t.id && inMain.has(ct.key)).length]));
+  const sizeOf = (tagId: string) => input.packages?.[tagId] ?? 8;
+  const enablerTags = new Set(accepted.filter((t) => t.kind === 'enabler').map((t) => t.id));
+  const payoffTags = new Set(accepted.filter((t) => t.kind === 'payoff').map((t) => t.id));
+  const keysWith = (ids: Set<string>) => new Set(on.filter((ct) => ids.has(ct.tagId) && inMain.has(ct.key)).map((ct) => ct.key));
+  const enablers = keysWith(enablerTags);
+  const payoffs = keysWith(payoffTags);
+  const countOf = (r: RoleCount) => (r.id === 'draw' ? r.cards.filter((n) => !impulse.has(n)).reduce((n, name) => n + (cards.find((c) => c.card.name === name)?.quantity ?? 1), 0) : r.count);
+  const count = (id: string) => { const r = roles.find((x) => x.id === id); return r ? countOf(r) : 0; };
 
   // Where the curve is overloaded (Commander Template: look there first).
   const spells = cards.filter((c) => !isLand(c.card));
@@ -123,93 +170,125 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
   for (const { card, quantity } of spells) perBucket.set(bucket(card.cmc ?? 0), (perBucket.get(bucket(card.cmc ?? 0)) ?? 0) + quantity);
   const heavy = new Set([...perBucket.entries()].filter(([b, n]) => n - CURVE_SHARE[b] * total >= 3).map(([b]) => b));
   const curve = heavy.size ? [...heavy].map((b) => `${perBucket.get(b)} cards at ${b} mana (about ${Math.round(CURVE_SHARE[b] * total)} is usual)`).join(', ') : null;
+  const averageMv = total ? spells.reduce((n, c) => n + (c.card.cmc ?? 0) * c.quantity, 0) / total : 0;
 
   // Which utility to trim after interaction: ramp if the commander is cheap, draw if it is dear.
   const cmdMv = commander?.cmc ?? 4;
   const secondary = cmdMv <= 3 ? 'ramp' : cmdMv >= 5 ? 'draw' : null;
   const wipesLeft = count('wipe');
+  const overFull = (r: RoleCount) => !!r.target && countOf(r) > r.target[1];
 
   const candidates: CutCandidate[] = [];
   const protectedCards: string[] = [];
   for (const { card } of cards) {
     if (isLand(card)) continue;
     const key = card.oracle_id ?? card.id;
-    if (keyCards.has(key) || keep.has(key)) { protectedCards.push(card.name); continue; }
     const mine = rolesOf.get(card.name) ?? [];
     const ids = mine.map((r) => r.id);
+    const cardTags = tagsOf.get(key) ?? [];
+    const custom = settings.custom.filter((c) => customApplies(c, { name: card.name, cmc: card.cmc ?? 0, roles: ids, tags: cardTags }));
+    if ((ruleOn(settings, 'key') && keyCards.has(key)) || keep.has(key) || (ruleOn(settings, 'pet') && petCards.has(key)) || custom.some((c) => c.then === 'protect')) {
+      protectedCards.push(card.name);
+      continue;
+    }
     const f = fitOf(card, fit);
+    const text = textOf(card);
     const finisher = ids.some((r) => FINISHING.has(r));
-    const reasons: string[] = [];
-    let score = 0;
+    const why: CutReason[] = [];
+    const add = (rule: string, delta: number, text: string) => { if (delta) why.push({ rule, delta: Math.round(delta * 100) / 100, text }); };
+    const sign = (rule: string) => (CUT_RULES.find((r) => r.id === rule)?.toward === 'keep' ? -1 : 1);
+    const rule = (id: string, text: string, part = 1) => add(id, sign(id) * w(id) * part, text);
 
-    // Roles: over the guideline is a cut; short of it is a keep.
+    // Roles: over the range is a cut (the first full role counts whole, more count half); short of it is a keep.
+    let overs = 0;
     for (const r of mine) {
-      if (r.target && r.count > r.target[1]) { score += 1; reasons.push(`${r.label}: ${r.count}, more than ${r.target[0]}–${r.target[1]}`); }
-      if (r.target && r.count <= r.target[0]) { score -= 1; reasons.push(`Needed: ${r.label.toLowerCase()} ${r.count} of ${r.target[0]}–${r.target[1]}`); }
+      if (r.id === 'draw' && impulse.has(card.name)) continue;
+      const n = countOf(r);
+      if (overFull(r)) { rule('over', `${r.label}: ${n}${r.id === 'draw' && impulse.size ? ' (not counting impulse draw)' : ''}, more than ${r.target![0]}–${r.target![1]}`, overs ? 0.5 : 1); overs += 1; }
+      if (r.target && n <= r.target[0]) rule('needed', `Needed: ${r.label.toLowerCase()} ${n} of ${r.target[0]}–${r.target[1]}`);
     }
 
-    // Utility, in Commander Template's order: interaction first...
+    // Theme packages: over its size the extras go first; at or under it, keep.
+    const packs = (tagsOf.get(key) ?? []).map((name) => themeTags.find((t) => t.name === name)).filter((t): t is NonNullable<typeof t> => !!t);
+    const overPack = packs.find((t) => (members.get(t.id) ?? 0) > sizeOf(t.id));
+    const shortPack = packs.find((t) => (members.get(t.id) ?? 0) <= sizeOf(t.id));
+    if (shortPack) rule('package-short', `${shortPack.name}: ${members.get(shortPack.id)} of ${sizeOf(shortPack.id)} - the package needs it`);
+    else if (overPack) rule('package-over', `${overPack.name}: ${members.get(overPack.id)}, more than its ${sizeOf(overPack.id)}`);
+    // Engines: enablers are the backbone; payoffs should be about half as many.
+    if (enablers.has(key) && enablers.size < 12) rule('enablers', `An enabler, and the deck has ${enablers.size} of about 12`);
+    if (payoffs.has(key) && !enablers.has(key) && payoffs.size > enablers.size / 2) {
+      rule('payoffs', `${payoffs.size} payoffs for ${enablers.size} enablers: too many to fire`, Math.min(1.5, Math.max(0.5, (card.cmc ?? 3) / 4)));
+    }
+
+    // Utility, in this order: interaction first...
     if (ids.includes('removal') && !ids.includes('wipe')) {
-      if (count('removal') > 8 && narrow(card)) { score += 0.6; reasons.push('Narrow removal: interaction is the first utility to trim'); } else if (count('removal') > 10 && !flexible(card)) { score += 0.3; reasons.push('Interaction is the first utility to trim'); }
-      if (flexible(card)) score -= 0.4;
+      if (count('removal') > 8 && narrow(card)) rule('interaction', 'Narrow removal: interaction is the first utility to trim');
+      else if (count('removal') > 10 && !flexible(card)) rule('interaction', 'Interaction is the first utility to trim', 0.5);
+      if (flexible(card)) rule('flexible', 'Removal that hits anything');
     }
     // ...keeping a board wipe or two...
-    if (ids.includes('wipe') && wipesLeft <= 2) score -= 1;
+    if (ids.includes('wipe') && wipesLeft <= 2) rule('wipes', 'One of the last board wipes');
+    if (ids.includes('removal') && !ids.includes('wipe') && /\bSorcery\b/.test(card.type_line ?? '') && !/\beach\b|\ball\b/i.test(text)) rule('sorcery', 'Single-target removal at sorcery speed');
     // ...then ramp or draw, by the commander's cost.
     if (secondary && ids.includes(secondary) && count(secondary) > 10 && !f.matches.length) {
-      score += 0.4;
-      reasons.push(secondary === 'ramp' ? `${commander?.name.split(',')[0]} is cheap: ramp is the next to trim` : `${commander?.name.split(',')[0]} costs ${cmdMv}: draw is the next to trim`);
+      rule('cmdcost', secondary === 'ramp' ? `${commander?.name.split(',')[0]} is cheap: ramp is the next to trim` : `${commander?.name.split(',')[0]} costs ${cmdMv}: draw is the next to trim`);
     }
-    // The commander, in every game, already does this job.
-    const repeats = ids.filter((r) => commanderRoles.includes(r) && ['ramp', 'draw', 'removal', 'protection'].includes(r));
-    if (repeats.length) { score += 0.3; reasons.push(`Your commander already does this (${repeats.join(', ')})`); }
+    // The commander, in every game, already does this job - which only matters where the role is full.
+    const repeats = mine.filter((r) => commanderRoles.includes(r.id) && ['ramp', 'draw', 'removal', 'protection'].includes(r.id) && overFull(r)).map((r) => r.label.toLowerCase());
+    if (repeats.length) rule('repeat', `Your commander already does this (${repeats.join(', ')})`);
 
-    // The theme: in a Type B deck it carries the deck; in a Type A, a tiebreaker.
+    // The plan: a card that does what the deck's style is about is kept.
+    const styleHit = (input.styles ?? []).find((s) => s.test.test(text));
+    if (styleHit) rule('style', `Fits the plan: ${styleHit.label}`);
+    // The commander's theme: in a Type B deck it carries the deck; in a Type A, a tiebreaker.
     if (f.matches.length) {
-      score -= type.type === 'B' ? 1.2 : 0.3;
-      if (type.type === 'B') reasons.push(`Carries the theme (${f.matches.join(', ')}) - keep unless it is weak`);
-    } else if (fit && !finisher && !ids.some((r) => UTILITY.has(r))) {
+      rule('theme', type.type === 'B' ? `Carries the theme (${f.matches.join(', ')}) - keep unless it is weak` : `On theme (${f.matches.join(', ')})`, type.type === 'B' ? 1 : 0.25);
+    } else if (fit && !styleHit && !finisher && !ids.some((r) => UTILITY.has(r))) {
       // Off theme and not a job every deck needs: generic utility is fine away from the deck's focus.
-      score += 0.6;
-      reasons.push(`Nothing ${fit.commander} cares about`);
+      rule('offtheme', `Nothing ${fit.commander} cares about`);
     }
 
     // A staple most Commander decks play has a high floor (Sol Ring, Swords).
-    if (popularity(card) >= 0.8) { score -= 0.8; reasons.push('A staple most decks play'); }
+    if (popularity(card) >= 0.8) rule('staple', 'A staple most decks play');
 
     // Floor and ceiling.
     const floor = lowFloor(card);
-    if (floor && !finisher) { score += 0.6; reasons.push(floor); }
+    if (floor && !finisher) rule('floor', floor);
 
     // The curve: cuts from an overloaded mana value, and dear ones before cheap ones.
     const b = bucket(card.cmc ?? 0);
-    if (heavy.has(b)) { score += 0.5; reasons.push(`The curve is heavy at ${b} mana`); }
-    if ((card.cmc ?? 0) >= 6 && !finisher) { score += 0.4; reasons.push(`Costs ${card.cmc} and does not end the game`); }
+    if (heavy.has(b)) rule('curve', `The curve is heavy at ${b} mana`);
+    if (ids.some((r) => ['ramp', 'rock', 'dork', 'land-ramp'].includes(r)) && (card.cmc ?? 0) >= 4) rule('slowramp', `Ramp costing ${card.cmc}: it arrives when you should be casting spells`);
+    if ((card.cmc ?? 0) >= 6 && !finisher) rule('costly', `Costs ${card.cmc} and does not end the game`);
+    else if ((card.cmc ?? 0) >= 5 && averageMv > 3.3 && !finisher) rule('highcurve', `The curve is high (average ${averageMv.toFixed(1)}): a 5-drop out brings it down`);
 
     // How much it is played: EDHREC for this commander when on, else Commander overall.
     const s = stats?.get(front(card.name)) ?? stats?.get(card.name);
     if (stats) {
-      if (!s) { score += 0.4; reasons.push(`Not on EDHREC's list for ${fit?.commander ?? 'the commander'}`); } else if (s.inclusion < 0.05) { score += 0.6; reasons.push(`In ${Math.round(s.inclusion * 100)}% of ${fit?.commander ?? 'its'} decks`); }
+      if (!s) rule('rare', `Not on EDHREC's list for ${fit?.commander ?? 'the commander'}`, 0.67);
+      else if (s.inclusion < 0.05) rule('rare', `In ${Math.round(s.inclusion * 100)}% of ${fit?.commander ?? 'its'} decks`);
     } else if (popularity(card) < 0.3) {
-      score += 0.4;
       const rank = (card as { edhrec_rank?: number }).edhrec_rank;
-      reasons.push(rank ? `Rarely played in Commander (#${rank.toLocaleString()})` : 'Rarely played in Commander');
+      rule('rare', rank ? `Rarely played in Commander (#${rank.toLocaleString()})` : 'Rarely played in Commander', 0.67);
     }
 
-    if (ids.length === 1 && ids[0] === 'cantrip' && !f.matches.length) { score += 0.3; reasons.push('Only replaces itself'); }
-    if (!ids.length && !anyTag.has(key) && !f.matches.length) { score += 0.5; reasons.push('No role and none of your tags'); }
+    if (ids.length === 1 && ids[0] === 'cantrip' && !f.matches.length) rule('cantrip', 'Only replaces itself');
+    if (!ids.length && !anyTag.has(key) && !f.matches.length && !styleHit) rule('norole', 'No role and none of your tags');
+    for (const c of custom) if (typeof c.then === 'number') add('custom', c.then, describeCustom(c));
 
-    if (score > 0) candidates.push({ cardId: card.id, name: card.name, score: Math.round(score * 10) / 10, reasons, roles: ids, cmc: card.cmc ?? 0 });
+    const score = why.reduce((n, r) => n + r.delta, 0);
+    if (score > 0) {
+      const shown = why.filter((r) => r.delta > 0 || ['needed', 'theme', 'style', 'staple', 'package-short', 'enablers'].includes(r.rule)).map((r) => r.text);
+      candidates.push({ cardId: card.id, name: card.name, score: Math.round(score * 10) / 10, reasons: shown, why, roles: ids, cmc: card.cmc ?? 0 });
+    }
   }
 
   // Lands only when over the formula: never cut lands to make room.
   if (lands.have > lands.want + 1) {
     const basics = cards.filter((c) => /\bBasic\b/.test(c.card.type_line ?? '')).sort((a, b) => b.quantity - a.quantity);
     if (basics[0]) {
-      candidates.push({
-        cardId: basics[0].card.id, name: basics[0].card.name, score: 1.5, roles: [], cmc: 0,
-        reasons: [`Lands: ${lands.have}, the formula says ${lands.want}`],
-      });
+      const text = `Lands: ${lands.have}, the formula says ${lands.want}`;
+      candidates.push({ cardId: basics[0].card.id, name: basics[0].card.name, score: 1.5, roles: [], cmc: 0, reasons: [text], why: [{ rule: 'lands', delta: 1.5, text }] });
     }
   }
   candidates.sort((a, b) => b.score - a.score || b.cmc - a.cmc || a.name.localeCompare(b.name));

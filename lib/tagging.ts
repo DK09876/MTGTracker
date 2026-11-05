@@ -226,6 +226,8 @@ export interface AssignInput extends DeckContext {
   tags: Tag[];
   /** The keys of the cards to tag this call; the rest of the deck is context. */
   batch: string[];
+  /** The owner's instructions for this run. */
+  instructions?: string;
 }
 
 export interface Assignment {
@@ -278,6 +280,7 @@ export function assignMessage(input: AssignInput): string {
     '',
     `Tag these ${batch.size} cards:`,
     ...input.cards.filter((c) => batch.has(c.key)).map((c) => describeCard(c, c.key)),
+    ...(input.instructions?.trim() ? ['', `The owner's instructions for this run - follow them:\n"""\n${input.instructions.trim()}\n"""`] : []),
   ].join('\n');
 }
 
@@ -524,7 +527,7 @@ and cards that fit neither - or, if they agree, what the deck still needs.
 In "brief", return the owner's brief with the fewest changes that make it
 true to the cards.`;
 
-export type BriefInput = DeckContext & { mode?: BriefMode };
+export type BriefInput = DeckContext & { mode?: BriefMode; instructions?: string };
 
 export function briefMessage(input: BriefInput): string {
   const mode = input.mode ?? 'build';
@@ -540,6 +543,7 @@ export function briefMessage(input: BriefInput): string {
     '',
     `The deck - ${input.cards.reduce((n, c) => n + c.quantity, 0)} cards:`,
     ...input.cards.map((c) => describeCard(c, c.key)),
+    ...(input.instructions?.trim() ? ['', `The owner's instructions for this read - follow them where the cards allow:\n"""\n${input.instructions.trim()}\n"""`] : []),
   ].join('\n');
 }
 

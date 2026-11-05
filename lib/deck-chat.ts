@@ -116,6 +116,10 @@ export interface ChatDeck {
   cards: ListedCard[];
   brief: string;
   roles: RoleCount[] | null;
+  /** The plan's styles and flip turn, in words. */
+  plan?: string;
+  /** The owner's tags on each card, by card name. */
+  tagsOf?: Map<string, string[]>;
 }
 
 const MAX_ROUNDS = 8;
@@ -193,11 +197,15 @@ export function deckText(deck: ChatDeck): string {
     c ? `Colours: ${(c.color_identity ?? []).join('') || 'colourless'}` : '',
     '',
     deck.brief.trim() ? `The owner's brief:\n${deck.brief.trim()}` : 'The owner has not written a brief.',
+    deck.plan ? `The plan: ${deck.plan}` : '',
     '',
-    counts ? `Role counts: ${counts}` : '',
+    counts ? `Built-in tag counts against the plan's guidelines: ${counts}` : '',
     '',
     `Main deck (${main.reduce((n, x) => n + x.quantity, 0) + (c ? 1 : 0)} cards with the commander):`,
-    ...main.map((x) => `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${rolesOf.has(x.card.name) ? ` [${rolesOf.get(x.card.name)!.join(', ')}]` : ''}`),
+    ...main.map((x) => {
+      const tags = [...(rolesOf.get(x.card.name) ?? []), ...(deck.tagsOf?.get(x.card.name) ?? []).map((t) => `#${t}`)];
+      return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
+    }),
     ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'Maybeboard and sideboard:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}`)] : []),
   ].filter((l) => l !== undefined).join('\n');
 }

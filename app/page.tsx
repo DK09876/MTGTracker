@@ -16,6 +16,7 @@ import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
+import { useNavBottom } from '@/lib/use-nav-bottom';
 import { identityStyle } from '@/lib/identity';
 import { getProfile } from '@/lib/profile';
 import { parseSession, replayOf, type RecentSearch, type Replay, type SavedSearch, type Session } from '@/lib/recent';
@@ -172,7 +173,8 @@ export default function SearchPage() {
    * Carry on a search - a recent one, a saved one, or the one on screen before
    * a reload - as it was left: run straight to Scryfall as it was read the
    * first time, then its tab, pages and EDHREC toggle, then where it was
-   * scrolled. Refining it from there builds on the whole of it.
+   * scrolled. Refining it from there builds on the whole of it. Opening one
+   * from the lists does not move it in Recent; refining it does.
    */
   const openSession = (session: Session, { keep = true, savedId = null }: { keep?: boolean; savedId?: string | null } = {}) => {
     dismissKeyboard();
@@ -337,9 +339,10 @@ export default function SearchPage() {
   const historyActions = {
     onOpen: (e: HistoryEntry) => {
       const x = savedFor(e);
-      if (x) { openSession(x.session, { savedId: x.id }); return; }
+      // Opening one only shows it: it moves to the top of Recent when it is refined or searched anew.
+      if (x) { openSession(x.session, { keep: false, savedId: x.id }); return; }
       const r = recentFor(e);
-      if (r) openSession(sessionOf(r));
+      if (r) openSession(sessionOf(r), { keep: false });
     },
     onSave: async (e: HistoryEntry) => {
       const r = recentFor(e);
@@ -410,6 +413,7 @@ export default function SearchPage() {
   };
 
   const busy = status === 'searching' || status === 'thinking';
+  const navBottom = useNavBottom();
   const hasViews = Object.keys(views).length > 0;
 
   return (
@@ -418,6 +422,8 @@ export default function SearchPage() {
       {/* A commander search takes on the commander's colours. */}
       <div className="min-w-0" style={answer?.interpretation.commander ? identityStyle(answer.interpretation.commander.identity) : undefined}>
       <AiModelPicker area="search" align="right" className="mb-3" />
+      {/* The search box stays under the top bar through long results, to refine or start again. */}
+      <div data-tour="search-sticky" style={{ top: navBottom }} className="sticky z-30 -mx-4 bg-[var(--background)]/92 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
       <SearchBox
         value={query}
         onChange={setQuery}
@@ -430,13 +436,14 @@ export default function SearchPage() {
         onPickRecent={(text, isSaved) => {
           if (isSaved) {
             const x = saved.find((y) => y.name === text);
-            if (x) openSession(x.session, { savedId: x.id });
+            if (x) openSession(x.session, { keep: false, savedId: x.id });
           } else {
             const r = recent.find((y) => y.text === text);
-            if (r) openSession({ thread: r.text.split(THREAD), replay: r.replay });
+            if (r) openSession({ thread: r.text.split(THREAD), replay: r.replay }, { keep: false });
           }
         }}
       />
+      </div>
 
       {status === 'idle' && hasViews && !answer?.choice && session && (
         <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />

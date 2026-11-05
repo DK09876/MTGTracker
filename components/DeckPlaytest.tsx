@@ -12,12 +12,18 @@
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { lastGoodStartKey } from './DeckGlance';
+import GoldfishSettings from './GoldfishSettings';
+
 import type { ListedCard } from '@/lib/db';
-import { simCard, type BestHand, type GoldfishReport } from '@/lib/goldfish';
+import { DEFAULT_SETTINGS, describeCheck, simCard, type BestHand, type GoldfishReport, type GoldfishSettings as GoldfishSettingsType } from '@/lib/goldfish';
+import { describeKeep } from '@/lib/keep';
+import * as api from '@/lib/api';
 import type { GoldfishJob } from '@/lib/goldfish.worker';
 import { imageOf, type ScryfallCard } from '@/lib/scryfall';
 
-const SERIES = '#b38f1f';
+// In the commander's colours (the deck page sets --c1..--c3; gold without a commander).
+const SERIES = 'linear-gradient(135deg, var(--c1), var(--c3))';
 
 interface Props {
   listId: string;
@@ -33,9 +39,38 @@ const one = (x: number) => x.toFixed(1);
 
 export default function DeckPlaytest({ listId, commander, cards }: Props) {
   const [mode, setMode] = useState<Mode>('goldfish');
+  // The deck's settings, presets, and each card's tags - read once, saved as they change.
+  const [state, setState] = useState<api.PlaytestState | null>(() => api.peek<api.PlaytestState>(api.paths.playtest(listId)) ?? null);
+  useEffect(() => {
+    let cancelled = false;
+    api.deckPlaytest(listId).then((p) => { if (!cancelled) setState(p); }).catch(() => { if (!cancelled) setState({ settings: DEFAULT_SETTINGS, presets: [], saved: false, cardTags: {}, tagNames: [] }); });
+    return () => { cancelled = true; };
+  }, [listId]);
   const byName = useMemo(() => new Map(cards.map((c) => [c.card.name, c.card])), [cards]);
-  const deck = useMemo(() => cards.flatMap((c) => Array.from({ length: c.quantity }, () => simCard(c.card))), [cards]);
+  const tagsOf = state?.cardTags;
+  const deck = useMemo(() => cards.flatMap((c) => Array.from({ length: c.quantity }, () => simCard(c.card, tagsOf?.[c.card.name] ?? []))), [cards, tagsOf]);
   const size = deck.length + (commander ? 1 : 0);
+  const setSettings = (settings: GoldfishSettingsType) => {
+    setState((s) => (s ? { ...s, settings } : s));
+    void api.savePlaytest(listId, { settings }).catch(() => {});
+  };
+  const setPresets = (presets: api.PlaytestState['presets']) => {
+    setState((s) => (s ? { ...s, presets } : s));
+    void api.savePlaytest(listId, { presets }).catch(() => {});
+  };
+  if (!state) return <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>;
+  const sim: SimProps = { listId, deck, commander, byName, settings: state.settings };
+  const panel = (
+    <details data-tour="how-it-plays" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+      <summary className="cursor-pointer text-sm font-medium">
+        How it plays <span className="font-normal text-[var(--muted)]">· {state.settings.games.toLocaleString()} games of {state.settings.turns} turns · keeps {describeKeep(state.settings.keep)} · {state.settings.checks.length} goal{state.settings.checks.length === 1 ? '' : 's'}</span>
+      </summary>
+      <div className="mt-4">
+        <GoldfishSettings settings={state.settings} presets={state.presets} cards={cards} cardTags={state.cardTags} tagNames={state.tagNames}
+          hasCommander={!!commander} onChange={setSettings} onPresets={setPresets} />
+      </div>
+    </details>
+  );
 
   return (
     <section className="mt-5 flex flex-col gap-4">
@@ -58,8 +93,9 @@ export default function DeckPlaytest({ listId, commander, cards }: Props) {
           The deck has {size} cards; the numbers mean more once it is close to 100.
         </p>
       )}
-      {mode === 'goldfish' ? <Goldfish listId={listId} deck={deck} commander={commander} byName={byName} />
-        : mode === 'best' ? <Best listId={listId} deck={deck} commander={commander} byName={byName} />
+      {mode !== 'play' && panel}
+      {mode === 'goldfish' ? <Goldfish {...sim} />
+        : mode === 'best' ? <Best {...sim} />
           : <Table cards={cards} commander={commander} />}
     </section>
   );
@@ -89,13 +125,14 @@ function useSimulation<T>(): [Run<T>, (job: GoldfishJob) => void] {
   return [run, start];
 }
 
-// The last run is kept in this browser only, to compare the next one against.
-const lastKey = (listId: string) => `mtg-goldfish:${listId}`;
-function readLast(listId: string): GoldfishReport | null {
-  try { return JSON.parse(localStorage.getItem(lastKey(listId)) ?? 'null'); } catch { return null; }
+// The last run with the same settings is kept in this browser only, to compare the next one against.
+const settingsKey = (s: GoldfishSettingsType) => { let h = 0; for (const ch of JSON.stringify(s)) h = (h * 31 + ch.charCodeAt(0)) | 0; return (h >>> 0).toString(36); };
+const lastKey = (listId: string, s: GoldfishSettingsType) => `mtg-goldfish:${listId}:${settingsKey(s)}`;
+function readLast(listId: string, s: GoldfishSettingsType): GoldfishReport | null {
+  try { return JSON.parse(localStorage.getItem(lastKey(listId, s)) ?? 'null'); } catch { return null; }
 }
-function saveLast(listId: string, r: GoldfishReport) {
-  try { localStorage.setItem(lastKey(listId), JSON.stringify(r)); } catch { /* no comparison next time, still works */ }
+function saveLast(listId: string, s: GoldfishSettingsType, r: GoldfishReport) {
+  try { localStorage.setItem(lastKey(listId, s), JSON.stringify(r)); } catch { /* no comparison next time, still works */ }
 }
 
 interface SimProps {
@@ -103,27 +140,33 @@ interface SimProps {
   deck: ReturnType<typeof simCard>[];
   commander: ScryfallCard | null;
   byName: Map<string, ScryfallCard>;
+  settings: GoldfishSettingsType;
 }
 
 // --- goldfish ---------------------------------------------------------------
 
-function Goldfish({ listId, deck, commander, byName }: SimProps) {
+function Goldfish({ listId, deck, commander, byName, settings }: SimProps) {
   const [run, start] = useSimulation<GoldfishReport>();
   // The run before this one, for the arrows; set when a new run starts.
   const [before, setBefore] = useState<GoldfishReport | null>(null);
   const shown = useRef<GoldfishReport | null>(null);
+  // The settings the shown run used: compared only with runs that used the same.
+  const ran = useRef<GoldfishSettingsType | null>(null);
 
   useEffect(() => {
     if (run.state === 'done' && shown.current !== run.result) {
       shown.current = run.result;
-      saveLast(listId, run.result);
+      saveLast(listId, ran.current ?? settings, run.result);
+      // The deck page's at-a-glance strip shows the last good-start rate.
+      if (run.result.goodStart !== null) { try { localStorage.setItem(lastGoodStartKey(listId), JSON.stringify({ share: run.result.goodStart })); } catch { /* fine */ } }
     }
-  }, [run, listId]);
+  }, [run, listId, settings]);
 
   const play = () => {
-    setBefore(readLast(listId));
+    ran.current = settings;
+    setBefore(readLast(listId, settings));
     // The same shuffles every run, so a change in the numbers is a change in the deck, not luck.
-    start({ kind: 'goldfish', deck, commander: commander ? simCard(commander) : null, seed: 1 });
+    start({ kind: 'goldfish', deck, commander: commander ? simCard(commander) : null, seed: 1, settings });
   };
 
   const r = run.state === 'done' ? run.result : null;
@@ -131,16 +174,32 @@ function Goldfish({ listId, deck, commander, byName }: SimProps) {
     <div className="flex flex-col gap-4">
       <div data-tour="goldfish-run" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
         <p>
-          Plays the deck alone {r ? r.games.toLocaleString() : '2,000'} times, eight turns each, on autopilot: a land a turn, mana first, the commander as soon as it can, then the biggest spells it can pay for. Bad sevens - fewer than two lands or more than five - are mulliganed.
+          Plays the deck alone {settings.games.toLocaleString()} times, {settings.turns} turns each, on autopilot: a land a turn, then what it can pay for in your order. Sevens that fail your keep rule ({describeKeep(settings.keep)}) are mulliganed, up to {settings.maxMulligans} times. Change any of it under How it plays.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <button data-tour="goldfish-play" onClick={play} disabled={run.state === 'running' || !deck.length} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
-            {run.state === 'running' ? 'Playing…' : r ? 'Play again' : 'Play 2,000 games'}
+            {run.state === 'running' ? 'Playing…' : r ? 'Play again' : `Play ${settings.games.toLocaleString()} games`}
           </button>
-          {r && before && <span className="text-xs text-[var(--muted)]">Arrows compare with your last run here.</span>}
+          {r && before && <span className="text-xs text-[var(--muted)]">Arrows compare with your last run with the same settings.</span>}
           {run.state === 'failed' && <span role="alert" className="text-red-400">{run.error}</span>}
         </div>
       </div>
+
+      {r && r.checks.length > 0 && (
+        <div data-tour="goldfish-goals" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <h3 data-section="Goals" className="text-sm font-semibold">Your goals</h3>
+          {r.goodStart !== null && <p className="text-sm">A <span className="font-semibold">good start</span> - every goal you marked - in <span className="font-semibold tabular-nums">{pct(r.goodStart)}</span> of games{before?.goodStart != null && Math.abs(r.goodStart - before.goodStart) >= 0.015 && <span className={r.goodStart > before.goodStart ? 'text-[#0ca30c]' : 'text-[#fab219]'}> ({r.goodStart > before.goodStart ? '▲' : '▼'} {Math.round(Math.abs(r.goodStart - before.goodStart) * 100)} pts)</span>}.</p>}
+          <ul className="flex flex-col gap-1.5">
+            {r.checks.map(({ check, share }, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="w-12 text-right font-semibold tabular-nums">{pct(share)}</span>
+                <span className="relative h-1.5 min-w-[6rem] flex-[0_1_10rem] overflow-hidden rounded-full bg-[var(--border)]"><span className="absolute inset-y-0 left-0 rounded-full" style={{ width: pct(share), background: SERIES }} /></span>
+                <span className="min-w-0 flex-1">{describeCheck(check)}{check.good && <span className="ml-2 text-xs text-[var(--accent)]">good start</span>}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {r && (
         <>
@@ -158,24 +217,24 @@ function Goldfish({ listId, deck, commander, byName }: SimProps) {
             <Stat label="Missed a land drop" value={pct(r.missedLandBy[4])} note={`by turn 4 · ${pct(r.missedLandBy[3])} by turn 3`} change={before ? r.missedLandBy[4] - before.missedLandBy[4] : null} lowerIsBetter format={(x) => `${Math.round(x * 100)} pts`} least={0.015} />
             <Stat label="Mana on turn 4" value={one(r.manaByTurn[3])} note={`${one(r.manaByTurn[2])} on turn 3 · ${one(r.manaByTurn[4])} on turn 5`} change={before ? r.manaByTurn[3] - before.manaByTurn[3] : null} format={one} />
             <Stat label="Mana spent by turn 4" value={one(r.spentBy[4])} note={`${one(r.spentBy[6])} by turn 6`} change={before ? r.spentBy[4] - before.spentBy[4] : null} format={one} />
-            <Stat label="Mulligans" value={pct(r.mulliganRate)} note="sevens with under two lands or over five" change={before ? r.mulliganRate - before.mulliganRate : null} lowerIsBetter format={(x) => `${Math.round(x * 100)} pts`} least={0.015} />
+            <Stat label="Mulligans" value={pct(r.mulliganRate)} note={`sevens that fail ${describeKeep(settings.keep)}`} change={before ? r.mulliganRate - before.mulliganRate : null} lowerIsBetter format={(x) => `${Math.round(x * 100)} pts`} least={0.015} />
           </div>
 
           <div className="flex flex-wrap gap-4">
             {commander && (
               <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                <h3 className="text-sm font-semibold">Commander cast by turn</h3>
+                <h3 data-section="Commander by turn" className="text-sm font-semibold">Commander cast by turn</h3>
                 <Bars values={r.commanderBy} label={(i) => `Turn ${i + 1}`} />
               </div>
             )}
             <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-              <h3 className="text-sm font-semibold">Mana each turn</h3>
+              <h3 data-section="Mana each turn" className="text-sm font-semibold">Mana each turn</h3>
               <Bars values={r.manaByTurn} max={Math.max(...r.manaByTurn, 1)} label={(i) => `Turn ${i + 1}`} format={one} />
             </div>
           </div>
 
           <div data-tour="goldfish-stuck" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-            <h3 className="text-sm font-semibold">Stuck in hand</h3>
+            <h3 data-section="Stuck in hand" className="text-sm font-semibold">Stuck in hand</h3>
             {r.stuck.length ? (
               <>
                 <p className="text-xs text-[var(--muted)]">Still in hand after turn 8, in this share of the games it was drawn. Usually too expensive, or a colour the lands do not make enough of.</p>
@@ -238,15 +297,15 @@ function Bars({ values, max = 1, label, format = pct }: { values: number[]; max?
 
 // --- best hand --------------------------------------------------------------
 
-function Best({ deck, commander, byName }: SimProps) {
+function Best({ deck, commander, byName, settings }: SimProps) {
   const [run, start] = useSimulation<BestHand>();
-  const find = () => start({ kind: 'best', deck, commander: commander ? simCard(commander) : null, seed: 7 });
+  const find = () => start({ kind: 'best', deck, commander: commander ? simCard(commander) : null, seed: 7, settings });
   const r = run.state === 'done' ? run.result : null;
   return (
     <div className="flex flex-col gap-4">
       <div data-tour="best-hand" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
         <p>
-          The strongest seven this deck can open with. It builds the hand a card at a time, keeping the five best partial hands at each step, and judges each by playing it out against shuffled libraries: the commander early, mana spent by turn four, no land drops missed.
+          The strongest seven this deck can open with. It builds the hand a card at a time, keeping the five best partial hands at each step, and judges each by playing it out against shuffled libraries - {settings.checks.length ? 'by your goals (the good-start ones count double)' : 'the commander early, mana spent by turn four, no land drops missed'}.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <button data-tour="best-find" onClick={find} disabled={run.state === 'running' || deck.length < 7} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
@@ -272,6 +331,11 @@ function Best({ deck, commander, byName }: SimProps) {
             {commander && r.commanderAverage !== null && <>From this hand the commander comes down on turn <b>{one(r.commanderAverage)}</b> on average, and </>}
             {commander && r.commanderAverage !== null ? 'it' : 'It'} spends <b>{one(r.spentBy4)}</b> mana by the end of turn four.
           </p>
+          {r.checks.length > 0 && (
+            <ul className="flex flex-col gap-1 text-sm">
+              {r.checks.map(({ check, share }, i) => <li key={i}><span className="font-semibold tabular-nums">{pct(share)}</span> <span className="text-[var(--muted)]">of games from this hand:</span> {describeCheck(check)}</li>)}
+            </ul>
+          )}
           <p className="text-xs text-[var(--muted)]">
             You will almost never draw exactly this seven; it shows what an ideal start looks like for this deck, and which cards make it. If the best hand still starts slowly, the deck wants more cheap mana.
           </p>

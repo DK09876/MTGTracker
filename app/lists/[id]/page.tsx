@@ -13,12 +13,16 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckGlance from '@/components/DeckGlance';
+import DeckPlan from '@/components/DeckPlan';
+import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
 import DeckSuggestions from '@/components/DeckSuggestions';
 import DeckTags from '@/components/DeckTags';
+import PasteFormats from '@/components/PasteFormats';
 import ImportResult from '@/components/ImportResult';
 import { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
@@ -26,6 +30,7 @@ import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
+import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -35,16 +40,36 @@ import { imageOf, priceOf } from '@/lib/scryfall';
 export default function ListPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [list, setList] = useState<List | null>(null);
-  const [cards, setCards] = useState<ListedCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Opened before this visit: shown at once from last time while it is read again.
+  const seen = api.peek<api.ListPage>(api.paths.list(id));
+  const [list, setList] = useState<List | null>(seen?.list ?? null);
+  const [cards, setCards] = useState<ListedCard[]>(seen?.cards ?? []);
+  const [loading, setLoading] = useState(!seen);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
   const [renaming, setRenaming] = useState(false);
-  const [draftName, setDraftName] = useState('');
+  const [draftName, setDraftName] = useState(seen?.list.name ?? '');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<'build' | DeckTab>('cards');
-  const [tags, setTags] = useState<Tags | null>(null);
+  const [section, setSection] = useState<DeckTab>('cards');
+  // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
+  const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
+  const onPlan = useCallback((p: api.DeckPlanState) => setPlanConfirmed(p.confirmed), []);
+  // A question from Tune, waiting in a new chat.
+  const [chatQuestion, setChatQuestion] = useState('');
+
+  // Keyboard: 1-8 switch the deck's tabs, N adds cards (the Cards tab has its own keys).
+  useEffect(() => {
+    const TABS: DeckTab[] = ['cards', 'plan', 'tune', 'tags', 'health', 'playtest', 'chat', 'collection'];
+    const key = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
+      if (/^[1-8]$/.test(e.key)) { setSection(TABS[Number(e.key) - 1]); window.scrollTo({ top: 0 }); }
+      else if (e.key.toLowerCase() === 'n') { e.preventDefault(); setAddOpen(true); }
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, []);
+  const [tags, setTags] = useState<Tags | null>(() => api.peek<Tags>(api.paths.tags(id)) ?? null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
@@ -52,15 +77,18 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [imported, setImported] = useState<ImportSummary | null>(null);
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [exported, setExported] = useState<'copied' | 'failed' | null>(null);
+
 
   // Whether others can see this deck on the owner's profile; private until made public.
-  const [shown, setShown] = useState(false);
+  const [shown, setShown] = useState(!!seen?.public);
   const load = useCallback(async () => {
     const data = await api.fetchList(id);
     setList(data.list);
     setCards(data.cards);
     setDraftName(data.list.name);
     setShown(!!data.public);
+    setPlanConfirmed(data.planConfirmed !== false);
   }, [id]);
 
   // A starter list being built for this deck in the background: the page
@@ -94,6 +122,13 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setCards(data.cards);
         setDraftName(data.list.name);
         setShown(!!data.public);
+        setPlanConfirmed(data.planConfirmed !== false);
+        // Read the other tabs now, side by side, so opening one is instant.
+        if (data.list.kind === 'deck') {
+          const later: Array<Promise<unknown>> = [api.deckPlan(id), api.buildPlan(id), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
+          if (data.cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + 1 > 100) later.push(api.cutPlan(id));
+          void Promise.allSettled(later);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load that list');
       } finally {
@@ -170,11 +205,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   };
 
   /** Save the text back: the list becomes exactly what it says. */
-  const saveText = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveText = async (e?: React.FormEvent, text = decklist) => {
+    e?.preventDefault();
     setImportBusy(true);
     try {
-      const { imported: result, ok } = await api.replaceDecklist(id, decklist);
+      const { imported: result, ok } = await api.replaceDecklist(id, text);
       setImported(result);
       setRejected(!ok);
       if (ok) {
@@ -262,8 +297,20 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </button>
             <div data-tour="deck-more"><MoreMenu
               items={[
-                { label: importing ? 'Close the text' : 'Edit as text', onClick: () => (importing ? setImporting(false) : openText()) },
+                { label: importing ? 'Close the import' : 'Import', onClick: () => (importing ? setImporting(false) : openText()) },
+                {
+                  label: 'Export',
+                  onClick: async () => {
+                    try {
+                      await navigator.clipboard.writeText(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
+                      setExported('copied');
+                    } catch { setExported('failed'); }
+                    setTimeout(() => setExported(null), 2500);
+                  },
+                },
+
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
+                { label: `Duplicate ${deck ? 'deck' : 'list'}`, onClick: async () => { const copy = await api.duplicateList(id); router.push(`${deck ? '/decks' : '/lists'}/${copy.id}`); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
                 ...(deck ? [{
                   label: shown ? 'Make private' : 'Show on my profile',
@@ -325,20 +372,28 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {importing && (
         <form onSubmit={saveText} className="mt-4 flex flex-col gap-2">
           <p className="text-sm text-[var(--muted)]">
-            Edit the list, or paste a new one over it. Saving makes the {deck ? 'deck' : 'list'} exactly this —
-            same format as Moxfield, Archidekt, Arena and MTGO.
+            Edit the list, paste a new one over it (a text export from Arena, MTGO, Archidekt, Moxfield and most sites), or replace it all with a link to an Archidekt deck.
+            Saving makes the {deck ? 'deck' : 'list'} exactly this. Moxfield links aren&apos;t supported - use its Export and paste the list. <PasteFormats />
           </p>
           <textarea
             value={decklist}
             onChange={(e) => { setDecklist(e.target.value); setRejected(false); }}
             rows={Math.min(24, Math.max(8, decklist.split('\n').length + 1))}
             autoFocus
-            placeholder={'1 Sol Ring (SOC) 128\n33 Mountain (ACR) 107'}
+            placeholder={DECKLIST_EXAMPLE}
             spellCheck={false}
             className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
           />
+          {(() => {
+            const box = readDeckBox(decklist);
+            if (box.kind === 'both') return <p role="alert" className="text-xs text-amber-300">There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.</p>;
+            if (box.kind === 'links') return <p role="alert" className="text-xs text-amber-300">There are two links here. Keep the one for this deck.</p>;
+            if (box.kind === 'link' && box.link!.site === 'moxfield') return <p role="alert" className="text-xs text-amber-300">{MOXFIELD_REFUSES}</p>;
+            if (box.kind === 'link') return <p className="text-xs text-emerald-400">Saving fetches that Archidekt deck and makes this deck exactly that.</p>;
+            return null;
+          })()}
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <button disabled={importBusy} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
+            <button disabled={importBusy || ['both', 'links'].includes(readDeckBox(decklist).kind) || readDeckBox(decklist).link?.site === 'moxfield'} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
               {importBusy ? 'Saving…' : 'Save'}
             </button>
             <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
@@ -363,7 +418,24 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {imported && rejected && (
         <p className="mt-3 text-sm text-amber-400">Nothing was changed — fix the lines below and save again.</p>
       )}
-      {imported && (rejected || imported.commander) && <ImportResult result={imported} applied={!rejected} />}
+      {exported && (
+        <p role="status" className="mt-3 text-sm text-[var(--muted)]">
+          {exported === 'copied' ? 'Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.' : 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'}
+        </p>
+      )}
+      {imported && (rejected || imported.commander) && (
+        <ImportResult
+          result={imported}
+          applied={!rejected}
+          // Replacing waits for every line, so a typo never silently drops a card; this is the way past that, on purpose.
+          onDropProblems={rejected ? () => {
+            const bad = new Set([...imported.missing, ...imported.unreadable]);
+            const kept = decklist.split(/\r?\n/).filter((l) => !bad.has(l.trim())).join('\n');
+            setDecklist(kept);
+            void saveText(undefined, kept);
+          } : undefined}
+        />
+      )}
 
       {building && (
         <p className="mt-4 flex items-center gap-3 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-2.5 text-sm">
@@ -371,24 +443,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           Building a starter list - roles first, then what fits the commander, then lands. The cards appear here when it is done.
         </p>
       )}
-      {deck && (
-        <div data-tour="deck-tabs" className="mt-5 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Deck view">
-          {([['cards', 'Cards'], ['build', 'Build'], ['chat', 'Chat'], ['tags', 'Tags'], ['health', 'Health'], ['playtest', 'Playtest'], ['suggestions', 'Suggestions'], ['collection', 'Collection']] as const).map(([value, label]) => (
-            <button
-              key={value}
-              role="tab"
-              data-tour-tab={value}
-              aria-selected={section === value}
-              onClick={() => setSection(value)}
-              className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {deck && section === 'build' ? (
+      <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
+      {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
+      <div className="min-w-0">
+      {deck && section === 'plan' ? (
+        tags ? (
+          <DeckPlan
+            listId={id}
+            tags={tags}
+            onTags={setTags}
+            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+            onPlan={onPlan}
+            onTab={(tab) => setSection(tab)}
+          />
+        ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+      ) : deck && section === 'tune' ? (
         <DeckBuild
           listId={id}
           cards={cards}
@@ -397,16 +466,28 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
           onMove={moveCard}
           onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
+          planConfirmed={planConfirmed}
+          brief={tags?.brief ?? ''}
+          onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
         />
+      ) : deck && section === 'chat' && !planConfirmed ? (
+        <div data-tour="chat-locked" className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <h3 className="font-display text-lg font-semibold">Chat starts with the plan</h3>
+          <p className="text-sm text-[var(--muted)]">Claude answers better when it knows what the deck is for. The plan is already drafted from the cards - read it, change anything, and confirm it.</p>
+          <button onClick={() => setSection('plan')} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Go to Plan</button>
+        </div>
       ) : deck && section === 'chat' ? (
         <DeckChat
+          key={chatQuestion}
+          question={chatQuestion}
           listId={id}
           cards={cards}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
           onRemove={(cardId) => changeQuantity(cardId, 0)}
         />
       ) : deck && section === 'tags' ? (
-        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} />
+        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => setSection('plan')} />
       ) : deck && section === 'collection' ? (
         <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
       ) : deck && section === 'suggestions' ? (
@@ -429,17 +510,24 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
         />
       ) : (
+        <>
+        {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }} />}
         <DeckCards
           listId={id}
           entries={entries}
           tags={deck ? tags : null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
+          onTags={setTags}
+          onAsk={deck ? (q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); } : undefined}
           onSelect={setSelected}
           onQuantity={changeQuantity}
           onMove={moveCard}
         />
+        </>
       )}
+      </div>
+      </div>
 
       <CardModal
         card={selected}

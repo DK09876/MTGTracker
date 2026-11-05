@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 
 import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander } from '@/lib/db';
+import { planConfirmed } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
 import { isPublic, setPublic } from '@/lib/profile-style';
 import { getCard, ScryfallError } from '@/lib/scryfall';
@@ -18,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const owned = requireList(request, id);
     if (owned instanceof NextResponse) return owned;
-    return NextResponse.json({ list: owned.list, cards: cardsInList(id), public: isPublic(id) });
+    return NextResponse.json({ list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id) });
   } catch (error) {
     console.error('[list] read failed', error);
     return NextResponse.json({ error: 'Could not read that list' }, { status: 500 });

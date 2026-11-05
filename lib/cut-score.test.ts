@@ -78,4 +78,95 @@ describe('cutCandidates', () => {
     const flexScore = candidates.find((c) => c.name === 'Beast Within')?.score ?? 0;
     expect(flexScore).toBeLessThan(snipe.score);
   });
+
+  describe('rules and the plan (Kevin\'s Jiang Yanggu deck)', () => {
+    const jiang = { name: 'Jiang Yanggu, Alone', type_line: 'Legendary Creature', cmc: 5, oracle_text: 'Whenever a creature you control attacks a player alone, discard a card, then draw a card.' } as ScryfallCard;
+    const deck = [
+      card('Wheel of Misfortune', 'Sorcery', 'Each player secretly chooses a number. Each player discards their hand, then draws seven cards.', { cmc: 3 }),
+      card('Impulse', 'Instant', 'Exile the top two cards of your library. Until the end of your next turn, you may play those cards.', { cmc: 3 }),
+      card('Real Draw', 'Sorcery', 'Draw three cards.', { cmc: 3 }),
+      card('Draw Two', 'Sorcery', 'Draw two cards.', { cmc: 3 }),
+      card('Pet Dragon', 'Creature — Dragon', 'Flying', { cmc: 6, edhrec_rank: 30_000 }),
+      card('Fatty', 'Creature — Beast', 'Trample', { cmc: 6, edhrec_rank: 30_000 }),
+    ];
+    // Four draw cards by Scryfall's count, against a range of 1-2.
+    const draw = role('draw', ['Wheel of Misfortune', 'Impulse', 'Real Draw', 'Draw Two'], [1, 2]);
+    const base = { cards: deck, roles: [draw], fit: fitProfile(jiang), commander: jiang, commanderRoles: ['draw'], keep: new Set<string>(), stats: null, lands: { have: 37, want: 37 } };
+    const discard = { label: 'Discard', test: /\bdiscards? (a|their|your) (card|hand)|each player discards/i };
+
+    it('keeps cards that fit the plan\'s style, like wheels in a discard deck', () => {
+      const without = cutCandidates({ ...base, tags: null });
+      const withPlan = cutCandidates({ ...base, tags: null, styles: [discard] });
+      const score = (r: typeof without, n: string) => r.candidates.find((c) => c.name === n)?.score ?? 0;
+      expect(score(withPlan, 'Wheel of Misfortune')).toBeLessThan(score(without, 'Wheel of Misfortune'));
+      expect(withPlan.candidates.find((c) => c.name === 'Wheel of Misfortune')?.why.map((w) => w.rule) ?? ['kept']).not.toContain('norole');
+    });
+
+    it('counts impulse draw as card draw, unless the owner turns that off', () => {
+      const plain = cutCandidates({ ...base, tags: null });
+      expect(plain.candidates.find((c) => c.name === 'Real Draw')!.reasons.join(' ')).toMatch(/draw: 4, more than 1–2/);
+      const { candidates } = cutCandidates({ ...base, tags: null, settings: { rules: { impulse: { on: true } }, custom: [] } });
+      const impulse = candidates.find((c) => c.name === 'Impulse');
+      expect(impulse?.why.some((w) => w.rule === 'over') ?? false).toBe(false);
+      // Three real draw cards against 1-2, not four.
+      expect(candidates.find((c) => c.name === 'Real Draw')!.reasons.join(' ')).toMatch(/draw: 3 \(not counting impulse draw\), more than 1–2/);
+    });
+
+    it('names each reason\'s rule, and follows the owner\'s switches, weights and rules', () => {
+      const plain = cutCandidates({ ...base, tags: null });
+      const fatty = plain.candidates.find((c) => c.name === 'Fatty')!;
+      expect(fatty.why.map((w) => w.rule)).toEqual(expect.arrayContaining(['costly', 'rare']));
+      const off = cutCandidates({ ...base, tags: null, settings: { rules: { costly: { on: false }, rare: { weight: 2 } }, custom: [] } });
+      const fatty2 = off.candidates.find((c) => c.name === 'Fatty')!;
+      expect(fatty2.why.some((w) => w.rule === 'costly')).toBe(false);
+      expect(fatty2.why.find((w) => w.rule === 'rare')!.delta).toBeCloseTo(2 * 0.67, 1);
+      const mine = cutCandidates({ ...base, tags: null, settings: { rules: {}, custom: [{ when: 'card', value: 'Fatty', then: 'protect' }, { when: 'mv-at-least', value: '3', then: 1 }] } });
+      expect(mine.protectedCards).toContain('Fatty');
+      expect(mine.candidates.find((c) => c.name === 'Real Draw')!.why.some((w) => w.rule === 'custom' && w.delta === 1)).toBe(true);
+    });
+
+    it('never offers cards tagged Pet', () => {
+      const tags = { brief: '', overview: '', tags: [{ id: 't1', name: 'Pet', description: '', color: '#fff', kind: null, status: 'accepted', origin: 'manual', position: 0, examples: [] }], cardTags: [{ key: 'o-Pet Dragon', tagId: 't1', source: 'manual', on: true, reason: '' }] };
+      const { protectedCards, candidates } = cutCandidates({ ...base, tags: tags as never });
+      expect(protectedCards).toContain('Pet Dragon');
+      expect(candidates.some((c) => c.name === 'Pet Dragon')).toBe(false);
+    });
+  });
+});
+
+describe('packages, engines and the mana rules', () => {
+  const tag = (id: string, name: string, kind: string | null = null) => ({ id, name, description: '', color: '#fff', kind, status: 'accepted', origin: 'manual', position: 0, examples: [] });
+  const on = (key: string, tagId: string) => ({ key: `o-${key}`, tagId, source: 'manual', on: true, reason: '' });
+  const base = { roles: [], fit: null, commander: null, commanderRoles: [], keep: new Set<string>(), stats: null, lands: { have: 37, want: 37 } };
+
+  it('trims a theme package over its size and keeps one at its size', () => {
+    const tokens = Array.from({ length: 10 }, (_, i) => card(`Token ${i}`, 'Creature', 'Create a token.', { cmc: 3, edhrec_rank: 30_000 }));
+    const wheels = Array.from({ length: 3 }, (_, i) => card(`Wheel ${i}`, 'Sorcery', 'Each player discards their hand.', { cmc: 3, edhrec_rank: 30_000 }));
+    const tags = { brief: '', overview: '', tags: [tag('t', 'Tokens'), tag('w', 'Wheels')], cardTags: [...tokens.map((c) => on(c.card.name, 't')), ...wheels.map((c) => on(c.card.name, 'w'))] };
+    const { candidates } = cutCandidates({ ...base, cards: [...tokens, ...wheels], tags: tags as never });
+    const token = candidates.find((c) => c.name === 'Token 0')!;
+    expect(token.why.find((w) => w.rule === 'package-over')?.text).toBe('Tokens: 10, more than its 8');
+    expect(candidates.some((c) => c.name.startsWith('Wheel') && !c.why.some((w) => w.rule === 'package-short'))).toBe(false);
+    // A key theme sized 16 is no longer over.
+    const sized = cutCandidates({ ...base, cards: [...tokens, ...wheels], tags: tags as never, packages: { t: 16 } });
+    expect(sized.candidates.find((c) => c.name === 'Token 0')?.why.some((w) => w.rule === 'package-over') ?? false).toBe(false);
+  });
+
+  it('keeps enablers while there are few, and trims payoffs that outnumber them', () => {
+    const en = Array.from({ length: 2 }, (_, i) => card(`Enabler ${i}`, 'Creature', 'Whenever you gain life, scry 1.', { cmc: 2, edhrec_rank: 30_000 }));
+    const pay = Array.from({ length: 4 }, (_, i) => card(`Payoff ${i}`, 'Creature', 'Whenever you gain life, each opponent loses 1 life.', { cmc: 5, edhrec_rank: 30_000 }));
+    const tags = { brief: '', overview: '', tags: [tag('e', 'Lifegain', 'enabler'), tag('p', 'Drain', 'payoff')], cardTags: [...en.map((c) => on(c.card.name, 'e')), ...pay.map((c) => on(c.card.name, 'p'))] };
+    const { candidates } = cutCandidates({ ...base, cards: [...en, ...pay], tags: tags as never, packages: { e: 16, p: 2 } });
+    expect(candidates.find((c) => c.name === 'Payoff 0')!.why.some((w) => w.rule === 'payoffs')).toBe(true);
+    const enabler = candidates.find((c) => c.name === 'Enabler 0');
+    expect(enabler?.why.some((w) => w.rule === 'enablers') ?? true).toBe(true);
+  });
+
+  it('trims slow ramp and sorcery-speed single-target removal', () => {
+    const cards = [card('Big Ramp', 'Sorcery', 'Search for two lands.', { cmc: 5 }), card('Snipe', 'Sorcery', 'Destroy target creature.', { cmc: 2 })];
+    const roles = [role('ramp', ['Big Ramp']), role('removal', ['Snipe'])];
+    const { candidates } = cutCandidates({ ...base, cards, roles, tags: null });
+    expect(candidates.find((c) => c.name === 'Big Ramp')!.why.map((w) => w.rule)).toContain('slowramp');
+    expect(candidates.find((c) => c.name === 'Snipe')!.why.map((w) => w.rule)).toContain('sorcery');
+  });
 });

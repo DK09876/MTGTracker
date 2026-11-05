@@ -102,3 +102,52 @@ describe('the best hand', () => {
     expect(best.commanderAverage!).toBeLessThan(4);
   });
 });
+
+describe('the owner\'s settings', () => {
+  const tagged = (card: ScryfallCard, tags: string[]) => simCard(card, tags);
+  // All green, so a deck of Forests can cast everything.
+  const outlet = card('Wild Discard', { type_line: 'Sorcery', mana_cost: '{G}', cmc: 1 });
+  const commander = simCard(card('Green Boss', { type_line: 'Legendary Creature', mana_cost: '{3}{G}', cmc: 4 }));
+  const deck = [
+    ...simDeck([{ card: forest, quantity: 37 }, { card: bear, quantity: 50 }]),
+    ...Array.from({ length: 12 }, () => tagged(outlet, ['Discard outlet'])),
+  ];
+
+  it('checks goals each game, and a good start is all the marked ones', () => {
+    const r = goldfish(deck, commander, 400, 3, 6, {
+      checks: [
+        { kind: 'commander', turn: 6, good: true },
+        { kind: 'mana', amount: 4, turn: 4, good: true },
+        { kind: 'card', tag: 'Discard outlet', how: 'hand', turn: 3 },
+        { kind: 'card', tag: 'Discard outlet', how: 'cast', turn: 3 },
+      ],
+    });
+    const [cmd, mana, inHand, cast] = r.checks.map((c) => c.share);
+    // Twelve outlets in 99, eleven cards seen by turn 3 (seven plus a draw a turn): about 79%.
+    expect(inHand).toBeGreaterThan(0.7);
+    expect(inHand).toBeLessThan(0.88);
+    expect(cast).toBeLessThanOrEqual(inHand);
+    expect(r.goodStart!).toBeLessThanOrEqual(Math.min(cmd, mana));
+    expect(r.goodStart!).toBeGreaterThan(0);
+  });
+
+  it('casts what the order puts first', () => {
+    const first = goldfish(deck, commander, 300, 5, 4, { order: [{ kind: 'tag', tag: 'Discard outlet' }, { kind: 'biggest' }], checks: [{ kind: 'card', tag: 'Discard outlet', how: 'cast', turn: 2 }] });
+    const last = goldfish(deck, commander, 300, 5, 4, { order: [{ kind: 'biggest' }], checks: [{ kind: 'card', tag: 'Discard outlet', how: 'cast', turn: 2 }] });
+    expect(first.checks[0].share).toBeGreaterThan(last.checks[0].share);
+  });
+
+  it('mulligans by the keep rule', () => {
+    const loose = goldfish(deck, commander, 400, 2, 4, { keep: { lands: [0, 7], needs: [] } });
+    const strict = goldfish(deck, commander, 400, 2, 4, { keep: { lands: [3, 4], needs: [{ tag: 'Discard outlet', atLeast: 1 }] } });
+    expect(loose.mulliganRate).toBe(0);
+    expect(strict.mulliganRate).toBeGreaterThan(0.5);
+  });
+
+  it('keeps sent settings to what makes sense', async () => {
+    const { cleanGoldfishSettings, startingChecks } = await import('./goldfish');
+    const s = cleanGoldfishSettings({ games: 7, turns: 99, order: [{ kind: 'tag' }, { kind: 'mana' }], checks: [{ kind: 'mana', amount: 5, turn: 40 }, { kind: 'card', tag: 'Ramp', how: 'cast', turn: 3, good: 1 }] });
+    expect([s.games, s.turns, s.order, s.checks]).toEqual([2000, 8, [{ kind: 'mana' }], [{ kind: 'card', tag: 'Ramp', how: 'cast', turn: 3, good: true }]]);
+    expect(startingChecks(4, 5)).toEqual([{ kind: 'commander', turn: 5, good: true }, { kind: 'mana', amount: 5, turn: 4, good: true }]);
+  });
+});

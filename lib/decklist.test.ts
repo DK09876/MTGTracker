@@ -110,4 +110,24 @@ describe('parseDecklist', () => {
       ['Sol Ring', 'main'], ['Treasure', 'skip'],
     ]);
   });
+  it('reads Archidekt categories and labels, taking boards from them', () => {
+    const text = '1x Fire Lord Azula (tla) 1 [Commander{top}]\n1x Sol Ring (c21) 263 [Ramp,Artifact] ^Have,#37d67a^\n1x Opt (m21) 59 *F* [Maybeboard{noDeck}{noPrice},Draw]\n1x Pyroblast (ice) 213 [Sideboard{noDeck}]';
+    const { entries, unreadable } = parseDecklist(text);
+    expect(unreadable).toEqual([]);
+    expect(entries.map((e) => [e.name, e.set, e.collectorNumber, e.finish, e.section])).toEqual([
+      ['Fire Lord Azula', 'tla', '1', 'nonfoil', 'commander'],
+      ['Sol Ring', 'c21', '263', 'nonfoil', 'main'],
+      ['Opt', 'm21', '59', 'foil', 'maybe'],
+      ['Pyroblast', 'ice', '213', 'nonfoil', 'side'],
+    ]);
+  });
+
+  it("reads MTGO's SB: lines and steps over card-type headings", () => {
+    const text = 'Commander\n1 Krenko, Mob Boss\n\nCreatures (2)\n1 Goblin Lackey\n1 Goblin Matron\nLands (1)\n30 Mountain\nSB: 1 Pyroblast';
+    const { entries, unreadable } = parseDecklist(text);
+    expect(unreadable).toEqual([]);
+    expect(entries.map((e) => [e.name, e.quantity, e.section])).toEqual([
+      ['Krenko, Mob Boss', 1, 'commander'], ['Goblin Lackey', 1, 'main'], ['Goblin Matron', 1, 'main'], ['Mountain', 30, 'main'], ['Pyroblast', 1, 'side'],
+    ]);
+  });
 });

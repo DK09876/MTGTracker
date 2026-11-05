@@ -21,6 +21,7 @@ import type { BoxCopies, DeckCopies } from '@/lib/collection';
 import { filterCards } from '@/lib/filter';
 import { imageOf, priceOf, type Finish } from '@/lib/scryfall';
 import { steady } from '@/lib/steady-tap';
+import { useNavBottom } from '@/lib/use-nav-bottom';
 
 type Where = { kind: 'all' } | { kind: 'box'; name: string } | { kind: 'decks' };
 type Sort = 'name' | 'value' | 'recent';
@@ -32,7 +33,8 @@ const money = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigi
 const boxName = (name: string) => name || 'Unsorted';
 
 export default function CollectionPage() {
-  const [state, setState] = useState<api.CollectionState | null>(null);
+  const navBottom = useNavBottom();
+  const [state, setState] = useState<api.CollectionState | null>(() => api.peekCollection() ?? null);
   const [error, setError] = useState<string | null>(null);
   const [where, setWhere] = useState<Where>({ kind: 'all' });
   const [filter, setFilter] = useState('');
@@ -91,7 +93,6 @@ export default function CollectionPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setPanel(panel === 'add' ? null : 'add')} className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-[#221c08]">Add cards</button>
           <Link href="/collection/scan" className={`${button} inline-flex items-center`}>Scan</Link>
           <button onClick={() => setPanel(panel === 'import' ? null : 'import')} className={button}>Import</button>
           <a href={api.collectionExportUrl()} className={`${button} inline-flex items-center`}>Export CSV</a>
@@ -132,7 +133,8 @@ export default function CollectionPage() {
       </div>
       {panel === 'box' && <BoxPanel where={where} locations={locations} onDone={(w) => { load(); if (w) setWhere(w); setPanel(null); }} />}
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      {/* Filter, sort and Add cards stay under the top bar as the collection scrolls. */}
+      <div style={{ top: navBottom }} className="sticky z-20 -mx-4 mt-3 flex gap-2 bg-[var(--background)]/92 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -145,6 +147,13 @@ export default function CollectionPage() {
           <option value="value">Value</option>
           <option value="recent">Recently added</option>
         </select>
+        <button
+          onClick={() => { setPanel(panel === 'add' ? null : 'add'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          aria-label="Add cards"
+          className="min-h-10 shrink-0 whitespace-nowrap rounded-lg bg-[var(--accent)] px-4 text-sm font-medium text-[#221c08]"
+        >
+          ＋<span className="max-sm:hidden"> Add cards</span>
+        </button>
       </div>
       {unsupported.length > 0 && <p className="mt-1 text-xs text-amber-400">Not understood: {unsupported.join(', ')}</p>}
 

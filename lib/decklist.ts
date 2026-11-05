@@ -13,6 +13,10 @@
  * Sideboard and maybeboard cards keep their board; tokens are skipped. A
  * line that cannot be read is reported rather than dropped.
  *
+ * Other sites' extras are read past: MTGO's "SB: 1 Name" goes to the
+ * sideboard, Archidekt's "[Ramp]" categories and "^Have^" labels are
+ * dropped, and type headings like "Creatures (30)" are not cards.
+ *
  * The set code and collector number pin the exact printing, so a card
  * imported from a Secret Lair list keeps its Secret Lair art and price.
  */
@@ -45,6 +49,9 @@ const HEADINGS: Array<[RegExp, Section]> = [
   [/^(tokens?|attractions?|stickers?)$/, 'skip'],
 ];
 
+// Card-type headings some sites group a list under: still the main deck.
+const TYPE_HEADING = /^(creatures?|instants?|sorcery|sorceries|artifacts?|enchantments?|planeswalkers?|lands?|battles?|spells?|other|nonland|non-land)$/;
+
 // "1x Name (SET) 123 *F*" - count, name, then optional printing and markers.
 const LINE = /^(?:(\d+)\s*x?\s+)?(.+?)(?:\s+\(([A-Za-z0-9]{2,6})\)(?:\s+([A-Za-z0-9★†-]+))?)?((?:\s+\*[A-Za-z]+\*)*)\s*$/;
 
@@ -61,9 +68,16 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
     const heading = line.replace(/^\/\/\s*/, '').replace(/:$/, '').replace(/\s*\(\d+\)$/, '').trim().toLowerCase();
     const match = HEADINGS.find(([pattern]) => pattern.test(heading));
     if (match) { section = match[1]; continue; }
+    if (TYPE_HEADING.test(heading)) { if (section === 'commander') section = 'main'; continue; }
     if (line.startsWith('//')) continue;
 
-    const parts = line.match(LINE);
+    // MTGO marks sideboard lines one by one; Archidekt adds [categories] and ^labels^.
+    const sb = /^SB:\s*/i.test(line);
+    // Archidekt names a card's board among its categories: [Commander{top}], [Maybeboard{noDeck}].
+    const tagged = (line.match(/\[([^\]]*)\]/)?.[1] ?? '').toLowerCase().split(',').map((c) => c.replace(/\{[^}]*\}/g, '').trim());
+    const board: Section | null = sb || tagged.includes('sideboard') ? 'side' : tagged.includes('maybeboard') ? 'maybe' : tagged.includes('commander') ? 'commander' : null;
+    const card = line.replace(/^SB:\s*/i, '').replace(/\s*\^[^^]*\^/g, '').replace(/\s*\[[^\]]*\]/g, '').trim();
+    const parts = card.match(LINE);
     const name = parts?.[2]?.trim();
     if (!parts || !name || /^\d+$/.test(name)) {
       unreadable.push(line);
@@ -75,7 +89,7 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
       set: parts[3]?.toLowerCase(),
       collectorNumber: parts[4],
       finish: /\*E\*/i.test(parts[5] ?? '') ? 'etched' : /\*F\*/i.test(parts[5] ?? '') ? 'foil' : 'nonfoil',
-      section,
+      section: board ?? section,
       line,
     });
   }

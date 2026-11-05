@@ -25,7 +25,7 @@ export default function CardRoles({ listId, card }: { listId: string; card: Scry
   }, [listId, oracleId]);
 
   if (error) return <p className="text-xs text-red-400">{error}</p>;
-  if (!roles) return <p className="text-xs text-[var(--muted)]">Reading its roles…</p>;
+  if (!roles) return <p className="text-xs text-[var(--muted)]">Reading its built-in tags…</p>;
   const has = roles.filter((r) => r.has);
 
   const change = async (role: api.CardRole, next: boolean) => {
@@ -40,7 +40,7 @@ export default function CardRoles({ listId, card }: { listId: string; card: Scry
   return (
     <section className="flex flex-col gap-2" data-tour="card-roles">
       <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-medium">Roles in this deck</h3>
+        <h3 className="text-sm font-medium">Built-in tags in this deck</h3>
         <button onClick={() => setEditing((e) => !e)} className="text-xs text-[var(--accent)] hover:underline">{editing ? 'Done' : 'Correct'}</button>
       </div>
       {!editing ? (
@@ -52,7 +52,7 @@ export default function CardRoles({ listId, card }: { listId: string; card: Scry
               </li>
             ))}
           </ul>
-        ) : <p className="text-xs text-[var(--muted)]">No basic role. Correct it if it does a job here - protection, ramp, a finisher.</p>
+        ) : <p className="text-xs text-[var(--muted)]">No built-in tag. Add one if it does a job here - protection, ramp, a finisher.</p>
       ) : (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs text-[var(--muted)]">Tick what it does in this deck. Changes count on Health, Build, cuts and suggestions.</p>

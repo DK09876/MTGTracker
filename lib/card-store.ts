@@ -26,6 +26,7 @@ import { Database } from 'node-sqlite3-wasm';
 import { database, getSetting, saveRoles, setSetting, storeCard } from './db';
 import { recordError } from './errors';
 import { recentJobs, startJob, type Job } from './jobs';
+import { canLead } from './import';
 import { ROLES, ROLES_VERSION, tagSets } from './roles';
 import { collection, type ScryfallCard } from './scryfall';
 
@@ -129,17 +130,30 @@ function table(): Database {
 
 const nameKey = (name: string) => name.split(' // ')[0].trim().toLowerCase();
 
-/** Cards by name from the copy on the Pi; names it does not have are left out. */
+// Not cards you put in a deck: art cards, tokens, emblems, planes and the like
+// share names with real cards ("Fire Lord Azula // Fire Lord Azula").
+const NOT_PLAYABLE = new Set(['art_series', 'token', 'double_faced_token', 'emblem', 'planar', 'scheme', 'vanguard', 'front_card']);
+
+/**
+ * Cards by name from the copy on the Pi, one per name - the playable card
+ * when an art card or token shares its name; names it does not have are
+ * left out.
+ */
 export function localCards(names: string[]): ScryfallCard[] {
   if (!names.length) return [];
   const keys = [...new Set(names.map(nameKey))];
-  const out: ScryfallCard[] = [];
+  const best = new Map<string, ScryfallCard>();
+  const playable = (c: ScryfallCard) => !NOT_PLAYABLE.has((c as { layout?: string }).layout ?? '');
   for (let i = 0; i < keys.length; i += 500) {
     const part = keys.slice(i, i + 500);
-    const rows = table().all(`SELECT data FROM oracle_cards WHERE nameKey IN (${part.map(() => '?').join(',')})`, part) as Array<{ data: string }>;
-    out.push(...rows.map((r) => JSON.parse(r.data) as ScryfallCard));
+    const rows = table().all(`SELECT nameKey, data FROM oracle_cards WHERE nameKey IN (${part.map(() => '?').join(',')})`, part) as Array<{ nameKey: string; data: string }>;
+    for (const r of rows) {
+      const card = JSON.parse(r.data) as ScryfallCard;
+      const had = best.get(r.nameKey);
+      if (!had || (!playable(had) && playable(card))) best.set(r.nameKey, card);
+    }
   }
-  return out;
+  return [...best.values()].filter(playable);
 }
 
 export interface CardDataStatus {
@@ -243,6 +257,23 @@ export function startCardRefresh(): Job {
 }
 
 
+
+/**
+ * Cards that can lead a deck whose name contains what was typed, from the
+ * copy on the Pi - names starting with it first, then the most played.
+ * Instant, where asking Scryfall waits on its rate limit every keystroke.
+ */
+export function localCommanders(typed: string, max = 8): ScryfallCard[] {
+  const key = typed.trim().toLowerCase();
+  if (key.length < 2) return [];
+  const rows = table().all('SELECT data FROM oracle_cards WHERE nameKey LIKE ? LIMIT 400', [`%${key.replace(/[%_]/g, '')}%`]) as Array<{ data: string }>;
+  const rank = (c: ScryfallCard) => (c as { edhrec_rank?: number }).edhrec_rank ?? 1e9;
+  const starts = (c: ScryfallCard) => (nameKey(c.name).startsWith(key) ? 0 : 1);
+  return rows.map((r) => JSON.parse(r.data) as ScryfallCard)
+    .filter((c) => canLead(c) && !NOT_PLAYABLE.has((c as { layout?: string }).layout ?? ''))
+    .sort((a, b) => starts(a) - starts(b) || rank(a) - rank(b))
+    .slice(0, max);
+}
 
 /** Cards by oracle id from the copy on the Pi. */
 export function localCardsByOracle(ids: string[]): ScryfallCard[] {

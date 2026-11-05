@@ -43,14 +43,17 @@ export default function CardModal({
           aria-label={card.name}
           className="relative w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
         >
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-2 top-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
-          >
-            ✕
-          </button>
-          <CardDetail card={card} />
+          {/* ✕ stays at the top while a tall card scrolls (phones). The actions stay in the flow: with tags they are tall. */}
+          <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-1 flex items-center justify-end rounded-t-2xl bg-[var(--surface)]/95 px-2 pt-2 backdrop-blur">
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="-mt-10"><CardDetail card={card} /></div>
           {actions && <div className="mt-5 border-t border-[var(--border)] pt-4">{actions}</div>}
         </div>
       </div>

@@ -29,47 +29,55 @@ const tab = (t: string) => `[data-tour-tab="${t}"]`;
 const deck = (id: string) => `/decks/${id}`;
 const closeCard = '?[data-tour="card-modal"] [aria-label="Close"]';
 const closeAdd = '?[data-tour="add-panel"] [aria-label="Close"]';
-const buildStep = (n: number) => `[data-tour="build-steps"] button:nth-child(${n})`;
 
 /** A deck, tab by tab and how to use each - the deck's own tour, and the second half of Decks'. */
 const DECK_STEPS: TourStep[] = [
-  { path: deck, click: [tab('cards')], target: 'deck-tabs', title: 'A deck\'s tabs', body: 'Everything about a deck lives in these tabs. This is the sample deck, a Grixis spellslinger; nothing in it can be changed, so press anything.' },
+  { path: deck, click: [tab('cards')], target: 'deck-tabs', title: 'A deck\'s tabs', body: 'Everything about a deck lives here and stays in reach as you scroll: the deck itself with its count and Add cards on top, its tabs, then "On this page", which jumps to each part of the page - on Cards, every group. This is the sample deck; nothing in it can be changed, so press anything.' },
   { click: [closeAdd, tab('cards')], target: 'boards', title: 'Main, maybe and side', body: 'The 99 are the main board. The maybeboard holds cards you are considering; the sideboard, cards you swap in. Move a card between them from its card.' },
-  { target: 'card-tools', title: 'Filter, view, group, sort', body: 'Filter with Scryfall syntax - t:creature, cmc<=2, usd>5. Switch between pictures and a text list, group by type, mana value, your tags or the automatic roles, and sort.' },
-  { click: [closeCard, tab('cards'), '[data-tour="card-grid"] button'], target: 'card-modal', title: 'Open any card', body: 'Its text, rulings and printings. Pick a cheaper or foil printing, change how many, move it to another board, put your tags on it, and correct its roles for this deck if Scryfall has them wrong.' },
+  { target: 'deck-glance', title: 'The deck at a glance', body: 'Its curve, lands against the plan, the built-in tags against their ranges, colour sources, bracket and the last good-start rate - without leaving Cards. Customize picks which show; click one for the tab with the detail.' },
+  { target: 'card-tools', title: 'See it your way', body: 'Grid, Stacks (each group a column of overlapping cards) or Text. The slider sizes the cards - click S, M or L to snap. Filter with Scryfall syntax, group by type, mana value or tags, and click a group\'s heading to fold it. Shortcuts lists the keys: / filters, G, S and T switch views.' },
+  { target: 'select-cards', title: 'Select several', body: 'Press Select, then click cards to pick them (shift-click a range) and move, tag or remove them together. Esc clears, then stops selecting. A card\'s ⋯ has the quick things for one card.' },
+  { click: [closeCard, tab('cards'), '[data-tour="card-grid"] button'], target: 'card-modal', title: 'Open any card', body: 'Its text, rulings and printings. Pick a cheaper or foil printing, change how many, move it to another board, put your tags on it, and correct its built-in tags for this deck if Scryfall has them wrong.' },
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
-  { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Edit the whole list as text, rename the deck, change its commander, show it on your profile (decks are private until you do), or delete it.' },
+  { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Import a list (from Moxfield, Arena or MTGO) or an Archidekt link over the deck, export it, rename, duplicate, change the commander, show it on your profile (decks are private until you do), or delete it.' },
 
-  { click: [tab('build'), buildStep(1)], target: 'build-steps', title: 'Build: a checklist', body: 'Seven steps from the commander\'s style to a final check, each marked done, needs work, or to do. Click a step for what to do about it. All worked out from the cards, no AI.' },
-  { click: [tab('build'), buildStep(4)], target: 'build-fill', title: 'Fill the gaps', body: 'Pick a role the deck is short on. Cards for it are ranked by how often this commander\'s decks play them; tick "From my collection first" to see what you own - and which box it is in - before what you would buy. Set a price cap, then Add.' },
-  { click: [tab('build'), buildStep(5)], target: 'build-mana', title: 'The mana', body: 'How many lands Karsten\'s formula wants for this curve, and each colour\'s sources against what its hungriest spell needs. The button copies the decklist and opens Salubrious Snail\'s tool to check how often each spell is castable on time.' },
-  { click: [tab('build'), buildStep(6)], target: 'cut-workbench', title: 'Cuts', body: 'Over 100? Every card is weighed, with its reasons - a role you have too many of, nothing the commander cares about, rarely played - and cards your tags mark as the plan are protected. Tick some, see the roles they would leave, and cut them to the maybeboard, with undo.' },
+  { click: [tab('plan')], target: 'brief', title: 'Plan: what the deck does', body: 'The first thing to settle. A sentence or two on how the deck wins - drafted for you from the cards, or by Claude with your instructions. Everything else reads it: what to add and cut, how cards are tagged, what Chat knows.' },
+  { target: 'plan-style', title: 'Its style', body: 'Read from the commander and the deck\'s own cards - this one is a spells deck. Change the main or second style if it reads the deck wrong; it moves the usual counts and the cut list keeps cards that fit it.' },
+  { target: 'plan-flip', title: 'The flip turn', body: 'The mana the deck needs before it starts doing its thing - the commander\'s mana value unless you say otherwise. The ramp and land counts follow it, and Playtest starts with a goal from it.' },
+  { target: 'plan-guidelines', title: 'Guidelines', body: 'How many lands, ramp, card draw, removal and board wipes the deck should run. Each has an ⓘ explaining why; change a range and it is yours.' },
+  { target: 'plan-packages', title: 'Theme packages', body: 'Each of your tags is a package - 8 cards by default, 16 for a key theme - and how full it is. The cut list trims packages over their size first.' },
+  { target: 'plan-confirm', title: 'Confirm it', body: 'Chat, the tagger and Claude\'s reviews wait for a confirmed plan, because they read it. Change it any time.' },
 
-  { click: [tab('chat'), '[data-tour="chat-list"] [data-tour-entry]'], target: 'chat-thread', title: 'Chat about the deck', body: 'Claude reads the deck, its brief and its roles, and looks things up - Scryfall, your collection, EDHREC - shown above each answer. What it suggests comes as Add and Cut buttons; nothing changes until you press one.' },
-  { target: 'chat-composer', title: 'Ask anything', body: 'Type a question or tap a starter - what to cut, upgrades from your collection, whether the deck can win. Every chat is saved on the left; replies keep going if you leave the page.' },
+  { click: [tab('tune'), '[data-tune="add"]'], target: 'build-issues', title: 'Tune: what to look at', body: 'Adding and cutting toward the plan. Add opens on the few things worth fixing, in plain words: a tag well short of its range, no clear way to win, too few lands or sources of a colour. Each says why, shows the cards, and has the fix right there.' },
+  { target: 'build-roles', title: 'Built-in tags', body: 'Ramp, card draw, removal and the rest against the plan\'s ranges - the green band. Click one for its cards.' },
+  { click: [tab('tune'), '[data-tune="add"]', '?[data-tour="build-roles"]:not(:has([data-tour="build-fill"])) [data-tour="role-find"]'], target: 'build-fill', title: 'Find cards', body: 'Cards for a tag, ranked by how well they fit this commander and how much Commander plays them. Tick "From my collection first" to see what you own - and which box it is in. Set a price cap, then Add.' },
+  { target: 'build-mana', title: 'The mana', body: 'Lands against the plan\'s range, with Karsten\'s formula as a second opinion, and each colour\'s sources against what its hungriest spell needs.' },
+  { target: 'tune-combos', title: 'Combos', body: 'Every combo already in the list, and cards one away from finishing one - from Commander Spellbook.' },
+  { target: 'tune-ideas', title: 'Ideas from Claude', body: 'Ask for cards that fit the plan, with your own instructions; it opens in Chat with Add buttons. The ⓘ lists exactly what Claude is sent.' },
+  { click: [tab('tune'), '[data-tune="cut"]'], target: 'cut-workbench', title: 'Cut', body: 'Every card weighed, with its reasons; cards your tags mark as the plan are never offered. Tick some, see what they would leave, and cut them to the maybeboard, with undo.' },
+  { click: [tab('tune'), '[data-tune="cut"]', '[data-tour="cut-views"] button:nth-child(2)'], target: 'cut-rules', title: 'The rules behind it', body: 'The cut list is these rules added up, grouped by what they are about, each with an ⓘ. Switch one off, change how much it counts, or write your own - "tagged Wheels: never cut".' },
+  { click: [tab('tune'), '[data-tune="cut"]', '[data-tour="cut-views"] button:nth-child(3)'], target: 'cut-review', title: 'Ask Claude', body: 'Claude reads the plan, your tags and the top 30 cuts and says which it agrees with, with one line each - plus anything your instructions ask. It never cuts anything itself.' },
 
-  { click: [tab('tags')], target: 'basic-roles', title: 'Basic roles, automatic', body: 'Ramp, draw, removal and the rest come from Scryfall\'s card tags, for free. Hover a role to see its cards.' },
-  { target: 'draft-menu', title: 'Read the deck', body: 'Draft with AI writes how the deck wins and what it needs. The arrow has more: a free quick read, a draft from scratch, building on your brief, or checking it.' },
-  { target: 'brief', title: 'The brief', body: 'What the deck should do, in your words. Every AI step reads it. A new read waits for you to save it, use it as the brief, or discard it.' },
-  { target: 'saved-reads', title: 'Saved reads', body: 'Reads you kept, with the cards in and out of the deck since and how its ways to win changed - a light history of the deck.' },
-  { target: 'suggest-tags', title: 'Tag step 1: suggest', body: 'The model suggests categories for this deck\'s plan - engines, payoffs, enablers, ways to win - each with a test for what belongs. Ask again with instructions to refine.' },
+  { click: [tab('tags')], target: 'basic-roles', title: 'Built-in tags', body: 'Ramp, card draw, removal and the rest come from Scryfall\'s card tags, for free. Hover one to see its cards.' },
+  { target: 'suggest-tags', title: 'Tag step 1: suggest', body: 'The model suggests tags for this deck\'s plan - engines, payoffs, enablers, ways to win - each with a test for what belongs. Ask again with instructions to refine.' },
   { target: 'your-tags', title: 'Tag step 2: keep and shape', body: 'Keep, edit or drop each suggestion, or make your own. The kind says what the tag is for; the description is the test the model tags by.' },
-  { target: 'tag-cards', title: 'Tag step 3: put them on the cards', body: 'The model applies your tags to every card and double-checks each tag, with the price shown before you start. Group the Cards tab by your tags to look them over.' },
+  { target: 'tag-scope', title: 'Tag step 3: which cards, which tags', body: 'The whole deck, the untagged, cards missing one tag, or cards you pick - with all your tags or just some, and your own instructions. The price shows before you start.' },
 
   { click: [tab('health')], target: 'bracket', title: 'Bracket', body: 'The lowest official bracket the list can be, and why: Game Changers, two-card combos, mass land denial.' },
   { target: 'win-read', title: 'How it wins', body: 'A free read of how the deck closes games - combos, finishers and its shape - and what it lacks.' },
   { target: 'curve', title: 'Curve and colours', body: 'Spells by mana value, and each colour\'s share of the costs against the lands that make it. Hover a column for its cards.' },
-  { target: 'roles', title: 'Roles against the guidelines', body: 'How many of each role the deck runs against common Commander counts. Click a role\'s name to see its cards.' },
-  { target: 'hands', title: 'Opening hands', body: 'The odds of a keepable seven and of hitting land drops, from the real list.' },
+  { target: 'roles', title: 'Built-in tags against the plan', body: 'How many of each the deck runs against the plan\'s ranges. Click one to see its cards.' },
+  { target: 'hands', title: 'Opening hands', body: 'How many lands a seven has. Under Geek stats, write your keep rule - a land range plus cards it must have - and see how often a seven passes it.' },
 
-  { click: [tab('playtest'), '[data-tour-mode="goldfish"]', '[data-tour="goldfish-play"]'], target: 'goldfish-stats', title: 'Playtest: goldfish', body: 'Two thousand games alone, on autopilot: what turn the commander comes down, how often a land drop is missed, the mana each turn and how many sevens are mulliganed. Change the deck and play again - arrows show what got better or worse.' },
-  { target: 'goldfish-stuck', title: 'Stuck in hand', body: 'Cards still in hand after turn eight in a good share of the games they were drawn - too expensive, or a colour the lands cannot make often enough. Good places to look for cuts.' },
-  { click: [tab('playtest'), '[data-tour-mode="best"]', '?[data-tour="best-find"]:not(:disabled)'], target: 'best-hand-cards', title: 'The best hand', body: 'The strongest seven the deck can open with, found by trying hands a card at a time and playing each out. It shows which cards make the deck\'s ideal start.' },
-  { click: [tab('playtest'), '[data-tour-mode="play"]', '?[data-tour="play-draw"]'], target: 'play-table', title: 'Play it yourself', body: 'Draw a seven, mulligan, then click cards to play them, click again to tap, and go turn by turn. The commander waits in the command zone with its tax. Nothing here changes the deck.' },
+  { click: [tab('playtest'), '[data-tour-mode="goldfish"]'], target: 'how-it-plays', title: 'Playtest: how it plays', body: 'Everything the autopilot assumes is yours to set: games and turns, play or draw, your keep rule and mulligans, what it casts first, and goals like "a Discard outlet in hand by turn 3". Save a setup as a preset.' },
+  { click: [tab('playtest'), '[data-tour-mode="goldfish"]', '[data-tour="goldfish-play"]'], target: 'goldfish-goals', title: 'Your goals', body: 'How often each goal is met, and how often a game hits every goal you marked as a good start. Change the deck and play again - arrows compare with the last run that used the same settings.' },
+  { target: 'goldfish-stats', title: 'The numbers', body: 'When the commander comes down, missed land drops, the mana each turn and how many sevens are mulliganed.' },
+  { target: 'goldfish-stuck', title: 'Stuck in hand', body: 'Cards still in hand at the end in a good share of the games they were drawn - too expensive, or a colour the lands cannot make often enough.' },
+  { click: [tab('playtest'), '[data-tour-mode="best"]', '?[data-tour="best-find"]:not(:disabled)'], target: 'best-hand-cards', title: 'The best hand', body: 'The strongest seven the deck can open with, judged by your goals. It shows which cards make the deck\'s ideal start.' },
+  { click: [tab('playtest'), '[data-tour-mode="play"]', '?[data-tour="play-draw"]'], target: 'play-table', title: 'Play it yourself', body: 'Draw a seven, mulligan, then click cards to play them, click again to tap, and go turn by turn. Nothing here changes the deck.' },
 
-  { click: [tab('suggestions')], target: 'combos', title: 'Combos it has', body: 'Every combo already in the list, from Commander Spellbook, and what each one makes.' },
-  { target: 'one-away', title: 'One card away', body: 'Cards that would finish a combo with what the deck already holds, the ones completing the most first. Add one straight from here.' },
-  { target: 'cuts', title: 'Cuts to consider', body: 'Where to look first when the deck needs room: roles it is over on, and cards this commander\'s decks rarely play. Prompts, not verdicts.' },
+  { click: [tab('chat'), '[data-tour="chat-list"] [data-tour-entry]'], target: 'chat-thread', title: 'Chat about the deck', body: 'Claude reads the plan, the deck and its tags, and looks things up - Scryfall, your collection, how often cards are played - shown above each answer. Suggestions come as Add and Cut buttons; nothing changes until you press one.' },
+  { target: 'chat-composer', title: 'Ask anything', body: 'Type a question or tap a starter. Every chat is saved on the left; replies keep going if you leave the page.' },
 
   { click: [tab('collection')], target: 'collection-summary', title: 'The physical deck', body: 'How many cards are really in the deck, which sit in a box ready to pull, which another deck is holding, and what is left to buy. Pull and return copies, or mark proxies.' },
 ];
@@ -112,12 +120,15 @@ export const GUIDES: Guide[] = [
     match: (p) => p === '/decks',
     title: 'Decks',
     help: [
-      'Your Commander decks. Make one from a commander, or paste or import a decklist.',
-      'Open a deck for its tabs: Cards, Build, Chat, Tags, Health, Playtest, Suggestions, Collection.',
+      'Your Commander decks. Make one from a commander, a pasted list, or an Archidekt link. Each deck\'s ⋯ duplicates, files or deletes it.',
+      'Folders keep decks apart: ＋ New folder, then drag decks onto it. Find, filter, sort and New deck stay at the top as you scroll.',
+      'Open a deck for its tabs: Cards, Plan, Tune, Tags, Health, Playtest, Chat, Collection. Start with Plan.',
       'Decks are private until you show one on your profile.',
     ],
     steps: [
-      { target: 'new-deck', title: 'Make a deck', body: 'Start from a commander - with a suggested starter list if you like: roles first, then what fits the commander, then lands for its colours - or paste a decklist from Moxfield, Archidekt or plain text.' },
+      { target: 'new-deck', title: 'Make a deck', body: 'Start from a commander - with a suggested starter list if you like: roles first, then what fits the commander, then lands for its colours - or paste a list (most sites\' text export) or an Archidekt link.' },
+      { target: 'deck-folders', title: 'Folders', body: 'Folders keep decks apart; each one\'s swatch mixes the colours of its decks. Drag a deck onto one (on a phone, use the deck\'s ⋯ → Move to). A deck made while a folder is open goes in it.' },
+      { target: 'deck-sort', title: 'Find and sort', body: 'Find a deck by name or commander, filter by colour or decks not at 100 yet, and sort - recently edited first by default. This bar stays under the top of the screen as you scroll.' },
       { target: 'deck-grid', title: 'Your decks', body: 'Each deck in its commander\'s colours, with its card count and value. Next, the tour opens the sample deck and goes through every tab.' },
       ...DECK_STEPS,
     ],
@@ -127,9 +138,9 @@ export const GUIDES: Guide[] = [
     match: (p) => /^\/(decks|lists)\/[^/]+$/.test(p),
     title: 'A deck',
     help: [
-      'Cards: the list, grouped and sorted how you like. Build: a checklist to build by. Chat: ask Claude about the deck.',
-      'Tags: your own categories and the brief. Health: curve, colours, roles, bracket and how it wins. Playtest: goldfish two thousand games, find the best opening hand, or play it by hand. Suggestions: combos and cuts. Collection: the physical deck.',
-      'The ⋯ menu edits as text, renames, changes the commander, and shows the deck on your profile.',
+      'Start with Plan: what the deck does, its style, flip turn and guidelines. Everything else reads it. Cards: the list, grouped by type or tags.',
+      'Tune: what to add and what to cut, with rules you can change and Claude\'s review. Tags: your own tags next to the built-in ones. Health: curve, colours, bracket, your keep rule. Playtest: goldfish by your own goals, the best hand, or play by hand. Chat: ask Claude. Collection: the physical deck.',
+      'The ⋯ menu imports a list or a link, exports, sets the card size, renames, duplicates, changes the commander, and shows the deck on your profile.',
     ],
     steps: DECK_STEPS,
   },
@@ -139,7 +150,7 @@ export const GUIDES: Guide[] = [
     title: 'Collection',
     help: [
       'Every card you own, by box. Add cards by search, import a list, or scan them with the camera.',
-      'Decks show which of their cards you own and where; Build and chat suggest from your collection first.',
+      'Decks show which of their cards you own and where; Tune and Chat suggest from your collection first.',
     ],
     steps: [
       { target: 'collection-head', title: 'Your collection', body: 'What you own, what it is worth, and how much sits in decks. The sample has one box with a few cards.' },

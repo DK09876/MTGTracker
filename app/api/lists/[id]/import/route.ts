@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server';
 
 import { getList } from '@/lib/db';
+import { deckText, DeckLinkError } from '@/lib/deck-links';
 import { importInto, replaceWith } from '@/lib/import-into';
 import { requireList } from '@/lib/profile-route';
 import { warmRoles } from '@/lib/role-warmup';
@@ -31,10 +32,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!body.decklist?.trim()) return NextResponse.json({ error: 'Paste a decklist first' }, { status: 400 });
 
   try {
-    const imported = await importInto(owned.list, body.decklist);
+    const { text } = await deckText(body.decklist);
+    const imported = await importInto(owned.list, text, owned.profile);
     warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported });
   } catch (error) {
+    if (error instanceof DeckLinkError) return NextResponse.json({ error: error.message }, { status: 400 });
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[import] failed', error);
     return NextResponse.json({ error: 'Could not import that list' }, { status: 500 });
@@ -53,13 +56,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   try {
-    const result = await replaceWith(owned.list, body.decklist ?? '');
+    const { text } = await deckText(body.decklist ?? '');
+    const result = await replaceWith(owned.list, text);
     if (!result.applied) {
       return NextResponse.json({ error: 'Some lines could not be found, so nothing was changed', imported: result }, { status: 422 });
     }
     warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported: result });
   } catch (error) {
+    if (error instanceof DeckLinkError) return NextResponse.json({ error: error.message }, { status: 400 });
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[replace] failed', error);
     return NextResponse.json({ error: 'Could not save that list' }, { status: 500 });

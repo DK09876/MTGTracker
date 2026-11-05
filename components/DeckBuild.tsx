@@ -1,23 +1,33 @@
 'use client';
 
 /**
- * The Build tab: a checklist to build a deck by, from
- * docs/deckbuilding-reference.md - the commander's style, the plan, the
- * skeleton of roles, filling the gaps (cards you own first), the mana,
- * cuts to 100, and a last check. Every step is worked out from the cards
- * without a model; the AI lives on the Tags tab and in the deck chat.
+ * The Tune tab: changing the deck toward its plan, both ways.
+ *
+ * Add: what to look at in plain words - a role short of the plan's range,
+ * no way to win, too few lands or sources of a colour - each with why it
+ * matters, the cards behind it and cards to fix it; every role against the
+ * plan's ranges; the mana against Karsten's numbers; combos the deck has
+ * and is one card from; and Claude's ideas, in Chat.
+ * Cut: the cut list, its rules and Claude's review (TuneCut.tsx).
+ *
+ * It opens on Cut when the deck is over 100 and on Add otherwise.
  */
 
+import Tip from './Tip';
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 
+import DeckSuggestions from './DeckSuggestions';
 import ManaCost from './ManaCost';
+import TuneCut from './TuneCut';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
-import type { BuildPlan, StepId } from '@/lib/build';
+import type { BuildPlan, Issue, RoleRow } from '@/lib/build';
 import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
+import { ROLE_GROUPS, ROLES } from '@/lib/roles';
 
-export type DeckTab = 'cards' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
+export type DeckTab = 'cards' | 'plan' | 'tune' | 'tags' | 'health' | 'suggestions' | 'collection' | 'chat' | 'playtest';
 
 interface Props {
   listId: string;
@@ -28,15 +38,46 @@ interface Props {
   /** Move a card between boards: cuts go to the maybeboard, so nothing is lost. */
   onMove: (cardId: string, board: Board) => Promise<void> | void;
   onTab: (tab: DeckTab) => void;
+  /** The deck's tag names, for writing cut rules. */
+  tagNames: string[];
+  planConfirmed: boolean;
+  brief: string;
+  /** Open Chat with this question ready to send. */
+  onAsk: (question: string) => void;
 }
 
-const MARK = { done: ['✓', 'text-emerald-400'], warn: ['!', 'text-amber-300'], todo: ['○', 'text-[var(--muted)]'] } as const;
 const PRICES = [null, 1, 5, 10, 25] as const;
 const SNAIL = 'https://www.salubrioussnail.com/manabase-tool';
+const BUTTON = 'rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]';
+const PRIMARY = 'rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08]';
 
-export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, onTab }: Props) {
-  const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>('loading');
-  const [step, setStep] = useState<StepId | null>(null);
+// Issues you hide stay hidden for this deck, in this browser.
+const hiddenKey = (listId: string) => `mtg-build-hidden:${listId}`;
+function readHidden(listId: string): string[] {
+  try { return JSON.parse(localStorage.getItem(hiddenKey(listId)) ?? '[]'); } catch { return []; }
+}
+
+/** Text with {W}-style symbols drawn as mana symbols. */
+function WithSymbols({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\{[WUBRGC]\})/).map((part, i) => (/^\{[WUBRGC]\}$/.test(part)
+        ? <ManaCost key={i} cost={part} size={15} />
+        : <Fragment key={i}>{part}</Fragment>))}
+    </>
+  );
+}
+
+/** Where a Find or Cuts panel is open: under an issue, under the roles, or at the bottom. */
+type Open = { at: string; kind: 'fill'; role: string } | { at: string; kind: 'cuts' } | null;
+
+export default function DeckBuild({ listId, cards, commander, version, onAdd, onMove, onTab, tagNames, planConfirmed, brief, onAsk }: Props) {
+  const [plan, setPlan] = useState<BuildPlan | 'loading' | 'failed'>(() => api.peek<BuildPlan>(api.paths.build(listId)) ?? 'loading');
+  const [open, setOpen] = useState<Open>(null);
+  const [hidden, setHidden] = useState<string[]>(() => readHidden(listId));
+  const [showHidden, setShowHidden] = useState(false);
+  const [mode, setMode] = useState<'add' | 'cut' | null>(null);
+  const [ideas, setIdeas] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -46,87 +87,110 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
   if (plan === 'loading') return <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>;
   if (plan === 'failed') return <p className="mt-8 text-center text-red-400">Couldn&apos;t read the deck just now.</p>;
-  // Opens on the first step that needs work.
-  const current = step ?? plan.steps.find((s) => s.status !== 'done')?.id ?? 'check';
+
+  const hide = (id: string, on: boolean) => {
+    const next = on ? [...new Set([...hidden, id])] : hidden.filter((h) => h !== id);
+    setHidden(next);
+    try { localStorage.setItem(hiddenKey(listId), JSON.stringify(next)); } catch { /* not remembered, still works */ }
+  };
+  const shown = plan.issues.filter((i) => showHidden || !hidden.includes(i.id));
+  const hiddenCount = plan.issues.filter((i) => hidden.includes(i.id)).length;
+  const toggle = (next: Exclude<Open, null>) => setOpen((o) => (o && o.at === next.at && o.kind === next.kind && (o.kind !== 'fill' || next.kind !== 'fill' || o.role === next.role) ? null : next));
+  const panel = (at: string) => open?.at === at && open.kind === 'fill' && (
+    <div className="mt-1 rounded-2xl border border-[var(--border)] bg-[var(--background)]/40 p-3">
+      <Fill key={open.role} listId={listId} plan={plan} commander={commander} start={open.role} onAdd={onAdd} />
+    </div>
+  );
+  const view = mode ?? (plan.size > 100 ? 'cut' : 'add');
 
   return (
-    <div className="mt-5 flex flex-wrap items-start gap-5">
-      <nav data-tour="build-steps" aria-label="Build steps" className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
-        {plan.steps.map((s, i) => (
-          <button
-            key={s.id}
-            onClick={() => setStep(s.id)}
-            aria-current={current === s.id ? 'step' : undefined}
-            className={`flex items-start gap-3 rounded-xl px-3 py-2.5 text-left ${current === s.id ? 'border border-[var(--accent)] bg-[var(--accent)]/10' : 'border border-transparent hover:bg-[var(--surface-hover)]'}`}
-          >
-            <span aria-hidden className={`w-4 font-bold ${MARK[s.status][1]}`}>{MARK[s.status][0]}</span>
-            <span className="min-w-0">
-              <span className="block text-sm font-medium">{i + 1} · {s.title}</span>
-              <span className="block text-xs text-[var(--muted)]">{s.summary}</span>
-            </span>
+    <div className="mt-5 flex flex-col gap-6">
+      <div data-tour="tune-plan" className="flex max-w-3xl flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+        <span className="text-[var(--muted)]">{planConfirmed ? 'The plan:' : 'Write the plan first - everything here reads it.'}</span>
+        <span className="min-w-0 flex-[1_1_20rem]">{planConfirmed ? brief || 'Not written.' : ''}{plan.style && <span className="text-[var(--muted)]"> · {plan.style.label}</span>}</span>
+        <button onClick={() => onTab('plan')} className="text-[var(--accent)] hover:underline">{planConfirmed ? 'Edit' : 'Go to Plan'}</button>
+      </div>
+
+      <div data-tour="tune-modes" className="flex w-fit max-w-full gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Tune">
+        {([['add', 'Add'], ['cut', 'Cut']] as const).map(([v, label]) => (
+          <button key={v} role="tab" aria-selected={view === v} data-tune={v} onClick={() => setMode(v)}
+            className={`rounded-full px-4 py-1.5 ${view === v ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+            {label}{v === 'cut' && plan.size > 100 ? <span className="ml-1.5 rounded-full bg-black/20 px-1.5 text-xs">{plan.size - 100}</span> : null}
           </button>
         ))}
-      </nav>
+      </div>
 
-      <section className="flex min-w-0 flex-[999_1_32rem] flex-col gap-4">
-        {current === 'style' && (
-          <Detail title="Commander style">
-            {plan.style ? (
-              <>
-                <p><span className="font-semibold">{plan.style.label}.</span> {plan.style.note}</p>
-                <p className="text-sm text-[var(--muted)]">Read from {commander ?? 'the commander'}&apos;s text. Every other step follows from what it rewards.</p>
-              </>
-            ) : <p>Pick a commander first, from the deck&apos;s header.</p>}
-          </Detail>
+      {view === 'cut' ? (
+        <TuneCut listId={listId} cards={cards} version={version} tagNames={tagNames} planConfirmed={planConfirmed} onMove={onMove} onPlan={() => onTab('plan')} />
+      ) : (<>
+      <section data-tour="build-issues" className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 data-section="To look at" className="font-display text-xl font-semibold">
+            {plan.issues.length - hiddenCount === 0 ? 'Nothing stands out' : `${plan.issues.length - hiddenCount} thing${plan.issues.length - hiddenCount === 1 ? '' : 's'} to look at`}
+          </h3>
+          {hiddenCount > 0 && (
+            <button onClick={() => setShowHidden((v) => !v)} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+              {showHidden ? 'Leave out hidden' : `Show ${hiddenCount} hidden`}
+            </button>
+          )}
+        </div>
+        {shown.length === 0 && (
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
+            <span aria-hidden className="font-bold text-emerald-400">✓</span>
+            <span className="min-w-0 flex-[1_1_20rem]">{plan.size} cards, every built-in tag in its range, enough lands and colour sources. See how it plays on the Playtest tab.</span>
+            <button onClick={() => onTab('playtest')} className={BUTTON}>Playtest</button>
+          </div>
         )}
-        {current === 'plan' && (
-          <Detail title="Plan">
-            <p>Write down how the deck wins - or let the AI read it. Every AI step reads the brief.</p>
-            <div><button onClick={() => onTab('tags')} className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08]">Open the brief on the Tags tab</button></div>
-          </Detail>
-        )}
-        {current === 'skeleton' && (
-          <Detail title="Skeleton">
-            {plan.gaps.length ? (
-              <ul className="flex flex-col gap-1.5">
-                {plan.gaps.map((g) => (
-                  <li key={g.role} className="flex justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-                    <span>{g.label}</span>
-                    <span><span className="font-semibold text-amber-300">{g.have}</span> <span className="text-[var(--muted)]">of {g.want[0]}–{g.want[1]}</span></span>
-                  </li>
-                ))}
-              </ul>
-            ) : <p>Every role is at its usual count.</p>}
-            <p className="text-sm text-[var(--muted)]">Guidelines, not rules: a deck&apos;s plan may want more or fewer. The Health tab has every role.</p>
-            {plan.gaps.length > 0 && <div><button onClick={() => setStep('fill')} className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08]">Fill the gaps</button></div>}
-          </Detail>
-        )}
-        {current === 'fill' && <Fill listId={listId} plan={plan} commander={commander} onAdd={onAdd} />}
-        {current === 'mana' && (
-          <Detail title="Mana" tour="build-mana">
+        {shown.map((issue) => (
+          <IssueCard
+            key={issue.id}
+            issue={issue}
+            hidden={hidden.includes(issue.id)}
+            onHide={(on) => hide(issue.id, on)}
+            onAction={() => {
+              const a = issue.action;
+              if (!a) return;
+              if (a.kind === 'tags') onTab('plan');
+              else if (a.kind === 'cuts') setMode('cut');
+              else toggle({ at: issue.id, kind: 'fill', role: a.role });
+            }}
+            active={open?.at === issue.id}
+          >
+            {panel(issue.id)}
+          </IssueCard>
+        ))}
+      </section>
+
+      <div className="flex flex-wrap items-start gap-5">
+        <section data-tour="build-roles" className="flex min-w-0 flex-[1_1_28rem] flex-col gap-3">
+          <h3 data-section="Built-in tags" className="font-display text-xl font-semibold">Built-in tags</h3>
+          <Roles rows={plan.roles} finishers={plan.finishers} onFind={(role) => toggle({ at: 'roles', kind: 'fill', role })} />
+          {panel('roles')}
+        </section>
+
+        <section data-tour="build-mana" className="flex min-w-0 flex-[1_1_20rem] flex-col gap-3">
+          <h3 data-section="Mana" className="font-display text-xl font-semibold">Mana</h3>
+          <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
             <p>
-              <span className="font-semibold">{plan.lands.have} lands</span>; Karsten&apos;s formula says <span className="font-semibold">{plan.lands.want}</span>
-              <span className="text-[var(--muted)]"> (average mana value {plan.lands.averageMv.toFixed(2)}, {plan.lands.cheap} cheap draw and ramp spells, never below 37).</span>
+              <span className="font-semibold">{plan.lands.have} lands.</span> Karsten&apos;s formula suggests <span className="font-semibold">{plan.lands.want}</span>
+              <span className="text-[var(--muted)]"> for an average mana value of {plan.lands.averageMv.toFixed(2)} with {plan.lands.cheap} ramp and draw spells at two mana or less.</span>
             </p>
             {plan.colors.some((c) => c.needed !== null) && (
-              <ul className="flex flex-col gap-1 text-sm">
+              <ul className="flex flex-col gap-1.5">
                 {plan.colors.filter((c) => c.needed !== null).map((c) => {
                   const short = c.sources < c.needed! - 1;
                   return (
                     <li key={c.color} className="flex flex-wrap items-center gap-2">
                       <ManaCost cost={`{${c.color}}`} size={16} />
-                      <span className={short ? 'font-semibold text-amber-300' : 'text-emerald-400'}>{short ? '▲' : '✓'} {c.sources} of {c.needed} sources</span>
-                      <span className="text-[var(--muted)]">- {c.neededFor} sets it</span>
+                      <span className={short ? 'font-semibold text-amber-300' : 'text-emerald-400'}>{short ? '!' : '✓'} {c.sources} of {c.needed} sources</span>
+                      <span className="min-w-0 text-[var(--muted)]">for {c.neededFor}</span>
                     </li>
                   );
                 })}
               </ul>
             )}
-            <p className="text-sm text-[var(--muted)]">
-              {plan.lands.have > plan.lands.want + 1 ? 'You could cut a land or two for spells.' : plan.lands.have < plan.lands.want - 1 ? 'Add lands, or cheap ramp and draw, before cutting more.' : 'Right where it should be.'}
-              {' '}For how often each spell is castable on curve, check the deck in Salubrious Snail&apos;s tool.
-            </p>
-            <div className="flex flex-wrap gap-2">
+            <p className="text-xs text-[var(--muted)]">Sources each colour needs come from its most demanding spell, by Karsten&apos;s table; rocks and dorks count three-quarters.</p>
+            <div>
               <button
                 onClick={async () => {
                   const main = cards.filter((c) => c.board === 'main');
@@ -134,41 +198,119 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
                   await navigator.clipboard?.writeText(text).catch(() => {});
                   window.open(SNAIL, '_blank', 'noopener');
                 }}
-                className="rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+                className={BUTTON}
               >
-                Copy the decklist and open Salubrious Snail
+                Check each spell in Salubrious Snail&apos;s tool
               </button>
-              <button onClick={() => onTab('health')} className="rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]">Colours on the Health tab</button>
             </div>
-          </Detail>
-        )}
-        {current === 'cuts' && <Cuts listId={listId} cards={cards} version={version} onMove={onMove} onTab={onTab} />}
-        {current === 'check' && (
-          <Detail title="Check">
-            <p>Look over the bracket, the combos it has and the free win read, then save a read of the finished deck.</p>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => onTab('health')} className="rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]">Bracket and win read</button>
-              <button onClick={() => onTab('suggestions')} className="rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]">Combos</button>
-              <button onClick={() => onTab('tags')} className="rounded-full border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)]">Save a read</button>
-            </div>
-          </Detail>
-        )}
+          </div>
+        </section>
+      </div>
+
+      <section data-tour="tune-combos" className="flex flex-col gap-3">
+        <h3 data-section="Combos" className="font-display text-xl font-semibold">Combos</h3>
+        <DeckSuggestions listId={listId} cards={cards} commander={commander} version={version} onAdd={onAdd} onMove={(id, board) => { void onMove(id, board); }} onRemove={() => {}} combosOnly />
       </section>
+
+      <section data-tour="tune-ideas" className="flex max-w-3xl flex-col gap-2">
+        <h3 data-section="Ideas from Claude" className="font-display text-xl font-semibold">Ideas from Claude</h3>
+        <p className="text-sm text-[var(--muted)]">Claude reads the plan, the tags and the cards, and suggests what to add, each with an Add button. It opens in Chat, where you can keep asking.</p>
+        <label className="flex flex-col gap-1 text-sm">
+          Your instructions <span className="text-xs text-[var(--muted)]">(optional)</span>
+          <textarea value={ideas} onChange={(e) => setIdeas(e.target.value)} rows={2} maxLength={1000}
+            placeholder="e.g. Only cards I own. More haste. Nothing over $10."
+            className="resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 outline-none focus:border-[var(--accent)]" />
+        </label>
+        <div>
+          <button onClick={() => onAsk(`Suggest cards to add that fit the plan and fill what the deck is short on.${ideas.trim() ? ` ${ideas.trim()}` : ''}`)}
+            className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">{planConfirmed ? 'Ask Claude for ideas' : 'Ask Claude (after the plan)'}</button>
+          <span className="ml-2"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
+        </div>
+      </section>
+      </>)}
     </div>
   );
 }
 
-function Detail({ title, children, tour }: { title: string; children: React.ReactNode; tour?: string }) {
+function IssueCard({ issue, hidden, onHide, onAction, active, children }: { issue: Issue; hidden: boolean; onHide: (on: boolean) => void; onAction: () => void; active: boolean; children: React.ReactNode }) {
+  const [showCards, setShowCards] = useState(false);
+  const fix = issue.level === 'fix';
   return (
-    <div data-tour={tour} className="flex flex-col gap-3">
-      <h3 className="font-display text-xl font-semibold">{title}</h3>
+    <article className={`flex flex-col gap-2 rounded-2xl border bg-[var(--surface)] px-4 py-3 ${fix ? 'border-amber-300/40' : 'border-[var(--border)]'} ${hidden ? 'opacity-60' : ''}`}>
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+        <span className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${fix ? 'bg-amber-300/15 text-amber-300' : 'bg-[var(--surface-hover)] text-[var(--muted)]'}`}>
+          {fix ? 'Fix' : 'Worth a look'}
+        </span>
+        <h4 className="min-w-0 flex-[1_1_16rem] font-semibold"><WithSymbols text={issue.title} /></h4>
+      </div>
+      <p className="text-sm text-[var(--muted)]"><WithSymbols text={issue.why} /></p>
+      {issue.cards.length > 0 && (
+        showCards
+          ? <p className="text-sm">{issue.cards.join(' · ')}</p>
+          : null
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {issue.action && (
+          <button onClick={onAction} aria-expanded={issue.action.kind === 'tags' ? undefined : active} className={active ? BUTTON : PRIMARY}>
+            {active ? 'Close' : issue.action.label}
+          </button>
+        )}
+        {issue.cards.length > 0 && (
+          <button onClick={() => setShowCards((v) => !v)} aria-expanded={showCards} className={BUTTON}>
+            {showCards ? 'Hide the cards' : `The ${issue.cards.length} card${issue.cards.length === 1 ? '' : 's'}`}
+          </button>
+        )}
+        <button onClick={() => onHide(!hidden)} className="ml-auto text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
+          {hidden ? 'Unhide' : 'Fine for this deck - hide'}
+        </button>
+      </div>
       {children}
+    </article>
+  );
+}
+
+function Roles({ rows, finishers, onFind }: { rows: RoleRow[]; finishers: string[]; onFind: (role: string) => void }) {
+  const [openRole, setOpenRole] = useState<string | null>(null);
+  const groups = [...new Set(rows.map((r) => r.group))];
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
+      {groups.map((g) => (
+        <div key={g} className="flex flex-col gap-1">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">{ROLE_GROUPS[g]}</h4>
+          {rows.filter((r) => r.group === g).map((r) => {
+            const short = r.want && r.have < r.want[0];
+            const isOpen = openRole === r.role;
+            return (
+              <div key={r.role}>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setOpenRole(isOpen ? null : r.role)} aria-expanded={isOpen} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1 text-left hover:text-[var(--foreground)]">
+                    <span className="w-36 shrink-0 truncate">{r.label}</span>
+                    <span className="relative h-1.5 min-w-0 flex-1 rounded-full bg-[var(--border)]" aria-hidden>
+                      {r.want && <span className="absolute inset-y-0 rounded-full bg-emerald-500/25" style={{ left: `${(r.want[0] / 16) * 100}%`, width: `${((r.want[1] - r.want[0]) / 16) * 100}%` }} />}
+                      <span className={`absolute inset-y-0 left-0 rounded-full ${short ? 'bg-amber-300' : 'bg-[#b38f1f]'}`} style={{ width: `${Math.min(1, r.have / 16) * 100}%` }} />
+                    </span>
+                    <span className="w-20 shrink-0 text-right tabular-nums">
+                      <span className={short ? 'font-semibold text-amber-300' : ''}>{r.have}</span>
+                      {r.want && <span className="text-[var(--muted)]"> of {r.want[0]}-{r.want[1]}</span>}
+                    </span>
+                  </button>
+                  {r.want && <button data-tour="role-find" onClick={() => onFind(r.role)} className="shrink-0 text-xs text-[var(--accent)] hover:underline">Find</button>}
+                </div>
+                {isOpen && <p className="pb-2 pl-1 text-xs text-[var(--muted)]">{r.cards.length ? r.cards.join(' · ') : 'None in the deck.'}</p>}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      <p className="text-xs text-[var(--muted)]">
+        {finishers.length ? `Ways to win: ${finishers.join(', ')}.` : 'No finishers found.'} Built-in tags come from Scryfall; correct a card&apos;s from its card. The ranges are the plan&apos;s - change them on the Plan tab, where your theme packages are too.
+      </p>
     </div>
   );
 }
 
-function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildPlan; commander: string | null; onAdd: Props['onAdd'] }) {
-  const [role, setRole] = useState(plan.targets[0]?.role ?? 'removal');
+function Fill({ listId, plan, commander, start, onAdd }: { listId: string; plan: BuildPlan; commander: string | null; start: string; onAdd: Props['onAdd'] }) {
+  const [role, setRole] = useState(start);
   const [owned, setOwned] = useState(true);
   const [max, setMax] = useState<number | null>(null);
   // Kept with the question it answers, so a new question reads as loading.
@@ -192,7 +334,7 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
   return (
     <div data-tour="build-fill" className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="font-display text-xl font-semibold">Fill the gaps</h3>
+        <h3 className="font-semibold">Find cards</h3>
         <div className="flex flex-wrap items-center gap-4 text-sm">
           <label className="flex items-center gap-2"><input type="checkbox" checked={owned} onChange={(e) => setOwned(e.target.checked)} /> From my collection first</label>
           <label className="flex items-center gap-2">
@@ -204,13 +346,13 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        {plan.targets.map((g) => (
+        {[...plan.targets, ...(plan.targets.some((t) => t.role === start) ? [] : [{ role: start, label: ROLES.find((r) => r.id === start)?.label ?? start, have: plan.roles.find((r) => r.role === start)?.have ?? 0, want: null }])].map((g) => (
           <button
             key={g.role}
             onClick={() => setRole(g.role)}
             className={`rounded-full border px-3 py-1 text-sm ${role === g.role ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
           >
-            {g.label} · <span className={g.have < g.want[0] ? 'text-amber-300' : ''}>{g.have}</span> of {g.want[0]}–{g.want[1]}
+            {g.label} · <span className={g.want && g.have < g.want[0] ? 'text-amber-300' : ''}>{g.have}</span>{g.want && <> of {g.want[0]}–{g.want[1]}</>}
           </button>
         ))}
       </div>
@@ -245,148 +387,6 @@ function Fill({ listId, plan, commander, onAdd }: { listId: string; plan: BuildP
           </p>
         </>
       )}
-    </div>
-  );
-}
-
-function Cuts({ listId, cards, version, onMove, onTab }: { listId: string; cards: ListedCard[]; version: string; onMove: Props['onMove']; onTab: Props['onTab'] }) {
-  const [plan, setPlan] = useState<{ version: string; plan: api.CutPlan | 'failed' } | null>(null);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [undo, setUndo] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.cutPlan(listId).then((p) => { if (!cancelled) setPlan({ version, plan: p }); }).catch(() => { if (!cancelled) setPlan({ version, plan: 'failed' }); });
-    return () => { cancelled = true; };
-  }, [listId, version]);
-
-  const current = plan?.version === version ? plan.plan : null;
-  if (!current) return <p className="text-sm text-[var(--muted)]">Weighing every card…</p>;
-  if (current === 'failed') return <p className="text-sm text-red-400">Couldn&apos;t weigh the cards just now.</p>;
-
-  const over = current.size - 100;
-  const chosen = current.candidates.filter((c) => picked.has(c.cardId));
-  // Cuts should keep the curve where it is or lower it (3/3 Elk).
-  const spellCount = Math.max(1, Math.round(current.size - 1 - 37));
-  const mvAfter = chosen.length
-    ? (current.averageMv * spellCount - chosen.reduce((n, c) => n + c.cmc, 0)) / Math.max(1, spellCount - chosen.length)
-    : current.averageMv;
-  const left = Math.max(0, over - chosen.length);
-  // The role counts as they would be after these cuts.
-  const after = current.roles.map((r) => ({ ...r, now: r.count - chosen.filter((c) => c.roles.includes(r.id)).length }))
-    .filter((r) => r.now !== r.count);
-  // A ★ keeps a card for good: it leaves the list at once.
-  const star = async (c: api.CutPlan['candidates'][number]) => {
-    const card = cards.find((x) => x.card.id === c.cardId)?.card;
-    if (!card || !current || typeof current === 'string') return;
-    await api.keepCard(listId, card.oracle_id ?? card.id, true);
-    setPicked((p) => { const n = new Set(p); n.delete(c.cardId); return n; });
-    setPlan({ version, plan: { ...current, candidates: current.candidates.filter((x) => x.cardId !== c.cardId), protectedCards: [...current.protectedCards, c.name] } });
-  };
-  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-
-  const cut = async () => {
-    setBusy(true);
-    try {
-      const ids = chosen.map((c) => c.cardId);
-      for (const id of ids) await onMove(id, 'maybe');
-      setUndo(ids);
-      setPicked(new Set());
-    } finally {
-      setBusy(false);
-    }
-  };
-  const putBack = async () => {
-    if (!undo) return;
-    setBusy(true);
-    try {
-      for (const id of undo) await onMove(id, 'main');
-      setUndo(null);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div data-tour="cut-workbench" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-display text-xl font-semibold">Cuts</h3>
-        <p className="text-sm">
-          {over > 0
-            ? <>{current.size} cards · <span className={left ? 'font-semibold text-amber-300' : 'font-semibold text-emerald-400'}>{left ? `pick ${left} more` : 'that gets it to 100'}</span></>
-            : over === 0 ? <span className="text-emerald-400">100 cards - nothing has to go</span> : <span>{-over} short of 100</span>}
-        </p>
-      </div>
-      {undo && (
-        <p className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
-          {undo.length} moved to the maybeboard.
-          <button onClick={putBack} disabled={busy} className="text-[var(--accent)] hover:underline">Undo</button>
-        </p>
-      )}
-      <div className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm">
-        <p>
-          <span className="font-semibold">Type {current.type.type} deck.</span>{' '}
-          <span className="text-[var(--muted)]">{current.type.why}</span>
-        </p>
-        {current.curve && <p className="text-[var(--muted)]"><span className="text-[var(--foreground)]">Look here first:</span> {current.curve}.</p>}
-        <p className="text-[var(--muted)]">
-          Then interaction, then {current.type.type === 'B' ? 'the cards outside the theme' : 'ramp or draw'}; lands only if you run more than the formula wants.
-          Cuts go to the maybeboard, so nothing is lost.
-          {current.protectedCards.length > 0 && <> {current.protectedCards.length} card{current.protectedCards.length === 1 ? ' is' : 's are'} kept out by your tags or a ★.</>}
-        </p>
-      </div>
-      {(after.length > 0 || chosen.length > 0) && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          {chosen.length > 0 && (
-            <span className={`rounded-full border px-2.5 py-0.5 ${mvAfter > current.averageMv + 0.02 ? 'border-amber-400/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)]'}`}>
-              Average mana value {current.averageMv.toFixed(2)} → {mvAfter.toFixed(2)}{mvAfter > current.averageMv + 0.02 ? ' (heavier)' : ''}
-            </span>
-          )}
-          {after.map((r) => {
-            const low = r.now < r.target[0];
-            return (
-              <span key={r.id} className={`rounded-full border px-2.5 py-0.5 ${low ? 'border-amber-400/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)]'}`}>
-                {r.label} {r.count} → {r.now}{low ? ` (below ${r.target[0]})` : ''}
-              </span>
-            );
-          })}
-        </div>
-      )}
-      {current.candidates.length === 0 ? (
-        <p className="text-sm text-[var(--muted)]">Nothing stands out - every card has a job here.</p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {current.candidates.slice(0, 30).map((c) => (
-            <li key={c.cardId}>
-              <div className={`flex items-start gap-3 rounded-2xl border p-2.5 ${picked.has(c.cardId) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}>
-                <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
-                  <input type="checkbox" checked={picked.has(c.cardId)} onChange={() => toggle(c.cardId)} className="mt-1" />
-                  {c.image ? <Image src={c.image} alt="" width={40} height={56} className="rounded" unoptimized /> : <span className="h-14 w-10 rounded bg-[var(--surface-hover)]" />}
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium">{c.name}</span>
-                    <span className="block text-xs text-[var(--muted)]">{c.reasons.join(' · ')}</span>
-                  </span>
-                </label>
-                <button
-                  onClick={() => star(c)}
-                  aria-label={`Keep ${c.name}: never offer it as a cut`}
-                  title="Keep it: never offer it as a cut"
-                  className="rounded-full px-2 py-1 text-base text-[var(--muted)] hover:text-[var(--accent)]"
-                >
-                  ☆
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="sticky bottom-[calc(var(--nav-h,0px)+0.75rem)] flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 backdrop-blur sm:bottom-4">
-        <button onClick={cut} disabled={!chosen.length || busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
-          {busy ? 'Moving…' : `Cut ${chosen.length || ''} to the maybeboard`.replace('  ', ' ')}
-        </button>
-        <button onClick={() => onTab('suggestions')} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">Combos and more ideas</button>
-      </div>
     </div>
   );
 }

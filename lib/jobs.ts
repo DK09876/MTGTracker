@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 import { database } from './db';
 import { recordError, type Level } from './errors';
 
-export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter';
+export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter' | 'printings' | 'cutreview';
 export type JobStatus = 'running' | 'done' | 'failed' | 'interrupted';
 
 export interface Job {

@@ -66,21 +66,21 @@ const FINISHER = new RegExp([
 ].join('|'), 'i');
 
 export const ROLES: Role[] = [
-  { id: 'ramp', label: 'Ramp', group: 'mana', tag: 'otag:ramp -t:land', target: [10, 12] },
+  { id: 'ramp', label: 'Ramp', group: 'mana', tag: 'otag:ramp -t:land', target: [11, 13] },
   { id: 'rock', label: 'Mana rocks', group: 'mana', tag: 'otag:mana-rock -t:land', target: null },
   { id: 'dork', label: 'Mana creatures', group: 'mana', tag: 'otag:mana-dork', target: null },
   { id: 'land-ramp', label: 'Land ramp', group: 'mana', tag: 'otag:land-ramp -t:land', target: null },
   { id: 'ritual', label: 'Rituals', group: 'mana', tag: 'otag:ritual', target: null },
   { id: 'reducer', label: 'Cost reducers', group: 'mana', tag: 'otag:cost-reducer -t:land', target: null },
 
-  { id: 'draw', label: 'Card advantage', group: 'cards', tag: 'otag:card-advantage -otag:cantrip -t:land', target: [10, 12] },
+  { id: 'draw', label: 'Card draw', group: 'cards', tag: 'otag:card-advantage -otag:cantrip -t:land', target: [9, 11] },
   { id: 'engine', label: 'Draw engines', group: 'cards', tag: 'otag:draw-engine -t:land', target: null },
   { id: 'cantrip', label: 'Cantrips', group: 'cards', tag: 'otag:cantrip', target: null },
   { id: 'tutor', label: 'Tutors', group: 'cards', tag: 'otag:tutor -otag:ramp -t:land', target: null },
   { id: 'wheel', label: 'Wheels', group: 'cards', tag: 'otag:wheel', target: null },
 
-  { id: 'removal', label: 'Targeted removal', group: 'interaction', tag: 'otag:spot-removal -t:land', target: [8, 12] },
-  { id: 'wipe', label: 'Board wipes', group: 'interaction', tag: 'otag:board-wipe -t:land', target: [2, 4] },
+  { id: 'removal', label: 'Targeted removal', group: 'interaction', tag: 'otag:spot-removal -t:land', target: [9, 11] },
+  { id: 'wipe', label: 'Board wipes', group: 'interaction', tag: 'otag:board-wipe -t:land', target: [1, 2] },
   { id: 'counter', label: 'Counterspells', group: 'interaction', tag: 'otag:counterspell', target: null },
   { id: 'gy-hate', label: 'Graveyard hate', group: 'interaction', tag: 'otag:graveyard-hate -t:land', target: null },
   // Slows the whole table down. Scryfall has no single stax tag; these are

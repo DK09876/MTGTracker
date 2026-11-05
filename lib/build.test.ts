@@ -23,14 +23,38 @@ describe('build', () => {
     expect(karstenLands(1.5, 20)).toBe(37);
   });
 
-  it('lists roles below their guideline, and a missing finisher, as gaps', () => {
+  it('says what is worth fixing, most pressing first, with the cards behind it', () => {
     const plan = buildPlan({
-      commander: null, cards: [], lands: 36, averageMv: 3, size: 101, brief: '', savedReads: 0,
-      roles: [role('ramp', 8, [10, 12]), role('draw', 11, [10, 12]), role('finisher', 0)],
+      commander: null, cards: [], lands: 41, averageMv: 3, size: 101, brief: '',
+      roles: [role('ramp', 9, [10, 12]), role('draw', 11, [10, 12]), role('removal', 3, [8, 12]), role('finisher', 0)],
     });
-    expect(plan.gaps.map((g) => g.role)).toEqual(['ramp', 'finisher']);
-    expect(plan.targets.map((g) => g.role)).toEqual(['ramp', 'finisher', 'draw']);
-    expect(plan.steps.find((s) => s.id === 'cuts')?.summary).toBe('1 over 100');
-    expect(plan.steps.find((s) => s.id === 'plan')?.status).toBe('todo');
+    expect(plan.gaps.map((g) => g.role)).toEqual(['ramp', 'removal']);
+    expect(plan.targets.map((g) => g.role)).toEqual(['ramp', 'removal', 'draw']);
+    expect(plan.issues.map((i) => [i.id, i.level])).toEqual([
+      ['size', 'fix'], ['role:removal', 'fix'], ['role:ramp', 'consider'], ['finisher', 'consider'],
+    ]);
+    expect(plan.issues[0]).toMatchObject({ title: '1 card over 100', action: { kind: 'cuts' } });
+    expect(plan.issues.find((i) => i.id === 'role:ramp')?.cards).toHaveLength(9);
+    // Only roles the deck has cards in, or a guideline for.
+    expect(plan.roles.map((r) => r.role)).toEqual(['ramp', 'draw', 'removal']);
+  });
+
+  it('counts cards tagged as a win condition as finishers', () => {
+    const plan = buildPlan({
+      commander: null, cards: [], lands: 41, averageMv: 3, size: 100, brief: 'Go wide with slivers.',
+      roles: [role('ramp', 10, [10, 12])], wincons: ['Sliver Overlord'],
+    });
+    expect(plan.finishers).toEqual(['Sliver Overlord']);
+    expect(plan.issues).toEqual([]);
+  });
+
+  it('flags a colour that is short of its sources', () => {
+    const plan = buildPlan({
+      commander: null, cards: [], lands: 41, averageMv: 3, size: 100, brief: 'x', roles: [role('finisher', 2)],
+      colors: [{ color: 'W', sources: 14, needed: 19, neededFor: 'Swords to Plowshares' }, { color: 'U', sources: 20, needed: 20, neededFor: 'Counterspell' }],
+    });
+    expect(plan.issues.map((i) => [i.id, i.level])).toEqual([['colors', 'fix']]);
+    expect(plan.issues[0].title).toBe('Short of {W} sources for the hungriest spells');
+    expect(plan.issues[0].why).toMatch(/^\{W\} 14 of 19, set by Swords to Plowshares/);
   });
 });

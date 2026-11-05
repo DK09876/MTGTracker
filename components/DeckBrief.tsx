@@ -12,8 +12,10 @@
  * their routes compare with the newest read.
  */
 
+import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import { modelLabel } from '@/lib/quota';
 import type { DeckRead, ReadMode, WinLine } from '@/lib/reads';
@@ -23,12 +25,14 @@ interface Props {
   listId: string;
   tags: DeckTags;
   onTags: (tags: DeckTags) => void;
+  /** A first brief drafted from the cards, shown until the owner writes one. */
+  drafted?: string;
 }
 
 const POLL_MS = 2_500;
 
 const MODES: Array<{ mode: ReadMode; label: string; note: string; free?: boolean }> = [
-  { mode: 'quick', label: 'Quick read', note: 'How it wins from combos and roles, without AI.', free: true },
+  { mode: 'quick', label: 'Quick read', note: 'How it wins from combos and built-in tags, without AI.', free: true },
   { mode: 'scratch', label: 'Draft from scratch', note: 'Reads the cards and ignores what you wrote.' },
   { mode: 'build', label: 'Build on my brief', note: 'Keeps your words and fills in what is missing.' },
   { mode: 'check', label: 'Check my brief', note: 'Where the cards and your plan disagree.' },
@@ -37,11 +41,13 @@ const MODES: Array<{ mode: ReadMode; label: string; note: string; free?: boolean
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const by = (r: DeckRead) => (r.model ? modelLabel(r.model).replace(/^Claude /, '') : 'Quick read');
 
-export default function DeckBrief({ listId, tags, onTags }: Props) {
+export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props) {
   const [brief, setBrief] = useState<string | null>(null);
-  const [reads, setReads] = useState<api.DeckReads | null>(null);
+  const [reads, setReads] = useState<api.DeckReads | null>(() => api.peek<api.DeckReads>(api.paths.reads(listId)) ?? null);
   const [menu, setMenu] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The owner's words for the model, on top of everything it is sent anyway.
+  const [instructions, setInstructions] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -56,7 +62,8 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
   }, [running, load]);
 
   // The box grows with what is written rather than scrolling inside itself.
-  const text = brief ?? tags.brief;
+  const fromCards = !tags.brief.trim() && brief === null && !!drafted;
+  const text = brief ?? (tags.brief || drafted);
   // It is fitted again when its width changes too (the saved reads column
   // arriving, a rotated phone), not only when the text does.
   useEffect(() => {
@@ -85,7 +92,7 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
     setMenu(false);
     setError(null);
     try {
-      const { job } = await api.startRead(listId, mode);
+      const { job } = await api.startRead(listId, mode, mode === 'quick' ? '' : instructions);
       setReads((r) => (r ? { ...r, job } : r));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start it');
@@ -119,7 +126,7 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
   return (
     <section data-tour="brief" className="flex flex-col gap-3">
       <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">What should this deck do?</h3>
+        <h3 data-section="What it does" className="flex items-center gap-2 font-medium">What this deck does <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.brief.map((x) => <li key={x}>{x}</li>)}</ul></Tip></h3>
         <div className="relative" ref={menuRef}>
           <div data-tour="draft-menu" className="btn-go inline-flex overflow-hidden rounded-full text-sm font-semibold">
             <button onClick={() => start(tags.brief.trim() ? 'build' : 'scratch')} disabled={running} className="px-3.5 py-1.5 disabled:opacity-60">
@@ -138,6 +145,17 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
           </div>
           {menu && (
             <div role="menu" className="absolute right-0 z-30 mt-1 w-80 max-w-[90vw] rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-lg">
+              <label className="block px-3 pb-2 pt-1 text-xs text-[var(--muted)]">
+                Your instructions for the AI <span className="opacity-80">(optional, added to what it is sent)</span>
+                <textarea
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  rows={2}
+                  maxLength={2000}
+                  placeholder="e.g. Casual table, no infinite combos. Focus on the commander growing huge."
+                  className="mt-1 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)]"
+                />
+              </label>
               {MODES.map((m) => (
                 <button key={m.mode} role="menuitem" onClick={() => start(m.mode)} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-[var(--surface-hover)]">
                   <span className="text-sm font-medium">{m.label}</span>
@@ -150,9 +168,9 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
         </div>
       </div>
       <p className="max-w-3xl text-sm text-[var(--muted)]">
-        Optional, and read by every step. The plan, how it wins, what you want parts of the deck to do —
-        &ldquo;the tokens are there to feed Korvold&rdquo;, &ldquo;keep interaction cheap&rdquo;. Reads run in the background, so you can
-        leave this page while one works.
+        Everything else reads this: what to add and cut, how cards are tagged, what Chat knows. The plan, how it wins,
+        what parts of the deck are for — &ldquo;the tokens are there to feed Korvold&rdquo;, &ldquo;keep interaction cheap&rdquo;. AI reads run in the
+        background, so you can leave this page while one works.
       </p>
       {error && <p className="text-sm text-red-400">{error}</p>}
       {running && (
@@ -181,7 +199,7 @@ export default function DeckBrief({ listId, tags, onTags }: Props) {
             </ReadCard>
           )}
           <label htmlFor={`brief-${listId}`} className="text-sm font-medium">
-            My brief <span className="font-normal text-[var(--muted)]">· saved when you leave the box</span>
+            My brief <span className="font-normal text-[var(--muted)]">· {fromCards ? 'drafted from the cards - change anything, then confirm the plan below' : 'saved when you leave the box'}</span>
           </label>
           <textarea
             id={`brief-${listId}`}

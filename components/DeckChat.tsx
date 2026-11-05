@@ -8,9 +8,11 @@
  * background, so the page can be left while Claude thinks.
  */
 
+import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
+import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { DeckChat as Chat } from '@/lib/deck-chat';
 import type { ListedCard } from '@/lib/db';
@@ -22,19 +24,21 @@ interface Props {
   cards: ListedCard[];
   onAdd: (cardId: string, board: Board) => Promise<void>;
   onRemove: (cardId: string) => Promise<void> | void;
+  /** A question to start a new chat with, ready to send (from Tune). */
+  question?: string;
 }
 
 const POLL_MS = 2_000;
 const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?'];
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
-  const [chats, setChats] = useState<api.ChatSummary[] | null>(null);
+export default function DeckChat({ listId, cards, onAdd, onRemove, question = '' }: Props) {
+  const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
   const [replying, setReplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(question);
   const end = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);
@@ -173,7 +177,8 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
             ))}
           </div>
         )}
-        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2">
+        {/* The composer stays at the bottom of the screen as the thread grows, as on Rules. */}
+        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
           <label htmlFor={`ask-${listId}`} className="sr-only">Ask about this deck</label>
           <textarea
             id={`ask-${listId}`}
@@ -185,6 +190,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove }: Props) {
             placeholder={chat ? 'Ask a follow-up…' : 'Ask about this deck…'}
             className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
+          <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
           <button type="submit" disabled={replying || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
       </section>

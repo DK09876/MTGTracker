@@ -4,7 +4,7 @@
  * GET: the waiting draft, the saved reads (each with the cards in and out
  * since, and how its routes compare with the newest read), and the read
  * job if one is running.
- * POST {mode}: start a read in the background - 'quick' from the cards
+ * POST {mode, instructions?}: start a read in the background - 'quick' from the cards
  * alone, or the model's 'scratch', 'build' or 'check'. Answers the job.
  * PATCH {id, saved}: keep a read or let it go back to being the draft.
  * DELETE ?read=: drop one.
@@ -72,7 +72,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
   const { list, profile } = owned;
-  const body = await request.json().catch(() => ({})) as { mode?: string };
+  const body = await request.json().catch(() => ({})) as { mode?: string; instructions?: string };
+  const instructions = typeof body.instructions === 'string' ? body.instructions.slice(0, 2000) : '';
   const mode = MODES.find((m) => m === body.mode) ?? 'build';
 
   const model = mode === 'quick' ? null : appModel(profile, 'tagging', list.name);
@@ -84,7 +85,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     errorLevel: (e) => (e instanceof ModelError || e instanceof StepError || e instanceof ScryfallError ? 'warn' : 'error'),
   }, async ({ progress }) => {
     progress(mode === 'quick' ? 'Reading roles and combos' : 'The model is reading the deck');
-    const found = mode === 'quick' ? await quickRead(list) : await briefStep(model!, { list, boards: ['main'] }, { maxBusy: 1 }, mode);
+    const found = mode === 'quick' ? await quickRead(list) : await briefStep(model!, { list, boards: ['main'] }, { maxBusy: 1 }, mode, instructions);
     const read = addRead({ listId: id, profileId: profile, mode, model: found.model, winConditions: found.winConditions, missing: found.missing, brief: found.brief, cards: mainNames(id) });
     return { readId: read.id };
   });

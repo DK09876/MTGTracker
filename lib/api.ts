@@ -36,6 +36,9 @@ import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
+import type { CutReview } from './cut-review';
+import type { GoldfishSettings } from './goldfish';
+import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
@@ -59,6 +62,48 @@ export const AI_SPENT = 'mtg-ai-spent';
 function spending<T>(work: Promise<T>): Promise<T> {
   return work.finally(() => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(AI_SPENT)); });
 }
+
+// --- answers remembered for this visit -----------------------------------------
+//
+// The Pi answers in tens of milliseconds, but from away it is a round trip of
+// 100-300ms. So a page opened again starts from what it showed last time
+// (peek) and refreshes in the background, rather than going blank to wait.
+// A deck's answers are dropped as soon as the deck itself has changed.
+
+const memo = new Map<string, unknown>();
+
+function get<T>(path: string): Promise<T> {
+  const u = url(path);
+  return fetch(u).then(json<T>).then((v) => { memo.set(u, v); return v; });
+}
+
+/** What a GET answered last time this visit, if anything: to show at once while it is asked again. */
+export function peek<T>(path: string): T | undefined {
+  return memo.get(url(path)) as T | undefined;
+}
+
+/** Forget a deck's remembered answers (it changed). */
+function forgetDeck(listId: string) {
+  for (const k of memo.keys()) if (k.includes(`/lists/${listId}/`)) memo.delete(k);
+}
+
+/** The paths the deck pages read, for peek. */
+export const paths = {
+  list: (id: string) => `lists/${id}`,
+  lists: (kind?: ListKind) => (kind ? `lists?kind=${kind}` : 'lists'),
+  plan: (id: string) => `lists/${id}/plan`,
+  build: (id: string) => `lists/${id}/build`,
+  cuts: (id: string) => `lists/${id}/cuts`,
+  review: (id: string) => `lists/${id}/cuts/review`,
+  health: (id: string) => `lists/${id}/health`,
+  roles: (id: string) => `lists/${id}/health?roles=1`,
+  insights: (id: string) => `lists/${id}/insights`,
+  tags: (id: string) => `lists/${id}/tags`,
+  playtest: (id: string) => `lists/${id}/playtest`,
+  chats: (id: string) => `lists/${id}/chats`,
+  reads: (id: string) => `lists/${id}/reads`,
+  folders: 'folders',
+};
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
@@ -151,11 +196,13 @@ export const autocomplete = (q: string, signal?: AbortSignal) =>
   fetch(url(`autocomplete?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ names: string[] }>).then((b) => b.names);
 
-export const fetchLists = (kind?: ListKind) =>
-  fetch(url(kind ? `lists?kind=${kind}` : 'lists')).then(json<{ lists: List[] }>).then((b) => b.lists);
+export const fetchLists = (kind?: ListKind) => get<{ lists: List[] }>(paths.lists(kind)).then((b) => b.lists);
+export const peekLists = (kind?: ListKind) => peek<{ lists: List[] }>(paths.lists(kind))?.lists;
 
 export interface CommanderOption {
   id: string;
+  /** For finding the card in the Pi's own copy, without asking Scryfall. */
+  oracleId?: string | null;
   name: string;
   typeLine: string;
   image: string | null;
@@ -165,11 +212,11 @@ export const searchCommanders = (q: string, signal?: AbortSignal) =>
   fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
 
-export const createDeck = (name: string, commanderId: string | null, decklist: string, starter?: { ownedFirst: boolean }) =>
+export const createDeck = (name: string, commander: CommanderOption | null, decklist: string, starter?: { ownedFirst: boolean }) =>
   fetch(url('lists'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'deck', commanderId, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
+    body: JSON.stringify({ name, kind: 'deck', commanderId: commander?.id ?? null, commanderOracleId: commander?.oracleId ?? null, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
   }).then(json<{ list: List; imported?: ImportSummary }>).finally(jobsChanged);
 
 /** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
@@ -219,11 +266,32 @@ export const renameList = (id: string, name: string) =>
     body: JSON.stringify({ name }),
   }).then(json<{ list: List }>);
 
+export const duplicateList = (id: string) =>
+  fetch(url(`lists/${id}/duplicate`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    .then(json<{ list: List }>).then((b) => b.list);
+
+export interface DeckFolders { folders: Array<{ id: string; name: string }>; placed: Record<string, string> }
+export const fetchFolders = () => get<DeckFolders>(paths.folders);
+export const createFolder = (name: string) =>
+  fetch(url('folders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+    .then(json<{ folder: { id: string; name: string } }>).then((b) => b.folder);
+export const renameFolder = (id: string, name: string) =>
+  fetch(url(`folders/${id}`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(json<{ folder: { id: string; name: string } }>);
+export const deleteFolder = (id: string) => fetch(url(`folders/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+export const placeDeck = (listId: string, folderId: string | null) =>
+  fetch(url(`lists/${listId}/folder`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId }) }).then(json<{ ok: true }>);
+
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
-export const fetchList = (id: string) =>
-  fetch(url(`lists/${id}`)).then(json<{ list: List; cards: ListedCard[]; public?: boolean }>);
+export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean };
+export const fetchList = async (id: string) => {
+  const before = peek<ListPage>(paths.list(id));
+  const now = await get<ListPage>(paths.list(id));
+  // The deck changed since its tabs were read: what they remember is out of date.
+  if (before && before.list.updatedAt !== now.list.updatedAt) forgetDeck(id);
+  return now;
+};
 
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
@@ -344,11 +412,10 @@ export interface DeckHealth {
 }
 
 /** Everything that comes from the stored cards - immediate. */
-export const deckHealth = (listId: string) => fetch(url(`lists/${listId}/health`)).then(json<DeckHealth>);
+export const deckHealth = (listId: string) => get<DeckHealth>(paths.health(listId));
 
 /** Role counts - slow the first time a deck's cards are seen, then immediate. */
-export const deckRoles = (listId: string) =>
-  fetch(url(`lists/${listId}/health?roles=1`)).then(json<{ roles: RoleCount[] }>).then((b) => b.roles);
+export const deckRoles = (listId: string) => get<{ roles: RoleCount[] }>(paths.roles(listId)).then((b) => b.roles);
 
 export interface DeckInsights {
   bracket: (BracketFloor & { spellbook: { tag: string; label: string } }) | null;
@@ -370,14 +437,14 @@ export interface DeckInsights {
   unavailable: string[];
 }
 
-export const deckInsights = (listId: string) => fetch(url(`lists/${listId}/insights`)).then(json<DeckInsights>);
+export const deckInsights = (listId: string) => get<DeckInsights>(paths.insights(listId));
 
 // --- deck tags -----------------------------------------------------------
 
 const send = (path: string, method: string, body: object) =>
   fetch(url(path), { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-export const deckTags = (listId: string) => fetch(url(`lists/${listId}/tags`)).then(json<DeckTags>);
+export const deckTags = (listId: string) => get<DeckTags>(paths.tags(listId));
 
 // --- background jobs, errors and deck reads ---------------------------------
 
@@ -415,18 +482,22 @@ export interface CutPlan {
   curve: string | null;
   averageMv: number;
   roles: Array<{ id: string; label: string; count: number; target: [number, number] }>;
+  /** The deck's own rule settings. */
+  settings: CutSettings;
 }
-export const cutPlan = (listId: string) => fetch(url(`lists/${listId}/cuts`)).then(json<CutPlan>);
+export const cutPlan = (listId: string) => get<CutPlan>(paths.cuts(listId));
 /** Star a card so it is never offered as a cut. */
 export const keepCard = (listId: string, oracleId: string, keep: boolean) => send(`lists/${listId}/cuts`, 'PUT', { oracleId, keep }).then(json<{ ok: true }>);
+/** Save the deck's own cut rules. */
+export const saveCutSettings = (listId: string, settings: CutSettings) => send(`lists/${listId}/cuts`, 'PATCH', { settings }).then(json<{ settings: CutSettings }>);
 
-export const buildPlan = (listId: string) => fetch(url(`lists/${listId}/build`)).then(json<BuildPlan>);
+export const buildPlan = (listId: string) => get<BuildPlan>(paths.build(listId));
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
     .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
-export const deckChats = (listId: string) => fetch(url(`lists/${listId}/chats`)).then(json<{ chats: ChatSummary[] }>);
+export const deckChats = (listId: string) => get<{ chats: ChatSummary[] }>(paths.chats(listId));
 export const deckChat = (listId: string, chatId: string) =>
   fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
 export const askDeck = (listId: string, text: string, chatId?: string) =>
@@ -446,9 +517,9 @@ export interface DeckReads {
   /** The read job, while it runs or if the last one failed. */
   job: Job | null;
 }
-export const deckReads = (listId: string) => fetch(url(`lists/${listId}/reads`)).then(json<DeckReads>);
-export const startRead = (listId: string, mode: ReadMode) =>
-  send(`lists/${listId}/reads`, 'POST', { mode }).then(json<{ job: Job }>).finally(jobsChanged);
+export const deckReads = (listId: string) => get<DeckReads>(paths.reads(listId));
+export const startRead = (listId: string, mode: ReadMode, instructions = '') =>
+  send(`lists/${listId}/reads`, 'POST', { mode, instructions }).then(json<{ job: Job }>).finally(jobsChanged);
 export const keepRead = (listId: string, id: string, saved: boolean) => send(`lists/${listId}/reads`, 'PATCH', { id, saved }).then(json<{ ok: true }>);
 export const dropRead = (listId: string, id: string) =>
   fetch(url(`lists/${listId}/reads?read=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
@@ -500,7 +571,8 @@ export type CollectionState = {
   totals: { copies: number; unique: number; inDecks: number; value: number };
 };
 
-export const collection = () => fetch(url('collection')).then(json<CollectionState>);
+export const collection = () => get<CollectionState>('collection');
+export const peekCollection = () => peek<CollectionState>('collection');
 
 export const addToCollection = (cardId: string, opts: { quantity?: number; finish?: Finish; location?: string } = {}) =>
   send('collection', 'POST', { cardId, ...opts }).then(json<{ ok: true; count: number; card: ScryfallCard }>);
@@ -600,3 +672,50 @@ export const setCaps = (caps: Partial<Caps>) => send('ai/models', 'PUT', { caps 
 export const aiUsage = (days = 7) =>
   fetch(url(`ai/usage?days=${days}`)).then(json<{ calls: AiCall[]; names: Record<string, string>; days: number }>);
 export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);
+
+/** A deck's plan: what it does, its styles, the ranges it uses, how it wins. */
+export interface DeckPlanState {
+  brief: string;
+  /** A first brief drafted from the cards, until one is written. */
+  draft: string;
+  confirmed: boolean;
+  detected: { primary: string; secondary: string | null; support: Record<string, number> };
+  style: string;
+  style2: string | null;
+  chosen: { style: boolean; style2: boolean };
+  targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
+  wins: { tagged: string[]; finishers: string[] };
+  styles: Array<{ id: string; label: string; note: string; cards: number }>;
+  flip: { value: number; mine: boolean };
+  lands: [number, number];
+  landsDefault: [number, number];
+  packages: Array<{ tagId: string; name: string; kind: string | null; size: number; count: number }>;
+}
+export interface PlanChange {
+  brief?: string;
+  style?: string | null;
+  style2?: string | null;
+  targets?: Record<string, [number, number] | null>;
+  confirm?: boolean;
+  flip?: number | null;
+  packages?: Record<string, number | null>;
+}
+export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
+export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
+
+/** Claude's last review of the cut list, and the job if one is running. */
+export const cutReview = (listId: string) => get<{ review: CutReview | null; job: Job | null }>(paths.review(listId));
+export const startCutReview = (listId: string, instructions: string) =>
+  send(`lists/${listId}/cuts/review`, 'POST', { instructions }).then(json<{ job: Job }>).finally(jobsChanged);
+
+/** A deck's playtest settings, presets, and each card's tags by name. */
+export interface PlaytestState {
+  settings: GoldfishSettings;
+  presets: Array<{ name: string; settings: GoldfishSettings }>;
+  saved: boolean;
+  cardTags: Record<string, string[]>;
+  tagNames: string[];
+}
+export const deckPlaytest = (listId: string) => get<PlaytestState>(paths.playtest(listId));
+export const savePlaytest = (listId: string, change: { settings?: GoldfishSettings; presets?: PlaytestState['presets'] }) =>
+  send(`lists/${listId}/playtest`, 'PUT', change).then(json<{ settings: GoldfishSettings; presets: PlaytestState['presets'] }>);
