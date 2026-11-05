@@ -104,7 +104,14 @@ export default function DecksPage() {
     // Measured on scroll and resize, not watched for crossings: opening New deck moves the toolbar
     // from above the screen to below it in one go, which an IntersectionObserver never reports.
     let frame = 0;
-    const check = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => setToolsGone(toolsEl.getBoundingClientRect().bottom < navHeight)); };
+    // It takes over as soon as the toolbar starts under the nav, so there is never a moment with neither.
+    const check = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const nav = document.querySelector('body header')?.getBoundingClientRect().bottom ?? navHeight;
+        setToolsGone(toolsEl.getBoundingClientRect().top < nav);
+      });
+    };
     check();
     window.addEventListener('scroll', check, { passive: true });
     window.addEventListener('resize', check);
