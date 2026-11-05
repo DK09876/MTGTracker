@@ -26,7 +26,8 @@ import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
 
 // Series colour: the app's gold, stepped down into the band that reads on
 // the dark surface (validated: lightness band and 3:1 contrast on #1d1a16).
-const SERIES = '#b38f1f';
+// In the commander's colours (the deck page sets --c1..--c3; gold without a commander).
+const SERIES = 'linear-gradient(135deg, var(--c1), var(--c3))';
 const TRACK = '#3a3016';
 // Status colours are fixed and only ever appear beside an icon and a label.
 const STATUS = { good: '#0ca30c', warning: '#fab219', critical: '#d03b3b' };

@@ -22,7 +22,8 @@ import * as api from '@/lib/api';
 import type { GoldfishJob } from '@/lib/goldfish.worker';
 import { imageOf, type ScryfallCard } from '@/lib/scryfall';
 
-const SERIES = '#b38f1f';
+// In the commander's colours (the deck page sets --c1..--c3; gold without a commander).
+const SERIES = 'linear-gradient(135deg, var(--c1), var(--c3))';
 
 interface Props {
   listId: string;

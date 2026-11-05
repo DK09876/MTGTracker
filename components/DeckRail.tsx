@@ -6,6 +6,9 @@
  * one (above the app's own nav). "On this page" lists every element the
  * page marks with data-section, so each tab names its own parts - on Cards,
  * every group with its count - and keeps up as they change.
+ *
+ * The deck itself heads it - its art, name, count and Add cards - so those
+ * stay in reach as the page scrolls without a second bar appearing.
  */
 
 import { useEffect, useState } from 'react';
@@ -23,11 +26,12 @@ interface Props {
   section: DeckTab;
   onSection: (tab: DeckTab) => void;
   planConfirmed: boolean;
+  deck: { name: string; art: string | null; size: number; onAdd: () => void };
 }
 
 const smooth = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
-export default function DeckRail({ section, onSection, planConfirmed }: Props) {
+export default function DeckRail({ section, onSection, planConfirmed, deck }: Props) {
   const [parts, setParts] = useState<Section[]>([]);
 
   // The page's sections, read from the page and read again when it changes.
@@ -63,9 +67,30 @@ export default function DeckRail({ section, onSection, planConfirmed }: Props) {
       data-deck-rail
       aria-label="Deck"
       className="fixed inset-x-2 bottom-[calc(var(--nav-h)+0.5rem)] z-30 flex gap-1 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-lg backdrop-blur
-        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-[7.5rem] lg:z-0 lg:max-h-[calc(100vh-8.5rem)] lg:flex-col lg:overflow-y-auto lg:p-2 lg:shadow-none"
+        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:p-2 lg:shadow-none"
     >
-      <span className="hidden px-3 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)] lg:block">Deck</span>
+      {/* Wide screens: the deck heads the rail. */}
+      <div className="hidden flex-col gap-2 border-b border-[var(--border)] px-1.5 pb-3 pt-1 lg:flex">
+        <div className="flex items-center gap-2.5">
+          {deck.art
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={deck.art} alt="" aria-hidden className="h-10 w-10 shrink-0 rounded-lg object-cover object-[50%_25%]" />
+            : <span aria-hidden className="id-grad h-10 w-10 shrink-0 rounded-lg opacity-60" />}
+          <span className="flex min-w-0 flex-col leading-tight">
+            <b className="line-clamp-2 font-display text-[15px]">{deck.name}</b>
+            <button
+              onClick={() => go(deck.size === 100 ? 'cards' : 'tune')}
+              title={deck.size === 100 ? undefined : deck.size > 100 ? `Tune: cut ${deck.size - 100}` : `Tune: add ${100 - deck.size}`}
+              className={`mt-1 self-start rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${deck.size === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}
+            >
+              {deck.size} / 100
+            </button>
+          </span>
+        </div>
+        <button onClick={deck.onAdd} className="btn-go rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
+      </div>
+      {/* Phones: Add cards leads the bar. */}
+      <button onClick={deck.onAdd} aria-label="Add cards" className="btn-go flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg font-semibold lg:hidden">＋</button>
       <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col">
         {TABS.map(([value, label]) => (
           <button

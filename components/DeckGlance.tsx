@@ -97,7 +97,7 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
           <span className="flex h-12 items-end gap-1" aria-label={`Mana curve: ${h.curve.map((c) => `${c.count} at ${c.label}`).join(', ')}`}>
             {h.curve.map((c) => (
               <span key={c.label} className="flex w-4 flex-col items-center gap-0.5">
-                <span className="w-full rounded-t-[3px] bg-[#b38f1f]" style={{ height: `${(c.count / max) * 34}px`, minHeight: c.count ? 2 : 0 }} title={`${c.count} at ${c.label}`} />
+                <span className="w-full rounded-t-[3px] bg-[linear-gradient(to_top,var(--c1),var(--c3))]" style={{ height: `${(c.count / max) * 34}px`, minHeight: c.count ? 2 : 0 }} title={`${c.count} at ${c.label}`} />
                 <span className="text-[10px] leading-none text-[var(--muted)]">{c.label}</span>
               </span>
             ))}

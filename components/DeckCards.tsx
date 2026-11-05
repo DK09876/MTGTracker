@@ -27,6 +27,7 @@ import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
 import { tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
+import { useNavBottom } from '@/lib/use-nav-bottom';
 
 export type Entry = Item & { board: Board };
 
@@ -88,6 +89,7 @@ const SHORTCUTS: Array<[string, string]> = [
 
 export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk }: Props) {
   const [board, setBoard] = useState<Board>('main');
+  const navBottom = useNavBottom();
   const [filter, setFilter] = useState('');
   const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === 'undefined' ? DEFAULT_PREFS : loadPrefs()));
   const [folded, setFolded] = useState<Set<string>>(() => (typeof window === 'undefined' ? new Set() : loadFolded(listId)));
@@ -237,14 +239,16 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
         </div>
       )}
 
-      <div data-tour="card-tools" className="mt-3 flex flex-wrap items-center gap-2">
+      {/* Sticks under the top bar as the cards scroll: one row to swipe on a phone, wrapped on wider screens. */}
+      <div data-tour="card-tools" style={{ top: navBottom }}
+        className="sticky z-20 -mx-4 mt-3 flex items-center gap-2 overflow-x-auto bg-[var(--background)]/92 px-4 py-2 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:rounded-b-2xl sm:px-0">
         <input
           ref={filterBox}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter (press /) — t:creature, c:rg, cmc<=3, usd>5, -t:land"
+          placeholder="Filter (/) — t:creature, c:rg, cmc<=3"
           aria-label="Filter this list"
-          className="min-w-[12rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
+          className="min-w-[11rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
         />
         <div className="flex shrink-0 overflow-hidden rounded-full border border-[var(--border)] text-sm" role="group" aria-label="View">
           {(['grid', 'stacks', 'text'] as View[]).map((v) => (
@@ -272,7 +276,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             </span>
           </span>
         </div>
-        <div className="flex w-full min-w-0 gap-2 sm:w-auto">
+        <div className="flex shrink-0 gap-2">
           <select aria-label="Group by" value={groupBy} onChange={(e) => setPrefs((p) => ({ ...p, groupBy: e.target.value as GroupBy }))} className={select('')}>
             <option value="type">Group: type</option>
             <option value="mv">Group: mana value</option>
@@ -285,12 +289,12 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             <option value="price">Sort: price</option>
           </select>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <button data-tour="select-cards" onClick={() => (selecting ? stopSelecting() : setSelecting(true))} aria-pressed={selecting}
             className={`rounded-full border px-3.5 py-1.5 text-sm ${selecting ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
             {selecting ? `${picked.size} selected · Done` : 'Select'}
           </button>
-          <span className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
+          <span className="flex items-center gap-1.5 whitespace-nowrap text-sm text-[var(--muted)] max-sm:hidden">
             Shortcuts
             <Tip label="Keyboard shortcuts">
               <span className="font-semibold">Keyboard shortcuts</span>
@@ -383,9 +387,9 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       })}
 
       {selecting && (
-        <div data-tour="selection-bar" className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 mt-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--accent)]/60 bg-[var(--surface-hover)] p-3 text-sm shadow-xl lg:bottom-4">
+        <div data-tour="selection-bar" className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 mt-6 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:whitespace-normal rounded-2xl border border-[var(--accent)]/60 bg-[var(--surface-hover)] p-3 text-sm shadow-xl lg:bottom-4">
           <b className="tabular-nums">{picked.size} selected</b>
-          <span className="text-xs text-[var(--muted)]">click cards to pick them · shift-click a range · A picks all shown</span>
+          <span className="text-xs text-[var(--muted)] max-sm:hidden">click cards to pick them · shift-click a range · A picks all shown</span>
           {isDeck && (['main', 'maybe', 'side'] as Board[]).filter((b) => b !== board).map((b) => (
             <button key={b} disabled={!pickedEntries.length || busy} onClick={() => bulk((e) => onMove(e.card.id, b))}
               className="rounded-full border border-[var(--border)] px-3 py-1 hover:bg-[var(--surface)] disabled:opacity-40">To {BOARD_NAME[b].replace('the ', '')}</button>
