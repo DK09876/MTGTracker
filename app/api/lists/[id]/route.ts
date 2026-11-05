@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server';
 
 import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander, slotQuestions } from '@/lib/db';
-import { planConfirmed } from '@/lib/deck-plan';
+import { planConfirmed, planProgress } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
 import { isPublic, setPublic } from '@/lib/profile-style';
 import { getCard, ScryfallError } from '@/lib/scryfall';
@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (owned instanceof NextResponse) return owned;
     const deck = owned.list.kind === 'deck';
     return NextResponse.json({
-      list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id),
+      list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id), planProgress: deck ? planProgress(id) : null,
       // A deck's sections beyond Main, and what to ask about its second commander or companion.
       sections: deck ? sectionsOf(id) : [], slotQuestions: deck ? slotQuestions(id) : [],
     });

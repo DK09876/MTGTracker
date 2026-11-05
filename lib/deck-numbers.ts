@@ -158,7 +158,7 @@ const count = (list: Cards) => list.reduce((n, c) => n + c.quantity, 0);
 const round = (n: number) => Math.round(n * 100) / 100;
 
 /** The land number, from the cards and which of them are ramp or draw. */
-export function landNumber(cards: Cards, rolesOf: (card: ScryfallCard) => string[], mine?: [number, number] | null): LandNumber {
+export function landNumber(cards: Cards, rolesOf: (card: ScryfallCard) => string[], mine?: [number, number] | null, by: 'yours' | 'override' = 'yours'): LandNumber {
   const spells = cards.filter((c) => !isLand(c.card));
   const backs = spells.filter((c) => isLandBack(c.card));
   const spellCount = count(spells);
@@ -181,7 +181,7 @@ export function landNumber(cards: Cards, rolesOf: (card: ScryfallCard) => string
       steps: [
         `31.42 + 3.13 × ${averageMv.toFixed(2)} − 0.28 × ${cheap} = ${raw.toFixed(1)}`,
         `Rounded: ${Math.round(raw)}${Math.round(raw) < 37 ? ', raised to 37 (never fewer)' : ''}.`,
-        ...(mine ? [`Your own range, ${mine[0]}–${mine[1]}, is used instead.`] : []),
+        ...(mine ? [by === 'override' ? `A change to the usual rules sets ${mine[0] === mine[1] ? mine[0] : `${mine[0]}–${mine[1]}`} instead.` : `Your own range, ${mine[0]}–${mine[1]}, is used instead.`] : []),
       ],
     },
   };
@@ -199,6 +199,8 @@ export interface JobInput {
   flip: number;
   /** Ranges in use: the style's and the owner's, by job id; missing ones use the base. */
   ranges?: Partial<Record<JobId, [number, number]>>;
+  /** Where each range came from, in words ("your range", "a change to the usual rules: ..."). */
+  rangeFrom?: Partial<Record<JobId, string>>;
 }
 
 /** Every job, counted the same way for every screen. */
@@ -217,7 +219,8 @@ export function jobs(input: JobInput): Job[] {
   const slow = ramp.filter((n) => (byName.get(n)!.card.cmc ?? 0) >= flip);
   const cmdRamps = !!commander && commanderRoles.includes('ramp');
   const rampCount = ramp.reduce((n, name) => n + qty(name) * (slow.includes(name) ? 0.5 : 1), 0) + (cmdRamps ? 1 : 0);
-  const rampFrom = input.ranges?.ramp ? 'your plan' : `a flip turn of ${flip}`;
+  const rampFrom = input.rangeFrom?.ramp ?? (input.ranges?.ramp ? 'your plan' : `a flip turn of ${flip}`);
+  const fromStep = (id: JobId) => (input.rangeFrom?.[id] ? [`Range from ${input.rangeFrom[id]}.`] : []);
   job('ramp', ramp, rampCount, range('ramp', rampRange(flip)), {
     inputs: [`Ramp cards: ${ramp.length}`, `Costing ${flip} or more (the flip turn): ${slow.length}${slow.length ? ` (${slow.slice(0, 3).join(', ')})` : ''}`, ...(cmdRamps ? [`${commander!.name.split(',')[0]} ramps too`] : [])],
     steps: [`${ramp.length - slow.length} counted whole, ${slow.length} at half${cmdRamps ? ', +1 for the commander' : ''} = ${round(rampCount)}.`, `Range from ${rampFrom}: 12 at a flip turn of 4, one more or fewer per mana.`],
@@ -230,7 +233,7 @@ export function jobs(input: JobInput): Job[] {
   const drawCount = draw.reduce((n, name) => n + qty(name), 0);
   job('draw', draw, drawCount, range('draw', BASE_RANGES.draw), {
     inputs: [`Cards Scryfall tags as card advantage, cantrips left out: ${drawAll.length}`, `Of those, impulse draw: ${impulse.length}`],
-    steps: [`${drawAll.length} − ${impulse.length} impulse = ${drawCount}.`, 'Impulse draw is counted on its own: it digs, but what it exiles has to be played soon, so it does not refill your hand.'],
+    steps: [`${drawAll.length} − ${impulse.length} impulse = ${drawCount}.`, 'Impulse draw is counted on its own: it digs, but what it exiles has to be played soon, so it does not refill your hand.', ...fromStep('draw')],
   });
   job('impulse', impulse, impulse.reduce((n, name) => n + qty(name), 0), null, {
     inputs: [`Card advantage that exiles cards to play them: ${impulse.length}`],
@@ -244,7 +247,7 @@ export function jobs(input: JobInput): Job[] {
   const counters = membersOf(['counter']).length;
   job('interaction', interaction, interactionCount, range('interaction', BASE_RANGES.interaction), {
     inputs: [`Removal, counterspells and board wipes: ${interaction.length} (${counters} counterspell${counters === 1 ? '' : 's'})`, `Removal that can be used again: ${repeatable.length}${repeatable.length ? ` (${repeatable.slice(0, 3).join(', ')})` : ''}`],
-    steps: [`${interaction.length} + ${repeatable.length} for repeatable removal = ${interactionCount}.`],
+    steps: [`${interaction.length} + ${repeatable.length} for repeatable removal = ${interactionCount}.`, ...fromStep('interaction')],
   });
 
   // Wipes: one more when there are few creatures to lose.
@@ -260,13 +263,13 @@ export function jobs(input: JobInput): Job[] {
   const protection = membersOf(['protection']);
   job('protection', protection, protection.reduce((n, name) => n + qty(name), 0), range('protection', BASE_RANGES.protection), {
     inputs: [`Protection, fogs, silence effects and redirects: ${protection.length}`],
-    steps: [input.ranges?.protection ? 'Range from your plan.' : 'Base range.'],
+    steps: [input.rangeFrom?.protection ? `Range from ${input.rangeFrom.protection}: low 1–2, medium 2–3, high 3–5.` : input.ranges?.protection ? 'Range from your plan.' : 'Base range.'],
   });
 
   const finishers = membersOf(JOB_ROLES.finishers);
   job('finishers', finishers, finishers.reduce((n, name) => n + qty(name), 0), range('finishers', BASE_RANGES.finishers), {
     inputs: [`Cards that win or close a game: ${finishers.length}`],
-    steps: ['Alternate wins, finishers from rules text, extra turns, extra combats, overruns and drain.'],
+    steps: ['Alternate wins, finishers from rules text, extra turns, extra combats, overruns and drain.', ...fromStep('finishers')],
   });
   return out;
 }

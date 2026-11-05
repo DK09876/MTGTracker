@@ -190,7 +190,7 @@ export function deckText(deck: ChatDeck): string {
     c ? `Colours: ${(c.color_identity ?? []).join('') || 'colourless'}` : '',
     '',
     deck.brief.trim() ? `The owner's brief:\n${deck.brief.trim()}` : 'The owner has not written a brief.',
-    deck.plan ? `The plan: ${deck.plan}` : '',
+    deck.plan ? deck.plan : '',
     '',
     counts ? `Counts against the plan's guidelines (card draw leaves out cantrips and impulse draw; interaction is removal, counterspells and wipes together): ${counts}` : '',
     '',

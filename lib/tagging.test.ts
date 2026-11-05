@@ -175,6 +175,24 @@ describe('parseBrief', () => {
       .toMatch(/finisher/);
     expect(() => parseBrief({ winConditions: [], missing: '', brief: '' }, deck)).toThrow(/no brief/);
   });
+  it('reads what Claude would set in the plan: proposals, disagreements, overrides and notes', async () => {
+    const { parseBrief } = await import('./tagging');
+    const d = parseBrief({
+      winConditions: [], missing: '', brief: 'Treasure.',
+      proposals: [{ part: 'style', value: 'exile', why: 'More cards exile.' }, { part: 'made-up', value: 'x', why: '' }],
+      disagreements: [{ part: 'lean', detected: 'Medium', value: 'High', why: 'Prosper is the engine.' }],
+      overrides: [{ target: 'lands', value: '36', why: 'Cheap rocks.', affects: 'Lands, Cuts' }],
+      notes: ['Only two draw engines.'],
+    }, []);
+    expect(d.suggestions).toEqual([
+      { kind: 'proposal', part: 'style', value: 'exile', why: 'More cards exile.' },
+      { kind: 'disagreement', part: 'lean', value: 'High', why: 'Prosper is the engine.', detected: 'Medium' },
+      { kind: 'override', part: 'lands', value: '36', why: 'Cheap rocks.', affects: 'Lands, Cuts' },
+      { kind: 'note', part: 'note', value: 'Only two draw engines.', why: '' },
+    ]);
+    // An older answer without any of it still reads.
+    expect(parseBrief({ winConditions: [], missing: '', brief: 'x' }, []).suggestions).toEqual([]);
+  });
 });
 
 describe('briefMessage modes', () => {

@@ -15,6 +15,8 @@ import {
   type BriefMode, type DraftedBrief,
   parseAssignments, parseAudit, parseProposals, PROPOSE_SCHEMA, PROPOSE_SYSTEM, proposeMessage,
 } from './tagging';
+import { planContext } from './plan-context';
+import { STYLES, VALUE } from './styles';
 import { nextColor } from './tags';
 
 export class StepError extends Error {}
@@ -35,7 +37,8 @@ function read({ list, boards }: StepDeck) {
 /** Suggest tags for the owner to review. Answers how many were suggested and by which model. */
 export async function proposeStep(model: JsonModel, at: StepDeck, instructions: string, options?: CallOptions) {
   const { deck, current, context } = read(at);
-  const input = { ...context, instructions, accepted: current.tags.filter((t) => t.status === 'accepted'), rejected: current.tags.filter((t) => t.status === 'rejected') };
+  const plan = await planContext(at.list).catch(() => '');
+  const input = { ...context, plan, instructions, accepted: current.tags.filter((t) => t.status === 'accepted'), rejected: current.tags.filter((t) => t.status === 'rejected') };
   const answer = await model({ step: 'suggest tags', system: PROPOSE_SYSTEM, user: proposeMessage(input), schema: PROPOSE_SCHEMA, temperature: 0.4 }, options);
   const { overview, tags } = parseProposals(answer.data, deck.cards, current.tags.filter((t) => t.status !== 'proposed'));
   if (!tags.length) throw new StepError('The model suggested nothing new - try different instructions');
@@ -56,7 +59,8 @@ export async function assignStep(model: JsonModel, at: StepDeck, keys: string[],
   if (!accepted.length) throw new StepError('Accept some tags first');
   const batch = keys.map((k) => deck.refOf.get(k)).filter((r): r is string => !!r);
   if (!batch.length) return { tagged: 0, skipped: keys.length, added: 0, model: null };
-  const input = { ...context, tags: accepted, batch, instructions: only.instructions };
+  const plan = await planContext(at.list).catch(() => '');
+  const input = { ...context, plan, tags: accepted, batch, instructions: only.instructions };
   const answer = await model({ step: 'tag cards', system: ASSIGN_SYSTEM, user: assignMessage(input), schema: ASSIGN_SCHEMA }, options);
   const { assignments, answered } = parseAssignments(answer.data, accepted, batch, deck.cards);
   // Only cards the model answered for lose their old model tags; a card it
@@ -79,7 +83,8 @@ export async function auditStep(model: JsonModel, at: StepDeck, tagIds: string[]
   }
   // A card the owner took a tag off is not the model's to put back.
   const blocked = new Set(current.cardTags.filter((l) => !l.on).map((l) => `${l.key}:${l.tagId}`));
-  const input = { ...context, tags: accepted, checking, members };
+  const plan = await planContext(at.list).catch(() => '');
+  const input = { ...context, plan, tags: accepted, checking, members };
   const answer = await model({ step: 'check the tags', system: AUDIT_SYSTEM, user: auditMessage(input), schema: AUDIT_SCHEMA }, options);
   const changes = parseAudit(answer.data, input)
     .map((c) => ({ ...c, key: deck.keyOf.get(c.key)! }))
@@ -106,10 +111,12 @@ export function cardsToTag(
 /** Draft the brief: how the deck wins - or that it does not - and its plan. Nothing is saved; the owner edits it. */
 export async function briefStep(model: JsonModel, at: StepDeck, options?: CallOptions, mode: BriefMode = 'build', instructions = ''): Promise<DraftedBrief & { model: string }> {
   const { deck, context } = read(at);
+  // The plan as it stands, and the styles Claude may pick from when it proposes one.
+  const plan = `${await planContext(at.list).catch(() => '')}\n\nStyles to choose from (id - name): ${[...STYLES, VALUE].map((s) => `${s.id} - ${s.label}`).join('; ')}.`;
   const answer = await model({
     step: mode === 'check' ? 'check the brief' : 'draft the brief',
     system: mode === 'check' ? BRIEF_SYSTEM + BRIEF_CHECK : BRIEF_SYSTEM,
-    user: briefMessage({ ...context, mode, instructions }), schema: BRIEF_SCHEMA, thinking: 'high',
+    user: briefMessage({ ...context, plan, mode, instructions }), schema: BRIEF_SCHEMA, thinking: 'high',
   }, options);
   return { ...parseBrief(answer.data, deck.cards), model: answer.model };
 }

@@ -84,7 +84,24 @@ export async function deckRoles(listId: string, main: ListedCard[] = cardsInList
   const commander = commanderOf(listId);
   const plan = planFor(listId, '', commander, main);
   const ranges = Object.fromEntries(plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
-  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: await commanderRoles(commander), flip: plan.flip.value, ranges }));
+  const rangeFrom = Object.fromEntries(plan.targets.map((t) => [t.role, t.from])) as Partial<Record<JobId, string>>;
+  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: await commanderRoles(commander), flip: plan.flip.value, ranges, rangeFrom }));
+}
+
+/**
+ * The same as deckRoles, from roles already looked up only - nothing is
+ * searched. For text sent to Claude, where a missing role is better than a
+ * slow or failing lookup (every card is looked up nightly anyway).
+ */
+export async function deckRolesKnown(listId: string, main: ListedCard[] = cardsInList(listId).filter((c) => c.board === 'main')): Promise<RoleCount[]> {
+  const none = { search: async () => ({ cards: [], totalCards: 0, hasMore: false }), cached: cachedRoles, save: () => {} };
+  const roles = withOverrides(await countRoles(main, none), main, overrides(listId));
+  const commander = commanderOf(listId);
+  const plan = planFor(listId, '', commander, main);
+  const ranges = Object.fromEntries(plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
+  const rangeFrom = Object.fromEntries(plan.targets.map((t) => [t.role, t.from])) as Partial<Record<JobId, string>>;
+  const cmdRoles = commander ? (await countRoles([{ card: commander, quantity: 1 }], none)).filter((r) => r.count > 0).map((r) => r.id) : [];
+  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: cmdRoles, flip: plan.flip.value, ranges, rangeFrom }));
 }
 
 /** A deck's commander, by list id alone. */

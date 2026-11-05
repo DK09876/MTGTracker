@@ -117,7 +117,7 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
               >
                 <span className={on ? 'text-[var(--c1)]' : ''}><Icon tab={value} /></span>
                 <span className="flex-1">{label}</span>
-                {value === 'chat' && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
+                {(value === 'chat' || value === 'tune') && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
                 {value === 'plan' && !planConfirmed && !on && <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300">start here</span>}
               </button>
               {BREAK_AFTER.includes(value) && <span aria-hidden className="mx-2.5 my-1.5 hidden h-px bg-[var(--border)] lg:block" />}

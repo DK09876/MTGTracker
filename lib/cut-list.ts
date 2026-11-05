@@ -7,7 +7,7 @@
 
 import { cutCandidates } from './cut-score';
 import { cardsInList, deckTags, type List } from './db';
-import { cutSettings, planFor, planStyles } from './deck-plan';
+import { cutSettings, effectiveCutSettings, planFor, planStyles } from './deck-plan';
 import { commanderRoles as rolesOfCommander, deckRoles, keeps } from './deck-roles';
 import { fitProfile } from './fit';
 import { analyse } from './health';
@@ -19,17 +19,23 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>) {
   // What the commander itself does, from the same tags (it is in every game).
   const commanderRoles = await rolesOfCommander(list.commander);
   const settings = cutSettings(list.id);
+  // Scored with the deck's changes to the usual rules on top, where the owner set nothing.
+  const effective = effectiveCutSettings(list.id);
   const styles = planStyles(list.id, list.commander, main);
   const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
+  // Never cut: the ★ keeps, the plan's key cards and the cards of the ways it wins.
+  const keep = keeps(list.id);
+  const protectedNames = new Set([...(plan.stored.key?.v ?? plan.snapshot.keyCards ?? []), ...(plan.snapshot.routeCards ?? [])]);
+  for (const c of main) if (protectedNames.has(c.card.name)) keep.add(c.card.oracle_id ?? c.card.id);
   const result = cutCandidates({
     // A second commander leads the deck with the first: never a cut.
     cards: main.filter((c) => c.slot !== 'partner'), roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,
-    tags, keep: keeps(list.id),
+    tags, keep,
     // Lands are offered only over the plan's range, never to make room.
     lands: { have: plan.landNumber.have, range: plan.lands },
     packages: plan.packages,
-    settings, styles,
+    settings: effective.settings, styles,
   });
-  return { ...result, main, health, roles, settings, styles, tags };
+  return { ...result, main, health, roles, settings, overridden: Object.fromEntries(Object.entries(effective.changed).map(([k, o]) => [k, o.what])), styles, tags };
 }

@@ -34,6 +34,8 @@ export interface DeckContext {
   commander: ScryfallCard | null;
   cards: DeckCard[];
   brief: string;
+  /** The deck's plan as the app holds it, its numbers and the default ways to judge a deck (plan-context.ts). */
+  plan?: string;
 }
 
 /** A card's facts, as the model reads them. */
@@ -63,6 +65,11 @@ export function describeCard(c: DeckCard, ref: string): string {
 function commanderBlock(commander: ScryfallCard | null): string {
   if (!commander) return 'The deck has no commander set.';
   return `Commander: ${commander.name} ${manaCostOf(commander)} - ${typeLineOf(commander)}\n${oracleTextOf(commander)}`;
+}
+
+/** The plan, numbers and default rules, when the step was given them. */
+export function planBlock(plan: string | undefined): string {
+  return plan?.trim() ? `\n${plan.trim()}` : '';
 }
 
 function briefBlock(brief: string): string {
@@ -134,7 +141,8 @@ For each tag give:
   sacrifices from an enters trigger do not count - only repeatable outlets").
 - kind: wincon (actually ends the game), engine (keeps making value every
   turn), payoff (rewards the deck for doing its thing), enabler (makes the
-  deck's thing happen), or other.
+  deck's thing happen), multiplier (doubles or repeats what the deck's thing
+  does), or other.
 - examples: the names of cards in this deck that belong, exactly as listed.
   Up to 8, the clearest ones first.
 
@@ -146,6 +154,7 @@ export function proposeMessage(input: ProposeInput): string {
     commanderBlock(input.commander),
     '',
     briefBlock(input.brief),
+    planBlock(input.plan),
   ];
   if (input.instructions.trim()) {
     lines.push('', `Instructions for this round of suggestions:\n"""\n${input.instructions.trim()}\n"""`);
@@ -271,6 +280,7 @@ export function assignMessage(input: AssignInput): string {
     commanderBlock(input.commander),
     '',
     briefBlock(input.brief),
+    planBlock(input.plan),
     '',
     'The tags:',
     ...input.tags.map((t) => tagLine(t, refs.get(t.id)!)),
@@ -417,6 +427,7 @@ export function auditMessage(input: AuditInput): string {
     commanderBlock(input.commander),
     '',
     briefBlock(input.brief),
+    planBlock(input.plan),
     '',
     'All the tags (for context):',
     ...input.tags.map((t) => tagLine(t, refs.get(t.id)!)),
@@ -507,7 +518,28 @@ tell someone sorting the cards which ones are the engine, which are fuel,
 which are the finish, and which are interaction or support.
 
 If the owner already wrote something, keep what they meant and build on it;
-it outranks your own reading.`;
+it outranks your own reading.
+
+You are also shown the deck's plan as the app holds it: each part, whether
+it was detected from the cards, set by the owner, or yours from before, and
+the numbers the app computed. Help fill it in:
+- proposals: values for any part where you would set something - the main
+  or second style (an id from the list, or "own: <name>" with ranges in
+  "why" for a style of your own), what the commander does for the deck,
+  broad or dense, key cards, a theme ("<Name>: card, card, ..."), a deck
+  rule, a way to win ("<Name>: card, card"), how much the deck leans on its
+  commander, the flip turn, or a line of the game plan by stage. Propose only
+  where you would change or add something.
+- disagreements: where you think a detected value is wrong, the part, what
+  was detected, what you would set, and why.
+- overrides: changes to the usual rules for this deck, only when they serve
+  what the owner is optimizing for and the usual rule would mislead here -
+  e.g. fewer lands because the deck makes lots of cheap mana. Say what it
+  changes ("range:ramp", "lands", "theme-size:<theme>", "rule:<cut rule id>"
+  or "exception"), the new value, why, and what it affects.
+- notes: anything worth knowing that fits no part.
+Never propose against the owner's own values unless you say so plainly in
+"why". Card names must be exactly as listed.`;
 
 /**
  * scratch: read the cards alone, ignoring what the owner wrote.
@@ -543,9 +575,14 @@ export function briefMessage(input: BriefInput): string {
     '',
     `The deck - ${input.cards.reduce((n, c) => n + c.quantity, 0)} cards:`,
     ...input.cards.map((c) => describeCard(c, c.key)),
+    // The plan before the owner's instructions, which come last.
+    ...(input.plan?.trim() ? [planBlock(input.plan)] : []),
     ...(input.instructions?.trim() ? ['', `The owner's instructions for this read - follow them where the cards allow:\n"""\n${input.instructions.trim()}\n"""`] : []),
   ].join('\n');
 }
+
+/** The plan parts Claude may propose a value for. */
+export const PROPOSAL_PARTS = ['style', 'style2', 'role', 'build', 'key', 'theme', 'rule', 'route', 'lean', 'flip', 'stage-early', 'stage-mid', 'stage-close'];
 
 export const BRIEF_SCHEMA = {
   type: 'OBJECT',
@@ -560,9 +597,35 @@ export const BRIEF_SCHEMA = {
     },
     missing: { type: 'STRING' },
     brief: { type: 'STRING' },
+    proposals: {
+      type: 'ARRAY',
+      items: { type: 'OBJECT', properties: { part: { type: 'STRING', enum: PROPOSAL_PARTS }, value: { type: 'STRING' }, why: { type: 'STRING' } }, required: ['part', 'value', 'why'] },
+    },
+    disagreements: {
+      type: 'ARRAY',
+      items: { type: 'OBJECT', properties: { part: { type: 'STRING', enum: PROPOSAL_PARTS }, detected: { type: 'STRING' }, value: { type: 'STRING' }, why: { type: 'STRING' } }, required: ['part', 'detected', 'value', 'why'] },
+    },
+    overrides: {
+      type: 'ARRAY',
+      items: { type: 'OBJECT', properties: { target: { type: 'STRING' }, value: { type: 'STRING' }, why: { type: 'STRING' }, affects: { type: 'STRING' } }, required: ['target', 'value', 'why', 'affects'] },
+    },
+    notes: { type: 'ARRAY', items: { type: 'STRING' } },
   },
   required: ['winConditions', 'missing', 'brief'],
 };
+
+/** One thing Claude would set: a proposal, a disagreement with what was detected, a change to the usual rules, or a note. */
+export interface PlanSuggestion {
+  kind: 'proposal' | 'disagreement' | 'override' | 'note';
+  /** The part (proposals and disagreements) or what the override changes ("range:ramp", "lands"...). */
+  part: string;
+  value: string;
+  why: string;
+  /** Disagreements: what was detected. */
+  detected?: string;
+  /** Overrides: what it affects. */
+  affects?: string;
+}
 
 export interface DraftedBrief {
   /** Each way the deck wins, with the cards that do it; empty when it has none. */
@@ -570,11 +633,13 @@ export interface DraftedBrief {
   /** What the deck lacks to win, or '' when it has what it needs. */
   missing: string;
   brief: string;
+  /** What Claude would set in the plan, for the owner to accept or skip. */
+  suggestions: PlanSuggestion[];
 }
 
 /** The model's draft, checked: card names kept only if they are in the deck. */
 export function parseBrief(body: unknown, deck: DeckCard[]): DraftedBrief {
-  const b = (body ?? {}) as { winConditions?: unknown; missing?: unknown; brief?: unknown };
+  const b = (body ?? {}) as { winConditions?: unknown; missing?: unknown; brief?: unknown; proposals?: unknown; disagreements?: unknown; overrides?: unknown; notes?: unknown };
   const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
   const names = new Map(deck.map((c) => [c.card.name.toLowerCase(), c.card.name]));
   const winConditions = (Array.isArray(b.winConditions) ? b.winConditions : [])
@@ -590,5 +655,12 @@ export function parseBrief(body: unknown, deck: DeckCard[]): DraftedBrief {
   const missing = str(b.missing, 600);
   const brief = str(b.brief, 4000);
   if (!brief) throw new Error('The model wrote no brief');
-  return { winConditions, missing: /^(none|nothing|n\/a)\.?$/i.test(missing) ? '' : missing, brief };
+  const list = (v: unknown) => (Array.isArray(v) ? v : []) as Array<Record<string, unknown>>;
+  const suggestions: PlanSuggestion[] = [
+    ...list(b.proposals).map((p) => ({ kind: 'proposal' as const, part: str(p.part, 40), value: str(p.value, 600), why: str(p.why, 400) })),
+    ...list(b.disagreements).map((p) => ({ kind: 'disagreement' as const, part: str(p.part, 40), value: str(p.value, 600), why: str(p.why, 400), detected: str(p.detected, 200) })),
+    ...list(b.overrides).map((p) => ({ kind: 'override' as const, part: str(p.target, 80), value: str(p.value, 300), why: str(p.why, 400), affects: str(p.affects, 120) })),
+    ...(Array.isArray(b.notes) ? b.notes : []).map((n) => ({ kind: 'note' as const, part: 'note', value: str(n, 600), why: '' })),
+  ].filter((x) => x.value && (x.kind === 'override' || x.kind === 'note' || PROPOSAL_PARTS.includes(x.part))).slice(0, 24);
+  return { winConditions, missing: /^(none|nothing|n\/a)\.?$/i.test(missing) ? '' : missing, brief, suggestions };
 }

@@ -23,6 +23,12 @@ export interface Style {
 export const STYLES: Style[] = [
   { id: 'spells', label: 'Spells engine', note: 'Rewards casting instants and sorceries: cheap spells, rituals and copy effects are the deck.',
     test: /whenever you cast (an? )?(instant|sorcery|noncreature)|copy (that|target) (instant|sorcery|spell)|magecraft/i, shift: { draw: [12, 15], ramp: [8, 10] } },
+  // Exile-and-play before treasure: a commander that does both (Prosper) is
+  // usually read for the exile first, and the cards then settle which leads.
+  { id: 'exile', label: 'Casting from exile', note: 'Exiles cards to play them: impulse draw, cascade, foretell, and payoffs for casting from exile.',
+    test: /\b(cast|play)[^.]* from exile|exile the top[^\n]*?you may (play|cast)|\bcascade\b|\bforetell\b|\bplot\b/i, shift: {} },
+  { id: 'treasure', label: 'Treasure', note: 'Makes and spends treasure: treasure makers, payoffs for sacrificing artifacts, and big spells it pays for.',
+    test: /\btreasure/i, shift: { ramp: [10, 12] } },
   { id: 'discard', label: 'Discard', note: 'Discarding is the engine: outlets, wheels, madness and payoffs for cards leaving your hand.',
     test: /\bdiscards? (a|one|two|that|any number of|your hand|cards?)\b|\bmadness\b|each player discards|whenever you discard/i, shift: { draw: [12, 16] } },
   { id: 'aristocrats', label: 'Aristocrats', note: 'Rewards creatures dying or being sacrificed: fodder, sac outlets and death payoffs.',
@@ -32,7 +38,7 @@ export const STYLES: Style[] = [
   { id: 'counters', label: '+1/+1 counters', note: 'Spreads and multiplies counters: counter makers, doublers and payoffs.',
     test: /\+1\/\+1 counters? on/i, shift: {} },
   { id: 'tokens', label: 'Go wide', note: 'Makes or rewards many creatures: token makers, anthems and overruns.',
-    test: /create[^.]* (creature )?tokens?|for each creature you control/i, shift: { wipe: [1, 3] } },
+    test: /create[^.]*(\d+\/\d+|creature)[^.]* tokens?|for each creature you control/i, shift: { wipe: [1, 3] } },
   { id: 'voltron', label: 'Voltron', note: 'Wins with commander damage: equipment, auras and protection for one creature.',
     test: /equipped creature|enchanted creature|\battach\b/i, shift: { interaction: [7, 11], wipe: [1, 3] } },
   { id: 'graveyard', label: 'Graveyard', note: 'Uses the graveyard: self-mill, reanimation and recursion.',

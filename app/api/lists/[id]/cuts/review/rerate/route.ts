@@ -12,6 +12,7 @@ import { lastReview, rerateCard, saveReview, TIERS, verdictOfTier, type Tier } f
 import { cardsInList, deckTags } from '@/lib/db';
 import { planStyles } from '@/lib/deck-plan';
 import { setKeep } from '@/lib/deck-roles';
+import { planContext } from '@/lib/plan-context';
 import { requireList, requirePlan } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const found = await rerateCard(model, {
       commander: list.commander,
       brief: deckTags(id).brief,
+      plan: await planContext(list).catch(() => ''),
       styles: planStyles(id, list.commander, main).map((s) => s.label),
       card: entry.card,
       was,

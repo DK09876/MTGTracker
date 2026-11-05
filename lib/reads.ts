@@ -12,6 +12,7 @@
 import { randomUUID } from 'crypto';
 
 import { database } from './db';
+import type { PlanSuggestion } from './tagging';
 
 export type ReadMode = 'quick' | 'scratch' | 'build' | 'check';
 
@@ -37,6 +38,8 @@ export interface DeckRead {
   brief: string;
   /** The deck's cards (names, main board) when it was read. */
   cards: string[];
+  /** What Claude would set in the plan: proposals, disagreements, overrides, notes. Model reads only. */
+  suggestions?: PlanSuggestion[];
   saved: boolean;
 }
 

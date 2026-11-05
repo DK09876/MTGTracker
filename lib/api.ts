@@ -26,6 +26,8 @@ import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
 import type { DeckSection, Purpose } from './sections-shared';
 import type { BracketFloor } from './bracket';
+import type { PlanChange as PlanChangeCore } from './deck-plan';
+import type { ChangeLine, PlanPart, PlanState, ProposalLine, RouteView, RuleLine, ThemeView } from './plan-server';
 import type { Health } from './health';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
@@ -282,7 +284,7 @@ export const placeDeck = (listId: string, folderId: string | null) =>
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
-export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean; sections?: DeckSection[]; slotQuestions?: SlotQuestion[] };
+export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean; planProgress?: { done: number; total: number } | null; sections?: DeckSection[]; slotQuestions?: SlotQuestion[] };
 export const fetchList = async (id: string) => {
   const before = peek<ListPage>(paths.list(id));
   const now = await get<ListPage>(paths.list(id));
@@ -442,7 +444,7 @@ export interface DeckInsights {
       id: string | null;
       image: string | null;
       price: string | null;
-      combos: Array<{ id: string; url: string; produces: string[]; popularity: number | null; have: string[] }>;
+      combos: Array<{ id: string; url: string; produces: string[]; have: string[] }>;
     }>;
   } | null;
   /** How it wins, guessed from the cards alone; null when the roles could not be read. */
@@ -688,36 +690,17 @@ export const aiUsage = (days = 7) =>
 export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);
 
 /** A deck's plan: what it does, its styles, the ranges it uses, how it wins. */
-export interface DeckPlanState {
-  brief: string;
-  /** A first brief drafted from the cards, until one is written. */
-  draft: string;
-  confirmed: boolean;
-  detected: { primary: string; secondary: string | null; support: Record<string, number> };
-  style: string;
-  style2: string | null;
-  chosen: { style: boolean; style2: boolean };
-  targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
-  wins: { tagged: string[]; finishers: string[] };
-  styles: Array<{ id: string; label: string; note: string; cards: number }>;
-  flip: { value: number; mine: boolean };
-  lands: [number, number];
-  landsDefault: [number, number];
-  packages: Array<{ tagId: string; name: string; kind: string | null; size: number; count: number }>;
-  /** The bracket aimed for, 1-5, or null until set. */
-  bracket: number | null;
-  gameChangers: string[];
-}
-export interface PlanChange {
+/** The Plan tab's picture of a deck (plan-server.ts). */
+export type DeckPlanState = PlanState;
+export type { PlanPart, ThemeView, RouteView, RuleLine, ChangeLine, ProposalLine };
+/** A change to the plan, plus what only the route does: keep or drop a detected theme, settle one of Claude's proposals, the brief. */
+export type PlanChange = PlanChangeCore & {
   brief?: string;
-  style?: string | null;
-  style2?: string | null;
-  targets?: Record<string, [number, number] | null>;
-  confirm?: boolean;
-  flip?: number | null;
-  packages?: Record<string, number | null>;
-  bracket?: number | null;
-}
+  keepTheme?: string;
+  unkeepTheme?: string;
+  settle?: { key: string; status: 'accepted' | 'skipped' };
+  acceptBrief?: string;
+};
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 

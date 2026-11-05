@@ -3,12 +3,12 @@
  * question and the reply runs as a background job. Server only.
  */
 
-import { planFor } from './deck-plan';
 import { deckRoles } from './deck-roles';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
+import { planContext } from './plan-context';
 import { startJob, type Job } from './jobs';
 import { newChat, reply, saveChat, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
@@ -35,7 +35,6 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     // Both commanders' colours, when the deck has two.
     const identity = [...deckIdentity([list.commander, main.find((c) => c.slot === 'partner')?.card])].join('') || 'c';
     const tags = deckTags(list.id);
-    const plan = planFor(list.id, tags.brief, list.commander, main);
     const names = new Map(tags.tags.filter((t) => t.status === 'accepted').map((t) => [t.id, t.name]));
     const byKey = new Map(main.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));
     const tagsOf = new Map<string, string[]>();
@@ -43,7 +42,7 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
       const name = byKey.get(ct.key);
       if (ct.on && name && names.has(ct.tagId)) tagsOf.set(name, [...(tagsOf.get(name) ?? []), names.get(ct.tagId)!]);
     }
-    const planText = `${plan.style.label}${plan.style2 ? ` + ${plan.style2.label}` : ''}; it needs ${plan.flip.value} mana to get going (the flip turn); ${plan.lands[0]}-${plan.lands[1]} lands.`;
+    const planText = await planContext(list).catch(() => '');
     const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),

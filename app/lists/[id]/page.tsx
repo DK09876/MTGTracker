@@ -59,12 +59,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [section, setSection] = useState<DeckTab>('cards');
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
   const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
+  // How many parts of the plan are left to confirm, for the locked screens.
+  const [planLeft, setPlanLeft] = useState<number | null>(seen?.planProgress ? seen.planProgress.total - seen.planProgress.done : null);
   // A deck's sections beyond Main, and what an import left to ask about its second commander or companion.
   const [sections, setSections] = useState<DeckSection[]>(seen?.sections?.length ? seen.sections : DEFAULT_SECTIONS);
   const [questions, setQuestions] = useState<SlotQuestion[]>(seen?.slotQuestions ?? []);
   // The bracket the plan aims for, which the Cards tab checks the Game Changers against.
   const [bracket, setBracket] = useState<number | null>(() => api.peek<api.DeckPlanState>(api.paths.plan(id))?.bracket ?? null);
-  const onPlan = useCallback((p: api.DeckPlanState) => { setPlanConfirmed(p.confirmed); setBracket(p.bracket ?? null); }, []);
+  const onPlan = useCallback((p: api.DeckPlanState) => { setPlanConfirmed(p.confirmed); setBracket(p.bracket ?? null); setPlanLeft(p.progress.total - p.progress.done); }, []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
 
@@ -100,6 +102,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setDraftName(data.list.name);
     setShown(!!data.public);
     setPlanConfirmed(data.planConfirmed !== false);
+    if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
     if (data.sections?.length) setSections(data.sections);
     setQuestions(data.slotQuestions ?? []);
   }, [id]);
@@ -136,6 +139,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setDraftName(data.list.name);
         setShown(!!data.public);
         setPlanConfirmed(data.planConfirmed !== false);
+        if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
+    if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
         if (data.sections?.length) setSections(data.sections);
         setQuestions(data.slotQuestions ?? []);
         // Read the other tabs now, side by side, so opening one is instant.
@@ -501,8 +506,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
             onPlan={onPlan}
             onTab={(tab) => setSection(tab)}
+            cardNames={[...new Set(cards.map((c) => c.card.name))].sort()}
           />
         ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+      ) : deck && (section === 'tune' || section === 'chat') && !planConfirmed ? (
+        <PlanLock what={section === 'tune' ? 'Tune' : 'Chat'} left={planLeft} onPlan={() => setSection('plan')} />
       ) : deck && section === 'tune' ? (
         <DeckBuild
           listId={id}
@@ -522,12 +530,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           brief={tags?.brief ?? ''}
           onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
         />
-      ) : deck && section === 'chat' && !planConfirmed ? (
-        <div data-tour="chat-locked" className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <h3 className="font-display text-lg font-semibold">Chat starts with the plan</h3>
-          <p className="text-sm text-[var(--muted)]">Claude answers better when it knows what the deck is for. The plan is already drafted from the cards - read it, change anything, and confirm it.</p>
-          <button onClick={() => setSection('plan')} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Go to Plan</button>
-        </div>
       ) : deck && section === 'chat' ? (
         <DeckChat
           key={chatQuestion}
@@ -627,6 +629,20 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onClose={() => setAddOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/** Tune and Chat wait for the plan: everything they do is built on what the deck is for. */
+function PlanLock({ what, left, onPlan }: { what: 'Tune' | 'Chat'; left: number | null; onPlan: () => void }) {
+  return (
+    <div data-tour={what === 'Chat' ? 'chat-locked' : 'tune-locked'} className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+      <h3 className="font-display text-lg font-semibold">{what} starts with the plan</h3>
+      <p className="text-sm text-[var(--muted)]">
+        {what === 'Tune' ? 'Cuts, swaps, finding cards and fixes are all built on what the deck is for.' : 'Claude answers better when it knows what the deck is for.'}
+        {' '}{left ? `${left} part${left === 1 ? '' : 's'} of the plan still to confirm. Most are filled in already.` : 'The plan is drafted from the cards: read it, change anything, and confirm it.'}
+      </p>
+      <button onClick={onPlan} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Go to Plan</button>
     </div>
   );
 }

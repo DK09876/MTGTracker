@@ -1,75 +1,71 @@
 /**
  * A deck's plan - what it is built to do.
  *
- * GET: the brief (or a draft of one), the main and second style as detected
- * and as chosen, every role's range, the cards it wins with, and whether
- * the plan is confirmed.
- * PUT {brief?, style?, style2?, targets?, confirm?, flip?, packages?, bracket?}: change any of it;
- * confirm saves the brief (the draft, if none was written) and unlocks the
- * AI steps.
+ * GET: every part of the plan (value, who set it, how sure, confirmed, how
+ * it was worked out), what to look at first, every rule with this deck's
+ * setting, the changes to the usual rules, and Claude's proposals.
+ * PUT: change any part (deck-plan.ts PlanChange) - changing a part makes
+ * it the owner's and confirms it - or confirm one part or the whole plan;
+ * keep or drop a detected theme; accept or skip one of Claude's proposals.
+ * Confirming the whole plan saves the brief (the draft, if none was
+ * written) and unlocks Tune, Chat and the paid Claude steps.
  */
 
 import { NextResponse } from 'next/server';
 
-import { cardsInList, deckTags, setTagBrief } from '@/lib/db';
-import { changePlan, draftFromCards, planFor, type PlanChange } from '@/lib/deck-plan';
-import { deckRoles } from '@/lib/deck-roles';
+import { setTagBrief } from '@/lib/db';
+import { changePlan, type PlanChange } from '@/lib/deck-plan';
+import { acceptBrief, keepTheme, planState, settleProposal, unkeepTheme, type ThemeView } from '@/lib/plan-server';
 import { requireList } from '@/lib/profile-route';
-import { STYLES, VALUE } from '@/lib/styles';
-import { FINISHING } from '@/lib/build';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-async function read(id: string, commander: Parameters<typeof planFor>[2]) {
-  const main = cardsInList(id).filter((c) => c.board === 'main');
-  const tags = deckTags(id);
-  const plan = planFor(id, tags.brief, commander, main);
-  // How it wins: cards tagged as a win condition, then the finisher roles.
-  const winTags = new Set(tags.tags.filter((t) => t.kind === 'wincon').map((t) => t.id));
-  const winKeys = new Set(tags.cardTags.filter((t) => t.on && winTags.has(t.tagId)).map((t) => t.key));
-  const pool = commander ? [{ card: commander }, ...main] : main;
-  const tagged = pool.filter((c) => winKeys.has(c.card.oracle_id ?? c.card.id)).map((c) => c.card.name);
-  const roles = await deckRoles(id, main).catch(() => []);
-  const finishers = roles.filter((r) => FINISHING.includes(r.id)).flatMap((r) => r.cards);
-  const wins = { tagged, finishers: [...new Set(finishers)].filter((n) => !tagged.includes(n)).sort() };
-  const draft = plan.draft || (plan.brief ? '' : draftFromCards(commander, plan.style, plan.style2, [...tagged, ...wins.finishers]));
-  // Theme packages: the owner's tags (not win conditions or pets), each with a size and how full it is.
-  const inMain = new Set(main.map((c) => c.card.oracle_id ?? c.card.id));
-  const packages = tags.tags.filter((t) => t.status === 'accepted' && t.kind !== 'wincon' && !/^(pets?|fun|favou?rites?)$/i.test(t.name))
-    .map((t) => ({ tagId: t.id, name: t.name, kind: t.kind, size: plan.packages[t.id] ?? 8, count: tags.cardTags.filter((ct) => ct.on && ct.tagId === t.id && inMain.has(ct.key)).length }));
-  return {
-    ...plan,
-    draft,
-    style: plan.style.id,
-    style2: plan.style2?.id ?? null,
-    wins,
-    packages,
-    // Game Changers in the deck (commanders included), against the bracket aimed for.
-    gameChangers: [...(commander ? [commander] : []), ...main.map((c) => c.card)].filter((c) => c.game_changer === true).map((c) => c.name),
-    styles: [...STYLES, VALUE].map((s) => ({ id: s.id, label: s.label, note: s.note, cards: plan.detected.support[s.id] ?? 0 })),
-  };
-}
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  return NextResponse.json(await read(id, owned.list.commander));
+  return NextResponse.json(await planState(owned.list));
 }
+
+type Body = PlanChange & { brief?: string; keepTheme?: string; unkeepTheme?: string; settle?: { key: string; status: 'accepted' | 'skipped' }; acceptBrief?: string };
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const body = await request.json().catch(() => ({})) as PlanChange & { brief?: string };
-  if (typeof body.brief === 'string') setTagBrief(id, body.brief.slice(0, 4000));
-  if (body.confirm) {
-    const now = await read(id, owned.list.commander);
-    const brief = now.brief.trim() || now.draft.trim();
-    if (!brief) return NextResponse.json({ error: 'Write a sentence on what the deck does first' }, { status: 400 });
-    if (!now.brief.trim()) setTagBrief(id, brief);
+  const { list } = owned;
+  const body = await request.json().catch(() => ({})) as Body;
+  const { brief, keepTheme: keep, unkeepTheme: unkeep, settle, acceptBrief: claudeBrief, ...change } = body;
+  // Claude can't set anything itself: only an accepted proposal is Claude's.
+  delete change.by;
+  delete change.proposal;
+
+  if (typeof brief === 'string') {
+    setTagBrief(id, brief.slice(0, 4000));
+    if (brief.trim()) changePlan(id, { briefBy: 'yours' });
   }
-  changePlan(id, { style: body.style, style2: body.style2, targets: body.targets, confirm: body.confirm, flip: body.flip, packages: body.packages, bracket: body.bracket });
-  return NextResponse.json(await read(id, owned.list.commander));
+  if (typeof claudeBrief === 'string' && claudeBrief.trim()) acceptBrief(id, claudeBrief);
+  if (settle?.key) {
+    const done = await settleProposal(list, settle.key, settle.status === 'skipped' ? 'skipped' : 'accepted');
+    if (!done) return NextResponse.json({ error: 'That proposal can’t be used as it is: skip it, or set the part yourself.' }, { status: 400 });
+  }
+  if (keep || unkeep || change.confirm || change.confirmPart) {
+    const now = await planState(list);
+    if (keep) {
+      const theme = (now.parts.themes.value as ThemeView[]).find((t) => t.id === keep);
+      if (theme) keepTheme(list, theme);
+    }
+    if (unkeep) unkeepTheme(list, unkeep);
+    // Confirming what the app detected saves it where a value must be set.
+    const bracket = now.parts.bracket.value as { value: number | null; looksLike: number };
+    if ((change.confirm || change.confirmPart === 'bracket') && bracket.value === null) changePlan(id, { bracket: bracket.looksLike });
+    if (change.confirm || change.confirmPart === 'brief') {
+      const text = now.brief.trim() || now.draft.trim();
+      if (change.confirm && !text) return NextResponse.json({ error: 'Write a sentence on what the deck does first' }, { status: 400 });
+      if (!now.brief.trim() && text) setTagBrief(id, text);
+    }
+  }
+  changePlan(id, change);
+  return NextResponse.json(await planState(list));
 }

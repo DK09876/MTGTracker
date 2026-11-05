@@ -11,7 +11,7 @@ import type { ScryfallCard } from './scryfall';
 
 /** proposed: suggested by the model, not yet reviewed. rejected: kept so it is not suggested again. */
 export type TagStatus = 'proposed' | 'accepted' | 'rejected';
-export type TagKind = 'wincon' | 'engine' | 'payoff' | 'enabler' | 'other';
+export type TagKind = 'wincon' | 'engine' | 'payoff' | 'enabler' | 'multiplier' | 'other';
 
 export interface Tag {
   id: string;
@@ -56,6 +56,7 @@ export const TAG_KINDS: Record<TagKind, string> = {
   engine: 'Engine',
   payoff: 'Payoff',
   enabler: 'Enabler',
+  multiplier: 'Multiplier',
   other: 'Other',
 };
 
@@ -64,6 +65,7 @@ export const TAG_KIND_HINTS: Record<TagKind, string> = {
   engine: 'Keeps making value every turn',
   payoff: "Rewards you for doing the deck's thing",
   enabler: "Makes the deck's thing happen",
+  multiplier: "Doubles what the deck's thing does",
   other: 'Anything else you want to group',
 };
 

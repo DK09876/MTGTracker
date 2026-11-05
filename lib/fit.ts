@@ -9,9 +9,9 @@ import { commanderStyle } from './build';
 import type { ScryfallCard } from './scryfall';
 
 /** Things a commander can care about, each with how a card shows it. */
-const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = [
+export const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = [
   { name: 'instants and sorceries', commander: /\b(instant|sorcery|noncreature) spell|magecraft|copy (that|target) (instant|sorcery|spell)/i, card: /^(Instant|Sorcery)\b|\b(instant|sorcery) spells? (you cast|cost)|magecraft|copy target (instant|sorcery)/i },
-  { name: 'tokens', commander: /\btokens?\b/i, card: /\bcreate[^.]*\btokens?\b|\btokens? you control\b/i },
+  { name: 'tokens', commander: /\b(creature|\d+\/\d+)[^.]*\btokens?\b|\bcreature tokens?\b/i, card: /\bcreate[^.]*(\d+\/\d+|creature)[^.]*\btokens?\b|\bcreature tokens? you control\b/i },
   { name: 'treasure', commander: /\btreasure/i, card: /\btreasure/i },
   { name: '+1/+1 counters', commander: /\+1\/\+1 counter/i, card: /\+1\/\+1 counter|proliferate/i },
   { name: 'sacrifice', commander: /\bsacrifice|\bdies\b/i, card: /\bsacrifice (a|another)|\bwhenever [^.]*\bdies\b/i },
@@ -27,7 +27,7 @@ const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = [
   { name: 'flying', commander: /\bflying\b/i, card: /\bflying\b/i },
   { name: 'snow', commander: /\bsnow\b/i, card: /\bSnow\b|\bsnow\b/ },
   { name: 'curses', commander: /\bcurses?\b/i, card: /\bCurse\b/ },
-  { name: 'casting from exile', commander: /\bcast [^.]*from exile|\bforetell|\bcascade/i, card: /\bcascade\b|\bforetell\b|\bcast [^.]*from exile/i },
+  { name: 'casting from exile', commander: /\b(cast|play) [^.]*from exile|exile the top[^\n]*?you may (play|cast)|\bforetell|\bcascade/i, card: /\bcascade\b|\bforetell\b|\b(cast|play) [^.]*from exile|exile the top[^\n]*?you may (play|cast)/i },
 ];
 
 // Reminder text in brackets is left out: Azula's "(A copy of a permanent
