@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { cutCandidates } from './cut-score';
 import { fitProfile } from './fit';
+import { styleById } from './styles';
 import type { RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
 
@@ -187,5 +188,32 @@ describe('cards that do two jobs', () => {
     expect(spiral?.why.some((w) => w.rule === 'multi') ?? true).toBe(true);
     // The card doing one job is the better cut.
     expect(spiral?.score ?? 0).toBeLessThan(rampant.score);
+  });
+});
+
+describe('reading the plan', () => {
+  const jiang = { name: 'Discard Boss', type_line: 'Legendary Creature', oracle_text: 'Whenever you discard a card, draw a card.', cmc: 5 } as ScryfallCard;
+  const discard = styleById('discard')!;
+  const wheel = card('Snort', 'Sorcery', 'Each player may discard their hand and draw five cards. Then Snort deals 5 damage to each opponent who discarded their hand this way.', { cmc: 4 });
+  const fury = card("Khorvath's Fury", 'Sorcery', 'For each player, choose friend or foe. Each friend discards all cards from their hand, then draws that many cards plus one.', { cmc: 5 });
+  const beast = card('Big Dumb Beast', 'Creature — Beast', 'Trample', { cmc: 6 });
+  const base = { roles: [role('draw', ['Snort', "Khorvath's Fury"], [10, 12])], fit: fitProfile(jiang), commander: jiang, commanderRoles: [], tags: null, keep: new Set<string>(), lands: { have: 37, range: [37, 38] as [number, number] } };
+
+  it('keeps wheels in a discard deck', () => {
+    const { candidates } = cutCandidates({ ...base, cards: [wheel, fury, beast], styles: [{ label: discard.label, test: discard.test }] });
+    const names = candidates.map((c) => c.name);
+    expect(names).not.toContain('Snort');
+    expect(names).not.toContain("Khorvath's Fury");
+    expect(names).toContain('Big Dumb Beast');
+  });
+
+  it('reads how the deck is built, its detected themes and what it optimizes for', () => {
+    const { type } = cutCandidates({ ...base, cards: [beast], build: 'Dense' });
+    expect(type.type).toBe('B');
+    const plain = cutCandidates({ ...base, cards: [beast] }).candidates[0].score;
+    const faster = cutCandidates({ ...base, cards: [beast], goal: ['Faster'] }).candidates[0].score;
+    expect(faster).toBeGreaterThan(plain);
+    const themed = cutCandidates({ ...base, cards: [beast], themes: [{ name: 'Big creatures', size: 8, cards: ['Big Dumb Beast'] }] }).candidates;
+    expect(themed[0]?.reasons.join(' ') ?? '').not.toMatch(/No role and none of your tags/);
   });
 });

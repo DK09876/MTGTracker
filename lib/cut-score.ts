@@ -71,6 +71,25 @@ export interface CutInput {
   settings?: CutSettings;
   /** The plan's styles: cards that do what they are about are kept. */
   styles?: Array<{ label: string; test: RegExp }>;
+  /** The plan's "how the deck is built": broad cuts on quality, dense keeps its theme cards. Read from the cards when missing. */
+  build?: 'Broad' | 'Dense';
+  /** The plan's detected themes (not yet kept as tags), each with its size and cards. */
+  themes?: Array<{ name: string; size: number; cards: string[] }>;
+  /** What the owner is optimizing for (the plan's chips): moves some rules' weights. */
+  goal?: string[];
+  /** When lands are over the range: the basic to offer (the colour the deck needs least). */
+  landCut?: string | null;
+}
+
+/** How the plan's chips move the rules: faster decks cut the top of the curve harder, fun decks keep their theme. */
+export function goalWeights(goal: string[] = []): Record<string, number> {
+  const out: Record<string, number> = {};
+  const times = (ids: string[], by: number) => { for (const id of ids) out[id] = (out[id] ?? 1) * by; };
+  if (goal.some((g) => /faster|win more/i.test(g))) times(['curve', 'costly', 'highcurve', 'slowramp'], 1.4);
+  if (goal.some((g) => /win more/i.test(g))) times(['floor'], 1.3);
+  if (goal.some((g) => /more fun|pets/i.test(g))) times(['theme', 'style', 'package-short'], 1.4);
+  if (goal.some((g) => /stay on theme/i.test(g))) { times(['offtheme'], 1.4); times(['theme'], 1.2); }
+  return out;
 }
 
 // Payoffs are not protected outright: a deck can have too many (the 'payoffs' rule).
@@ -126,7 +145,8 @@ const UTILITY = new Set(['ramp', 'rock', 'dork', 'land-ramp', 'draw', 'engine', 
 export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; protectedCards: string[]; type: DeckType; curve: string | null } {
   const { cards, roles, fit, commander, commanderRoles, tags, keep, lands } = input;
   const settings = input.settings ?? NO_SETTINGS;
-  const w = (id: string) => weightOf(settings, id);
+  const byGoal = goalWeights(input.goal);
+  const w = (id: string) => weightOf(settings, id) * (byGoal[id] ?? 1);
   const accepted = (tags?.tags ?? []).filter((t) => t.status === 'accepted');
   const keyTags = new Set(accepted.filter((t) => t.kind && PROTECTING.has(t.kind)).map((t) => t.id));
   const petTags = new Set(accepted.filter((t) => PET.test(t.name)).map((t) => t.id));
@@ -139,7 +159,9 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
   const anyTag = new Set(on.map((ct) => ct.key));
   const rolesOf = new Map<string, RoleCount[]>();
   for (const r of roles) for (const name of r.cards) rolesOf.set(name, [...(rolesOf.get(name) ?? []), r]);
-  const type = deckType(cards, fit);
+  const type: DeckType = input.build
+    ? { type: input.build === 'Dense' ? 'B' : 'A', why: input.build === 'Dense' ? 'The plan says the deck is dense: its theme cards carry it, so they are kept.' : 'The plan says the deck is broad: cards are judged on quality, the theme a tiebreaker.' }
+    : deckType(cards, fit);
 
   // Theme packages: each of the owner's theme tags, its size and how full it is.
   const inMain = new Set(cards.map((c) => c.card.oracle_id ?? c.card.id));
@@ -209,8 +231,14 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
     const packs = (tagsOf.get(key) ?? []).map((name) => themeTags.find((t) => t.name === name)).filter((t): t is NonNullable<typeof t> => !!t);
     const overPack = packs.find((t) => (members.get(t.id) ?? 0) > sizeOf(t.id));
     const shortPack = packs.find((t) => (members.get(t.id) ?? 0) <= sizeOf(t.id));
+    // The plan's detected themes count like tags, for cards no tag package covers.
+    const themeHit = !packs.length ? (input.themes ?? []).filter((t) => t.cards.includes(card.name)) : [];
+    const themeShort = themeHit.find((t) => t.cards.length <= t.size);
+    const themeOver = themeHit.find((t) => t.cards.length > t.size);
     if (shortPack) rule('package-short', `${shortPack.name}: ${members.get(shortPack.id)} of ${sizeOf(shortPack.id)} - the package needs it`);
     else if (overPack) rule('package-over', `${overPack.name}: ${members.get(overPack.id)}, more than its ${sizeOf(overPack.id)}`);
+    else if (themeShort) rule('package-short', `${themeShort.name}: ${themeShort.cards.length} of ${themeShort.size} - the theme needs it`);
+    else if (themeOver) rule('package-over', `${themeOver.name}: ${themeOver.cards.length}, more than its ${themeOver.size}`);
     // Engines: enablers are the backbone; payoffs should be about half as many.
     if (enablers.has(key) && enablers.size < 12) rule('enablers', `An enabler, and the deck has ${enablers.size} of about 12`);
     if (payoffs.has(key) && !enablers.has(key) && payoffs.size > enablers.size / 2) {
@@ -242,7 +270,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
     // The commander's theme: in a Type B deck it carries the deck; in a Type A, a tiebreaker.
     if (f.matches.length) {
       rule('theme', type.type === 'B' ? `Carries the theme (${f.matches.join(', ')}) - keep unless it is weak` : `On theme (${f.matches.join(', ')})`, type.type === 'B' ? 1 : 0.25);
-    } else if (fit && !styleHit && !finisher && !ids.some((r) => UTILITY.has(r))) {
+    } else if (fit && !styleHit && !themeHit.length && !finisher && !ids.some((r) => UTILITY.has(r))) {
       // Off theme and not a job every deck needs: generic utility is fine away from the deck's focus.
       rule('offtheme', `Nothing ${fit.commander} cares about`);
     }
@@ -259,7 +287,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
     else if ((card.cmc ?? 0) >= 5 && averageMv > 3.3 && !finisher) rule('highcurve', `The curve is high (average ${averageMv.toFixed(1)}): a 5-drop out brings it down`);
 
     if (ids.length === 1 && ids[0] === 'cantrip' && !f.matches.length) rule('cantrip', 'Only replaces itself');
-    if (!ids.length && !anyTag.has(key) && !f.matches.length && !styleHit) rule('norole', 'No role and none of your tags');
+    if (!ids.length && !anyTag.has(key) && !f.matches.length && !styleHit && !themeHit.length) rule('norole', 'No role and none of your tags');
     for (const c of custom) if (typeof c.then === 'number') add('custom', c.then, describeCustom(c));
 
     const score = why.reduce((n, r) => n + r.delta, 0);
@@ -271,7 +299,7 @@ export function cutCandidates(input: CutInput): { candidates: CutCandidate[]; pr
 
   // Lands only when over the plan's range: never cut lands to make room.
   if (lands.have > lands.range[1]) {
-    const basics = cards.filter((c) => /\bBasic\b/.test(c.card.type_line ?? '')).sort((a, b) => b.quantity - a.quantity);
+    const basics = cards.filter((c) => /\bBasic\b/.test(c.card.type_line ?? '')).sort((a, b) => Number(b.card.name === input.landCut) - Number(a.card.name === input.landCut) || b.quantity - a.quantity);
     if (basics[0]) {
       const text = `Lands: ${lands.have}, the plan wants ${lands.range[0]}–${lands.range[1]}`;
       candidates.push({ cardId: basics[0].card.id, name: basics[0].card.name, score: 1.5, roles: [], cmc: 0, reasons: [text], why: [{ rule: 'lands', delta: 1.5, text }] });

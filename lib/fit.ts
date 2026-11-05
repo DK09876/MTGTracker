@@ -23,7 +23,7 @@ export const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = 
   { name: 'attacking', commander: /\bwhenever [^.]* attacks|\bis attacking\b|\bcombat damage to a player/i, card: /\bextra combat|\bdouble strike|\bcan't be blocked|\bwhenever [^.]* attacks/i },
   { name: 'card draw', commander: /\bwhenever you draw/i, card: /\bdraw (a|two|three|that many|cards)\b|\bwheel|\beach player draws/i },
   { name: 'life gain', commander: /\bgain life|\blifelink/i, card: /\bgain \d+ life|\blifelink|\bwhenever you gain life/i },
-  { name: 'discard', commander: /\bdiscard/i, card: /\bdiscard (a|your hand|two)|\bmadness\b|\bloot/i },
+  { name: 'discard', commander: /\bdiscard/i, card: /\bdiscards? (a|your hand|their hands?|all the cards in (your|their) hands?|two)|\bmadness\b|\bloot/i },
   { name: 'flying', commander: /\bflying\b/i, card: /\bflying\b/i },
   { name: 'snow', commander: /\bsnow\b/i, card: /\bSnow\b|\bsnow\b/ },
   { name: 'curses', commander: /\bcurses?\b/i, card: /\bCurse\b/ },
@@ -110,6 +110,7 @@ export function quality(card: ScryfallCard, roles: string[] = []): Quality {
   const jobs = [...new Set(roles.map((r) => JOB_OF[r]).filter(Boolean))];
   score += Math.min(jobs.length, 3) / 3 * 0.3;
   if (jobs.length >= 2) reasons.push(`does ${jobs.length} jobs`);
-  if (roles.includes('removal') && /\b(target|each) (nonland )?permanent\b|\bany target\b|\bchoose (one|two)\b/i.test(text)) { score += 0.1; reasons.push('hits anything'); }
+  if (roles.includes('removal') && /\b(target|each) (nonland )?permanent\b|\bany target\b|\bchoose (one|two)\b/i.test(text)
+    && !/\btarget (white|blue|black|red|green) (spell|permanent)|\bif (it|that (spell|permanent)) is (white|blue|black|red|green)\b/i.test(text)) { score += 0.1; reasons.push('hits anything'); }
   return { score: Math.min(1, score), reasons };
 }

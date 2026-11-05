@@ -37,7 +37,6 @@ import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
-import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
 import type { CutReview, ReviewItem, ReviewMode, Tier as CardTier } from './cut-review-shared';
 import type { GoldfishSettings } from './goldfish';
@@ -46,7 +45,6 @@ import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
 import type { ThemeId } from './themes';
-import type { GapCard } from './gap-cards';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
 import type { Job } from './jobs';
@@ -507,10 +505,6 @@ export const keepCard = (listId: string, oracleId: string, keep: boolean) => sen
 /** Save the deck's own cut rules. */
 export const saveCutSettings = (listId: string, settings: CutSettings) => send(`lists/${listId}/cuts`, 'PATCH', { settings }).then(json<{ settings: CutSettings }>);
 
-export const buildPlan = (listId: string) => get<BuildPlan>(paths.build(listId));
-export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
-  fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
-    .then(json<{ role: { id: string; label: string }; source: 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
 export const deckChats = (listId: string) => get<{ chats: ChatSummary[] }>(paths.chats(listId));
@@ -724,3 +718,27 @@ export interface PlaytestState {
 export const deckPlaytest = (listId: string) => get<PlaytestState>(paths.playtest(listId));
 export const savePlaytest = (listId: string, change: { settings?: GoldfishSettings; presets?: PlaytestState['presets'] }) =>
   send(`lists/${listId}/playtest`, 'PUT', change).then(json<{ settings: GoldfishSettings; presets: PlaytestState['presets'] }>);
+
+// --- Tune ----------------------------------------------------------------------
+
+export type TuneState = import('./tune').TuneState;
+type TuneAction =
+  | { action: 'stage'; items: import('./tune-shared').Suggestion[] }
+  | { action: 'unstage'; keys: string[] }
+  | { action: 'dismiss' | 'undismiss'; keys: string[] }
+  | { action: 'save'; section: string; items: import('./tune-shared').Suggestion[] }
+  | { action: 'clear' }
+  | { action: 'apply'; cutsTo?: string }
+  | { action: 'keep'; cardId: string; keep: boolean }
+  | { action: 'pile'; choice: 'fill' | 'best' | null }
+  | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
+  | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };
+
+export const tunePath = (listId: string, intent?: string, symptom?: string) =>
+  `lists/${listId}/tune${intent ? `?intent=${intent}${symptom ? `&symptom=${symptom}` : ''}` : ''}`;
+export const tune = (listId: string, intent?: string, symptom?: string) => get<TuneState>(tunePath(listId, intent, symptom));
+export const tuneAct = <T = { ok: true; staged?: number; capped?: number; saved?: number; added?: number; cut?: number }>(listId: string, act: TuneAction) =>
+  send(`lists/${listId}/tune`, 'POST', act).then(json<T>).finally(() => { if (act.action === 'apply' || act.action === 'save' || act.action === 'keep') forgetDeck(listId); });
+export const tuneIdeasJob = (listId: string) => get<{ job: Job | null }>(`lists/${listId}/tune/claude`);
+export const startTuneIdeas = (listId: string, intent: string, instructions: string, problem?: string) =>
+  spending(send(`lists/${listId}/tune/claude`, 'POST', { intent, instructions, problem }).then(json<{ job: Job }>).finally(jobsChanged));

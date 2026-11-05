@@ -30,7 +30,7 @@ export const STYLES: Style[] = [
   { id: 'treasure', label: 'Treasure', note: 'Makes and spends treasure: treasure makers, payoffs for sacrificing artifacts, and big spells it pays for.',
     test: /\btreasure/i, shift: { ramp: [10, 12] } },
   { id: 'discard', label: 'Discard', note: 'Discarding is the engine: outlets, wheels, madness and payoffs for cards leaving your hand.',
-    test: /\bdiscards? (a|one|two|that|any number of|your hand|cards?)\b|\bmadness\b|each player discards|whenever you discard/i, shift: { draw: [12, 16] } },
+    test: /\bdiscards? (a|one|two|that|any number of|your hand|their hands?|all (the )?cards (in|from) (your|their) hands?|cards?)\b|\bmadness\b|each player (may )?discards|whenever you discard/i, shift: { draw: [12, 16] } },
   { id: 'aristocrats', label: 'Aristocrats', note: 'Rewards creatures dying or being sacrificed: fodder, sac outlets and death payoffs.',
     test: /whenever (a|another) (creature|nontoken creature)[^.]* dies|sacrifice (a|another) creature/i, shift: {} },
   { id: 'landfall', label: 'Lands', note: 'Rewards land drops: extra lands, fetches and landfall payoffs.',

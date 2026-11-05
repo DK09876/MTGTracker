@@ -12,7 +12,7 @@ import { commanderRoles as rolesOfCommander, deckRoles, keeps } from './deck-rol
 import { fitProfile } from './fit';
 import { analyse } from './health';
 
-export async function deckCutList(list: Pick<List, 'id' | 'commander'>) {
+export async function deckCutList(list: Pick<List, 'id' | 'commander'>, opts: { landCut?: string | null } = {}) {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
   const health = analyse({ commander: list.commander, cards: main });
   const roles = await deckRoles(list.id, main);
@@ -36,6 +36,11 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>) {
     lands: { have: plan.landNumber.have, range: plan.lands },
     packages: plan.packages,
     settings: effective.settings, styles,
+    // The plan as the owner confirmed it: how the deck is built, its themes not yet kept as tags, what it optimizes for.
+    build: plan.stored.build?.v ?? plan.snapshot.build,
+    themes: (plan.snapshot.themes ?? []).filter((t) => !Object.prototype.hasOwnProperty.call(plan.stored.themes?.kept ?? {}, t.id) && !(plan.stored.themes?.dropped ?? []).includes(t.id)),
+    goal: plan.goal.chips,
+    landCut: opts.landCut ?? null,
   });
   return { ...result, main, health, roles, settings, overridden: Object.fromEntries(Object.entries(effective.changed).map(([k, o]) => [k, o.what])), styles, tags };
 }
