@@ -482,7 +482,7 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
         >
           {label}
         </button>
-        <span className="w-8 text-right text-lg font-semibold tabular-nums">{count}</span>
+        <span className="min-w-8 text-right text-lg font-semibold tabular-nums">{count}</span>
         <div className="relative h-2 min-w-[8rem] flex-1 rounded-full" style={{ background: TRACK }} aria-hidden>
           {target && (
             <div className="absolute inset-y-[-3px] rounded border border-[var(--muted)]/60"
@@ -490,9 +490,9 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
           )}
           <div className="h-full rounded-full" style={{ width: `${(count / max) * 100}%`, background: SERIES }} />
         </div>
-        <span className="w-16 text-sm text-[var(--muted)]">{target ? `${target[0]}–${target[1]}` : 'no target'}</span>
+        <span className="min-w-16 text-sm text-[var(--muted)]">{target ? `${target[0]}–${target[1]}` : 'no target'}</span>
         {chip && (
-          <span className="flex w-24 items-center gap-1.5 text-xs">
+          <span className="flex min-w-24 items-center gap-1.5 whitespace-nowrap text-xs">
             <span aria-hidden className="font-bold" style={{ color: chip.color }}>{chip.icon}</span>
             {chip.text}
           </span>

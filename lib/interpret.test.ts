@@ -34,7 +34,7 @@ const azula = card('Fire Lord Azula', {
 
 const combo = (id: string, cards: string[], over: Partial<Combo> = {}): Combo => ({
   id, cards, produces: ['Infinite mana'], steps: '', prerequisites: '', identity: 'UR',
-  popularity: 10, price: 5, url: `https://commanderspellbook.com/combo/${id}`, ...over,
+  price: 5, url: `https://commanderspellbook.com/combo/${id}`, ...over,
 });
 
 function deps(over: Partial<Deps> = {}): Deps {

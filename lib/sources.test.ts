@@ -36,7 +36,6 @@ describe('Commander Spellbook', () => {
       steps: 'Activate Quicksilver Elemental...\nRepeat.',
       prerequisites: 'Vivi has power 3 or more.',
       identity: 'UR',
-      popularity: 16040,
       price: 55.87,
       url: 'https://commanderspellbook.com/combo/1369-6586',
     });
@@ -46,13 +45,13 @@ describe('Commander Spellbook', () => {
     expect(toCombo({ ...variant, prices: { tcgplayer: null } }).price).toBeNull();
   });
 
-  it('sends the query, most popular first', async () => {
+  it('sends the query without popularity ordering, fewest pieces first', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ results: [variant] })));
     vi.stubGlobal('fetch', fetchMock);
     await searchCombos('card:"Vivi Ornitier"');
     const url = new URL((fetchMock.mock.calls[0] as unknown as [string])[0]);
     expect(url.searchParams.get('q')).toBe('card:"Vivi Ornitier"');
-    expect(url.searchParams.get('ordering')).toBe('-popularity');
+    expect(url.searchParams.get('ordering')).toBeNull();
   });
 
   it('passes Spellbook\'s explanation of a bad query through', async () => {

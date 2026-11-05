@@ -32,7 +32,7 @@ describe('guessWinRoutes', () => {
 });
 
 describe('engine combos', () => {
-  const combo = (cards: string[], produces: string[]) => ({ id: cards.join('+'), url: '', cards, produces, popularity: 1 }) as never;
+  const combo = (cards: string[], produces: string[]) => ({ id: cards.join('+'), url: '', cards, produces }) as never;
   it('counts an infinite-storm combo as a win only with a payoff', () => {
     const engine = [combo(['Storm-Kiln Artist', 'Reiterate'], ['Infinite storm count', 'Infinite colored mana'])];
     const without = guessWinRoutes({ cards: [], roles: [], combos: engine });

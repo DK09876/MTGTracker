@@ -52,11 +52,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   let toAdd: Array<Record<string, unknown>> = [];
   if (combos) {
     const near = combos.almost.filter((c) => c.missing.length === 1)
-      .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0)).slice(0, NEAR_MISSES);
+      .sort((a, b) => a.cards.length - b.cards.length).slice(0, NEAR_MISSES);
     const groups = new Map<string, typeof near>();
     for (const combo of near) groups.set(combo.missing[0], [...(groups.get(combo.missing[0]) ?? []), combo]);
     const ranked = [...groups.entries()]
-      .sort(([, a], [, b]) => b.length - a.length || (b[0].popularity ?? 0) - (a[0].popularity ?? 0));
+      // The card that finishes the most combos first, then the smallest combos.
+      .sort(([, a], [, b]) => b.length - a.length || a[0].cards.length - b[0].cards.length);
     // The cheapest paper printing of each, in one search. Spellbook does not
     // check legality - it offered Fastbond, which is banned - so only cards
     // legal in Commander are suggested.
@@ -71,7 +72,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return {
         name, id: card?.id ?? null, image: card ? imageOf(card, 'small') : null, price: card?.prices?.usd ?? null,
         combos: completes.map((c) => ({
-          id: c.id, url: c.url, produces: c.produces, popularity: c.popularity,
+          id: c.id, url: c.url, produces: c.produces,
           have: c.cards.filter((n) => n !== name),
         })),
       };

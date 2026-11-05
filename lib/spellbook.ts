@@ -27,8 +27,6 @@ export interface Combo {
   prerequisites: string;
   /** Colour identity as letters, e.g. "UBR". */
   identity: string;
-  /** Decks on EDHREC that run it, as Spellbook reports. */
-  popularity: number | null;
   /** Rough cost of the pieces, in US dollars, from TCGplayer. */
   price: number | null;
   url: string;
@@ -48,7 +46,6 @@ interface Variant {
   easyPrerequisites?: string;
   notablePrerequisites?: string;
   identity?: string;
-  popularity?: number | null;
   prices?: { tcgplayer?: string | null };
 }
 
@@ -57,7 +54,8 @@ interface Variant {
  * `coloridentity<=UR`, `result:"infinite mana"`, `legal:commander`.
  */
 export async function searchCombos(query: string): Promise<Combo[]> {
-  const params = new URLSearchParams({ q: query, ordering: '-popularity', limit: String(LIMIT) });
+  // Fewest pieces first: how many decks play a combo is EDHREC's number, which the app does not use.
+  const params = new URLSearchParams({ q: query, limit: String(LIMIT * 3) });
   let response: Response;
   try {
     response = await fetch(`${API}/variants/?${params}`, {
@@ -79,7 +77,7 @@ export async function searchCombos(query: string): Promise<Combo[]> {
   }
 
   const body = (await response.json()) as { results?: Variant[] };
-  return (body.results ?? []).map(toCombo);
+  return (body.results ?? []).map(toCombo).sort((a, b) => a.cards.length - b.cards.length).slice(0, LIMIT);
 }
 
 export function toCombo(variant: Variant): Combo {
@@ -92,7 +90,6 @@ export function toCombo(variant: Variant): Combo {
     prerequisites: [variant.easyPrerequisites, variant.notablePrerequisites]
       .map((p) => (p ?? '').trim()).filter(Boolean).join('\n'),
     identity: variant.identity ?? '',
-    popularity: variant.popularity ?? null,
     price: Number.isFinite(price) && price > 0 ? price : null,
     url: `${SITE}/combo/${variant.id}`,
   };

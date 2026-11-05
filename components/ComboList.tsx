@@ -53,7 +53,6 @@ export default function ComboList({ combos, cards, inLists, anchor, onSelect, on
               <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
                 {combo.identity && <ManaCost cost={[...combo.identity].map((c) => `{${c}}`).join('')} size={14} />}
                 {combo.price !== null && <span className="tabular-nums">${combo.price.toFixed(2)}</span>}
-                {combo.popularity !== null && <span>in {combo.popularity.toLocaleString()} decks</span>}
                 <a href={combo.url} target="_blank" rel="noreferrer" className="underline hover:text-[var(--foreground)]">
                   Spellbook ↗
                 </a>
