@@ -18,8 +18,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import ManaCost from './ManaCost';
+import Popover from './Popover';
 import StickyBar from './StickyBar';
-import Tip from './Tip';
 import type { Board } from '@/lib/decklist';
 import * as api from '@/lib/api';
 import { groupCards, primaryType, type Categories, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
@@ -212,8 +212,6 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
     return () => document.removeEventListener('keydown', key);
   });
 
-  const select = (className: string) =>
-    `min-w-0 flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm outline-none focus:border-[var(--c1)] sm:flex-none ${className}`;
   const size = prefs.size;
   const openMenu = (entry: Entry, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
@@ -247,7 +245,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           ref={filterBox}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter (/) — t:creature, c:rg, cmc<=3"
+          placeholder="Filter  ( / )"
+          title="Filter by name or Scryfall syntax - t:creature, c:rg, cmc<=3"
           aria-label="Filter this list"
           className="min-w-[11rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
         />
@@ -264,46 +263,42 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             </button>
           ))}
         </div>
-        <div data-tour="card-size" className="flex shrink-0 items-center gap-2 text-sm">
-          <span className="text-[var(--muted)]">Size</span>
-          <span className="flex w-36 flex-col">
-            <input type="range" min={MIN_SIZE} max={MAX_SIZE} step={5} value={size} aria-label="Card size"
-              onChange={(e) => setPrefs((p) => ({ ...p, size: Number(e.target.value) }))} className="w-full accent-[var(--accent)]" />
-            <span className="flex justify-between px-0.5 text-[11px] leading-none">
-              {(Object.keys(SIZES) as Array<keyof typeof SIZES>).map((k) => (
-                <button key={k} type="button" onClick={() => setPrefs((p) => ({ ...p, size: SIZES[k] }))} aria-label={`Card size ${k}`}
-                  className={`rounded px-1 ${nearest(size) === k ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{k}</button>
-              ))}
-            </span>
-          </span>
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <select aria-label="Group by" value={groupBy} onChange={(e) => setPrefs((p) => ({ ...p, groupBy: e.target.value as GroupBy }))} className={select('')}>
-            <option value="type">Group: type</option>
-            <option value="mv">Group: mana value</option>
-            {isDeck && <option value="tag">Group: tags</option>}
-            <option value="none">No groups</option>
-          </select>
-          <select aria-label="Sort by" value={prefs.sortBy} onChange={(e) => setPrefs((p) => ({ ...p, sortBy: e.target.value as SortBy }))} className={select('')}>
-            <option value="name">Sort: name</option>
-            <option value="mv">Sort: mana value</option>
-            <option value="price">Sort: price</option>
-          </select>
-        </div>
+        {/* Group, sort, size and the shortcuts: set once in a while, so behind one button. */}
+        <Popover
+          data-tour="card-size"
+          aria-label="View options"
+          label={<>View <span aria-hidden className="text-[10px] opacity-60">▾</span></>}
+          className="shrink-0 rounded-full border border-[var(--border)] px-3.5 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] aria-expanded:text-[var(--foreground)]"
+        >
+          <div className="flex flex-col gap-3 text-sm">
+            <Choice label="Group by" value={groupBy} onPick={(v) => setPrefs((p) => ({ ...p, groupBy: v }))}
+              options={[['type', 'Type'], ['mv', 'Mana value'], ...(isDeck ? [['tag', 'Tags'] as [GroupBy, string]] : []), ['none', 'None']]} />
+            <Choice label="Sort by" value={prefs.sortBy} onPick={(v) => setPrefs((p) => ({ ...p, sortBy: v }))}
+              options={[['name', 'Name'], ['mv', 'Mana value'], ['price', 'Price']]} />
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">Card size</p>
+              <input type="range" min={MIN_SIZE} max={MAX_SIZE} step={5} value={size} aria-label="Card size"
+                onChange={(e) => setPrefs((p) => ({ ...p, size: Number(e.target.value) }))} className="w-full accent-[var(--c1)]" />
+              <span className="flex justify-between px-0.5 text-[11px] leading-none">
+                {(Object.keys(SIZES) as Array<keyof typeof SIZES>).map((k) => (
+                  <button key={k} type="button" onClick={() => setPrefs((p) => ({ ...p, size: SIZES[k] }))} aria-label={`Card size ${k}`}
+                    className={`rounded px-1 ${nearest(size) === k ? 'font-bold text-[var(--foreground)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{k}</button>
+                ))}
+              </span>
+            </div>
+            <div className="border-t border-[var(--border)] pt-3 max-sm:hidden">
+              <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">Keyboard</p>
+              <span className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                {SHORTCUTS.map(([k, v]) => <span key={k} className="contents"><kbd className="font-mono text-[11px] text-[var(--c1)]">{k}</kbd><span className="text-[var(--muted)]">{v}</span></span>)}
+              </span>
+            </div>
+          </div>
+        </Popover>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <button data-tour="select-cards" onClick={() => (selecting ? stopSelecting() : setSelecting(true))} aria-pressed={selecting}
             className={`rounded-full border px-3.5 py-1.5 text-sm ${selecting ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
             {selecting ? `${picked.size} selected · Done` : 'Select'}
           </button>
-          <span className="flex items-center gap-1.5 whitespace-nowrap text-sm text-[var(--muted)] max-sm:hidden">
-            Shortcuts
-            <Tip label="Keyboard shortcuts">
-              <span className="font-semibold">Keyboard shortcuts</span>
-              <span className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                {SHORTCUTS.map(([k, v]) => <span key={k} className="contents"><span className="font-mono text-[11px] text-[var(--accent)]">{k}</span><span>{v}</span></span>)}
-              </span>
-            </Tip>
-          </span>
         </div>
       </StickyBar>
       {unsupported.length > 0 && (
@@ -465,10 +460,11 @@ function GridCard({ entry, isDeck, picked, selecting, onActivate, onQuantity, on
       </button>
       {!selecting && (
         // The quick controls show on hover, or keyboard focus. The commander has no −/+, just its ⋯.
-        <div className="absolute right-1.5 top-1.5 z-[2] flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+        <div className="absolute right-1.5 top-1.5 z-[2] flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:bottom-[calc(1.75rem+6px)] [@media(hover:none)]:left-1.5 [@media(hover:none)]:right-auto [@media(hover:none)]:top-auto [@media(hover:none)]:opacity-100">
           {!entry.commander && <>
-            <button onClick={() => onQuantity(card.id, quantity - 1)} aria-label={`One fewer ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">−</button>
-            <button onClick={() => onQuantity(card.id, quantity + 1)} aria-label={`One more ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">+</button>
+            {/* On touch screens only the ⋯: three buttons on every card covered its text. */}
+            <button onClick={() => onQuantity(card.id, quantity - 1)} aria-label={`One fewer ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black [@media(hover:none)]:hidden">−</button>
+            <button onClick={() => onQuantity(card.id, quantity + 1)} aria-label={`One more ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black [@media(hover:none)]:hidden">+</button>
           </>}
           <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${card.name}`} aria-haspopup="menu" className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">⋯</button>
         </div>
@@ -597,5 +593,22 @@ function QuickMenu({ entry, x, y, up, isDeck, tags, onClose, onOpen, onMove, onT
       {done && <p role="status" className="px-3 py-1.5 text-xs text-emerald-400">{done}</p>}
     </div>,
     document.body,
+  );
+}
+
+/** A row of choices inside a settings panel: the picked one filled. */
+function Choice<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: Array<[T, string]>; onPick: (v: T) => void }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">{label}</p>
+      <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1">
+        {options.map(([v, text]) => (
+          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onPick(v)}
+            className={`rounded-full px-2.5 py-1 text-xs ${value === v ? 'bg-[var(--surface-hover)] font-semibold text-[var(--foreground)] ring-1 ring-[color-mix(in_srgb,var(--c1)_60%,transparent)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

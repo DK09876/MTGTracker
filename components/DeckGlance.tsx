@@ -83,10 +83,13 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
   const save = (next: WidgetId[]) => { setShown(next); try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* fine */ } };
   const h = health?.health;
   const role = (id: string) => roles?.find((r) => r.id === id);
+  // The aim beside the count, the count in amber when it is outside it:
+  // "34 short" read as "34 missing".
+  const off = (have: number, range: [number, number] | null | undefined) => !!range && (have < range[0] || have > range[1]);
   const status = (have: number, range: [number, number] | null | undefined) =>
-    !range ? null : have < range[0] ? <span className="text-xs text-amber-300">short</span> : have > range[1] ? <span className="text-xs text-amber-300">over</span> : <span className="text-xs text-[var(--muted)]">of {range[0]}–{range[1]}</span>;
-  const stat = (label: string, value: React.ReactNode, note?: React.ReactNode) => (
-    <span className="flex flex-col text-xs text-[var(--muted)]">{label}<b className="text-base font-semibold tabular-nums text-[var(--foreground)]">{value} {note}</b></span>
+    !range ? null : <span className="text-xs font-normal text-[var(--muted)]">{have < range[0] ? 'low · ' : have > range[1] ? 'high · ' : ''}aim {range[0]}–{range[1]}</span>;
+  const stat = (label: string, value: React.ReactNode, note?: React.ReactNode, warn = false) => (
+    <span className="flex flex-col whitespace-nowrap text-xs text-[var(--muted)]">{label}<b className={`text-base font-semibold tabular-nums ${warn ? 'text-amber-300' : 'text-[var(--foreground)]'}`}>{value} {note}</b></span>
   );
   const body = (id: WidgetId): React.ReactNode => {
     switch (id) {
@@ -104,18 +107,18 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
           </span>
         );
       }
-      case 'lands': return h ? stat('Lands', h.lands, status(h.lands, plan?.lands)) : null;
+      case 'lands': return h ? stat('Lands', h.lands, status(h.lands, plan?.lands), off(h.lands, plan?.lands)) : null;
       case 'ramp': case 'draw': case 'removal': case 'wipe': {
         const r = role(id);
-        return r ? stat(r.label, r.count, status(r.count, r.target)) : null;
+        return r ? stat(r.label, r.count, status(r.count, r.target), off(r.count, r.target)) : null;
       }
       case 'colours': {
         if (!h) return null;
         const short = h.colors.filter((c) => c.needed !== null && c.sources < c.needed - 1);
-        return stat('Colours', short.length ? <span className="flex items-center gap-1 text-amber-300">{short.map((c) => <ManaCost key={c.color} cost={`{${c.color}}`} size={14} />)} short</span> : <span className="text-emerald-400">✓</span>);
+        return stat('Colours', short.length ? <span className="flex items-center gap-1 text-amber-300">{short.map((c) => <ManaCost key={c.color} cost={`{${c.color}}`} size={14} />)}<span className="text-xs font-normal">needs sources</span></span> : <span className="text-emerald-400">✓ enough</span>);
       }
       case 'bracket': return insights?.bracket ? stat('Bracket', insights.bracket.floor === 1 ? '1–2' : insights.bracket.floor) : null;
-      case 'good': return good === null ? stat('Good start', <span className="text-[var(--muted)]">—</span>, <span className="text-xs">play it</span>) : stat('Good start', `${Math.round(good * 100)}%`);
+      case 'good': return good === null ? stat('Good start', <span className="text-xs font-normal text-[var(--muted)]">not tested yet</span>) : stat('Good start', `${Math.round(good * 100)}%`);
       case 'avgmv': return h ? stat('Avg mana value', h.averageMv.toFixed(2)) : null;
       case 'price': return stat('Price', `$${price.toFixed(2)}`);
       case 'combos': return insights?.combos ? stat('Combos', insights.combos.included.length, <span className="text-xs text-[var(--muted)]">{insights.combos.toAdd.length} one away</span>) : null;
@@ -124,17 +127,18 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
   };
 
   return (
-    <div data-tour="deck-glance" className="mt-5 flex flex-wrap items-end gap-x-6 gap-y-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+    // One row to swipe on a phone; wrapped on wider screens.
+    <div data-tour="deck-glance" className="mt-5 flex items-end gap-x-7 gap-y-3 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]/60 px-4 py-3 [scrollbar-width:none] sm:flex-wrap">
       {shown.map((id) => {
         const w = WIDGETS.find((x) => x.id === id)!;
         const content = body(id);
         return (
-          <button key={id} onClick={() => onTab(w.tab)} title={`${w.label}: open ${w.tab}`} className="rounded-lg text-left hover:opacity-80">
+          <button key={id} onClick={() => onTab(w.tab)} title={`${w.label}: open ${w.tab}`} className="shrink-0 rounded-lg text-left hover:opacity-80">
             {content ?? <span className="flex flex-col text-xs text-[var(--muted)]">{w.label}<b className="text-base font-normal">…</b></span>}
           </button>
         );
       })}
-      <button onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="ml-auto self-center rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)]">
+      <button onClick={() => setEditing((v) => !v)} aria-expanded={editing} className="ml-auto shrink-0 self-center rounded-full px-2.5 py-1 text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">
         {editing ? 'Done' : 'Customize'}
       </button>
       {editing && (

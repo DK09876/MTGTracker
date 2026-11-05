@@ -16,11 +16,12 @@
  * button. A busy model ends the job at once rather than being waited on.
  */
 
-import Tip from './Tip';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Entry } from './DeckCards';
 import AiModelPicker from './AiModelPicker';
+import PlanLine from './PlanLine';
+import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
@@ -179,20 +180,20 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
 
   return (
     <div className="mt-5 flex flex-col gap-8">
-      <p className="max-w-3xl text-sm text-[var(--muted)]">
-        Tags are this deck&apos;s own categories: its engines, payoffs and ways to win. The jobs every deck needs —
-        ramp, draw, removal — are tagged automatically below. Group the deck by tags from the Cards tab, and open any
-        card to see and change its tags.
-      </p>
+      <div className="flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">
+          Tags
+          <Tip label="About tags">
+            Tags are this deck&apos;s own categories: its engines, payoffs and ways to win. The jobs every deck needs -
+            ramp, draw, removal - are tagged automatically. Group the deck by tags from the Cards tab, and open any
+            card to see and change its tags.
+          </Tip>
+        </h2>
+        <AiModelPicker area="deck" className="ml-auto" />
+      </div>
+      <PlanLine data-tour="brief" label="Plan the tagger reads" brief={tags.brief} action="Edit" onAction={onPlan} />
       <BasicRoles listId={listId} />
       {budget && <BudgetLine budget={budget} />}
-      <AiModelPicker area="deck" />
-
-      <div data-tour="brief" className="flex max-w-3xl flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <span className="text-[var(--muted)]">The plan the tagger reads:</span>
-        <span className="min-w-0 flex-[1_1_20rem]">{tags.brief.trim() || 'Not written yet.'}</span>
-        <button onClick={onPlan} className="text-[var(--accent)] hover:underline">Edit on the Plan tab</button>
-      </div>
 
       <section className="flex flex-col gap-3">
         <h3 data-tour="suggest-tags" data-section="1 · Suggest tags" className="font-medium">1 · Suggest tags</h3>
@@ -734,6 +735,8 @@ function BudgetLine({ budget }: { budget: Budget & { configured?: boolean } }) {
   }
   if (budget.spend) {
     const s = budget.spend;
+    // The model chip carries the price and what is left; this speaks up only when the day's budget runs low.
+    if (s.left >= 1) return null;
     return (
       <div className="max-w-3xl rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
         <p>

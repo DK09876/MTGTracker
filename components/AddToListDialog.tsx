@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { List } from '@/lib/db';
 import { getProfile } from '@/lib/profile';
@@ -109,7 +110,7 @@ export default function AddToListDialog({ card, lists, onAdd, onCreateList, onCl
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
       <div className="fixed inset-0 bg-black/70" onClick={onClose} aria-hidden="true" />
       <div
@@ -196,6 +197,7 @@ export default function AddToListDialog({ card, lists, onAdd, onCreateList, onCl
           Cancel
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

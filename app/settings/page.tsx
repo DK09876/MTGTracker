@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * The profile's AI models - one for rules and tagging, one for search - how
- * hard Claude thinks, and the app's daily spending caps.
+ * Settings, in tabs: your profile; the AI (budget, caps, who spent what);
+ * and for admins the people, and the app's health - card data, errors and
+ * checks. One long page had all of it, the admin tools under your own.
  */
 
 import { useEffect, useState } from 'react';
@@ -18,9 +19,24 @@ import type { AiState } from '@/lib/ai';
 import { useMe } from '@/lib/use-me';
 
 
+type Tab = 'profile' | 'ai' | 'people' | 'health';
+const fromHash = (hash: string): Tab => {
+  const h = hash.replace('#', '');
+  return h === 'errors' || h === 'health' ? 'health' : h === 'ai' || h === 'people' ? h : 'profile';
+};
+
 export default function SettingsPage() {
   const me = useMe();
   const [state, setState] = useState<AiState | null>(null);
+  // The tab is in the address (#ai), so a link can open one: the error banner's goes to #errors.
+  const [tab, setTab] = useState<Tab>('profile');
+  useEffect(() => {
+    const read = () => setTab(fromHash(window.location.hash));
+    read();
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
+  const pick = (t: Tab) => { setTab(t); history.replaceState(null, '', t === 'profile' ? window.location.pathname : `#${t}`); };
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,38 +49,57 @@ export default function SettingsPage() {
   if (!state) return <p className="text-sm text-[var(--muted)]">{error ?? 'Loading…'}</p>;
   const admin = !!me?.isAdmin;
 
+  const tabs: Array<[Tab, string]> = [['profile', 'Profile'], ['ai', 'AI'], ...(admin ? [['people', 'People'], ['health', 'App health']] as Array<[Tab, string]> : [])];
+  const shown: Tab = tabs.some(([t]) => t === tab) ? tab : 'profile';
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-10">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+    <div className="mx-auto flex max-w-3xl flex-col gap-8">
+      <div className="flex flex-col gap-4">
+        <h1 className="font-display text-3xl font-extrabold">Settings</h1>
+        <div role="tablist" aria-label="Settings" className="flex gap-1 overflow-x-auto border-b border-[var(--border)] [scrollbar-width:none]">
+          {tabs.map(([t, label]) => (
+            <button
+              key={t}
+              role="tab"
+              aria-selected={shown === t}
+              onClick={() => pick(t)}
+              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm ${shown === t ? 'border-[var(--accent)] font-medium text-[var(--foreground)]' : 'border-transparent text-[var(--muted)] hover:text-[var(--foreground)]'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      <MyProfile />
+      {shown === 'profile' && <MyProfile />}
 
-      <section data-tour="ai-budget" className="flex flex-col gap-3">
-        <h2 className="font-medium">AI budget</h2>
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><Budget state={state} /></div>
-        {admin && <Caps state={state} onState={setState} />}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-medium">AI usage</h2>
-        <p className="text-sm text-[var(--muted)]">
-          Every Claude request: who made it, what for, and what it cost. Kept a week, then cleared on Sunday. Opening a saved search or conversation makes no request, so it never shows here.
-        </p>
-        <AiUsage />
-      </section>
-
-      <section data-tour="ai-model" className="flex flex-col gap-3">
-        <h2 className="font-medium">Which AI each page uses</h2>
-        <p className="text-sm text-[var(--muted)]">
-          Search, Rules, a deck&apos;s Tags and its Chat each let you pick the Claude model - Haiku, Sonnet or Opus - remembered
-          for you on each page, with about what a request costs. Stronger models think harder and cost more. Fable is listed
-          but off for now.
-        </p>
-      </section>
-
-      {admin && (
+      {shown === 'ai' && (
         <>
-          <People self={me!.id} />
+          <section data-tour="ai-budget" className="flex flex-col gap-3">
+            <h2 className="font-medium">Budget</h2>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><Budget state={state} /></div>
+            {admin && <Caps state={state} onState={setState} />}
+          </section>
+          <section data-tour="ai-model" className="flex flex-col gap-2">
+            <h2 className="font-medium">Models</h2>
+            <p className="text-sm text-[var(--muted)]">
+              Every page that asks Claude - Search, Rules, a deck&apos;s Plan, Tags and Chat - has a <span className="rounded-full border border-[var(--border)] px-1.5 text-xs text-[var(--foreground)]">✦ model</span> chip
+              beside its button. Pick Haiku, Sonnet or Opus there; it is remembered for you on that page. Stronger models think harder and cost more.
+            </p>
+          </section>
+          <section className="flex flex-col gap-3">
+            <h2 className="font-medium">Usage</h2>
+            <p className="text-sm text-[var(--muted)]">
+              Every Claude request: who made it, what for, and what it cost. Kept a week. Opening a saved search or conversation makes no request.
+            </p>
+            <AiUsage />
+          </section>
+        </>
+      )}
+
+      {shown === 'people' && <People self={me!.id} />}
+      {shown === 'health' && (
+        <>
           <CardData />
           <ErrorLog />
         </>

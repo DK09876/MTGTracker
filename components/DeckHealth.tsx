@@ -112,7 +112,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
                   {c.fetchLandSources > 0 && <> ({c.fetchLandSources} by fetching)</>}
                   {c.otherSources > 0 && <> · {c.otherSources} other source{c.otherSources === 1 ? '' : 's'}</>}
                   {c.needed !== null && (
-                    <span className="block" title={`${c.neededFor} sets it: Karsten's sources to cast it on curve about 90% of the time. Lands count in full, rocks and dorks at three quarters.`}>
+                    <span className="block" title={`${c.neededFor} sets it: the sources to cast it on curve about 90% of the time. Lands count in full, rocks and dorks at three quarters.`}>
                       <span className={c.sources < c.needed - 1 ? 'font-semibold text-amber-300' : 'text-emerald-400'}>
                         {c.sources < c.needed - 1 ? '▲' : '✓'} {c.sources} of {c.needed} sources
                       </span>{' '}

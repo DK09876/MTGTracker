@@ -8,6 +8,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 
 const SECTIONS = [
   { href: '/', label: 'Search', icon: 'M11 4a7 7 0 1 0 4.2 12.6l4.1 4.1 1.4-1.4-4.1-4.1A7 7 0 0 0 11 4Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z' },
@@ -22,13 +23,16 @@ const active = (path: string, href: string) => (href === '/' ? path === '/' : pa
 export function TopLinks() {
   const path = usePathname();
   return (
-    <div className="hidden items-center gap-1 text-sm sm:flex">
+    <div className="hidden h-full items-stretch gap-1 text-sm sm:flex">
       {SECTIONS.map((s) => (
         <Link
           key={s.href}
           href={s.href}
           aria-current={active(path, s.href) ? 'page' : undefined}
-          className={`rounded-full px-3 py-1.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)] ${active(path, s.href) ? 'bg-[var(--surface)] text-[var(--foreground)]' : 'text-[var(--muted)]'}`}
+          // The page you are on: brighter, with the accent underneath - no filled pill.
+          className={`relative flex items-center px-3 transition-colors hover:text-[var(--foreground)] ${active(path, s.href)
+            ? 'font-medium text-[var(--foreground)] after:absolute after:inset-x-3 after:bottom-0 after:h-[2px] after:rounded-full after:bg-[var(--accent)]'
+            : 'text-[var(--muted)]'}`}
         >
           {s.label}
         </Link>
@@ -55,8 +59,17 @@ export function SettingsLink() {
   );
 }
 
+// A deck has its own bar along the bottom (DeckRail); two stacked bars took
+// a quarter of a phone's screen, so the app's steps aside there.
+const OWN_BAR = /^\/decks\/[^/]+/;
+
 export function TabBar() {
   const path = usePathname();
+  const hidden = OWN_BAR.test(path);
+  useEffect(() => {
+    document.documentElement.toggleAttribute('data-no-tabbar', hidden);
+  }, [hidden]);
+  if (hidden) return null;
   return (
     <nav
       aria-label="Sections"

@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import CardModal from './CardModal';
 import Interpreted from './Interpreted';
@@ -120,7 +121,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
 
   const busy = s.status === 'searching' || s.status === 'thinking';
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50">
       {/* A light backdrop, and on a wide screen a narrower panel: the deck stays in view while you add to it. */}
       <div className="absolute inset-0 bg-black/30" onClick={onClose} aria-hidden="true" />
@@ -194,6 +195,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
           <div className="max-w-xs">{actions(selected)}</div>
         )}
       />
-    </div>
+    </div>,
+    document.body,
   );
 }

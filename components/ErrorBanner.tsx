@@ -54,16 +54,16 @@ export default function ErrorBanner() {
 
   return (
     <div role="alert" className="border-b border-red-900/60 bg-red-950/60">
-      <div className="safe-x mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2 text-sm">
-        <p>
+      <div className="safe-x mx-auto flex max-w-[1680px] items-center justify-between gap-3 py-1.5 text-[13px]">
+        <p className="min-w-0 truncate" title={`${newest.source}: ${newest.message}`}>
           <span className="font-semibold text-red-300">{newest.source}: </span>
           {newest.message}
           {open.length > 1 && <span className="text-[var(--muted)]"> · and {open.length - 1} more</span>}
         </p>
-        <div className="flex gap-2">
-          <Link href="/settings#errors" className="rounded-full border border-red-900/70 px-3 py-1 text-red-200 hover:bg-red-900/30">See the log</Link>
-          <button onClick={ack} disabled={busy} className="rounded-full bg-[var(--foreground)] px-3 py-1 font-semibold text-[var(--background)] disabled:opacity-60">
-            Acknowledge
+        <div className="flex shrink-0 gap-1">
+          <Link href="/settings#errors" className="whitespace-nowrap rounded-full px-2.5 py-0.5 text-red-200 hover:bg-red-900/30">Log</Link>
+          <button onClick={ack} disabled={busy} className="whitespace-nowrap rounded-full border border-red-200/30 px-2.5 py-0.5 font-medium text-red-100 hover:bg-red-900/30 disabled:opacity-60">
+            Got it
           </button>
         </div>
       </div>

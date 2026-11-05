@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import EmptyState from '@/components/EmptyState';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 
@@ -49,10 +50,10 @@ export default function ListsPage() {
       {loading && <p className="mt-8 text-[var(--muted)]">Loading…</p>}
 
       {!loading && !lists.length && (
-        <p className="mt-10 text-center text-[var(--muted)]">
-          No lists yet. Make one above, or add a card from{' '}
-          <Link href="/" className="text-[var(--accent)] underline">search</Link>.
-        </p>
+        <EmptyState title="No lists yet">
+          Lists hold cards you want to remember - a wishlist, trades, ideas for a deck. Name one above, or press ＋ on any card in{' '}
+          <Link href="/" className="text-[var(--foreground)] underline">Search</Link>.
+        </EmptyState>
       )}
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2">

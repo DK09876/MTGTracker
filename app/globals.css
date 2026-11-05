@@ -122,6 +122,8 @@ body {
 :root { --nav-h: 0px; }
 @media (max-width: 639px) {
   :root { --nav-h: calc(3.5rem + env(safe-area-inset-bottom)); }
+  /* A deck's own bar takes the app's place (components/Nav.tsx). */
+  :root[data-no-tabbar] { --nav-h: 0px; }
 }
 
 /* Page gutters that clear the notch in landscape: 1rem, or more where the

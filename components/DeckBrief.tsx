@@ -167,10 +167,8 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
           )}
         </div>
       </div>
-      <p className="max-w-3xl text-sm text-[var(--muted)]">
-        Everything else reads this: what to add and cut, how cards are tagged, what Chat knows. The plan, how it wins,
-        what parts of the deck are for — &ldquo;the tokens are there to feed Korvold&rdquo;, &ldquo;keep interaction cheap&rdquo;. AI reads run in the
-        background, so you can leave this page while one works.
+      <p className="-mt-1 max-w-3xl text-sm text-[var(--muted)]">
+        How it wins and what each part is for - &ldquo;the tokens feed Korvold&rdquo;. Adds, cuts, tags and Chat all read it.
       </p>
       {error && <p className="text-sm text-red-400">{error}</p>}
       {running && (

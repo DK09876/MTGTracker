@@ -233,16 +233,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         ← All {deck ? 'decks' : 'lists'}
       </Link>
 
-      {/* A deck's header: its commander's art behind a name in its colours. */}
-      <div className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-4 pt-20 sm:mx-0 sm:rounded-3xl sm:px-6 sm:pt-24' : ''}`}>
+      {/* A deck's header: its commander's art, sharp, fading in from the right behind a name in its colours. */}
+      <div className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-5 pt-16 sm:mx-0 sm:rounded-2xl sm:border sm:border-white/[0.06] sm:px-6 sm:pb-5 sm:pt-14' : ''}`}>
         {hero && (
           <>
-            <div aria-hidden className="id-glow absolute -inset-10 -z-20 opacity-70 blur-2xl" />
+            <div aria-hidden className="id-glow absolute -inset-10 -z-20 opacity-40 blur-3xl" />
             {heroArt && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={heroArt} alt="" aria-hidden className="absolute inset-0 -z-20 h-full w-full scale-110 object-cover object-[50%_25%] opacity-70 blur-[3px] saturate-125" />
+              <img
+                src={heroArt}
+                alt=""
+                aria-hidden
+                className="absolute inset-y-0 right-0 -z-20 h-full w-full object-cover object-[50%_30%] opacity-80 [mask-image:linear-gradient(to_bottom,black_30%,transparent)] sm:w-[62%] sm:[mask-image:linear-gradient(to_right,transparent,black_45%)]"
+              />
             )}
-            <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-b from-[var(--background)]/10 via-[var(--background)]/60 to-[var(--background)]" />
+            <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-t from-[var(--background)] via-[var(--background)]/40 to-transparent sm:bg-gradient-to-r sm:from-[var(--background)]/90 sm:via-[var(--background)]/30" />
           </>
         )}
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -291,8 +296,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </p>
           </div>
 
-          <div className="flex w-full gap-2 sm:w-auto">
-            <button data-tour="add-cards" onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none lg:hidden">
+          <div className={`flex gap-2 ${deck ? 'absolute right-4 top-4 sm:static' : 'w-full sm:w-auto'}`}>
+            <button data-tour="add-cards" onClick={() => setAddOpen(true)} className={`btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none lg:hidden ${deck ? 'max-lg:hidden' : ''}`}>
               ＋ Add cards
             </button>
             <div data-tour="deck-more"><MoreMenu

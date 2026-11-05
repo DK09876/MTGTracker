@@ -196,9 +196,9 @@ export async function interpret(
     const reason = error instanceof Error ? error.message : 'the model failed';
     trace.push({ text: `Asked the AI what this means, but ${reason}` });
     if (previous) {
-      return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '', note: `AI search failed (${reason}). Try the follow-up again in a moment.` } };
+      return { ...EMPTY, trace, interpretation: { via: 'syntax', kind: 'cards', query: '', note: `The AI couldn't answer (${reason}) - try the follow-up again in a moment.` } };
     }
-    return asTyped(text, deps, trace, `AI search failed (${reason}), so this searched card names for what you typed.`);
+    return asTyped(text, deps, trace, `The AI couldn't read that (${reason}), so this searched card names for what you typed.`);
   }
   if (!resume) {
     trace.push({

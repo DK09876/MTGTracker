@@ -78,7 +78,7 @@ describe('syntax and fallbacks', () => {
     const d = deps({ translate: vi.fn(async () => { throw new Error('the model returned 503'); }) });
     const result = await interpret('enchantments that work well for fire lord azula', d);
     expect(d.search).not.toHaveBeenCalled();
-    expect(result.interpretation.note).toBe('AI search failed (the model returned 503). Try again in a moment, or use Scryfall syntax.');
+    expect(result.interpretation.note).toBe("The AI couldn't read that (the model returned 503). Try again in a moment, or use Scryfall syntax.");
   });
 
   it('falls back to a plain search when the model fails', async () => {
