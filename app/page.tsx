@@ -7,6 +7,7 @@ import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import FollowUp from '@/components/FollowUp';
+import { PALETTE_SEARCH } from '@/components/CommandPalette';
 import AiModelPicker from '@/components/AiModelPicker';
 import Interpreted from '@/components/Interpreted';
 import Results from '@/components/Results';
@@ -30,7 +31,7 @@ const EXAMPLES = [
   'enchantments that work well for fire lord azula',
   'combo cards for vivi',
   'cheap green ramp that isn\'t a land',
-  'lightnig bolt',
+  'counterspells under $2',
 ];
 
 /** The search that ran, for a follow-up to refine. */
@@ -143,6 +144,7 @@ export default function SearchPage() {
       remember(term, replayOf(r));
     });
   };
+
 
   const pickName = (name: string, keep = true, after?: () => void) => {
     setQuery(name);
@@ -412,6 +414,21 @@ export default function SearchPage() {
     });
   };
 
+  // From the ⌘K palette: "/?q=…" when it opened another page, an event when it is this one.
+  const searchRef = useRef(search);
+  useEffect(() => { searchRef.current = search; });
+  useEffect(() => {
+    const run = (text: string) => { setQuery(text); searchRef.current(text); };
+    const q = new URLSearchParams(window.location.search).get('q');
+    if (q) {
+      window.history.replaceState(null, '', window.location.pathname);
+      run(q);
+    }
+    const onAsk = (e: Event) => run((e as CustomEvent<string>).detail);
+    window.addEventListener(PALETTE_SEARCH, onAsk);
+    return () => window.removeEventListener(PALETTE_SEARCH, onAsk);
+  }, []);
+
   const busy = status === 'searching' || status === 'thinking';
   const hasViews = Object.keys(views).length > 0;
 
@@ -444,7 +461,7 @@ export default function SearchPage() {
       </StickyBar>
 
       {/* Under the box, one row: saving (or ideas to try) on the left, the model on the right. */}
-      <div className="mt-2 flex items-start gap-3">
+      <div className="mt-2 flex items-start gap-3 max-sm:flex-col-reverse max-sm:items-stretch">
         <div className="min-w-0 flex-1">
           {status === 'idle' && hasViews && !answer?.choice && session && (
             <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />
@@ -464,7 +481,7 @@ export default function SearchPage() {
         </div>
           )}
         </div>
-        <AiModelPicker area="search" align="right" className="shrink-0" />
+        <AiModelPicker area="search" align="right" className="shrink-0 max-sm:self-end" />
       </div>
 
       {answer && status !== 'thinking' && (

@@ -234,7 +234,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       </Link>
 
       {/* A deck's header: its commander's art, sharp, fading in from the right behind a name in its colours. */}
-      <div className={`relative isolate mt-2 ${hero ? '-mx-4 overflow-hidden px-4 pb-5 pt-16 sm:mx-0 sm:rounded-2xl sm:border sm:border-white/[0.06] sm:px-6 sm:pb-5 sm:pt-14' : ''}`}>
+      {/* Full height on Cards; a band on the other tabs, so their work starts near the top. */}
+      <div className={`relative isolate mt-2 ${hero ? `-mx-4 overflow-hidden px-4 pb-4 sm:mx-0 sm:rounded-2xl sm:border sm:border-white/[0.06] sm:px-6 ${section === 'cards' ? 'pt-16 sm:pb-5 sm:pt-14' : 'pt-6 sm:pt-5'}` : ''}`}>
         {hero && (
           <>
             <div aria-hidden className="id-glow absolute -inset-10 -z-20 opacity-40 blur-3xl" />
@@ -275,13 +276,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 <button type="button" onClick={() => setRenaming(false)} className="px-2 text-sm text-[var(--muted)]">Cancel</button>
               </form>
             ) : (
-              <h1 className={`font-display font-extrabold leading-[1.05] [text-wrap:balance] ${deck ? 'id-text text-3xl sm:text-4xl' : 'text-3xl'}`}>{list.name}</h1>
+              <h1 className={`font-display font-extrabold leading-[1.05] [text-wrap:balance] ${deck ? `id-text ${section === 'cards' ? 'text-3xl sm:text-4xl' : 'text-2xl sm:text-3xl'}` : 'text-3xl'}`}>{list.name}</h1>
             )}
             {deck && list.commander && !changingCommander && (
               <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--foreground)]/85">
                 <IdentitySymbols identity={(list.commander.color_identity ?? []).join('')} size={17} />
                 <button onClick={() => setSelected(list.commander)} className="hover:underline">{list.commander.name}</button>
-                <button onClick={() => setChangingCommander(true)} className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]">Change</button>
               </p>
             )}
             <p className="mt-3 flex flex-wrap gap-1.5 text-xs font-bold tabular-nums">

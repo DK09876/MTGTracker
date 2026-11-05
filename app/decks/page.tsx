@@ -85,6 +85,15 @@ export default function DecksPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
+  // "/decks?new" (the ⌘K palette's New deck) opens the form.
+  useEffect(() => {
+    const fromLink = () => {
+      if (!new URLSearchParams(window.location.search).has('new')) return;
+      window.history.replaceState(null, '', window.location.pathname);
+      setCreating(true);
+    };
+    fromLink();
+  }, []);
   const [name, setName] = useState('');
   const [commander, setCommander] = useState<api.CommanderOption | null>(null);
   const [decklist, setDecklist] = useState('');

@@ -10,6 +10,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { bottomFloor } from '@/lib/bottom-floor';
+
 export default function Popover({ label, children, className = '', panelClassName = 'w-72', align = 'left', ...rest }: {
   /** The button's face. */
   label: React.ReactNode;
@@ -49,7 +51,7 @@ export default function Popover({ label, children, className = '', panelClassNam
   useLayoutEffect(() => {
     if (!at || !panel.current) return;
     const r = panel.current.getBoundingClientRect();
-    const floor = window.innerHeight - (document.querySelector('[data-bottom-nav], [data-deck-rail]')?.getBoundingClientRect().height ?? 0) - 16;
+    const floor = bottomFloor(12);
     panel.current.style.top = `${at.top + r.height > floor && at.above - r.height >= 8 ? at.above - r.height : Math.max(8, Math.min(at.top, floor - r.height))}px`;
     const left = align === 'right' ? at.right - r.width : at.left;
     panel.current.style.left = `${Math.max(8, Math.min(left, window.innerWidth - r.width - 8))}px`;

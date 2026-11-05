@@ -149,7 +149,7 @@ export function buildPlan(input: {
     }
   }
   const range = input.landRange ?? [want - 1, want + 1];
-  const second = input.landRange ? ` Karsten's formula, a second opinion, says ${want} for this curve (average mana value ${input.averageMv.toFixed(2)}, ${cheap} cheap ramp and draw spells).` : '';
+  const second = input.landRange ? ` The usual formula, a second opinion, says ${want} for this curve (average mana value ${input.averageMv.toFixed(2)}, ${cheap} cheap ramp and draw spells).` : '';
   if (input.lands < range[0]) {
     issues.push({
       id: 'lands', level: input.lands < range[0] - 2 ? 'fix' : 'consider', title: `${input.lands} lands, the plan wants ${range[0]}-${range[1]}`,
@@ -169,7 +169,7 @@ export function buildPlan(input: {
     issues.push({
       id: 'colors', level: short.some((c) => c.needed! - c.sources > 4) ? 'fix' : 'consider',
       title: `Short of ${short.map((c) => `{${c.color}}`).join('')} sources for the hungriest spells`,
-      why: `${short.map((c) => `{${c.color}} ${one(c.sources)} of ${c.needed}, set by ${c.neededFor}`).join('; ')}. Karsten's table says how many sources a spell's colours need to cast it on curve in most games. Swap basics or single-colour lands for ones that make more of these colours - or, if one spell sets a bar far above the rest, ask whether it is worth it.`,
+      why: `${short.map((c) => `{${c.color}} ${one(c.sources)} of ${c.needed}, set by ${c.neededFor}`).join('; ')}. The standard table says how many sources a spell's colours need to cast it on curve in most games. Swap basics or single-colour lands for ones that make more of these colours - or, if one spell sets a bar far above the rest, ask whether it is worth it.`,
       cards: [], action: null,
     });
   }

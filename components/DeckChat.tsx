@@ -96,9 +96,9 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
       <aside data-tour="chat-list" className="flex min-w-0 flex-[1_1_15rem] flex-col gap-2">
-        <button onClick={() => { setOpen(null); setChat(null); setError(null); }} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08]">New chat</button>
-        <p className="mt-1 text-xs uppercase tracking-wide text-[var(--muted)]">Saved automatically</p>
-        {chats?.length === 0 && <p className="text-sm text-[var(--muted)]">No chats yet.</p>}
+        <button onClick={() => { setOpen(null); setChat(null); setError(null); }} className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"><span aria-hidden className="text-base leading-none">＋</span> New chat</button>
+        <p className="mt-1 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--faint)]" title="Chats are saved as you go">Chats</p>
+        {chats?.length === 0 && <p className="px-3 text-sm text-[var(--faint)]">None yet - they&apos;re kept as you go.</p>}
         {chats?.map((c) => (
           <button
             key={c.id}
@@ -120,8 +120,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
           <div className="flex flex-col gap-2">
             <h3 className="font-display text-lg font-semibold">Ask about this deck</h3>
             <p className="text-sm text-[var(--muted)]">
-              Claude reads the deck, your brief and its roles, and looks things up in Scryfall, your collection and EDHREC.
-              Changes it suggests come as buttons; nothing changes until you press one.
+              Claude knows the deck, its plan and your collection. What it suggests comes as buttons - nothing changes until you press one.
             </p>
           </div>
         )}

@@ -47,6 +47,16 @@ export default function RulesPage() {
   const [budget, setBudget] = useState<Budget | null>(null);
   const [thread, setThread] = useState<RulesThread | null>(null);
   const [question, setQuestion] = useState('');
+  // From the ⌘K palette: the question typed in, ready to send - not sent, since it costs.
+  useEffect(() => {
+    const fromLink = () => {
+      const q = new URLSearchParams(window.location.search).get('q');
+      if (!q) return;
+      window.history.replaceState(null, '', window.location.pathname);
+      setQuestion(q);
+    };
+    fromLink();
+  }, []);
   const [followUp, setFollowUp] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

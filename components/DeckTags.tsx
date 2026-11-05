@@ -197,10 +197,13 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
 
       <section className="flex flex-col gap-3">
         <h3 data-tour="suggest-tags" data-section="1 · Suggest tags" className="font-medium">1 · Suggest tags</h3>
-        <p className="max-w-3xl text-sm text-[var(--muted)]">
-          The model reads the commander, your brief and every card ({cards.length} different), and suggests tags for this
-          deck&apos;s plan, each with a test for what belongs. It stops here so you can keep, edit or drop them. Ask again
-          with instructions: &ldquo;split the payoffs by what they reward&rdquo;, &ldquo;more detail on the graveyard package&rdquo;.
+        <p className="flex max-w-3xl items-center gap-2 text-sm text-[var(--muted)]">
+          Claude suggests tags for this deck&apos;s plan; you keep, edit or drop each one.
+          <Tip label="How suggesting works">
+            It reads the commander, your brief and every card ({cards.length} different), and gives each tag a test for what
+            belongs. It stops there so you can keep, edit or drop them. Ask again with instructions: &ldquo;split the payoffs by
+            what they reward&rdquo;, &ldquo;more detail on the graveyard package&rdquo;.
+          </Tip>
         </p>
         <textarea
           value={instructions}

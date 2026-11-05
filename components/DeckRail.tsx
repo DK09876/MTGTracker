@@ -7,8 +7,8 @@
  * page marks with data-section, so each tab names its own parts - on Cards,
  * every group with its count - and keeps up as they change.
  *
- * The deck itself heads it - its art, name, count and Add cards - so those
- * stay in reach as the page scrolls without a second bar appearing.
+ * Add cards heads it, in reach as the page scrolls; the deck's name and
+ * count are the header's (they were both, one above the other).
  *
  * On a phone it is the only bar along the bottom: the app's own tab bar
  * steps aside on a deck (Nav.tsx), and "‹" leads back to the decks.
@@ -89,32 +89,18 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
       data-tour="deck-tabs"
       data-deck-rail
       aria-label="Deck"
-      className="fixed inset-x-2 bottom-[calc(var(--nav-h)+max(0.5rem,env(safe-area-inset-bottom)))] z-30 flex items-center gap-1 overflow-x-auto overscroll-contain rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none]
-        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-y-auto lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none lg:[mask-image:none]"
+      className="fixed inset-x-2 bottom-[calc(var(--nav-h)+max(0.5rem,env(safe-area-inset-bottom)))] z-30 flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur
+        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-y-auto lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
     >
-      {/* Wide screens: the deck heads the rail. */}
-      <div className="hidden flex-col gap-2.5 pb-4 lg:flex">
-        <div className="flex items-center gap-2.5">
-          {deck.art
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={deck.art} alt="" aria-hidden className="h-9 w-9 shrink-0 rounded-lg object-cover object-[50%_25%] ring-1 ring-white/10" />
-            : <span aria-hidden className="id-grad h-9 w-9 shrink-0 rounded-lg opacity-60" />}
-          <span className="flex min-w-0 flex-col leading-tight">
-            <b className="truncate font-display text-[14px]">{deck.name}</b>
-            <button
-              onClick={() => go(deck.size === 100 ? 'cards' : 'tune')}
-              title={deck.size === 100 ? undefined : deck.size > 100 ? `Tune: cut ${deck.size - 100}` : `Tune: add ${100 - deck.size}`}
-              className={`self-start text-xs font-semibold tabular-nums ${deck.size === 100 ? 'text-emerald-300/90' : 'text-amber-300'}`}
-            >
-              {deck.size} / 100
-            </button>
-          </span>
-        </div>
-        <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
+      {/* Wide screens: Add cards heads the rail; the deck's name is in the header above. */}
+      <div className="hidden pb-4 lg:block">
+        <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go w-full rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
       </div>
       {/* Phones: back to the decks, then Add cards, lead the bar. */}
       <Link href="/decks" aria-label="All decks" className="flex h-9 w-7 shrink-0 items-center justify-center text-xl text-[var(--muted)] lg:hidden">‹</Link>
       <button onClick={deck.onAdd} aria-label="Add cards" className="btn-go flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg font-semibold lg:hidden">＋</button>
+      {/* Phones: ‹ and ＋ stay put; the tabs and sections swipe, fading out at the edge. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-visible lg:[mask-image:none]">
       <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col lg:gap-0.5">
         {TABS.map(([value, label]) => {
           const on = section === value;
@@ -157,6 +143,7 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
       )}
       {/* Room to scroll the last item clear of the fade. */}
       <span aria-hidden className="w-4 shrink-0 lg:hidden" />
+      </div>
     </nav>
   );
 }

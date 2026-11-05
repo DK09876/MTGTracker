@@ -286,12 +286,12 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
                 ))}
               </span>
             </div>
-            <div className="border-t border-[var(--border)] pt-3 max-sm:hidden">
-              <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">Keyboard</p>
-              <span className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+            <details className="border-t border-[var(--border)] pt-2.5 max-sm:hidden">
+              <summary className="cursor-pointer text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)]">Keyboard shortcuts</summary>
+              <span className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                 {SHORTCUTS.map(([k, v]) => <span key={k} className="contents"><kbd className="font-mono text-[11px] text-[var(--c1)]">{k}</kbd><span className="text-[var(--muted)]">{v}</span></span>)}
               </span>
-            </div>
+            </details>
           </div>
         </Popover>
         <div className="ml-auto flex shrink-0 items-center gap-2">

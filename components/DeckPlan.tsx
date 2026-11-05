@@ -167,12 +167,13 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
       </section>
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-      {/* Stays at the bottom of the screen while the plan scrolls: confirming is what unlocks the rest. */}
-      <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 shadow-xl backdrop-blur lg:bottom-4">
+      {/* Until it is confirmed, this stays at the bottom of the screen while the plan scrolls - confirming
+          unlocks the rest. Once confirmed it sits at the end and covers nothing. */}
+      <div className={`z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 ${plan.confirmed ? '' : 'sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] shadow-xl lg:bottom-4'}`}>
         <button data-tour="plan-confirm" onClick={() => change({ confirm: true })} disabled={busy} className="btn-go rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60">
-          {plan.confirmed ? 'Save the plan' : 'Confirm the plan'}
+          {plan.confirmed ? 'Confirm again' : 'Confirm the plan'}
         </button>
-        <span className="text-sm text-[var(--muted)]">{plan.confirmed ? 'Saved already; this marks it read again.' : 'Unlocks Chat, the tagger and Claude’s reviews.'}</span>
+        <span className="text-sm text-[var(--muted)]">{plan.confirmed ? 'Confirmed. Do it again after changing the deck a lot, so the reviews read it fresh.' : 'Unlocks Chat, the tagger and Claude’s reviews.'}</span>
       </div>
     </div>
   );

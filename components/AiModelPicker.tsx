@@ -14,6 +14,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import * as api from '@/lib/api';
+import { bottomFloor } from '@/lib/bottom-floor';
 import type { AiState } from '@/lib/ai';
 import { AREA_OF, costOf, FEATURES, TIER_INFO, TIER_MODEL, TIERS, TIERS_OFF, TYPICAL_TOKENS, type AiArea, type Feature, type Tier } from '@/lib/models';
 import { dollars } from '@/lib/spend';
@@ -58,7 +59,7 @@ export default function AiModelPicker({ area, align = 'left', className = '' }: 
   useLayoutEffect(() => {
     if (!at || !popup.current) return;
     const r = popup.current.getBoundingClientRect();
-    const floor = window.innerHeight - (document.querySelector('[data-bottom-nav]')?.getBoundingClientRect().height ?? 0) - 8;
+    const floor = bottomFloor();
     popup.current.style.top = `${at.top + r.height > floor && at.above - r.height >= 8 ? at.above - r.height : Math.max(8, Math.min(at.top, floor - r.height))}px`;
     popup.current.style.left = `${Math.max(8, Math.min(at.left, window.innerWidth - r.width - 8))}px`;
     popup.current.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();

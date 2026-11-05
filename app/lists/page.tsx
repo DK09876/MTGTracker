@@ -31,7 +31,7 @@ export default function ListsPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">Lists</h1>
+      <h1 className="font-display text-3xl font-extrabold">Lists</h1>
 
       <form onSubmit={create} className="mt-4 flex gap-2">
         <input

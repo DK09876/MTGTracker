@@ -212,3 +212,9 @@ body {
 .stack-card:hover + .stack-card,
 .stack-card:focus-visible + .stack-card { margin-top: -1% !important; }
 @media (prefers-reduced-motion: reduce) { .stack-card { transition: none; } }
+
+/* The ⌘K palette arrives quickly and from just above; never on reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .palette-in { animation: palette-in 0.14s cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+@keyframes palette-in { from { opacity: 0; transform: translateY(-6px) scale(0.985); } }
