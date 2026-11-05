@@ -201,3 +201,12 @@ body {
 @media (width < 64rem) {
   body:has([data-deck-rail]) > footer { padding-bottom: calc(var(--nav-h) + 4.5rem + max(2rem, env(safe-area-inset-bottom))); }
 }
+
+/* Stacks (components/DeckCards): a hovered or focused card opens up - the
+   cards under it slide down, so the whole card shows. Moving down the stack,
+   the pointer stays on the next card as the one above closes, because the
+   next card's name bar sits where the pointer already is. */
+.stack-card { transition: margin-top 160ms ease; }
+.stack-card:hover + .stack-card,
+.stack-card:focus-visible + .stack-card { margin-top: -1% !important; }
+@media (prefers-reduced-motion: reduce) { .stack-card { transition: none; } }

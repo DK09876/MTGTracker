@@ -46,6 +46,8 @@ interface Props {
   onMove: (cardId: string, board: Board) => void;
   /** Ask Chat something about a card ("find a replacement"). */
   onAsk?: (question: string) => void;
+  /** The commander's ⋯ offers changing it. */
+  onChangeCommander?: () => void;
 }
 
 type View = 'grid' | 'stacks' | 'text';
@@ -87,7 +89,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Esc', 'Close a menu · clear the selection · stop selecting'], ['N', 'Add cards'], ['1 – 8', 'Switch the deck\'s tabs'],
 ];
 
-export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk }: Props) {
+export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander }: Props) {
   const [board, setBoard] = useState<Board>('main');
   const [filter, setFilter] = useState('');
   const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === 'undefined' ? DEFAULT_PREFS : loadPrefs()));
@@ -419,7 +421,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           onMove={(b) => onMove(menu.entry.card.id, b)}
           onTag={(tagId) => tagCards(tagId, [menu.entry])}
           onKeep={() => api.keepCard(listId, menu.entry.card.oracle_id ?? menu.entry.card.id, true)}
-          onAsk={onAsk ? () => onAsk(`Suggest replacements for ${menu.entry.card.name} that fit the plan.`) : undefined}
+          onAsk={onAsk && !menu.entry.commander ? () => onAsk(`Suggest replacements for ${menu.entry.card.name} that fit the plan.`) : undefined}
+          onChangeCommander={menu.entry.commander ? onChangeCommander : undefined}
           onRemove={() => onQuantity(menu.entry.card.id, 0)}
         />
       )}
@@ -460,11 +463,13 @@ function GridCard({ entry, isDeck, picked, selecting, onActivate, onQuantity, on
         {selecting && <Check on={picked} />}
         {entry.commander && <span className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-[var(--accent)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#221c08]">Commander</span>}
       </button>
-      {!selecting && !entry.commander && (
-        // The quick controls show on hover, or keyboard focus.
+      {!selecting && (
+        // The quick controls show on hover, or keyboard focus. The commander has no −/+, just its ⋯.
         <div className="absolute right-1.5 top-1.5 z-[2] flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-          <button onClick={() => onQuantity(card.id, quantity - 1)} aria-label={`One fewer ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">−</button>
-          <button onClick={() => onQuantity(card.id, quantity + 1)} aria-label={`One more ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">+</button>
+          {!entry.commander && <>
+            <button onClick={() => onQuantity(card.id, quantity - 1)} aria-label={`One fewer ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">−</button>
+            <button onClick={() => onQuantity(card.id, quantity + 1)} aria-label={`One more ${card.name}`} className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">+</button>
+          </>}
           <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${card.name}`} aria-haspopup="menu" className="h-7 w-7 rounded-lg bg-black/80 text-sm text-white hover:bg-black">⋯</button>
         </div>
       )}
@@ -485,7 +490,8 @@ function StackCard({ entry, first, picked, selecting, onActivate }: {
       aria-label={selecting ? `Pick ${entry.card.name}` : `Show details for ${entry.card.name}`}
       // A percentage margin is of the column's width, which is the card's: it works at any size.
       style={{ marginTop: first ? 0 : '-120.5%' }}
-      className={`relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] transition-transform hover:z-10 hover:-translate-y-1.5 hover:scale-[1.03] focus-visible:z-10 focus-visible:-translate-y-1.5 motion-reduce:transition-none ${selecting ? 'cursor-copy' : ''}`}>
+      // Hovered (or focused), it opens up: the cards under it slide down so the whole card shows (globals.css .stack-card).
+      className={`stack-card relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] hover:z-10 focus-visible:z-10 ${selecting ? 'cursor-copy' : ''}`}>
       <Picture card={entry.card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
       <Badge n={entry.quantity} right />
       {selecting && <Check on={picked} left />}
@@ -525,10 +531,12 @@ function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, 
       )}
       <ManaCost cost={manaCostOf(entry.card)} size={13} />
       <span className="w-16 text-right tabular-nums text-[var(--muted)]">{money(entry)}</span>
-      {!entry.commander && !selecting && (
+      {!selecting && (
         <span className="flex items-center gap-1">
-          <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">−</button>
-          <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">+</button>
+          {!entry.commander && <>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">−</button>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">+</button>
+          </>}
           {isDeck && <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${entry.card.name}`} aria-haspopup="menu" className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">⋯</button>}
         </span>
       )}
@@ -544,10 +552,10 @@ function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, 
 
 // --- a card's ⋯ ---------------------------------------------------------------------
 
-function QuickMenu({ entry, x, y, up, isDeck, tags, onClose, onOpen, onMove, onTag, onKeep, onAsk, onRemove }: {
+function QuickMenu({ entry, x, y, up, isDeck, tags, onClose, onOpen, onMove, onTag, onKeep, onAsk, onRemove, onChangeCommander }: {
   entry: Entry; x: number; y: number; up: boolean; isDeck: boolean; tags: Array<{ id: string; name: string }>;
   onClose: () => void; onOpen: () => void; onMove: (b: Board) => void; onTag: (tagId: string) => Promise<void> | void;
-  onKeep: () => Promise<unknown> | void; onAsk?: () => void; onRemove: () => void;
+  onKeep: () => Promise<unknown> | void; onAsk?: () => void; onRemove: () => void; onChangeCommander?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [tagging, setTagging] = useState(false);
@@ -579,6 +587,7 @@ function QuickMenu({ entry, x, y, up, isDeck, tags, onClose, onOpen, onMove, onT
       {isDeck && !entry.commander && <button role="menuitem" className={item} onClick={async () => { await onKeep(); setDone('Kept: never offered as a cut'); setTimeout(onClose, 900); }}>Never cut this ★</button>}
       <button role="menuitem" className={item} onClick={act(onOpen)}>Change printing or finish…</button>
       {onAsk && <button role="menuitem" className={item} onClick={act(onAsk)}>Find a replacement</button>}
+      {onChangeCommander && <button role="menuitem" className={item} onClick={act(onChangeCommander)}>Change commander…</button>}
       {!entry.commander && (
         <>
           <hr className="my-1 border-[var(--border)]" />

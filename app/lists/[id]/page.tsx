@@ -520,6 +520,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           isDeck={deck}
           onTags={setTags}
           onAsk={deck ? (q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); } : undefined}
+          onChangeCommander={deck ? () => { setChangingCommander(true); window.scrollTo({ top: 0, behavior: 'smooth' }); } : undefined}
           onSelect={setSelected}
           onQuantity={changeQuantity}
           onMove={moveCard}
