@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { edhrecSlug } from './edhrec';
 import { scoped } from './interpret';
 import { canPartner, mergePair, splitPair } from './partners';
 import type { ScryfallCard } from './scryfall';
@@ -41,10 +40,9 @@ describe('canPartner', () => {
 });
 
 describe('mergePair', () => {
-  it('is one commander for search: both colours, EDHREC\'s name for the pair, neither card in the results', () => {
+  it('is one commander for search: both colours, one name for the pair, neither card in the results', () => {
     const pair = mergePair(kratos, atreus);
     expect(pair.name).toBe('Atreus, Impulsive Son + Kratos, Stoic Father');
-    expect(edhrecSlug(pair.name)).toBe('atreus-impulsive-son-kratos-stoic-father');
     expect(pair.color_identity).toEqual(['W', 'U', 'R']);
     expect(pair.oracle_text).toContain('Kratos, Stoic Father: Whenever you attack');
     const q = scoped('t:creature', pair);

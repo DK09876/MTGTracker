@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { fitOf, fitProfile, popularity } from './fit';
+import { fitOf, fitProfile, quality } from './fit';
 import type { ScryfallCard } from './scryfall';
 
 const card = (name: string, type_line: string, oracle_text: string, extra: Record<string, unknown> = {}) => ({ id: name, name, type_line, oracle_text, ...extra }) as ScryfallCard;
@@ -22,9 +22,15 @@ describe('fit', () => {
     expect(fitOf(card('Llanowar Elves', 'Creature — Elf Druid', '{T}: Add {G}.'), eldrazi).score).toBe(0);
   });
 
-  it('ranks popularity from Scryfall\'s rank', () => {
-    expect(popularity(card('Sol Ring', 'Artifact', '', { edhrec_rank: 1 }))).toBe(1);
-    expect(popularity(card('Obscure', 'Artifact', '', { edhrec_rank: 30_000 }))).toBeLessThan(0.1);
-    expect(popularity(card('Unranked', 'Artifact', ''))).toBe(0);
+  it('rates how good a card is at its job from things on the card, not popularity', () => {
+    const growth = quality(card('Growth Spiral', 'Instant', 'Draw a card.', { cmc: 2 }), ['ramp', 'draw']);
+    const kodama = quality(card('Kodama\'s Reach', 'Sorcery', 'Search for two lands.', { cmc: 3 }), ['ramp']);
+    expect(growth.score).toBeGreaterThan(kodama.score);
+    expect(growth.reasons).toEqual(expect.arrayContaining(['2 mana', 'instant speed', 'does 2 jobs']));
+    const chaos = quality(card('Chaos Warp', 'Instant', 'The owner of target permanent shuffles it into their library.', { cmc: 3 }), ['removal']);
+    expect(chaos.reasons).toContain('hits anything');
+    const tapland = quality(card('Bad Land', 'Land', 'Bad Land enters tapped.', { produced_mana: ['B'] }));
+    const dual = quality(card('Blood Crypt', 'Land — Swamp Mountain', '', { produced_mana: ['B', 'R'] }));
+    expect(dual.score).toBeGreaterThan(tapland.score);
   });
 });

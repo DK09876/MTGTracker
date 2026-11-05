@@ -1,34 +1,24 @@
 'use client';
 
 /**
- * What to change: the combos the deck already has, the ones it is a single
- * card from (with that card one click away), and where to look first for
- * cuts. Combos come from Commander Spellbook; cuts from EDHREC and the
- * role counts.
+ * The combos the deck already has, and the ones it is a single card from
+ * (with that card one click away), from Commander Spellbook.
  */
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 
 import * as api from '@/lib/api';
-import type { ListedCard } from '@/lib/db';
 import type { Board } from '@/lib/decklist';
 
 interface Props {
   listId: string;
-  cards: ListedCard[];
   commander: string | null;
   version: string;
   onAdd: (cardId: string, board: Board) => Promise<void>;
-  onMove: (cardId: string, board: Board) => void;
-  onRemove: (cardId: string) => void;
-  /** Only the combos, inside Tune → Add (its cuts are the cut list's job now). */
-  combosOnly?: boolean;
 }
 
-const front = (name: string) => name.split(' // ')[0];
-
-export default function DeckSuggestions({ listId, cards, commander, version, onAdd, onMove, onRemove, combosOnly = false }: Props) {
+export default function DeckSuggestions({ listId, commander, version, onAdd }: Props) {
   const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>(() => api.peek<api.DeckInsights>(api.paths.insights(listId)) ?? 'loading');
   const [added, setAdded] = useState<Set<string>>(new Set());
 
@@ -40,10 +30,9 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
     return () => { cancelled = true; };
   }, [listId, version]);
 
-  if (insights === 'loading') return <p className="mt-8 text-center text-[var(--muted)]">Looking for combos and cuts…</p>;
+  if (insights === 'loading') return <p className="mt-8 text-center text-[var(--muted)]">Looking for combos…</p>;
   if (insights === 'failed') return <p className="mt-8 text-center text-red-400">Couldn&apos;t work out suggestions just now — try again in a moment.</p>;
 
-  const idOf = new Map(cards.map((c) => [front(c.card.name), c.card.id]));
   const short = commander?.split(',')[0] ?? 'this commander';
   const add = async (id: string, board: Board) => {
     setAdded((prev) => new Set(prev).add(id));
@@ -118,40 +107,6 @@ export default function DeckSuggestions({ listId, cards, commander, version, onA
         </ul>
       </Section>
 
-      {!combosOnly && <Section tour="cuts" title="Cuts to consider" subtitle="Where to look first when the deck needs room. Prompts, not verdicts.">
-        {insights.cuts.length === 0 && (
-          <p className="text-sm text-[var(--muted)]">Nothing stands out: every role is within its guideline{commander ? '' : ', and without a commander there is no EDHREC data to compare with'}.</p>
-        )}
-        <div className="flex flex-col gap-4">
-          {insights.cuts.map((group) => (
-            <div key={group.title} className="rounded-xl border border-[var(--border)]">
-              <div className="border-b border-[var(--border)] px-4 py-2.5">
-                <p className="text-sm font-medium">{group.title}</p>
-                <p className="text-xs text-[var(--muted)]">{group.detail}</p>
-              </div>
-              <ul className="divide-y divide-[var(--border)]">
-                {group.cards.map((card) => {
-                  const id = idOf.get(front(card.name));
-                  return (
-                    <li key={card.name} className="flex items-center gap-3 px-4 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate">{card.name}</span>
-                      <span className="text-xs text-[var(--muted)]">
-                        {card.inclusion === null ? `not on EDHREC's list for ${short}` : `in ${Math.round(card.inclusion * 100)}% of decks`}
-                      </span>
-                      {id && (
-                        <span className="flex gap-1">
-                          <button onClick={() => onMove(id, 'side')} className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs hover:bg-[var(--surface-hover)]">To sideboard</button>
-                          <button onClick={() => onRemove(id)} className="rounded-lg px-2 py-1 text-xs text-[var(--muted)] hover:text-red-400">Remove</button>
-                        </span>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </Section>}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /**
  * How well a card fits a commander, from the two cards' own text - no
- * EDHREC needed. The commander's text says what it cares about (instants,
+ * outside data needed. The commander's text says what it cares about (instants,
  * tokens, +1/+1 counters, a creature type, the graveyard...); a card that
  * does those things fits. Pure; used to rank suggestions and cuts.
  */
@@ -72,9 +72,44 @@ export function fitOf(card: ScryfallCard, profile: FitProfile | null): Fit {
   return { score: Math.min(1, matches.length / 2), matches };
 }
 
-/** How popular a card is in Commander overall, 0-1, from Scryfall's EDHREC rank (1 is the most played). */
-export function popularity(card: ScryfallCard): number {
-  const rank = (card as { edhrec_rank?: number }).edhrec_rank;
-  if (!rank) return 0;
-  return Math.max(0, 1 - Math.log(rank) / Math.log(40_000));
+// The jobs every deck needs, as the built-in roles that fill them.
+const JOB_OF: Record<string, string> = {
+  ramp: 'ramp', rock: 'ramp', dork: 'ramp', 'land-ramp': 'ramp', draw: 'draw', engine: 'draw',
+  removal: 'interaction', counter: 'interaction', wipe: 'interaction', protection: 'protection',
+  recursion: 'recursion', tutor: 'tutor', wincon: 'finish', finisher: 'finish',
+};
+
+export interface Quality {
+  /** 0 to 1. */
+  score: number;
+  /** What earned it, in a few words: "2 mana", "instant", "draws and ramps". */
+  reasons: string[];
+}
+
+/**
+ * How good a card is at what it does, from things anyone can check on the
+ * card: cheaper is better, instant speed is better, doing more than one job
+ * is better, and removal that hits anything beats removal that hits one
+ * kind of thing. Lands: entering untapped, and making more colours. Not how
+ * often other decks play it - the app does not use that.
+ */
+export function quality(card: ScryfallCard, roles: string[] = []): Quality {
+  const text = textOf(card);
+  const reasons: string[] = [];
+  if (/\bLand\b/.test((card.type_line ?? '').split('//')[0])) {
+    const tapped = /enters (the battlefield )?tapped/i.test(text) && !/\bunless\b|\bif you control\b/i.test(text);
+    const colors = (card.produced_mana ?? []).filter((c) => c !== 'C').length;
+    if (!tapped) reasons.push('enters untapped');
+    if (colors >= 2) reasons.push(`makes ${colors} colours`);
+    return { score: (tapped ? 0 : 0.6) + Math.min(colors, 3) / 3 * 0.4, reasons };
+  }
+  const mv = card.cmc ?? 0;
+  let score = (1 - Math.min(mv, 7) / 7) * 0.4;
+  if (mv <= 2) reasons.push(`${mv} mana`);
+  if (/^Instant\b/.test(card.type_line ?? '') || /\bflash\b/i.test((card.keywords ?? []).join(' '))) { score += 0.2; reasons.push('instant speed'); }
+  const jobs = [...new Set(roles.map((r) => JOB_OF[r]).filter(Boolean))];
+  score += Math.min(jobs.length, 3) / 3 * 0.3;
+  if (jobs.length >= 2) reasons.push(`does ${jobs.length} jobs`);
+  if (roles.includes('removal') && /\b(target|each) (nonland )?permanent\b|\bany target\b|\bchoose (one|two)\b/i.test(text)) { score += 0.1; reasons.push('hits anything'); }
+  return { score: Math.min(1, score), reasons };
 }

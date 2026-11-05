@@ -1,5 +1,5 @@
 /**
- * Deck chat wired to the database, Scryfall, EDHREC and Claude: ask a
+ * Deck chat wired to the database, Scryfall and Claude: ask a
  * question and the reply runs as a background job. Server only.
  */
 
@@ -8,7 +8,6 @@ import { deckRoles } from './deck-roles';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
-import { commanderPage, edhrecEnabled } from './edhrec';
 import { gapCards, heldByName } from './gap-cards';
 import { startJob, type Job } from './jobs';
 import { newChat, reply, saveChat, type DeckChat } from './deck-chat';
@@ -48,7 +47,6 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
-      edhrec: async () => (list.commander && edhrecEnabled() ? commanderPage(list.commander.name).catch(() => null) : null),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     current.messages.push(message);

@@ -3,7 +3,7 @@
 /**
  * The deck's Chat tab: ask Claude about the deck - what to add, what to
  * cut, whether the plan holds. Every chat is saved. Claude looks things up
- * (Scryfall, your collection, EDHREC) and puts each change it recommends
+ * (Scryfall, your collection) and puts each change it recommends
  * on a button; nothing changes until you press one. Replies run in the
  * background, so the page can be left while Claude thinks.
  */

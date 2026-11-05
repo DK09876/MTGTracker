@@ -13,8 +13,8 @@ describe('describeQuery', () => {
   it.each([
     ['otag:ramp c:g -t:land usd<2', 'tagged ramp · green · not a land · under $2'],
     ['t:enchantment id<=ubr f:commander', 'type enchantment · fits a blue/black/red deck · legal in Commander'],
-    ['(otag:draw or otag:card-advantage) mv<5 order:edhrec',
-      'tagged draw or tagged card advantage · mana value under 5 · most played in Commander first'],
+    ['(otag:draw or otag:card-advantage) mv<5 order:released',
+      'tagged draw or tagged card advantage · mana value under 5 · newest first'],
     ['!"Lightning Bolt"', 'named exactly “Lightning Bolt”'],
     ['-!"Fire Lord Azula"', 'not named exactly “Fire Lord Azula”'],
     ['t:creature c:u mv=2 o:"when ~ enters"', 'type creature · blue · mana value exactly 2 · text says “when ~ enters”'],
@@ -38,7 +38,7 @@ describe('describeQuery', () => {
 });
 
 describe('isUnfiltered', () => {
-  it.each(['f:commander order:edhrec', 'id<=ubr f:commander', ''])('%s filters nothing', (q) => {
+  it.each(['f:commander order:released', 'id<=ubr f:commander', ''])('%s filters nothing', (q) => {
     expect(isUnfiltered(q)).toBe(true);
   });
 

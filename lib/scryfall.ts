@@ -305,15 +305,15 @@ export function priceOf(card: ScryfallCard, finish: Finish = 'nonfoil'): number 
 }
 
 /**
- * Commanders a loose mention could mean - "omnath" is six of them - most
- * played first. Deciding between them is the caller's job (see
+ * Commanders a loose mention could mean - "omnath" is six of them - newest
+ * first. Deciding between them is the caller's job (see
  * pickCommander in interpret.ts), which may mean asking. Falls back to the
  * fuzzy name match for spellings the word search misses.
  */
 export async function findCommanders(mention: string): Promise<ScryfallCard[]> {
   const words = mention.replace(/["()]/g, ' ').trim();
   if (!words) return [];
-  const { cards } = await searchCards(`is:commander ${words} order:edhrec`);
+  const { cards } = await searchCards(`is:commander ${words}`, 1, { order: 'released', dir: 'desc' });
   if (cards.length) return cards;
   const named = await findCardNamed(words);
   return named ? [named] : [];

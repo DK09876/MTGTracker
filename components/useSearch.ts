@@ -23,16 +23,14 @@ export function viewsOf(answer: api.AskResponse): Views {
   }
   return {
     cards: {
-      cards: answer.cards, total: answer.totalCards, stats: answer.stats, sort: answer.interpretation.sort,
+      cards: answer.cards, total: answer.totalCards, sort: answer.interpretation.sort,
       page: 1, hasMore: answer.hasMore,
     },
-    edhrec: answer.interpretation.commander ? answer.edhrec ?? null : undefined,
   };
 }
 
 function firstTab(answer: api.AskResponse): Tab {
-  if (answer.interpretation.kind === 'combos') return 'combos';
-  return answer.edhrec ? 'edhrec' : 'cards';
+  return answer.interpretation.kind === 'combos' ? 'combos' : 'cards';
 }
 
 /**
@@ -47,7 +45,6 @@ interface Kept {
   tab: Tab;
   inLists: Record<string, string[]>;
   owned: Record<string, number>;
-  edhrecFull: boolean;
 }
 let kept: Kept | null = null;
 
@@ -63,10 +60,6 @@ export function useSearch() {
   // Copies the profile owns of each card shown, by card id.
   const [owned, setOwned] = useState<Record<string, number>>(memory?.owned ?? {});
   const [status, setStatus] = useState<Status>('idle');
-  // The EDHREC tab narrows by what was asked for; it can be switched to the
-  // whole search, and back.
-  const [edhrecFull, setEdhrecFull] = useState(memory?.edhrecFull ?? false);
-  const statedEdhrec = useRef<Views['edhrec']>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   // Guards against a slow request overwriting the result of a later one.
@@ -97,36 +90,7 @@ export function useSearch() {
     setAnswer(result);
     setViews(viewsOf(result));
     setTab(firstTab(result));
-    setEdhrecFull(false);
-    statedEdhrec.current = undefined;
   }, []);
-
-  /** Switch the EDHREC tab between the stated conditions and the whole search. */
-  const toggleEdhrecFull = async () => {
-    const commander = answer?.interpretation.commander?.name;
-    if (!answer || !commander) return;
-    if (edhrecFull) {
-      setViews((v) => ({ ...v, edhrec: statedEdhrec.current }));
-      setEdhrecFull(false);
-      return;
-    }
-    const id = runId.current;
-    setTabLoading(true);
-    try {
-      // An edited-query run narrows EDHREC by the whole query - which is this.
-      const r = await api.runQuery(answer.interpretation.query, { commander, sort: views.cards?.sort });
-      if (id !== runId.current) return;
-      statedEdhrec.current = views.edhrec;
-      setInLists((prev) => ({ ...prev, ...r.inLists }));
-      setOwned((prev) => ({ ...prev, ...r.owned }));
-      setViews((v) => ({ ...v, edhrec: r.edhrec ?? null }));
-      setEdhrecFull(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load that');
-    } finally {
-      setTabLoading(false);
-    }
-  };
 
   /** An edited query: both card views change, the explanation stays. */
   const runEdited = (edited: string) => {
@@ -141,11 +105,11 @@ export function useSearch() {
   const resort = (sort: Sort) => {
     if (!answer) return;
     const { commander, query } = answer.interpretation;
-    run('searching', () => api.runQuery(query, { commander: commander?.name, sort, edhrec: false }), (result) => {
+    run('searching', () => api.runQuery(query, { commander: commander?.name, sort }), (result) => {
       setViews((v) => ({
         ...v,
         cards: {
-          cards: result.cards, total: result.totalCards, stats: result.stats, sort: result.interpretation.sort,
+          cards: result.cards, total: result.totalCards, sort: result.interpretation.sort,
           page: 1, hasMore: result.hasMore,
         },
       }));
@@ -162,7 +126,7 @@ export function useSearch() {
     try {
       const next = (current.page ?? 1) + 1;
       const r = await api.runQuery(answer.interpretation.query, {
-        commander: answer.interpretation.commander?.name, sort: current.sort, edhrec: false, page: next,
+        commander: answer.interpretation.commander?.name, sort: current.sort, page: next,
       });
       if (id !== runId.current) return;
       setInLists((prev) => ({ ...prev, ...r.inLists }));
@@ -175,7 +139,6 @@ export function useSearch() {
           cards: {
             ...v.cards,
             cards: [...v.cards.cards, ...r.cards.filter((c) => !seen.has(c.id))],
-            stats: { ...v.cards.stats, ...r.stats },
             page: next,
             hasMore: r.hasMore,
           },
@@ -190,12 +153,11 @@ export function useSearch() {
 
   /**
    * Put a search back as it was left: the pages of the Scryfall view that
-   * were loaded, the EDHREC tab matched to the full search, and the tab that
-   * was open. Takes the answer just shown, since state has not caught up yet.
+   * were loaded, and the tab that was open. Takes the answer just shown, since state has not caught up yet.
    */
-  const resumeView = async (result: api.AskResponse, left: { tab?: Tab; pages?: number; edhrecFull?: boolean }) => {
+  const resumeView = async (result: api.AskResponse, left: { tab?: Tab; pages?: number }) => {
     const id = runId.current;
-    const { query, commander, sort, constraints, kind } = result.interpretation;
+    const { query, commander, sort, kind } = result.interpretation;
     const name = commander?.name;
     const merge = (r: api.SearchResponse) => {
       setInLists((prev) => ({ ...prev, ...r.inLists }));
@@ -204,28 +166,18 @@ export function useSearch() {
     try {
       if (kind !== 'combos' && left.pages && left.pages > 1 && result.hasMore) {
         let cards = result.cards;
-        let stats = { ...result.stats };
         let hasMore: boolean = result.hasMore;
         let page = 1;
         for (let next = 2; next <= left.pages && hasMore; next++) {
-          const r = await api.runQuery(query, { commander: name, sort, edhrec: false, page: next });
+          const r = await api.runQuery(query, { commander: name, sort, page: next });
           if (id !== runId.current) return;
           merge(r);
           const seen = new Set(cards.map((c) => c.id));
           cards = [...cards, ...r.cards.filter((c) => !seen.has(c.id))];
-          stats = { ...stats, ...r.stats };
           hasMore = r.hasMore;
           page = next;
         }
-        setViews((v) => (v.cards ? { ...v, cards: { ...v.cards, cards, stats, page, hasMore } } : v));
-      }
-      if (left.edhrecFull && name && constraints !== undefined && constraints !== query) {
-        const r = await api.runQuery(query, { commander: name, sort });
-        if (id !== runId.current) return;
-        merge(r);
-        statedEdhrec.current = viewsOf(result).edhrec;
-        setViews((v) => ({ ...v, edhrec: r.edhrec ?? null }));
-        setEdhrecFull(true);
+        setViews((v) => (v.cards ? { ...v, cards: { ...v.cards, cards, page, hasMore } } : v));
       }
       if (left.tab && name) {
         const have = viewsOf(result);
@@ -240,8 +192,7 @@ export function useSearch() {
           merge(r);
           setViews((v) => ({
             ...v,
-            cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
-            edhrec: r.edhrec ?? null,
+            cards: { cards: r.cards, total: r.totalCards, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
           }));
         }
       }
@@ -256,7 +207,7 @@ export function useSearch() {
     setTab(next);
     const commander = answer?.interpretation.commander?.name;
     if (!commander) return;
-    const missing = next === 'combos' ? !views.combos : next === 'edhrec' ? views.edhrec === undefined : !views.cards;
+    const missing = next === 'combos' ? !views.combos : !views.cards;
     if (!missing) return;
 
     const id = runId.current;
@@ -276,8 +227,7 @@ export function useSearch() {
       setOwned((prev) => ({ ...prev, ...r.owned }));
         setViews((v) => ({
           ...v,
-          cards: { cards: r.cards, total: r.totalCards, stats: r.stats, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
-          edhrec: r.edhrec ?? null,
+          cards: { cards: r.cards, total: r.totalCards, sort: r.interpretation.sort, page: 1, hasMore: r.hasMore },
         }));
       }
     } catch (e) {
@@ -288,13 +238,13 @@ export function useSearch() {
   };
 
   useEffect(() => {
-    kept = answer ? { profile: getProfile(), answer, views, tab, inLists, owned, edhrecFull } : null;
-  }, [answer, views, tab, inLists, owned, edhrecFull]);
+    kept = answer ? { profile: getProfile(), answer, views, tab, inLists, owned } : null;
+  }, [answer, views, tab, inLists, owned]);
 
   return {
     /** Whether this opened on the search kept from before, rather than empty. */
     fromMemory: !!memory,
     answer, setAnswer, views, setViews, tab, setTab, tabLoading, loadingMore, inLists, setInLists, owned,
-    status, error, run, showAnswer, runEdited, resort, loadMore, openTab, edhrecFull, toggleEdhrecFull, resumeView,
+    status, error, run, showAnswer, runEdited, resort, loadMore, openTab, resumeView,
   };
 }

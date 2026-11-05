@@ -3,7 +3,7 @@
  * saved as it goes.
  *
  * Claude gets the deck (commander, brief, cards and their roles) and tools
- * to look things up - Scryfall, the owner's collection, EDHREC, the cards
+ * to look things up - Scryfall, the owner's collection, the cards
  * that would fill a role. It never changes the deck itself: what it
  * suggests comes back as changes the owner applies with a button.
  *
@@ -18,7 +18,6 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { ClaudeParams } from './ai-claude';
 import { localCards } from './card-store';
 import { database, type List, type ListedCard } from './db';
-import type { CommanderPage } from './edhrec';
 import type { GapCard } from './gap-cards';
 import { ROLES, type RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
@@ -105,8 +104,6 @@ export interface ChatTools {
   search: (query: string) => Promise<ScryfallCard[]>;
   /** Where the owner has a copy of each card: a box, another deck, or null. */
   held: (names: string[]) => Record<string, string | null>;
-  /** EDHREC's numbers for the commander, or null when it is off. */
-  edhrec: () => Promise<CommanderPage | null>;
   /** Cards to fill a role. */
   gaps: (role: string, owned: boolean, max: number | null) => Promise<GapCard[]>;
 }
@@ -133,9 +130,10 @@ say why in a sentence. Keep answers short unless asked for depth.
 How to help:
 - Start from what the deck is trying to do (its brief and how it wins).
   Every suggestion should serve that plan.
-- Look things up rather than guess: search Scryfall for cards, check the
-  owner's collection, and use EDHREC's numbers for this commander. Only
-  suggest cards that are legal in Commander and in the commander's colours.
+- Look things up rather than guess: search Scryfall for cards and check the
+  owner's collection. Only suggest cards that are legal in Commander and in
+  the commander's colours. Judge cards by what they do for this plan, not by
+  how popular they are.
 - When the owner asks for cards from their collection, check it first and
   prefer what they own.
 - Cantrips are not card draw. A deck needs ways to actually win.
@@ -157,13 +155,8 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
     input_schema: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] },
   },
   {
-    name: 'edhrec',
-    description: "How often this commander's decks on EDHREC play cards. With names, those cards' share of decks; without, EDHREC's top and high-synergy cards for the commander.",
-    input_schema: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } } },
-  },
-  {
     name: 'cards_for_role',
-    description: `Cards that would fill a role in this deck, not already in it, ranked by EDHREC, with where the owner has a copy. Roles: ${ROLES.map((r) => r.id).join(', ')}.`,
+    description: `Cards that would fill a role or a job in this deck, not already in it, ranked by fit with the commander and how good they are at the job, with where the owner has a copy. Roles and jobs: interaction, finishers, ${ROLES.map((r) => r.id).join(', ')}.`,
     input_schema: {
       type: 'object',
       properties: { role: { type: 'string' }, owned_first: { type: 'boolean' }, max_price: { type: 'number' } },
@@ -199,7 +192,7 @@ export function deckText(deck: ChatDeck): string {
     deck.brief.trim() ? `The owner's brief:\n${deck.brief.trim()}` : 'The owner has not written a brief.',
     deck.plan ? `The plan: ${deck.plan}` : '',
     '',
-    counts ? `Built-in tag counts against the plan's guidelines: ${counts}` : '',
+    counts ? `Counts against the plan's guidelines (card draw leaves out cantrips and impulse draw; interaction is removal, counterspells and wipes together): ${counts}` : '',
     '',
     `Main deck (${main.reduce((n, x) => n + x.quantity, 0) + (c ? 1 : 0)} cards with the commander):`,
     ...main.map((x) => {
@@ -224,18 +217,6 @@ async function runTool(name: string, input: Record<string, unknown>, deck: ChatD
       const names = (input.names as string[] | undefined ?? []).slice(0, 40);
       const held = tools.held(names);
       return { result: names.map((n) => `${n}: ${held[n] ?? 'not owned'}`).join('\n'), lookup: 'Looked at your collection' };
-    }
-    case 'edhrec': {
-      const page = await tools.edhrec();
-      if (!page) return { result: 'EDHREC is not available here.', lookup: 'Tried EDHREC' };
-      const names = (input.names as string[] | undefined) ?? [];
-      if (names.length) {
-        return {
-          result: names.map((n) => { const s = page.stats.get(front(n)) ?? page.stats.get(n); return `${n}: ${s ? `${Math.round(s.inclusion * 100)}% of decks, synergy ${Math.round(s.synergy * 100)}%` : 'not on EDHREC\'s list'}`; }).join('\n'),
-          lookup: `EDHREC for ${deck.list.commander?.name.split(',')[0] ?? 'the commander'}`,
-        };
-      }
-      return { result: page.sections.slice(0, 4).map((s) => `${s.header}: ${s.names.slice(0, 15).join(', ')}`).join('\n'), lookup: `EDHREC for ${deck.list.commander?.name.split(',')[0] ?? 'the commander'}` };
     }
     case 'cards_for_role': {
       const role = String(input.role ?? '');

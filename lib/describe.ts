@@ -20,7 +20,6 @@ const GUILDS: Record<string, string> = {
 const FORMATS: Record<string, string> = { edh: 'Commander', commander: 'Commander' };
 
 const ORDERS: Record<string, string> = {
-  edhrec: 'most played in Commander first',
   usd: 'by price', cmc: 'by mana value', name: 'by name', released: 'newest first',
   rarity: 'by rarity', power: 'by power', toughness: 'by toughness', color: 'by colour',
 };

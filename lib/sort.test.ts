@@ -36,8 +36,13 @@ describe('sort keys', () => {
 });
 
 describe('sortLabel', () => {
-  it('defaults to most played in Commander', () => {
-    expect(sortLabel(DEFAULT_SORT)).toBe('Most played in Commander');
+  it('defaults to newest first', () => {
+    expect(sortLabel(DEFAULT_SORT)).toBe('Newest first');
+  });
+
+  it('drops the retired "most played" order, saved or typed', () => {
+    expect(parseSortKey('edhrec:auto')).toBeNull();
+    expect(splitSort('t:elf order:edhrec')).toEqual({ filters: 't:elf', sort: null });
   });
 
   it('describes an order the menu does not list', () => {

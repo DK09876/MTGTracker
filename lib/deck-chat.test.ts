@@ -49,7 +49,6 @@ describe('deck chat', () => {
     const answer = await reply(chat, deck(), {
       search: async () => [],
       held: (names) => Object.fromEntries(names.map((n) => [n, n === 'Grapeshot' ? 'yours, Box 4' : null])),
-      edhrec: async () => null,
       gaps: async () => [],
     }, call as never, 'claude-sonnet-5-5');
 

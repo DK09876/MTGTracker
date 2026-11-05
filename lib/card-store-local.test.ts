@@ -46,7 +46,7 @@ describe('the local copy', () => {
     expect(store.localCards(['Fire Lord Azula']).map((c) => c.id)).toEqual(['a1']);
   });
 
-  it('suggests commanders whose names start with what was typed first, then the most played', async () => {
+  it('suggests commanders whose names start with what was typed first, then the shortest names', async () => {
     const store = await withCards([azula, artCard, sliver, hivelord, queen]);
     expect(store.localCommanders('sliver').map((c) => c.name)).toEqual(['Sliver Hivelord', 'Sliver Overlord', 'The First Sliver']);
     expect(store.localCommanders('azula').map((c) => c.id)).toEqual(['a1']);

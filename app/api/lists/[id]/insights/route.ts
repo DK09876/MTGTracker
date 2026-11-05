@@ -1,7 +1,7 @@
 /**
  * What a deck's list says about how it plays: its bracket floor, the
- * combos it has and is one card from (Commander Spellbook), and where to
- * look first for cuts (EDHREC and the role counts).
+ * combos it has and is one card from (Commander Spellbook), and how it
+ * wins.
  *
  * Spellbook is asked twice per look, so answers are kept until the deck
  * changes: switching tabs does not ask again.
@@ -11,10 +11,7 @@ import { deckRoles } from '@/lib/deck-roles';
 import { NextResponse } from 'next/server';
 
 import { bracketFloor } from '@/lib/bracket';
-import { cutCandidates } from '@/lib/cuts';
 import { cardsInList } from '@/lib/db';
-import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
-import { primaryType } from '@/lib/deckview';
 import { requireList } from '@/lib/profile-route';
 import { guessWinRoutes } from '@/lib/wincons';
 import { imageOf, searchCards, type ScryfallCard } from '@/lib/scryfall';
@@ -44,11 +41,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     main: main.map((c) => ({ name: c.card.name, quantity: c.quantity })),
   };
 
-  const [bracket, combos, roles, page] = await Promise.all([
+  const [bracket, combos, roles] = await Promise.all([
     estimateBracket(deck).catch(() => null),
     combosInDeck(deck).catch(() => null),
     deckRoles(id, main).catch(() => null),
-    list.commander && edhrecEnabled() ? commanderPage(list.commander.name) : Promise.resolve(null),
   ]);
 
   // Near-misses grouped by the card that completes them: one card often
@@ -82,11 +78,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     });
   }
 
-  const spells = main.filter((c) => primaryType(c.card) !== 'Lands').map((c) => c.card.name);
   const body = {
     bracket: bracket && { ...bracketFloor(bracket), spellbook: { tag: bracket.tag, label: SPELLBOOK_TAGS[bracket.tag] } },
     combos: combos && { included: combos.included, toAdd },
-    cuts: cutCandidates(spells, page?.stats ?? null, roles),
     // How it wins, from the cards alone (no model): combos, finishers, shape.
     wincons: roles ? guessWinRoutes({ cards: [...main, ...(list.commander ? [{ card: list.commander, quantity: 1 }] : [])], roles, combos: combos?.included ?? null }) : null,
     unavailable: [!bracket && 'bracket', !combos && 'combos'].filter(Boolean),

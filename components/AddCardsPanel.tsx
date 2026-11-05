@@ -3,8 +3,8 @@
 /**
  * "Add cards", a window over the deck.
  *
- * It opens on suggestions - what this commander's decks play on EDHREC that
- * this deck does not have yet - and takes anything typed: plain English
+ * It opens on the newest cards in the commander's colours, and takes
+ * anything typed: plain English
  * ("ramp that fetches lands"), Scryfall syntax, or a card name. Every search
  * is for the deck's commander without having to say so. Cards already in
  * the deck are hidden by default, so what is left is what could be added.
@@ -53,12 +53,12 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
 
   const boardOf = (card: ScryfallCard) => added.get(front(card.name)) ?? inDeck.get(front(card.name));
 
-  // Opens on suggestions for the commander.
+  // Opens on the newest cards the commander can play.
   useEffect(() => {
     if (opened.current || !commander) return;
     opened.current = true;
     s.run('searching', () => api.runQuery('', { commander }), (r) => {
-      s.showAnswer({ ...r, interpretation: { ...r.interpretation, explanation: `Suggestions for ${commander}` } });
+      s.showAnswer({ ...r, interpretation: { ...r.interpretation, explanation: `The newest cards in ${commander.split(',')[0]}'s colours` } });
     });
   }, [commander, s]);
 
@@ -92,15 +92,9 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
   const keep = (card: ScryfallCard) => !hideInDeck || !inDeck.has(front(card.name));
   const views: Views = hideInDeck ? {
     cards: s.views.cards && { ...s.views.cards, cards: s.views.cards.cards.filter(keep) },
-    edhrec: s.views.edhrec && (() => {
-      const cards = s.views.edhrec.cards.filter(keep);
-      const ids = new Set(cards.map((c) => c.id));
-      return { ...s.views.edhrec, cards, sections: s.views.edhrec.sections.map((sec) => ({ ...sec, ids: sec.ids.filter((id) => ids.has(id)) })).filter((sec) => sec.ids.length) };
-    })(),
     combos: s.views.combos,
   } : s.views;
-  const hidden = (s.views.edhrec?.cards.length ?? 0) - (views.edhrec?.cards.length ?? 0)
-    + (s.views.cards?.cards.length ?? 0) - (views.cards?.cards.length ?? 0);
+  const hidden = (s.views.cards?.cards.length ?? 0) - (views.cards?.cards.length ?? 0);
 
   const actions = (card: ScryfallCard) => {
     const on = boardOf(card);
@@ -159,7 +153,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
 
         <div className="flex-1 overflow-y-auto p-4">
           {!commander && !s.answer && !busy && (
-            <p className="text-sm text-[var(--muted)]">Pick a commander for the deck to get suggestions — or search for anything above.</p>
+            <p className="text-sm text-[var(--muted)]">Pick a commander for the deck to see cards it can play — or search for anything above.</p>
           )}
           {s.answer && s.status !== 'thinking' && (
             <Interpreted interpretation={s.answer.interpretation} trace={s.answer.trace} onRun={s.runEdited} />
@@ -181,9 +175,6 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
               onSelect={setSelected}
               actions={actions}
               dense
-              edhrecFull={s.edhrecFull}
-              onEdhrecFull={s.answer && s.answer.interpretation.constraints !== undefined
-                && s.answer.interpretation.constraints !== s.answer.interpretation.query ? s.toggleEdhrecFull : undefined}
             />
           )}
         </div>

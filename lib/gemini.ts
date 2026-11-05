@@ -45,14 +45,6 @@ export interface Translation {
    * kind "combos": extra Commander Spellbook terms, usually empty.
    */
   query: string;
-  /**
-   * Only the conditions the request itself states - "enchantments", "under
-   * 5 mana" - without the synergy the model added to `query`. The EDHREC tab
-   * filters by these: its list is already what works with the commander, and
-   * re-filtering it by guessed rules text threw most of it away (12 of
-   * Azula's 20 enchantments). Null when the model did not say.
-   */
-  constraints: string | null;
   /** One sentence restating what the search looks for, shown above the results. */
   explanation: string;
 }
@@ -65,7 +57,6 @@ export interface Previous {
   commander?: string;
   cardName?: string;
   query: string;
-  constraints?: string;
 }
 
 /** What the model is told on top of the request. */
@@ -121,8 +112,7 @@ export function userMessage(request: string, context: Context = {}, today = new 
       `Plan that ran: kind ${previous.kind}`
         + (previous.commander ? `; commander ${previous.commander}` : '')
         + (previous.cardName ? `; cardName ${previous.cardName}` : '')
-        + `; query ${previous.query || '(empty)'}`
-        + (previous.constraints !== undefined ? `; constraints ${previous.constraints || '(empty)'}` : ''),
+        + `; query ${previous.query || '(empty)'}`,
       '',
       `Follow-up: ${request}`,
       '',
@@ -229,8 +219,7 @@ export function planFrom(answer: unknown): Translation {
     else throw new GeminiError('the model returned an empty query');
   }
 
-  const constraints = typeof parsed.constraints === 'string' ? parsed.constraints.trim() : null;
-  return { kind, cardName, commander, query, constraints, explanation: clean(parsed.explanation) };
+  return { kind, cardName, commander, query, explanation: clean(parsed.explanation) };
 }
 
 const RESPONSE_SCHEMA = {
@@ -241,10 +230,9 @@ const RESPONSE_SCHEMA = {
     commander: { type: 'STRING', nullable: true },
     explanation: { type: 'STRING' },
     query: { type: 'STRING' },
-    constraints: { type: 'STRING' },
   },
-  required: ['kind', 'cardName', 'commander', 'explanation', 'query', 'constraints'],
-  propertyOrdering: ['kind', 'cardName', 'commander', 'explanation', 'query', 'constraints'],
+  required: ['kind', 'cardName', 'commander', 'explanation', 'query'],
+  propertyOrdering: ['kind', 'cardName', 'commander', 'explanation', 'query'],
 };
 
 // Tags checked against Scryfall on 2026-09-24. An unknown otag does not
@@ -289,13 +277,6 @@ Return JSON with:
     For "combos": usually empty. Only add Commander Spellbook terms when the
     request narrows the combos: result:"infinite mana", cards<=2 (at most two
     pieces), price<50, coloridentity<=UR (only when no commander is given).
-- constraints: for "cards", every condition the request itself asks for, in
-  Scryfall syntax - card types, mana value, price, colours, rarity, a role
-  ("ramp", "card draw", "removal"), and qualities described in words
-  ("repeatable", "at instant speed", "that can't be countered", "like Zuran's
-  Orb" - what that card is like). Leave out only what you added yourself to
-  fit the commander's rules text. Empty when the request asks for nothing
-  but the commander ("good cards for Azula"). For "card" and "combos", empty.
 
 When a commander is given, the server adds its colour identity, Commander
 legality, and removes the commander itself. So never write id:, f:commander
@@ -324,8 +305,8 @@ Scryfall syntax:
 - kw: keyword abilities (kw:flying, kw:trample).
 - -term excludes. Terms are ANDed. (a or b) groups alternatives.
 - order: sets the sort. Only add one when the request asks for an order:
-  order:edhrec for "best", "most popular" or "staples"; order:released for
-  "new" or "latest"; order:usd direction:asc for "cheapest". Otherwise leave
+  order:released for "new" or "latest"; order:usd direction:asc for
+  "cheapest". Otherwise leave
   it out - the user picks the order from a menu.
 - otag: is a curated tag for what a card does. It is often the best way to
   express a role, but ONLY these tags exist - any other otag matches nothing:
@@ -344,17 +325,15 @@ never invent a keyword - if you are unsure a clause is valid, leave it out.
 
 Examples:
 "cheap green ramp that isn't a land" ->
-  kind: cards; query: otag:ramp c:g -t:land usd<2; constraints: otag:ramp c:g -t:land usd<2
+  kind: cards; query: otag:ramp c:g -t:land usd<2
 "lightnig bolt" -> kind: card; cardName: Lightning Bolt
 "enchantments that work well for fire lord azula" ->
-  kind: cards; commander: Fire Lord Azula; query: t:enchantment; constraints: t:enchantment
-  (once shown Azula's rules text: query: t:enchantment (o:copy or o:"whenever you cast"); constraints: t:enchantment)
+  kind: cards; commander: Fire Lord Azula; query: t:enchantment
+  (once shown Azula's rules text: query: t:enchantment (o:copy or o:"whenever you cast"))
 "a repeatable sacrifice outlet like zuran's orb for hearthhull" ->
-  kind: cards; commander: Hearthhull; query: o:/sacrifice an? [^.:]*:/;
-  constraints: o:/sacrifice an? [^.:]*:/ (repeatable is asked for, so it is a constraint)
+  kind: cards; commander: Hearthhull; query: o:/sacrifice an? [^.:]*:/
 "a card under 5 cmc for azula that helps me draw cards" ->
-  kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5;
-  constraints: (otag:draw or otag:card-advantage) mv<5
+  kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5
 "kratos stoic father and atreus, counters synergy" -> kind: cards;
   commander: Kratos, Stoic Father and Atreus; query: (o:"+1/+1 counter" or o:proliferate)
 "combo cards for vivi" -> kind: combos; commander: Vivi
@@ -362,7 +341,7 @@ Examples:
 "two card infinite mana combos in izzet" ->
   kind: combos; query: coloridentity<=UR result:"infinite mana" cards<=2
 "best commanders for a goblin deck" ->
-  kind: cards; query: is:commander (t:goblin or o:goblin) order:edhrec
+  kind: cards; query: is:commander (t:goblin or o:goblin)
 "new red cards from this year" -> kind: cards; query: c:r year>=YYYY order:released, with YYYY the current year
 "blue two drops that draw a card when they enter" ->
   kind: cards; query: t:creature c:u mv=2 o:"when ~ enters" o:"draw"

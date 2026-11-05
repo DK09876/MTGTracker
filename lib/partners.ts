@@ -4,10 +4,9 @@
  * commander that can choose a Background and a Background, the Doctor and a
  * Doctor's companion.
  *
- * Search treats a pair as one commander: the colours of both, EDHREC's page
- * for the pair, and neither card in the results. "Kratos and Atreus" asked
- * for a commander called that, found none, and searched every colour without
- * EDHREC (2026-09-30).
+ * Search treats a pair as one commander: the colours of both, and neither
+ * card in the results. "Kratos and Atreus" asked for a commander called
+ * that, found none, and searched every colour (2026-09-30).
  *
  * Pure.
  */
@@ -57,9 +56,9 @@ export function canPartner(a: ScryfallCard, b: ScryfallCard): boolean {
 const WUBRG = 'WUBRG';
 
 /**
- * The pair as one commander: both names in EDHREC's order (alphabetical, so
- * its page for the pair is found), both colour identities, both cards' text
- * for the model to read.
+ * The pair as one commander: both names in alphabetical order (so the same
+ * pair is always named the same way), both colour identities, both cards'
+ * text for the model to read.
  */
 export function mergePair(a: ScryfallCard, b: ScryfallCard): Commander {
   const [first, second] = [a, b].sort((x, y) => x.name.localeCompare(y.name));

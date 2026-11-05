@@ -106,7 +106,7 @@ function Editor({ interpretation, trace, onRun }: Props) {
 
 /**
  * The commander a search is for, on a stage of its own: its art blurred
- * behind its name, mana cost and colours, and a link to EDHREC.
+ * behind its name, mana cost and colours.
  */
 function CommanderBanner({ commander }: { commander: CommanderRef }) {
   // Scryfall serves each size at the same path: the art crop sits beside "normal".
@@ -131,9 +131,6 @@ function CommanderBanner({ commander }: { commander: CommanderRef }) {
             {commander.manaCost ? <ManaCost cost={commander.manaCost} size={15} /> : <IdentitySymbols identity={commander.identity} size={15} />}
           </p>
         </div>
-        <a href={commander.edhrecUrl} target="_blank" rel="noreferrer" className="glass rounded-full px-3 py-1.5 text-xs font-semibold hover:bg-white/10">
-          EDHREC ↗
-        </a>
       </div>
     </div>
   );

@@ -6,9 +6,8 @@
  *   POST {q, previous?, resume}    carry on after the user picked a commander
  *   POST {q, forDeck: {commander}} search from inside a deck, for its commander
  *   GET  ?query=&commander=&sort=  run a query as written, no model - for an
- *                                  edited query, a new sort (&edhrec=0 skips
- *                                  rebuilding the EDHREC tab), or a tab
- *                                  opened later; &page=2 for the next 175
+ *                                  edited query, a new sort, or a tab opened
+ *                                  later; &page=2 for the next 175
  *   GET  ?combosFor=...            a commander's combos, for the Combos tab
  *
  * /api/search still runs a bare query with nothing else attached.
@@ -20,7 +19,6 @@ import { ownedCounts } from '@/lib/collection';
 import { modelById, modelFor } from '@/lib/ai';
 import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
-import { commanderPage, edhrecEnabled } from '@/lib/edhrec';
 import { geminiTranslator, modelTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
 import { cardsNamed, findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
@@ -50,7 +48,6 @@ function deps(request: Request, label = ''): Deps {
     findCommanders,
     cardsNamed,
     searchCombos,
-    edhrec: edhrecEnabled() ? commanderPage : null,
     translate: translator(profileOf(request), label),
   };
 }
@@ -59,7 +56,7 @@ function deps(request: Request, label = ''): Deps {
 async function respond(request: Request, work: () => Promise<Interpreted>) {
   try {
     const result = await work();
-    const cards = [...result.cards, ...(result.edhrec?.cards ?? [])];
+    const cards = result.cards;
     const profile = profileOf(request);
     return NextResponse.json({
       ...result,
@@ -84,9 +81,7 @@ export async function GET(request: Request) {
   const query = params.get('query');
   if (query !== null) {
     return respond(request, () => runQuery(query, params.get('commander') || null, deps(request), parseSortKey(params.get('sort')), {
-      withEdhrec: params.get('edhrec') !== '0',
       page: Math.max(1, Number(params.get('page')) || 1),
-      constraints: params.get('constraints') ?? undefined,
     }));
   }
 
@@ -109,7 +104,6 @@ function resumeOf(raw: unknown): Resume | undefined {
       cardName: text(p.cardName) ?? null,
       commander: text(p.commander) ?? null,
       query: text(p.query) ?? '',
-      constraints: text(p.constraints) ?? null,
       explanation: text(p.explanation) ?? '',
     },
   };
@@ -127,7 +121,7 @@ export async function POST(request: Request) {
   const previous: Previous | undefined = text(p.request)
     ? {
       request: text(p.request)!, kind, commander: text(p.commander), cardName: text(p.cardName),
-      query: text(p.query) ?? '', constraints: text(p.constraints),
+      query: text(p.query) ?? '',
     }
     : undefined;
   const deckCommander = text(body.forDeck?.commander);
