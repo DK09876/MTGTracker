@@ -370,7 +370,7 @@ function Body({ id, part, plan, busy, change, cardNames, onTab }: { id: string; 
     }
     case 'themes': {
       const themes = v as api.ThemeView[];
-      if (!themes.length) return <p className="text-sm text-[var(--muted)]">No themes yet. Add cards, or make a tag on the Tags tab.</p>;
+      if (!themes.length) return <p className="text-sm text-[var(--muted)]">No themes yet. Add cards, or make a tag under Your tags, below.</p>;
       return (
         <div className="flex flex-col gap-1.5">
           {themes.map((t) => (
@@ -392,7 +392,7 @@ function Body({ id, part, plan, busy, change, cardNames, onTab }: { id: string; 
               </span>
             </div>
           ))}
-          <button onClick={() => onTab('tags')} className="w-fit text-xs text-[var(--accent)] hover:underline">Make your own on the Tags tab</button>
+          <button onClick={() => onTab('tags')} className="w-fit text-xs text-[var(--accent)] hover:underline">Make your own in Your tags, below</button>
         </div>
       );
     }
@@ -506,7 +506,7 @@ function Routes({ routes, busy, change, cardNames }: { routes: api.RouteView[]; 
   const [cards, setCards] = useState('');
   return (
     <div className="flex flex-col gap-1.5">
-      {routes.length === 0 && <p className="text-sm text-[var(--muted)]">No way to win found yet. Add one, or tag your win conditions on the Tags tab.</p>}
+      {routes.length === 0 && <p className="text-sm text-[var(--muted)]">No way to win found yet. Add one, or tag your win conditions under Your tags, below.</p>}
       {routes.map((r) => (
         <div key={r.id} className={`flex flex-col gap-1 rounded-xl border px-3 py-2 text-sm ${r.main && !r.dropped ? 'border-[var(--accent)]/70' : 'border-[var(--border)]'} ${r.dropped ? 'opacity-50' : ''}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -11,21 +11,22 @@
 
 import { useEffect, useState } from 'react';
 
-import type { DeckTab } from './DeckBuild';
+
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { RoleCount } from '@/lib/roles';
 
 type WidgetId = 'curve' | 'lands' | 'ramp' | 'draw' | 'removal' | 'wipe' | 'colours' | 'bracket' | 'good' | 'avgmv' | 'price' | 'combos' | 'gamechangers';
 
-const WIDGETS: Array<{ id: WidgetId; label: string; tab: DeckTab }> = [
+// Where each widget opens: the numbers live on Check; price opens your copies on Cards.
+const WIDGETS: Array<{ id: WidgetId; label: string; tab: 'health' | 'playtest' | 'collection' | 'tune' }> = [
   { id: 'curve', label: 'Mana curve', tab: 'health' },
-  { id: 'lands', label: 'Lands', tab: 'tune' },
-  { id: 'ramp', label: 'Ramp', tab: 'tune' },
-  { id: 'draw', label: 'Card draw', tab: 'tune' },
-  { id: 'removal', label: 'Removal', tab: 'tune' },
-  { id: 'wipe', label: 'Board wipes', tab: 'tune' },
-  { id: 'colours', label: 'Colour sources', tab: 'tune' },
+  { id: 'lands', label: 'Lands', tab: 'health' },
+  { id: 'ramp', label: 'Ramp', tab: 'health' },
+  { id: 'draw', label: 'Card draw', tab: 'health' },
+  { id: 'removal', label: 'Removal', tab: 'health' },
+  { id: 'wipe', label: 'Board wipes', tab: 'health' },
+  { id: 'colours', label: 'Colour sources', tab: 'health' },
   { id: 'bracket', label: 'Bracket', tab: 'health' },
   { id: 'good', label: 'Good start', tab: 'playtest' },
   { id: 'avgmv', label: 'Average mana value', tab: 'health' },
@@ -49,7 +50,8 @@ interface Props {
   listId: string;
   version: string;
   price: number;
-  onTab: (tab: DeckTab) => void;
+  /** Opens a tab by its name, old names included (lib/deck-tabs.ts). */
+  onTab: (tab: string) => void;
 }
 
 export default function DeckGlance({ listId, version, price, onTab }: Props) {
@@ -135,7 +137,7 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
         const w = WIDGETS.find((x) => x.id === id)!;
         const content = body(id);
         return (
-          <button key={id} onClick={() => onTab(w.tab)} title={`${w.label}: open ${w.tab}`} className="shrink-0 rounded-lg text-left hover:opacity-80">
+          <button key={id} onClick={() => onTab(w.tab)} title={`${w.label}: open ${w.tab === 'collection' ? 'your copies' : w.tab === 'playtest' ? 'Check → Playtest' : w.tab === 'tune' ? 'Tune' : 'Check'}`} className="shrink-0 rounded-lg text-left hover:opacity-80">
             {content ?? <span className="flex flex-col text-xs text-[var(--muted)]">{w.label}<b className="text-base font-normal">…</b></span>}
           </button>
         );

@@ -199,7 +199,7 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
     <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 data-section="How it wins" className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
-        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
+        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Have Claude read the deck on the Plan tab for the full read.</p>
       </div>
       {routes.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

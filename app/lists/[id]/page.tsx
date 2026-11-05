@@ -11,7 +11,6 @@ import CardModal from '@/components/CardModal';
 import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
-import DeckBuild, { type DeckTab } from '@/components/DeckBuild';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
 import DeckPlan from '@/components/DeckPlan';
@@ -20,7 +19,7 @@ import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
 import DeckHealth from '@/components/DeckHealth';
-import DeckSuggestions from '@/components/DeckSuggestions';
+import DeckTune from '@/components/DeckTune';
 import DeckTags from '@/components/DeckTags';
 import FlaggedZone from '@/components/FlaggedZone';
 import GameChangerLine from '@/components/GameChangerLine';
@@ -33,6 +32,7 @@ import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
 import { identityStyle } from '@/lib/identity';
+import { placeOf, type DeckTab } from '@/lib/deck-tabs';
 import type { Slot, SlotQuestion } from '@/lib/commanders';
 import { deckFlags, type Flag } from '@/lib/health';
 import { boardName, cutBoard, DEFAULT_SECTIONS, type DeckSection } from '@/lib/sections-shared';
@@ -56,7 +56,25 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(seen?.list.name ?? '');
   const [addOpen, setAddOpen] = useState(false);
-  const [section, setSection] = useState<DeckTab>('cards');
+  const [section, setTab] = useState<DeckTab>('cards');
+  // Check is Health and Playtest; Cards can show which cards you own and where (it was the Collection tab).
+  const [checkPart, setCheckPart] = useState<'health' | 'playtest'>('health');
+  const [owner, setOwner] = useState<'all' | 'mine' | 'missing'>('all');
+  const [ownership, setOwnership] = useState<api.DeckOwnership | null>(null);
+  useEffect(() => {
+    if (owner === 'all') return;
+    let stop = false;
+    api.deckOwnership(id).then((o) => { if (!stop) setOwnership(o); }).catch(() => {});
+    return () => { stop = true; };
+  }, [owner, id, cards]);
+  // Any tab name, old or new: Tags lands on Plan's tags, Health and Playtest on Check, Collection on Cards with your copies.
+  const setSection = useCallback((tab: DeckTab | string) => {
+    const place = placeOf(tab);
+    setTab(place.tab);
+    if (place.check) setCheckPart(place.check);
+    if (place.copies) setOwner((o) => (o === 'all' ? 'mine' : o));
+    if (place.anchor) setTimeout(() => document.getElementById(place.anchor!)?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }), 120);
+  }, []);
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
   const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
   // How many parts of the plan are left to confirm, for the locked screens.
@@ -70,18 +88,18 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
 
-  // Keyboard: 1-8 switch the deck's tabs, N adds cards (the Cards tab has its own keys).
+  // Keyboard: 1-5 switch the deck's tabs, N adds cards (the Cards tab has its own keys).
   useEffect(() => {
-    const TABS: DeckTab[] = ['cards', 'plan', 'tune', 'tags', 'health', 'playtest', 'chat', 'collection'];
+    const TABS: DeckTab[] = ['cards', 'plan', 'tune', 'check', 'chat'];
     const key = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
-      if (/^[1-8]$/.test(e.key)) { setSection(TABS[Number(e.key) - 1]); window.scrollTo({ top: 0 }); }
+      if (/^[1-5]$/.test(e.key)) { setSection(TABS[Number(e.key) - 1]); window.scrollTo({ top: 0 }); }
       else if (e.key.toLowerCase() === 'n') { e.preventDefault(); setAddOpen(true); }
     };
     document.addEventListener('keydown', key);
     return () => document.removeEventListener('keydown', key);
-  }, []);
+  }, [setSection]);
   const [tags, setTags] = useState<Tags | null>(() => api.peek<Tags>(api.paths.tags(id)) ?? null);
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -145,8 +163,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setQuestions(data.slotQuestions ?? []);
         // Read the other tabs now, side by side, so opening one is instant.
         if (data.list.kind === 'deck') {
-          const later: Array<Promise<unknown>> = [api.deckPlan(id).then((p) => { if (!cancelled) setBracket(p.bracket ?? null); }), api.buildPlan(id), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
-          if (data.cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + 1 > 100) later.push(api.cutPlan(id));
+          const later: Array<Promise<unknown>> = [api.deckPlan(id).then((p) => { if (!cancelled) setBracket(p.bracket ?? null); }), api.deckHealth(id), api.deckPlaytest(id), api.cutReview(id)];
           void Promise.allSettled(later);
         }
       } catch (e) {
@@ -509,66 +526,76 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             cardNames={[...new Set(cards.map((c) => c.card.name))].sort()}
           />
         ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+      ) : null}
+      {deck && section === 'plan' && tags ? (
+        <section id="plan-tags" data-section="Tags" className="mt-10 scroll-mt-24 border-t border-[var(--border)] pt-6">
+          <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => window.scrollTo({ top: 0, behavior: 'smooth' })} sections={sections} />
+        </section>
       ) : deck && (section === 'tune' || section === 'chat') && !planConfirmed ? (
         <PlanLock what={section === 'tune' ? 'Tune' : 'Chat'} left={planLeft} onPlan={() => setSection('plan')} />
       ) : deck && section === 'tune' ? (
-        <DeckBuild
-          listId={id}
-          cards={cards}
-          commander={list.commander?.name ?? null}
-          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
-          onMove={moveCard}
-          cutTo={cutTo}
-          cutName={cutName}
-          flags={flags}
-          onFix={fixFlag}
-          deckSize={deckSize}
-          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-          tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
-          planConfirmed={planConfirmed}
-          brief={tags?.brief ?? ''}
-          onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
-        />
+        <>
+          <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />
+          <DeckTune
+            listId={id}
+            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+            sections={sections}
+            brief={tags?.brief ?? ''}
+            tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
+            onChanged={load}
+            onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
+          />
+        </>
       ) : deck && section === 'chat' ? (
         <DeckChat
           key={chatQuestion}
           question={chatQuestion}
           listId={id}
           cards={cards}
-          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
-          onMove={moveCard}
-          cutTo={cutTo}
-          cutName={cutName}
         />
-      ) : deck && section === 'tags' ? (
-        <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => setSection('plan')} sections={sections} />
-      ) : deck && section === 'collection' ? (
-        <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
-      ) : deck && section === 'suggestions' ? (
-        <DeckSuggestions
-          listId={id}
-          commander={list.commander?.name ?? null}
-          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-          onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
-        />
-      ) : deck && section === 'playtest' ? (
-        <DeckPlaytest listId={id} commander={list.commander} cards={cards.filter((c) => c.board === 'main')} />
-      ) : deck && section === 'health' ? (
-        <DeckHealth
-          listId={id}
-          commander={list.commander ? { card: list.commander, finish: list.commanderFinish } : null}
-          cards={cards.filter((c) => c.board === 'main')}
-          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-        />
-      ) : (
+      ) : deck && section === 'check' ? (
+        <>
+          <div role="tablist" aria-label="Check" data-tour="check-parts" className="mt-5 flex w-fit gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm">
+            {([['health', 'Health'], ['playtest', 'Playtest']] as const).map(([v, label]) => (
+              <button key={v} role="tab" aria-selected={checkPart === v} data-check={v} onClick={() => setCheckPart(v)}
+                className={`rounded-full px-4 py-1.5 ${checkPart === v ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{label}</button>
+            ))}
+          </div>
+          {checkPart === 'playtest'
+            ? <DeckPlaytest listId={id} commander={list.commander} cards={cards.filter((c) => c.board === 'main')} />
+            : <DeckHealth
+              listId={id}
+              commander={list.commander ? { card: list.commander, finish: list.commanderFinish } : null}
+              cards={cards.filter((c) => c.board === 'main')}
+              version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+            />}
+        </>
+      ) : deck && section === 'plan' ? null : (
         <>
         {deck && <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />}
         {deck && <GameChangerLine names={entries.filter((e) => e.board === 'main' && e.card.game_changer).map((e) => e.card.name)} bracket={bracket} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0 }); }} />}
         {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }} />}
+        {deck && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-sm" data-tour="owner-filter">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--faint)]">Show</span>
+            <div role="radiogroup" aria-label="Which cards" className="flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-0.5">
+              {([['all', 'All'], ['mine', 'Mine'], ['missing', 'Missing']] as const).map(([v, label]) => (
+                <button key={v} role="radio" aria-checked={owner === v} data-owner={v} onClick={() => setOwner(v)}
+                  className={`rounded-full px-3 py-1 ${owner === v ? 'bg-[var(--surface-hover)] font-semibold' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{label}</button>
+              ))}
+            </div>
+            <span className="text-xs text-[var(--muted)]">{owner === 'all' ? 'Mine: cards you have a copy of. Missing: cards still to get.' : ownership ? `${ownership.summary.need - ownership.summary.missing} of ${ownership.summary.need} owned · where each copy is, below` : 'Reading your collection…'}</span>
+          </div>
+        )}
         <DeckCards
           listId={id}
-          entries={entries}
+          entries={deck && owner !== 'all' && ownership ? entries.filter((e) => {
+            if (e.board !== 'main') return owner === 'mine';
+            const h = ownership.cards.find((x) => x.cardIds.includes(e.card.id) || x.name === e.card.name);
+            const mine = !!h && h.status !== 'missing';
+            return owner === 'mine' ? mine : !mine;
+          }) : entries}
           tags={deck ? tags : null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
@@ -583,6 +610,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           commander={deck ? list.commander : null}
           onSlot={deck ? changeSlot : undefined}
         />
+        {deck && owner !== 'all' && (
+          <section id="your-copies" data-section="Your copies" className="mt-10 scroll-mt-24 border-t border-[var(--border)] pt-6">
+            <h2 className="font-display text-2xl font-semibold">Where your copies are</h2>
+            <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
+          </section>
+        )}
         </>
       )}
       </div>

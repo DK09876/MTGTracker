@@ -336,7 +336,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
         </p>
       )}
       {waiting && onBoard.length > 0 && <p className="mt-3 text-xs text-[var(--muted)]">Loading tags…</p>}
-      {noTags && <p className="mt-3 text-xs text-[var(--muted)]">None of your own tags yet - the built-in ones are shown; make your own on the Tags tab, or open a card to tag it.</p>}
+      {noTags && <p className="mt-3 text-xs text-[var(--muted)]">None of your own tags yet - the built-in ones are shown; make your own under Your tags on the Plan tab, or open a card to tag it.</p>}
       {groupBy === 'tag' && categories && <p className="mt-3 text-xs text-[var(--muted)]">Your tags first, then the built-in ones from Scryfall (marked auto). A card with several tags is listed under each.</p>}
       {onBoard.length > 0 && !shown.length && <p className="mt-10 text-center text-[var(--muted)]">Nothing here matches that filter.</p>}
 
