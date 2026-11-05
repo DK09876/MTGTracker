@@ -6,6 +6,8 @@
  *   - works out every card's roles (ramp, draw, removal...) from the tag
  *     file, so a new deck's roles are there at once instead of taking a
  *     hundred-odd searches;
+ *   - keeps every community tag on every card (about 5,000 tags), so what a
+ *     card does can be read without asking Scryfall - themes and the like;
  *   - keeps a slim copy of every card, so a card can be looked up by name
  *     without asking Scryfall;
  *   - refreshes the prices of the printings the app holds (Scryfall updates
@@ -55,8 +57,15 @@ async function bulkFiles(): Promise<Map<string, string>> {
 // finds the tag "sweeper" through its alias "boardwipe".
 const tagKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Oracle id -> the role ids its tags put it in, for every tagged card. */
-export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>): Promise<Map<string, string[]>> {
+/** Scryfall's tag file, read: each tag's slug, aliases, child tags and the cards tagged with it. */
+export interface TagFile {
+  slugOf: Map<string, string>;
+  aliasOf: Map<string, string>;
+  children: Map<string, string[]>;
+  tagged: Map<string, string[]>;
+}
+
+export async function readTagFile(rows: AsyncIterable<Record<string, unknown>>): Promise<TagFile> {
   const slugOf = new Map<string, string>();
   // Searches take a tag's aliases too: otag:board-wipe finds "sweeper".
   const aliasOf = new Map<string, string>();
@@ -69,6 +78,12 @@ export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>
     children.set(id, (t.child_ids as string[] | undefined) ?? []);
     tagged.set(id, ((t.taggings as Array<{ oracle_id: string }> | undefined) ?? []).map((x) => x.oracle_id));
   }
+  return { slugOf, aliasOf, children, tagged };
+}
+
+/** Oracle id -> the role ids its tags put it in, for every tagged card. */
+export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>> | TagFile): Promise<Map<string, string[]>> {
+  const { slugOf, aliasOf, children, tagged } = 'tagged' in rows ? rows as TagFile : await readTagFile(rows as AsyncIterable<Record<string, unknown>>);
   const idOf = new Map([...aliasOf, ...[...slugOf].map(([id, slug]) => [tagKey(slug), id] as [string, string])]);
   // A search for a tag finds cards tagged with anything under it too.
   const cardsUnder = (slug: string): Set<string> => {
@@ -104,7 +119,7 @@ export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>
 function slim(c: Record<string, unknown>): Partial<ScryfallCard> {
   const keep = ['id', 'oracle_id', 'name', 'mana_cost', 'cmc', 'type_line', 'oracle_text', 'colors', 'color_identity',
     'keywords', 'power', 'toughness', 'loyalty', 'rarity', 'set', 'set_name', 'collector_number', 'image_uris', 'card_faces',
-    'prices', 'edhrec_rank', 'game_changer', 'scryfall_uri', 'layout', 'produced_mana'] as const;
+    'prices', 'game_changer', 'scryfall_uri', 'layout', 'produced_mana'] as const;
   const out: Record<string, unknown> = {};
   for (const k of keep) if (c[k] !== undefined) out[k] = c[k];
   const legal = (c.legalities as Record<string, string> | undefined)?.commander;
@@ -124,8 +139,102 @@ function table(): Database {
     cardsDb = new Database(path);
     cardsDb.run(`CREATE TABLE IF NOT EXISTS oracle_cards (oracleId TEXT PRIMARY KEY, name TEXT NOT NULL, nameKey TEXT NOT NULL, data TEXT NOT NULL)`);
     cardsDb.run('CREATE INDEX IF NOT EXISTS idx_oracle_cards_name ON oracle_cards (nameKey)');
+    // Every community tag: one row per tag (its slug and the tags directly
+    // above it), and one row per card listing its tags' numbers - compact,
+    // a few MB for every card in Magic.
+    cardsDb.run('CREATE TABLE IF NOT EXISTS oracle_tag_names (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, parents TEXT NOT NULL)');
+    cardsDb.run('CREATE TABLE IF NOT EXISTS oracle_card_tags (oracleId TEXT PRIMARY KEY, tags TEXT NOT NULL)');
   }
   return cardsDb;
+}
+
+/** Keep every tag on every card from Scryfall's file, replacing what was there. Exported for tests. */
+export function saveTags(file: TagFile, d: Database = table()): { tags: number; cards: number } {
+  const ids = [...file.slugOf.keys()];
+  const numberOf = new Map(ids.map((id, i) => [id, i + 1]));
+  const parents = new Map<string, number[]>();
+  for (const [id, kids] of file.children) for (const kid of kids) if (numberOf.has(id)) parents.set(kid, [...(parents.get(kid) ?? []), numberOf.get(id)!]);
+  const byCard = new Map<string, number[]>();
+  for (const [id, cards] of file.tagged) for (const o of cards) byCard.set(o, [...(byCard.get(o) ?? []), numberOf.get(id)!]);
+  d.run('BEGIN');
+  try {
+    d.run('DELETE FROM oracle_tag_names');
+    d.run('DELETE FROM oracle_card_tags');
+    for (const id of ids) d.run('INSERT INTO oracle_tag_names (id, slug, parents) VALUES (?, ?, ?)', [numberOf.get(id)!, file.slugOf.get(id)!, (parents.get(id) ?? []).join(',')]);
+    for (const [o, nums] of byCard) d.run('INSERT INTO oracle_card_tags (oracleId, tags) VALUES (?, ?)', [o, [...new Set(nums)].join(',')]);
+    d.run('COMMIT');
+  } catch (error) {
+    d.run('ROLLBACK');
+    throw error;
+  }
+  tagIndex = null;
+  return { tags: ids.length, cards: byCard.size };
+}
+
+// The tag names, read once and kept: about 5,000 small rows.
+let tagIndex: { slug: Map<number, string>; id: Map<string, number>; parents: Map<number, number[]>; children: Map<number, number[]> } | null = null;
+function tags(d: Database) {
+  if (!tagIndex) {
+    const slug = new Map<number, string>();
+    const id = new Map<string, number>();
+    const parents = new Map<number, number[]>();
+    const children = new Map<number, number[]>();
+    for (const r of d.all('SELECT id, slug, parents FROM oracle_tag_names') as Array<{ id: number; slug: string; parents: string }>) {
+      slug.set(r.id, r.slug);
+      id.set(r.slug, r.id);
+      const ps = r.parents ? r.parents.split(',').map(Number) : [];
+      parents.set(r.id, ps);
+      for (const p of ps) children.set(p, [...(children.get(p) ?? []), r.id]);
+    }
+    tagIndex = { slug, id, parents, children };
+  }
+  return tagIndex;
+}
+
+/**
+ * Each card's community tags, by oracle id: the tags it carries and every
+ * tag above them ("hexproof-granter" is under "protection"), the way a
+ * Scryfall search for a tag finds cards tagged with anything under it.
+ */
+export function cardTags(oracleIds: string[], d: Database = table()): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const t = tags(d);
+  for (let i = 0; i < oracleIds.length; i += 500) {
+    const part = oracleIds.slice(i, i + 500);
+    if (!part.length) continue;
+    for (const r of d.all(`SELECT oracleId, tags FROM oracle_card_tags WHERE oracleId IN (${part.map(() => '?').join(',')})`, part) as Array<{ oracleId: string; tags: string }>) {
+      const seen = new Set<number>();
+      const stack = r.tags.split(',').map(Number);
+      while (stack.length) {
+        const n = stack.pop()!;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        stack.push(...(t.parents.get(n) ?? []));
+      }
+      out.set(r.oracleId, [...seen].map((n) => t.slug.get(n)).filter((x): x is string => !!x).sort());
+    }
+  }
+  return out;
+}
+
+/** Oracle ids of every card with this tag, or with a tag under it. */
+export function cardsTagged(slug: string, d: Database = table()): string[] {
+  const t = tags(d);
+  const start = t.id.get(slug);
+  if (start === undefined) return [];
+  const want = new Set<number>();
+  const stack = [start];
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (want.has(n)) continue;
+    want.add(n);
+    stack.push(...(t.children.get(n) ?? []));
+  }
+  const out: string[] = [];
+  for (const r of d.all('SELECT oracleId, tags FROM oracle_card_tags') as Array<{ oracleId: string; tags: string }>) {
+    if (r.tags.split(',').some((x) => want.has(Number(x)))) out.push(r.oracleId);
+  }
+  return out;
 }
 
 const nameKey = (name: string) => name.split(' // ')[0].trim().toLowerCase();
@@ -189,7 +298,9 @@ export async function refreshCardData(progress: (detail: string, done?: number, 
     if (!tagsUrl || !cardsUrl) throw new Error('Scryfall did not list its card or tag file');
 
     progress('Reading card tags');
-    const roles = await rolesFromTags(lines(tagsUrl));
+    const tagFile = await readTagFile(lines(tagsUrl));
+    const roles = await rolesFromTags(tagFile);
+    saveTags(tagFile);
 
     progress('Reading every card');
     const d = table();
@@ -260,18 +371,18 @@ export function startCardRefresh(): Job {
 
 /**
  * Cards that can lead a deck whose name contains what was typed, from the
- * copy on the Pi - names starting with it first, then the most played.
+ * copy on the Pi - names starting with it first, then the shortest names
+ * (the closest match to what was typed), then A to Z.
  * Instant, where asking Scryfall waits on its rate limit every keystroke.
  */
 export function localCommanders(typed: string, max = 8): ScryfallCard[] {
   const key = typed.trim().toLowerCase();
   if (key.length < 2) return [];
   const rows = table().all('SELECT data FROM oracle_cards WHERE nameKey LIKE ? LIMIT 400', [`%${key.replace(/[%_]/g, '')}%`]) as Array<{ data: string }>;
-  const rank = (c: ScryfallCard) => (c as { edhrec_rank?: number }).edhrec_rank ?? 1e9;
   const starts = (c: ScryfallCard) => (nameKey(c.name).startsWith(key) ? 0 : 1);
   return rows.map((r) => JSON.parse(r.data) as ScryfallCard)
     .filter((c) => canLead(c) && !NOT_PLAYABLE.has((c as { layout?: string }).layout ?? ''))
-    .sort((a, b) => starts(a) - starts(b) || rank(a) - rank(b))
+    .sort((a, b) => starts(a) - starts(b) || a.name.length - b.name.length || a.name.localeCompare(b.name))
     .slice(0, max);
 }
 
