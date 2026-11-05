@@ -59,14 +59,25 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // Once the big header has scrolled away, a compact one takes its place at the top.
   const [headEl, setHeadEl] = useState<HTMLDivElement | null>(null);
   const [headGone, setHeadGone] = useState(false);
-  // The app's own bar is the compact header's top; read once, it does not change.
+  // The app's own bar is the compact header's top.
   const [navHeight] = useState(() => (typeof document === 'undefined' ? 57 : document.querySelector('body header')?.getBoundingClientRect().height ?? 57));
   useEffect(() => {
     if (!headEl) return;
-    const h = navHeight;
-    const watch = new IntersectionObserver(([e]) => setHeadGone(!e.isIntersecting), { rootMargin: `-${Math.round(h)}px 0px 0px 0px` });
-    watch.observe(headEl);
-    return () => watch.disconnect();
+    // It takes over once the deck's name has gone under the nav - not after the whole header has,
+    // which left a stretch of scrolling with neither. Measured on scroll, against the nav as it is now.
+    let frame = 0;
+    const check = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const nav = document.querySelector('body header')?.getBoundingClientRect().bottom ?? navHeight;
+        const title = headEl.querySelector('h1') ?? headEl;
+        setHeadGone(title.getBoundingClientRect().bottom < nav + 8);
+      });
+    };
+    check();
+    window.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', check); window.removeEventListener('resize', check); };
   }, [headEl, navHeight]);
 
   // Keyboard: 1-8 switch the deck's tabs, N adds cards (the Cards tab has its own keys).
@@ -244,24 +255,24 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {deck && headGone && (
         <div data-tour="compact-head" style={{ top: navHeight }}
           className="fixed inset-x-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur">
-          <div className="safe-x mx-auto flex max-w-[1680px] flex-wrap items-center gap-x-3 gap-y-1 py-2">
+          <div className="safe-x mx-auto flex max-w-[1680px] items-center gap-x-3 py-2">
             {heroArt && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={heroArt} alt="" aria-hidden className="h-9 w-9 shrink-0 rounded-lg object-cover object-[50%_25%]" />
             )}
-            <span className="flex min-w-0 flex-col leading-tight">
+            <span className="flex min-w-0 flex-1 flex-col leading-tight sm:flex-none">
               <b className="truncate font-display text-base">{list.name}</b>
               <span className="truncate text-xs text-[var(--muted)]">{list.commander?.name ?? 'No commander'}{!planConfirmed && ' · plan not confirmed'}</span>
             </span>
             <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold tabular-nums ${deckSize === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{deckSize} / 100</span>
             <span className="hidden rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-bold tabular-nums sm:inline">${value.toFixed(2)}</span>
-            <span className="ml-auto flex items-center gap-2">
+            <span className="ml-auto flex shrink-0 items-center gap-2">
               {deckSize !== 100 && (
                 <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0 }); }} className="hidden rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)] sm:block">
                   Tune: {deckSize > 100 ? `cut ${deckSize - 100}` : `add ${100 - deckSize}`}
                 </button>
               )}
-              <button onClick={() => setAddOpen(true)} className="btn-go rounded-full px-4 py-1 text-sm font-semibold">＋ Add cards</button>
+              <button onClick={() => setAddOpen(true)} aria-label="Add cards" className="btn-go whitespace-nowrap rounded-full px-3 py-1 text-sm font-semibold sm:px-4">＋ Add<span className="max-sm:hidden"> cards</span></button>
             </span>
           </div>
         </div>

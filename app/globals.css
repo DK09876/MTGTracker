@@ -196,3 +196,8 @@ body {
 
 /* Jump targets from a deck's rail land below the sticky header. */
 [data-section] { scroll-margin-top: 5.5rem; }
+
+/* Below lg a deck's tab rail floats above the phone nav; the footer clears it too. */
+@media (width < 64rem) {
+  body:has([data-deck-rail]) > footer { padding-bottom: calc(var(--nav-h) + 4.5rem + max(2rem, env(safe-area-inset-bottom))); }
+}

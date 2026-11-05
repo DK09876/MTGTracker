@@ -200,7 +200,7 @@ function Workbench({ listId, cards, current, verdicts, onMove, onRules, onKept }
           })}
         </ul>
       )}
-      <div className="sticky bottom-[calc(var(--nav-h,0px)+0.75rem)] flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 backdrop-blur sm:bottom-4">
+      <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 backdrop-blur lg:bottom-4">
         <button onClick={async () => { const ids = chosen.map((c) => c.cardId); await move(ids, 'maybe'); setUndo(ids); setPicked(new Set()); }}
           disabled={!chosen.length || busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
           {busy ? 'Moving…' : `Cut ${chosen.length || ''} to the maybeboard`.replace('  ', ' ')}

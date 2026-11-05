@@ -60,9 +60,10 @@ export default function DeckRail({ section, onSection, planConfirmed }: Props) {
   return (
     <nav
       data-tour="deck-tabs"
+      data-deck-rail
       aria-label="Deck"
       className="fixed inset-x-2 bottom-[calc(var(--nav-h)+0.5rem)] z-30 flex gap-1 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-lg backdrop-blur
-        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:p-2 lg:shadow-none"
+        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-[7.5rem] lg:z-0 lg:max-h-[calc(100vh-8.5rem)] lg:flex-col lg:overflow-y-auto lg:p-2 lg:shadow-none"
     >
       <span className="hidden px-3 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)] lg:block">Deck</span>
       <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col">
