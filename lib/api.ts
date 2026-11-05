@@ -26,7 +26,6 @@ import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
 import type { DeckSection, Purpose } from './sections-shared';
 import type { BracketFloor } from './bracket';
-import type { CutGroup } from './cuts';
 import type { Health } from './health';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
@@ -153,17 +152,14 @@ export const resume = (q: string, previous: Previous | undefined, plan: Translat
 
 /**
  * Re-run a query as written - edited, re-sorted, or for a tab opened later -
- * scoped to the same commander. `edhrec: false` skips rebuilding the EDHREC
- * tab, for a change that only affects the Scryfall one.
+ * scoped to the same commander.
  */
-export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean; page?: number; constraints?: string } = {}) =>
+export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; page?: number } = {}) =>
   fetch(url(`ask?${new URLSearchParams({
     query,
     ...(opts.commander ? { commander: opts.commander } : {}),
     ...(opts.sort ? { sort: sortKey(opts.sort) } : {}),
-    ...(opts.edhrec === false ? { edhrec: '0' } : {}),
     ...(opts.page && opts.page > 1 ? { page: String(opts.page) } : {}),
-    ...(opts.constraints !== undefined ? { constraints: opts.constraints } : {}),
   })}`)).then(json<AskResponse>);
 
 /** A commander's combos, for the Combos tab. */
@@ -426,6 +422,8 @@ export const createProfile = (name: string) =>
 export interface DeckHealth {
   health: Health;
   landTarget: [number, number];
+  /** Lands as the plan counts them: a land on the back of a double-faced card is part of one. */
+  landCount?: number;
 }
 
 /** Everything that comes from the stored cards - immediate. */
@@ -447,7 +445,6 @@ export interface DeckInsights {
       combos: Array<{ id: string; url: string; produces: string[]; popularity: number | null; have: string[] }>;
     }>;
   } | null;
-  cuts: CutGroup[];
   /** How it wins, guessed from the cards alone; null when the roles could not be read. */
   wincons: WinGuess | null;
   /** Parts that could not be worked out just now: 'bracket', 'combos'. */
@@ -511,7 +508,7 @@ export const saveCutSettings = (listId: string, settings: CutSettings) => send(`
 export const buildPlan = (listId: string) => get<BuildPlan>(paths.build(listId));
 export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
   fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
-    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }>);
+    .then(json<{ role: { id: string; label: string }; source: 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
 export const deckChats = (listId: string) => get<{ chats: ChatSummary[] }>(paths.chats(listId));

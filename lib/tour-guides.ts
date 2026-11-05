@@ -43,8 +43,8 @@ const DECK_STEPS: TourStep[] = [
 
   { click: [tab('plan')], target: 'brief', title: 'Plan: what the deck does', body: 'The first thing to settle. A sentence or two on how the deck wins - drafted for you from the cards, or by Claude with your instructions. Everything else reads it: what to add and cut, how cards are tagged, what Chat knows.' },
   { target: 'plan-style', title: 'Its style', body: 'Read from the commander and the deck\'s own cards - this one is a spells deck. Change the main or second style if it reads the deck wrong; it moves the usual counts and the cut list keeps cards that fit it.' },
-  { target: 'plan-flip', title: 'The flip turn', body: 'The mana the deck needs before it starts doing its thing - the commander\'s mana value unless you say otherwise. The ramp and land counts follow it, and Playtest starts with a goal from it.' },
-  { target: 'plan-guidelines', title: 'Guidelines', body: 'How many lands, ramp, card draw, removal and board wipes the deck should run. Each has an ⓘ explaining why; change a range and it is yours.' },
+  { target: 'plan-flip', title: 'The flip turn', body: 'The mana the deck needs before it starts doing its thing - the commander\'s mana value unless you say otherwise. The ramp count follows it, and Playtest starts with a goal from it.' },
+  { target: 'plan-guidelines', title: 'Guidelines', body: 'How many lands, ramp, card draw, interaction, board wipes, protection and ways to finish the deck should run. Each has an ⓘ explaining why; change a range and it is yours.' },
   { target: 'plan-packages', title: 'Theme packages', body: 'Each of your tags is a package - 8 cards by default, 16 for a key theme - and how full it is. The cut list trims packages over their size first.' },
   { target: 'plan-confirm', title: 'Confirm it', body: 'Chat, the tagger and Claude\'s reviews wait for a confirmed plan, because they read it. Change it any time.' },
 

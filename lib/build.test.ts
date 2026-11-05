@@ -4,7 +4,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildPlan, commanderStyle, karstenLands } from './build';
+import { buildPlan, commanderStyle } from './build';
+import { karstenLands } from './deck-numbers';
 import type { RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
 

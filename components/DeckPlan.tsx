@@ -118,7 +118,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
           Flip turn
           <Tip label="What the flip turn is">
             The mana the deck needs before it stops setting up and starts doing its thing - usually the commander&apos;s mana value, but sometimes a key engine or multiplier.
-            The ramp and land guidelines follow it: about 12 ramp and 36 lands at 4 mana, one more ramp card for each mana above that.
+            The ramp guideline follows it: about 12 ramp at 4 mana, one more for each mana above that, and ramp costing this much or more counts half.
           </Tip>
         </h3>
         <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -151,7 +151,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab 
 
       <section data-tour="plan-guidelines" className="flex flex-col gap-3">
         <h3 data-section="Guidelines" className="font-medium">Guidelines</h3>
-        <p className="max-w-3xl text-sm text-[var(--muted)]">How many of each built-in tag the deck should run. They start from the flip turn and the style; change a range and it is yours, kept when those change. Tune, Health and the cut list all use these.</p>
+        <p className="max-w-3xl text-sm text-[var(--muted)]">How many lands and how many of each job the deck should run. Lands come from the curve, ramp from the flip turn, the rest from the style; change a range and it is yours, kept when those change. Tune, Health, Chat and the cut list all count these the same way.</p>
         <ul className="flex max-w-xl flex-col gap-1.5">
           <Range key={`lands:${plan.lands.join('-')}`} target={{ role: 'lands', label: 'Lands', range: plan.lands, styleRange: plan.landsDefault, mine: plan.lands.join() !== plan.landsDefault.join() }}
             tip={GUIDE_TIPS.lands} disabled={busy} onChange={(range) => change({ targets: { lands: range } })} />
@@ -226,11 +226,13 @@ function StylePick({ id, label, value, chosen, styles, disabled, allowNone, onCh
 
 // Why each guideline is what it is, for its ⓘ.
 const GUIDE_TIPS: Record<string, string> = {
-  lands: 'About 36 lands for a deck that gets going at 4 mana, a land more for every two mana above that. With 12 ramp that is about 48 mana sources - roughly a 75% chance of three in your opening seven.',
-  ramp: 'Ramp gets you ahead: a 4-drop on turn 3, or two spells in a turn. Two-mana rocks are the workhorses; three is the top end. Too much ramp and too few lands, and you spend turn 2 hunting for your third land.',
-  draw: 'Three kinds, worth mixing: dig (look deeper for what you need), steady card advantage (a stream of extra cards), and refills (a new hand after you have emptied yours - one or two is plenty).',
-  removal: 'Enough to answer what would beat you, not so much the deck turns reactive. Flexible and instant-speed first: removal that hits one thing leaves two opponents untouched.',
-  wipe: 'One or two, for when there is simply too much on the table to answer one at a time.',
+  lands: 'Worked out from the curve: 31.42 + 3.13 × the average mana value of the spells − 0.28 × the cheap (2 mana or less) ramp and draw, never below 37. A higher curve needs more lands; cheap ramp and draw let you run a few fewer.',
+  ramp: 'Ramp gets you ahead: a 4-drop on turn 3, or two spells in a turn. 12 for a deck that gets going at 4 mana, one more or fewer per mana. Ramp that costs as much as the flip turn counts half - it arrives too late to get ahead - and a commander that ramps counts one.',
+  draw: 'Cards that leave you with more cards than you started with. Cantrips only replace themselves, so they are not counted, and impulse draw (exile the top card, play it soon) is counted on its own: it digs, but does not refill your hand.',
+  interaction: 'Removal, counterspells and board wipes together. Enough to answer what would beat you, not so much the deck turns reactive. Flexible and instant-speed first; removal you can use again counts twice.',
+  protection: 'Ways to keep the commander and the plan alive: equipment and auras that protect, protection spells, fogs, silence effects. A deck that leans on its commander wants more.',
+  finishers: 'Cards that end a game you are ahead in: alternate wins, extra turns and combats, overruns, drain. Without a few, good games drag on.',
+  wipe: 'One or two, inside interaction, for when there is too much on the table to answer one at a time. One more when the deck has few creatures of its own to lose.',
 };
 
 function Range({ target, tip, disabled, onChange }: { target: api.DeckPlanState['targets'][number]; tip?: string; disabled: boolean; onChange: (range: [number, number] | null) => void }) {

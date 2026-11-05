@@ -34,7 +34,7 @@ export const STYLES: Style[] = [
   { id: 'tokens', label: 'Go wide', note: 'Makes or rewards many creatures: token makers, anthems and overruns.',
     test: /create[^.]* (creature )?tokens?|for each creature you control/i, shift: { wipe: [1, 3] } },
   { id: 'voltron', label: 'Voltron', note: 'Wins with commander damage: equipment, auras and protection for one creature.',
-    test: /equipped creature|enchanted creature|\battach\b/i, shift: { removal: [6, 10], wipe: [1, 3] } },
+    test: /equipped creature|enchanted creature|\battach\b/i, shift: { interaction: [7, 11], wipe: [1, 3] } },
   { id: 'graveyard', label: 'Graveyard', note: 'Uses the graveyard: self-mill, reanimation and recursion.',
     test: /from your graveyard|\bmill\b|return target creature card/i, shift: {} },
   { id: 'artifacts', label: 'Artifacts', note: 'Rewards artifacts: rocks, treasures and artifact payoffs.',

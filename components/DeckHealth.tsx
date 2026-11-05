@@ -69,7 +69,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
   if (error) return <p className="mt-8 text-center text-red-400">{error}</p>;
   if (!data) return <p className="mt-8 text-center text-[var(--muted)]">Checking the deck…</p>;
-  const { health, landTarget } = data;
+  const { health, landTarget, landCount } = data;
   const short = commander?.card.name.split(',')[0] ?? 'the commander';
 
   return (
@@ -128,7 +128,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
       <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from Scryfall.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
-          <RoleRow label="Lands" count={health.lands} target={landTarget} />
+          <RoleRow label="Lands" count={landCount ?? health.lands} target={landTarget} />
           {roles === 'loading' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">
               Tagging this deck&apos;s cards with Scryfall… The first time takes up to a minute; after that it is instant.

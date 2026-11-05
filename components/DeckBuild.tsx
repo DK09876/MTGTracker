@@ -153,7 +153,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
         {shown.length === 0 && (
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
             <span aria-hidden className="font-bold text-emerald-400">✓</span>
-            <span className="min-w-0 flex-[1_1_20rem]">{plan.size} cards, every built-in tag in its range, enough lands and colour sources. See how it plays on the Playtest tab.</span>
+            <span className="min-w-0 flex-[1_1_20rem]">{plan.size} cards, every job in its range, enough lands and colour sources. See how it plays on the Playtest tab.</span>
             <button onClick={() => onTab('playtest')} className={BUTTON}>Playtest</button>
           </div>
         )}
@@ -225,7 +225,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
       <section data-tour="tune-combos" className="flex flex-col gap-3">
         <h3 data-section="Combos" className="font-display text-xl font-semibold">Combos</h3>
-        <DeckSuggestions listId={listId} cards={cards} commander={commander} version={version} onAdd={onAdd} onMove={(id, board) => { void onMove(id, board); }} onRemove={() => {}} combosOnly />
+        <DeckSuggestions listId={listId} commander={commander} version={version} onAdd={onAdd} />
       </section>
 
       <section data-tour="tune-ideas" className="flex max-w-3xl flex-col gap-2">
@@ -399,7 +399,7 @@ function Fill({ listId, plan, commander, start, onAdd }: { listId: string; plan:
             ))}
           </ul>
           <p className="text-xs text-[var(--muted)]">
-            Ranked by how well they fit {commander ?? 'the commander'} and how much Commander plays them{found.source === 'edhrec' ? ', with EDHREC\'s numbers for this commander' : ''}; in your colours, legal, and not in the deck. No AI.
+            Ranked by how well they fit {commander ?? 'the commander'} and how good they are at the job (cheaper, instant speed, more than one job); in your colours, legal, and not in the deck. No AI.
           </p>
         </>
       )}

@@ -546,12 +546,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       ) : deck && section === 'suggestions' ? (
         <DeckSuggestions
           listId={id}
-          cards={cards}
           commander={list.commander?.name ?? null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           onAdd={async (cardId, board) => { await api.addCard(id, cardId, 1, board); await load(); }}
-          onMove={moveCard}
-          onRemove={(cardId) => changeQuantity(cardId, 0)}
         />
       ) : deck && section === 'playtest' ? (
         <DeckPlaytest listId={id} commander={list.commander} cards={cards.filter((c) => c.board === 'main')} />

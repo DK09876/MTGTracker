@@ -9,11 +9,11 @@
  * Server only.
  */
 
-import { karstenLands } from './build';
+import { karstenLands, sourceWeight } from './deck-numbers';
 import { allLocalCards } from './card-store';
 import { sourcesNeeded } from './health';
 import { database } from './db';
-import { fitOf, fitProfile, popularity } from './fit';
+import { fitOf, fitProfile, quality } from './fit';
 import { holdings } from './gap-cards';
 import { ROLES } from './roles';
 import type { ScryfallCard } from './scryfall';
@@ -78,9 +78,9 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   const textOf = (c: ScryfallCard) => [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
   const rolesFor = (c: ScryfallCard) => [...(rolesOf.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(textOf(c))).map((r) => r.id)];
   const ownedBonus = (c: ScryfallCard) => (owned.has(c.oracle_id ?? '') ? 0.25 : 0);
-  // The plan's cards by fit; staples (the role slots, lands) by how much Commander plays them.
-  const score = (c: ScryfallCard) => fitOf(c, fit).score * 0.55 + popularity(c) * 0.45 + ownedBonus(c);
-  const staple = (c: ScryfallCard) => popularity(c) * 0.75 + fitOf(c, fit).score * 0.25 + ownedBonus(c);
+  // The plan's cards by fit; the role slots and lands by how good they are at the job.
+  const score = (c: ScryfallCard) => fitOf(c, fit).score * 0.55 + quality(c, rolesFor(c)).score * 0.45 + ownedBonus(c);
+  const staple = (c: ScryfallCard) => quality(c, rolesFor(c)).score * 0.75 + fitOf(c, fit).score * 0.25 + ownedBonus(c);
   const spells = legal.filter((c) => !isLand(c)).map((c) => ({ card: c, score: score(c), roles: rolesFor(c) }))
     .sort((a, b) => b.score - a.score);
 
@@ -135,7 +135,7 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
     if (legal.some((c) => c.name === 'Command Tower')) lands.push(['Command Tower', 1]);
     const duals = legal.filter((c) => isLand(c) && !/\bBasic\b/.test(c.type_line ?? '') && c.name !== 'Command Tower'
       && makes(c).filter((m) => identity.has(m)).length >= 2)
-      // Lands that make only its colours, the most played first.
+      // Lands that make only its colours, untapped and making the most of them first.
       .filter((c) => makes(c).every((m) => identity.has(m) || m === 'C'))
       .sort((a, b) => staple(b) - staple(a))
       .slice(0, colors.length >= 4 ? 24 : colors.length === 3 ? 20 : colors.length * 4);
@@ -146,7 +146,7 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   else {
     // Basics go where sources are still most needed: each colour wants what
     // Karsten's table says for its hungriest spell, less what the other
-    // lands (and, at three quarters, the rocks) already make of it.
+    // lands (and, at part of a source each, the rocks and dorks) already make of it.
     const want: Record<string, number> = Object.fromEntries(colors.map((c) => [c, 0]));
     for (const card of chosen.values()) {
       const gold = colors.filter((c) => pipsOf(card, c) > 0).length > 1;
@@ -159,7 +159,7 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
     }
     for (const card of chosen.values()) {
       const made = (card.produced_mana ?? []).filter((m) => identity.has(m));
-      for (const c of made) have[c] += 0.75;
+      for (const c of made) have[c] += sourceWeight(card, 3);
     }
     const counts: Record<string, number> = Object.fromEntries(colors.map((c) => [c, 0]));
     for (let i = 0; i < basicsNeeded; i++) {

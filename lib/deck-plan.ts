@@ -9,9 +9,10 @@
  */
 
 import { cleanSettings, NO_SETTINGS, type CutSettings } from './cut-rules';
-import { database } from './db';
+import { cachedRoles, database } from './db';
+import { BASE_RANGES, JOB_LABELS, landNumber, rampRange, type LandNumber } from './deck-numbers';
 import { cleanGoldfishSettings, DEFAULT_SETTINGS, startingChecks, type GoldfishSettings } from './goldfish';
-import { ROLES } from './roles';
+import { ROLES_VERSION } from './roles';
 import type { ScryfallCard } from './scryfall';
 import { detectStyles, styleById, styleTargets, type Detected, type Style } from './styles';
 
@@ -37,8 +38,8 @@ function row(listId: string): Row | null {
   return db().get('SELECT style, style2, targets, draft, confirmedAt, extra FROM deck_plans WHERE listId = ?', [listId]) as Row | null;
 }
 
-/** The usual counts every deck starts from (roles.ts). */
-export const BASE_TARGETS: Record<string, [number, number]> = Object.fromEntries(ROLES.filter((r) => r.target).map((r) => [r.id, r.target!]));
+/** The usual counts every deck starts from (deck-numbers.ts), by job. */
+export const BASE_TARGETS: Record<string, [number, number]> = { ...BASE_RANGES };
 
 export interface Plan {
   brief: string;
@@ -50,13 +51,15 @@ export interface Plan {
   style2: Style | null;
   /** Whether each style is the owner's choice rather than the detected one. */
   chosen: { style: boolean; style2: boolean };
-  /** Every role with a guideline: the range in use, the style's, and whether the owner set it. */
+  /** Every job with a guideline: the range in use, the style's, and whether the owner set it. */
   targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
   /** The flip turn: the mana the deck needs before it starts doing its thing. */
   flip: { value: number; mine: boolean };
-  /** How many lands: the owner's range, else the flip turn's. */
+  /** How many lands: the owner's range, else the formula's for this curve. */
   lands: [number, number];
   landsDefault: [number, number];
+  /** The land number with how it was worked out. */
+  landNumber: LandNumber;
   /** Theme package sizes the owner set, by tag id (8 otherwise). */
   packages: Record<string, number>;
   /** The bracket the owner is aiming for, 1-5, or null until they say. */
@@ -64,15 +67,13 @@ export interface Plan {
 }
 
 /**
- * The usual counts for a deck that needs `flip` mana to get going: 12 ramp
- * and 36 lands at 4, about one more ramp card per mana above that and one
- * fewer below, and a land per two mana.
+ * Which of these cards are ramp or draw, from the roles already looked up -
+ * enough for the land formula, which only needs the cheap ones.
  */
-export function flipTargets(flip: number): { ramp: [number, number]; lands: [number, number] } {
-  const f = Math.max(1, Math.min(10, Math.round(flip)));
-  const ramp = Math.max(6, 12 + (f - 4));
-  const lands = 36 + Math.round((f - 4) / 2);
-  return { ramp: [ramp - 1, ramp + 1], lands: [lands - 1, lands + 1] };
+function knownRoles(cards: Array<{ card: ScryfallCard; quantity: number }>): (card: ScryfallCard) => string[] {
+  const ids = [...new Set(cards.map((c) => c.card.oracle_id).filter((x): x is string => !!x))];
+  const { roles } = cachedRoles(ids, '1970-01-01', ROLES_VERSION);
+  return (card) => roles.get(card.oracle_id ?? '') ?? [];
 }
 
 export function planFor(listId: string, brief: string, commander: ScryfallCard | null, cards: Array<{ card: ScryfallCard; quantity: number }>): Plan {
@@ -84,9 +85,9 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
   const style2 = r?.style2 === '' ? null : styleById(r?.style2) ?? auto2;
   const extra = JSON.parse(r?.extra ?? '{}') as Extra;
   const flip = extra.flip ?? Math.max(1, Math.min(10, commander?.cmc ?? 4));
-  const fromFlip = flipTargets(flip);
-  const fromStyle = styleTargets({ ...BASE_TARGETS, ramp: fromFlip.ramp }, style, style2);
+  const fromStyle = styleTargets({ ...BASE_TARGETS, ramp: rampRange(flip) }, style, style2);
   const mine = JSON.parse(r?.targets ?? '{}') as Record<string, [number, number]>;
+  const lands = landNumber(cards, knownRoles(cards), mine.lands ?? null);
   return {
     brief,
     draft: r?.draft ?? '',
@@ -95,12 +96,13 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     style,
     style2,
     chosen: { style: !!r?.style, style2: r?.style2 !== null && r?.style2 !== undefined },
-    targets: ROLES.filter((x) => x.target).map((x) => ({
-      role: x.id, label: x.label, range: mine[x.id] ?? fromStyle[x.id], styleRange: fromStyle[x.id], mine: !!mine[x.id],
+    targets: Object.keys(BASE_TARGETS).map((id) => ({
+      role: id, label: JOB_LABELS[id as keyof typeof JOB_LABELS], range: mine[id] ?? fromStyle[id], styleRange: fromStyle[id], mine: !!mine[id],
     })),
     flip: { value: flip, mine: extra.flip !== undefined },
-    lands: mine.lands ?? fromFlip.lands,
-    landsDefault: fromFlip.lands,
+    lands: lands.range,
+    landsDefault: [lands.want, lands.want + 1],
+    landNumber: lands,
     packages: extra.packages ?? {},
     bracket: extra.bracket ?? null,
   };

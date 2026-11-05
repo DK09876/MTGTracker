@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
 import { cardsInList } from '@/lib/db';
 import { analyse } from '@/lib/health';
 import { requireList } from '@/lib/profile-route';
-import { LAND_TARGET } from '@/lib/roles';
+import { planFor } from '@/lib/deck-plan';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const main = cardsInList(id).filter((c) => c.board === 'main');
   if (new URL(request.url).searchParams.get('roles') !== '1') {
-    return NextResponse.json({ health: analyse({ commander: owned.list.commander, cards: main }), landTarget: LAND_TARGET });
+    // Lands against the plan's range: the same number Plan and Tune show.
+    const plan = planFor(id, '', owned.list.commander, main);
+    return NextResponse.json({ health: analyse({ commander: owned.list.commander, cards: main }), landTarget: plan.lands, landCount: plan.landNumber.have });
   }
   try {
     const roles = await deckRoles(id, main);

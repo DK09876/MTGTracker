@@ -46,12 +46,12 @@ export const CUT_RULES: CutRule[] = [
     why: 'The commander is in every game, so a card repeating its job (draw, ramp, removal) is worth a little less - but only where the deck already has plenty of that job.' },
 
   // Tags and counts
-  { id: 'over', group: 'Tags and counts', toward: 'cut', weight: 1, label: 'In a built-in tag the deck has more of than its range',
-    why: 'Each built-in tag (ramp, card draw, removal, board wipes) has a range on the Plan tab. Over the range, the extras are the first place to find room. The first full tag counts whole, more count half.' },
-  { id: 'needed', group: 'Tags and counts', toward: 'keep', weight: 1, label: 'In a built-in tag the deck is short of',
+  { id: 'over', group: 'Tags and counts', toward: 'cut', weight: 1, label: 'In a job the deck has more of than its range',
+    why: 'Each job (ramp, card draw, interaction, board wipes, protection, ways to finish) has a range on the Plan tab. Over the range, the extras are the first place to find room. A card counts this once, for the job it is most over in.' },
+  { id: 'multi', group: 'Tags and counts', toward: 'keep', weight: 0.8, label: 'Does two or more jobs every deck needs',
+    why: 'A card that ramps and draws, or removes and protects, fills two slots for one. Those are the best value in a deck, so they are kept over cards that do one thing. Counts once more for each job past the first.' },
+  { id: 'needed', group: 'Tags and counts', toward: 'keep', weight: 1, label: 'In a job the deck is short of',
     why: 'Cutting a card from a tag the deck is already short on makes the gap worse.' },
-  { id: 'impulse', group: 'Tags and counts', toward: 'cut', weight: 0, protects: false, offByDefault: true, label: 'Don\'t count impulse draw as card draw',
-    why: 'Off by default: "exile the top card, you may play it" is a kind of card draw (it digs). Turn this on for decks that play so much of it that card draw looks over-full - those cards then neither count toward card draw nor pay for it being over.' },
   { id: 'cmdcost', group: 'Tags and counts', toward: 'cut', weight: 0.4, label: 'Ramp when the commander is cheap, card draw when it is dear',
     why: 'A cheap commander needs less ramp to come down on time, and an expensive one needs more; after interaction, the other of the two is the next to trim.' },
 
@@ -78,10 +78,6 @@ export const CUT_RULES: CutRule[] = [
   // Card quality
   { id: 'floor', group: 'Card quality', toward: 'cut', weight: 0.6, label: 'Low floor: slow, or often does nothing',
     why: 'A card is worth its slot when it does something most games. Cards that need a hard condition to work, or are just a body, are weak at their worst.' },
-  { id: 'staple', group: 'Card quality', toward: 'keep', weight: 0.8, label: 'A staple most Commander decks play',
-    why: 'Cards like Sol Ring and Swords to Plowshares are good in nearly every deck.' },
-  { id: 'rare', group: 'Card quality', toward: 'cut', weight: 0.6, label: 'Rarely played (with this commander, or in Commander overall)',
-    why: 'A card few Commander players run is often there for a reason; worth a second look, not a verdict.' },
   { id: 'cantrip', group: 'Card quality', toward: 'cut', weight: 0.3, label: 'Only replaces itself',
     why: 'A cantrip with nothing else to it keeps the hand the same size without moving the plan forward.' },
   { id: 'norole', group: 'Card quality', toward: 'cut', weight: 0.5, label: 'No built-in tag and none of your tags',

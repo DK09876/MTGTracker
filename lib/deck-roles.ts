@@ -7,7 +7,8 @@
  */
 
 import { cachedRoles, cardsInList, database, saveRoles, type ListedCard } from './db';
-import { targetsFor } from './deck-plan';
+import { jobs, withJobs, type JobId } from './deck-numbers';
+import { planFor } from './deck-plan';
 import { countRoles, ROLES, type RoleCount } from './roles';
 import { searchCards, type ScryfallCard } from './scryfall';
 
@@ -65,12 +66,25 @@ export function withOverrides(roles: RoleCount[], cards: Array<{ card: ScryfallC
   });
 }
 
-/** A deck's main-board roles, corrections included. */
+/** The roles the commander itself fills: it is in every game. */
+export async function commanderRoles(commander: ScryfallCard | null): Promise<string[]> {
+  if (!commander) return [];
+  return (await countRoles([{ card: commander, quantity: 1 }], { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles }))
+    .filter((r) => r.count > 0).map((r) => r.id);
+}
+
+/**
+ * A deck's main-board roles, corrections included, with the jobs the plan
+ * has ranges for (deck-numbers.ts) first: ramp, card draw, impulse draw,
+ * interaction, board wipes, protection and ways to finish, each counted the
+ * same way on every page, with the plan's ranges.
+ */
 export async function deckRoles(listId: string, main: ListedCard[] = cardsInList(listId).filter((c) => c.board === 'main')): Promise<RoleCount[]> {
-  const roles = await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles });
-  // The guideline ranges are the deck's plan's: its styles' numbers, or the owner's.
-  const targets = targetsFor(listId, commanderOf(listId), main);
-  return withOverrides(roles, main, overrides(listId)).map((r) => (r.target && targets[r.id] ? { ...r, target: targets[r.id] } : r));
+  const roles = withOverrides(await countRoles(main, { search: (q) => searchCards(q), cached: cachedRoles, save: saveRoles }), main, overrides(listId));
+  const commander = commanderOf(listId);
+  const plan = planFor(listId, '', commander, main);
+  const ranges = Object.fromEntries(plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
+  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: await commanderRoles(commander), flip: plan.flip.value, ranges }));
 }
 
 /** A deck's commander, by list id alone. */

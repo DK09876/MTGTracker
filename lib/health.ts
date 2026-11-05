@@ -12,6 +12,7 @@ import { distribution } from './odds';
 import type { Finish, ScryfallCard } from './scryfall';
 import { manaCostOf } from './scryfall';
 import { deckIdentity, type Slot } from './commanders';
+import { sourceWeight } from './deck-numbers';
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G';
 export const COLORS: Color[] = ['W', 'U', 'B', 'R', 'G'];
@@ -44,7 +45,10 @@ export interface Health {
     /** Sources Karsten's table wants for the colour's hungriest spell (null without coloured spells), and that spell. */
     needed: number | null;
     neededFor: string | null;
-    /** Sources counted his way: lands in full, mana rocks and dorks at three quarters. */
+    /**
+     * Sources for the hungriest spell: lands in full; rocks, mana creatures,
+     * land ramp and treasure at part of a source each (deck-numbers.ts).
+     */
     sources: number;
   }>;
   gameChangers: string[];
@@ -216,18 +220,22 @@ export function analyse(input: HealthInput): Health {
   const casts = [...spells, ...[commander, partner].filter((c): c is ScryfallCard => !!c).map((card) => ({ card, quantity: 1 }))];
   const colors = shown.map((color) => {
     const landSources = count(lands.filter((c) => makes(c.card, color)));
-    const otherSources = count(spells.filter((c) => makes(c.card, color)));
+    const others = spells.filter((c) => makes(c.card, color));
+    const otherSources = count(others);
     // The spell that asks the most of this colour sets how many sources it needs.
     let needed: number | null = null;
     let neededFor: string | null = null;
+    let neededMv = 3;
     for (const { card } of casts) {
       const cost = manaCostOf(card);
       const want = Math.ceil(pips(cost)[color]);
       if (!want) continue;
       const gold = COLORS.filter((c) => pips(cost)[c] > 0).length > 1;
       const n = sourcesNeeded(want, card.cmc ?? want, gold);
-      if (needed === null || n > needed) { needed = n; neededFor = card.name; }
+      if (needed === null || n > needed) { needed = n; neededFor = card.name; neededMv = card.cmc ?? want; }
     }
+    // Spells that make the colour count for part of a source, by kind and by the mana value of the spell they help cast.
+    const weighted = others.reduce((n, c) => n + sourceWeight(c.card, neededMv) * c.quantity, 0);
     return {
       color,
       pips: Math.round(demand[color] * 10) / 10,
@@ -237,7 +245,7 @@ export function analyse(input: HealthInput): Health {
       fetchLandSources: count(lands.filter((c) => !c.card.produced_mana?.includes(color) && makes(c.card, color))),
       needed,
       neededFor,
-      sources: Math.round((landSources + otherSources * 0.75) * 10) / 10,
+      sources: Math.round((landSources + weighted) * 10) / 10,
     };
   });
 
