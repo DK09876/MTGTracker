@@ -84,9 +84,9 @@ const rowsOf = ({ folders, counts }: Pick<FolderProps, 'folders' | 'counts'>): R
   ...folders.map((f) => ({ pick: f.id, label: f.name, count: counts.byFolder[f.id] ?? 0, folder: f })),
 ];
 
-/** Wide screens: the folders in a rail that stays beside the decks. */
-export function FolderRail(props: FolderProps) {
-  const { active, onPick, onDrop, onDelete, naming, setNaming, colours } = props;
+/** Wide screens: the folders in a rail that stays beside the decks. While a deck is dragged, the folders show they take it. */
+export function FolderRail(props: FolderProps & { dragging?: boolean }) {
+  const { active, onPick, onDrop, onDelete, naming, setNaming, colours, dragging = false } = props;
   const edit = useFolderEditing(props);
   const [over, setOver] = useState<FolderPick | null>(null);
   const drop = (target: FolderPick) => ({
@@ -105,7 +105,7 @@ export function FolderRail(props: FolderProps) {
 
   return (
     <nav data-tour="deck-folders" aria-label="Folders" className="flex flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 text-sm">
-      <span className="px-2.5 pb-1 pt-1 text-[11px] font-bold uppercase tracking-wider text-[var(--faint)]">Folders</span>
+      <span className={`px-2.5 pb-1 pt-1 text-[11px] font-bold uppercase tracking-wider ${dragging ? 'text-[var(--accent)]' : 'text-[var(--faint)]'}`}>{dragging ? 'Drop on a folder' : 'Folders'}</span>
       {rowsOf(props).map((r) => (
         edit.renaming === r.pick ? <div key={r.pick}>{edit.nameBox(r.pick)}</div> : (
           <div key={r.pick} className="group/row relative flex items-center">
@@ -115,6 +115,7 @@ export function FolderRail(props: FolderProps) {
               {...drop(r.pick)}
               className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${
                 over === r.pick ? 'bg-[var(--accent)]/20 ring-1 ring-[var(--accent)]'
+                  : dragging && r.pick !== 'all' ? 'text-[var(--foreground)] [outline:1px_dashed_var(--muted)] [outline-offset:-1px]'
                   : active === r.pick ? 'bg-[var(--surface-hover)] text-[var(--foreground)] shadow-[inset_2px_0_0_var(--accent)]'
                     : 'text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]'}`}
             >

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
@@ -16,7 +17,6 @@ import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
-import { useNavBottom } from '@/lib/use-nav-bottom';
 import { identityStyle } from '@/lib/identity';
 import { getProfile } from '@/lib/profile';
 import { parseSession, replayOf, type RecentSearch, type Replay, type SavedSearch, type Session } from '@/lib/recent';
@@ -413,7 +413,6 @@ export default function SearchPage() {
   };
 
   const busy = status === 'searching' || status === 'thinking';
-  const navBottom = useNavBottom();
   const hasViews = Object.keys(views).length > 0;
 
   return (
@@ -423,7 +422,7 @@ export default function SearchPage() {
       <div className="min-w-0" style={answer?.interpretation.commander ? identityStyle(answer.interpretation.commander.identity) : undefined}>
       <AiModelPicker area="search" align="right" className="mb-3" />
       {/* The search box stays under the top bar through long results, to refine or start again. */}
-      <div data-tour="search-sticky" style={{ top: navBottom }} className="sticky z-30 -mx-4 bg-[var(--background)]/92 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
+      <StickyBar data-tour="search-sticky" className="z-30" rowClassName="py-2">
       <SearchBox
         value={query}
         onChange={setQuery}
@@ -443,7 +442,7 @@ export default function SearchPage() {
           }
         }}
       />
-      </div>
+      </StickyBar>
 
       {status === 'idle' && hasViews && !answer?.choice && session && (
         <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />

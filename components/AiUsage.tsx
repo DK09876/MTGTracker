@@ -137,12 +137,12 @@ export default function AiUsage() {
         </p>
       ) : view === 'kinds' ? (
         <div className="overflow-x-auto rounded-xl border border-[var(--border)]">
-          <table className="w-full min-w-[32rem] border-collapse text-sm">
+          <table className="w-full border-collapse text-sm sm:min-w-[32rem]">
             <thead>
               <tr className="bg-[var(--surface)] text-left text-[11px] uppercase tracking-wider text-[var(--muted)]">
                 <th className="px-3 py-2 font-medium">What</th>
                 <th className="px-3 py-2 text-right font-medium">Requests</th>
-                <th className="px-3 py-2 text-right font-medium">Each</th>
+                <th className="px-3 py-2 text-right font-medium max-sm:hidden">Each</th>
                 <th className="px-3 py-2 text-right font-medium">Total</th>
               </tr>
             </thead>
@@ -157,7 +157,7 @@ export default function AiUsage() {
                     <span className="block text-xs text-[var(--muted)]">{modelName(k.model)}{k.failed ? ` · ${k.failed} did not finish` : ''}</span>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{k.count}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[var(--muted)]">
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-[var(--muted)] max-sm:hidden">
                     {k.low === Infinity ? '—' : k.low === k.high || dollars(k.low) === dollars(k.high) ? dollars(k.low) : `${dollars(k.low)}–${dollars(k.high)}`}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{dollars(k.total)}</td>
