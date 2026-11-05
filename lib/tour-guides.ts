@@ -121,14 +121,14 @@ export const GUIDES: Guide[] = [
     title: 'Decks',
     help: [
       'Your Commander decks. Make one from a commander, a pasted list, or an Archidekt link. Each deck\'s ⋯ duplicates, files or deletes it.',
-      'Folders keep decks apart: ＋ Folder, then drag decks onto it. Find, filter and sort sit under the folders.',
+      'Folders keep decks apart: ＋ New folder, then drag decks onto it. Find, filter, sort and New deck stay at the top as you scroll.',
       'Open a deck for its tabs: Cards, Plan, Tune, Tags, Health, Playtest, Chat, Collection. Start with Plan.',
       'Decks are private until you show one on your profile.',
     ],
     steps: [
       { target: 'new-deck', title: 'Make a deck', body: 'Start from a commander - with a suggested starter list if you like: roles first, then what fits the commander, then lands for its colours - or paste a list (most sites\' text export) or an Archidekt link.' },
-      { target: 'deck-folders', title: 'Folders', body: 'Make folders to keep decks apart. Drag a deck onto one, or use a deck\'s ⋯ → Move to. A deck made while a folder is open goes in it.' },
-      { target: 'deck-sort', title: 'Find and sort', body: 'Find a deck by name or commander, filter by colour or decks not at 100 yet, and sort - recently edited first by default. Remembered in this browser.' },
+      { target: 'deck-folders', title: 'Folders', body: 'Folders keep decks apart; each one\'s swatch mixes the colours of its decks. Drag a deck onto one (on a phone, use the deck\'s ⋯ → Move to). A deck made while a folder is open goes in it.' },
+      { target: 'deck-sort', title: 'Find and sort', body: 'Find a deck by name or commander, filter by colour or decks not at 100 yet, and sort - recently edited first by default. This bar stays under the top of the screen as you scroll.' },
       { target: 'deck-grid', title: 'Your decks', body: 'Each deck in its commander\'s colours, with its card count and value. Next, the tour opens the sample deck and goes through every tab.' },
       ...DECK_STEPS,
     ],
