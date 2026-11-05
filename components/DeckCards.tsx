@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import ManaCost from './ManaCost';
+import StickyBar from './StickyBar';
 import Tip from './Tip';
 import type { Board } from '@/lib/decklist';
 import * as api from '@/lib/api';
@@ -27,7 +28,6 @@ import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
 import { tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
-import { useNavBottom } from '@/lib/use-nav-bottom';
 
 export type Entry = Item & { board: Board };
 
@@ -89,7 +89,6 @@ const SHORTCUTS: Array<[string, string]> = [
 
 export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk }: Props) {
   const [board, setBoard] = useState<Board>('main');
-  const navBottom = useNavBottom();
   const [filter, setFilter] = useState('');
   const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === 'undefined' ? DEFAULT_PREFS : loadPrefs()));
   const [folded, setFolded] = useState<Set<string>>(() => (typeof window === 'undefined' ? new Set() : loadFolded(listId)));
@@ -240,8 +239,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       )}
 
       {/* Sticks under the top bar as the cards scroll: one row to swipe on a phone, wrapped on wider screens. */}
-      <div data-tour="card-tools" style={{ top: navBottom }}
-        className="sticky z-20 -mx-4 mt-3 flex items-center gap-2 overflow-x-auto bg-[var(--background)]/92 px-4 py-2 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:rounded-b-2xl sm:px-0">
+      <StickyBar data-tour="card-tools" className="mt-1"
+        rowClassName="flex items-center gap-2 overflow-x-auto py-2 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
         <input
           ref={filterBox}
           value={filter}
@@ -304,7 +303,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             </Tip>
           </span>
         </div>
-      </div>
+      </StickyBar>
       {unsupported.length > 0 && (
         <p className="mt-2 text-xs text-amber-400">
           Ignoring {unsupported.map((u) => `"${u}"`).join(', ')} — not supported here.

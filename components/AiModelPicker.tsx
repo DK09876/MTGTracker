@@ -77,7 +77,7 @@ export default function AiModelPicker({ area, align = 'left', className = '' }: 
     </div>
   );
   const line = (
-    <p className={`min-w-0 text-xs tabular-nums text-[var(--muted)] ${align === 'right' ? 'text-right' : ''}`} aria-live="polite">
+    <p className={`whitespace-nowrap text-xs tabular-nums text-[var(--muted)] ${align === 'right' ? 'text-right' : ''}`} aria-live="polite">
       {state && tier ? (
         <>≈ {dollars(each(tier))} a request<span className="max-sm:hidden"> · {dollars(state.spend.left)} left today</span></>
       ) : ' '}
@@ -85,7 +85,7 @@ export default function AiModelPicker({ area, align = 'left', className = '' }: 
   );
 
   return (
-    <div className={`flex items-center gap-3 ${align === 'right' ? 'justify-end' : ''} ${className}`} data-tour="ai-mode">
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${align === 'right' ? 'justify-end' : ''} ${className}`} data-tour="ai-mode">
       {/* On a phone the cost sits under the tiers rather than squeezed beside them. */}
       {align === 'right' ? <>{line}{buttons}</> : <>{buttons}{line}</>}
     </div>

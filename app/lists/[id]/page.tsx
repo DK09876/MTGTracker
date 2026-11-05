@@ -292,7 +292,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           </div>
 
           <div className="flex w-full gap-2 sm:w-auto">
-            <button data-tour="add-cards" onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none">
+            <button data-tour="add-cards" onClick={() => setAddOpen(true)} className="btn-go flex-1 rounded-full px-5 py-2 text-sm font-semibold sm:flex-none lg:hidden">
               ＋ Add cards
             </button>
             <div data-tour="deck-more"><MoreMenu

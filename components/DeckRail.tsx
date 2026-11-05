@@ -87,7 +87,7 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
             </button>
           </span>
         </div>
-        <button onClick={deck.onAdd} className="btn-go rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
+        <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
       </div>
       {/* Phones: Add cards leads the bar. */}
       <button onClick={deck.onAdd} aria-label="Add cards" className="btn-go flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg font-semibold lg:hidden">＋</button>

@@ -17,6 +17,7 @@ import ImportResult from '@/components/ImportResult';
 import ManaCost, { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
 import PasteFormats from '@/components/PasteFormats';
+import StickyBar from '@/components/StickyBar';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
@@ -24,6 +25,7 @@ import { parseDecklist } from '@/lib/decklist';
 import { identityStyle, MANA } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
+import { useNavBottom } from '@/lib/use-nav-bottom';
 
 type Sort = 'recent' | 'name' | 'commander' | 'price' | 'created';
 const SORTS: Array<[Sort, string]> = [['recent', 'Recently edited'], ['name', 'Name'], ['commander', 'Commander'], ['price', 'Price'], ['created', 'Newest']];
@@ -96,26 +98,8 @@ export default function DecksPage() {
     none: decks.filter((d) => !placed[d.id]).length,
     byFolder: decks.reduce<Record<string, number>>((n, d) => { if (placed[d.id]) n[placed[d.id]] = (n[placed[d.id]] ?? 0) + 1; return n; }, {}),
   };
-  // The one toolbar sticks under the app's nav; once it has, it takes a backdrop.
-  const [toolsEl, setToolsEl] = useState<HTMLDivElement | null>(null);
-  const [stuck, setStuck] = useState(false);
-  const [navHeight, setNavHeight] = useState(57);
-  useEffect(() => {
-    if (!toolsEl) return;
-    let frame = 0;
-    const check = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const nav = document.querySelector('body header')?.getBoundingClientRect().bottom ?? 57;
-        setNavHeight(nav);
-        setStuck(toolsEl.getBoundingClientRect().top <= nav + 1 && window.scrollY > 0);
-      });
-    };
-    check();
-    window.addEventListener('scroll', check, { passive: true });
-    window.addEventListener('resize', check);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', check); window.removeEventListener('resize', check); };
-  }, [toolsEl]);
+  // Where the top bar ends: the folder rail sits just under it.
+  const navHeight = useNavBottom();
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The deck under the pointer tints the page behind the grid.
   const [glow, setGlow] = useState<string[] | null>(null);
@@ -262,12 +246,7 @@ export default function DecksPage() {
           </div>
 
           {/* One toolbar, the same at the top and once scrolled: it sticks under the nav and takes a backdrop. */}
-          <div
-            ref={setToolsEl}
-            data-tour="deck-sort"
-            style={{ top: navHeight }}
-            className={`sticky z-20 -mx-4 mt-3 flex items-center gap-2 px-4 py-2.5 text-sm transition-[background-color,border-color] sm:mx-0 sm:rounded-b-2xl sm:px-0 ${stuck ? 'border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur sm:-mx-3 sm:px-3' : 'border-b border-transparent'}`}
-          >
+          <StickyBar data-tour="deck-sort" className="mt-2" rowClassName="flex items-center gap-2 py-2.5 text-sm">
             {decks.length > 0 && <div className="lg:hidden"><FolderPill {...folderProps} /></div>}
             {decks.length > 0 && (
               <input
@@ -295,7 +274,7 @@ export default function DecksPage() {
                 ＋<span className="max-md:hidden">&nbsp;New deck</span>
               </button>
             )}
-          </div>
+          </StickyBar>
           {filtered && (
             <p className="mt-1 text-xs text-[var(--muted)]">
               {shown.length ? `Showing ${shown.length} of ${folderPick === 'all' ? decks.length : folderPick === 'none' ? counts.none : counts.byFolder[folderPick] ?? 0}.` : 'No decks match.'}{' '}

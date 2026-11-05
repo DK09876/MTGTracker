@@ -16,12 +16,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AddToCollection from '@/components/AddToCollection';
 import CardModal from '@/components/CardModal';
+import StickyBar from '@/components/StickyBar';
 import * as api from '@/lib/api';
 import type { BoxCopies, DeckCopies } from '@/lib/collection';
 import { filterCards } from '@/lib/filter';
 import { imageOf, priceOf, type Finish } from '@/lib/scryfall';
 import { steady } from '@/lib/steady-tap';
-import { useNavBottom } from '@/lib/use-nav-bottom';
+
 
 type Where = { kind: 'all' } | { kind: 'box'; name: string } | { kind: 'decks' };
 type Sort = 'name' | 'value' | 'recent';
@@ -33,7 +34,6 @@ const money = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigi
 const boxName = (name: string) => name || 'Unsorted';
 
 export default function CollectionPage() {
-  const navBottom = useNavBottom();
   const [state, setState] = useState<api.CollectionState | null>(() => api.peekCollection() ?? null);
   const [error, setError] = useState<string | null>(null);
   const [where, setWhere] = useState<Where>({ kind: 'all' });
@@ -134,7 +134,7 @@ export default function CollectionPage() {
       {panel === 'box' && <BoxPanel where={where} locations={locations} onDone={(w) => { load(); if (w) setWhere(w); setPanel(null); }} />}
 
       {/* Filter, sort and Add cards stay under the top bar as the collection scrolls. */}
-      <div style={{ top: navBottom }} className="sticky z-20 -mx-4 mt-3 flex gap-2 bg-[var(--background)]/92 px-4 py-2 backdrop-blur sm:mx-0 sm:px-0">
+      <StickyBar className="mt-1" rowClassName="flex gap-2 py-2">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
@@ -142,7 +142,7 @@ export default function CollectionPage() {
           aria-label="Filter the collection"
           className={`${input} min-w-0 flex-1`}
         />
-        <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort" className={input}>
+        <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort" className={`${input} w-auto shrink-0 max-sm:max-w-[7.5rem]`}>
           <option value="name">Name</option>
           <option value="value">Value</option>
           <option value="recent">Recently added</option>
@@ -154,7 +154,7 @@ export default function CollectionPage() {
         >
           ＋<span className="max-sm:hidden"> Add cards</span>
         </button>
-      </div>
+      </StickyBar>
       {unsupported.length > 0 && <p className="mt-1 text-xs text-amber-400">Not understood: {unsupported.join(', ')}</p>}
 
       {!totals.copies && (
