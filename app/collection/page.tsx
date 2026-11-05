@@ -16,6 +16,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import AddToCollection from '@/components/AddToCollection';
 import CardModal from '@/components/CardModal';
+import EmptyState from '@/components/EmptyState';
+import MoreMenu from '@/components/MoreMenu';
 import StickyBar from '@/components/StickyBar';
 import * as api from '@/lib/api';
 import type { BoxCopies, DeckCopies } from '@/lib/collection';
@@ -81,23 +83,45 @@ export default function CollectionPage() {
   if (error) return <p className="mt-8 text-center text-red-400">{error}</p>;
   if (!state) return <p className="mt-8 text-center text-[var(--muted)]">Loading your collection…</p>;
   const { totals, locations } = state;
+  // Nothing in it yet: the page is one invitation, not empty filters and tabs.
+  const empty = !totals.copies && !totals.inDecks && !locations.some((l) => l.name);
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 data-tour="collection-head" className="text-2xl font-semibold">Collection</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            {totals.copies.toLocaleString()} card{totals.copies === 1 ? '' : 's'} · {totals.unique.toLocaleString()} different · {money(totals.value)}
-            {totals.inDecks > 0 && <> · {totals.inDecks} in decks</>}
-          </p>
+          <h1 data-tour="collection-head" className="font-display text-3xl font-extrabold">Collection</h1>
+          {!empty && (
+            <p className="mt-1 text-sm tabular-nums text-[var(--muted)]">
+              {totals.copies.toLocaleString()} card{totals.copies === 1 ? '' : 's'} · {totals.unique.toLocaleString()} different · {money(totals.value)}
+              {totals.inDecks > 0 && <> · {totals.inDecks} in decks</>}
+            </p>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link href="/collection/scan" className={`${button} inline-flex items-center`}>Scan</Link>
-          <button onClick={() => setPanel(panel === 'import' ? null : 'import')} className={button}>Import</button>
-          <a href={api.collectionExportUrl()} className={`${button} inline-flex items-center`}>Export CSV</a>
-        </div>
+        {!empty && (
+          <div className="flex gap-2">
+            <Link href="/collection/scan" className={`${button} inline-flex items-center`}>Scan</Link>
+            <MoreMenu items={[
+              { label: panel === 'import' ? 'Close the import' : 'Import a CSV', onClick: () => setPanel(panel === 'import' ? null : 'import') },
+              { label: 'Export as CSV', onClick: () => { window.location.href = api.collectionExportUrl(); } },
+            ]} />
+          </div>
+        )}
       </div>
+
+      {empty && panel === null && (
+        <EmptyState
+          title="Start your collection"
+          actions={<>
+            <button onClick={() => setPanel('add')} className="btn-go rounded-full px-5 py-2 text-sm font-semibold">＋ Add cards</button>
+            <Link href="/collection/scan" className="rounded-full border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--surface-hover)]">Scan with the camera</Link>
+            <button onClick={() => setPanel('import')} className="rounded-full border border-[var(--border)] px-4 py-2 text-sm hover:bg-[var(--surface-hover)]">Import a CSV</button>
+          </>}
+        >
+          Keep track of what you own, box by box. Decks then show which cards you already have.
+          Imports take exports from ManaBox, Moxfield, Deckbox and TCGplayer.
+        </EmptyState>
+      )}
 
       {panel === 'add' && (
         <section className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -119,6 +143,7 @@ export default function CollectionPage() {
         <ImportPanel locations={locations} onDone={(summary) => { load(); setToast({ text: summary }); }} />
       )}
 
+      {!empty && <>
       <div className="mt-5 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Where">
         <Chip on={where.kind === 'all'} onClick={() => setWhere({ kind: 'all' })}>All · {totals.copies}</Chip>
         {locations.filter((l) => l.count > 0 || l.name).map((l) => (
@@ -158,13 +183,11 @@ export default function CollectionPage() {
       {unsupported.length > 0 && <p className="mt-1 text-xs text-amber-400">Not understood: {unsupported.join(', ')}</p>}
 
       {!totals.copies && (
-        <p className="mt-10 text-center text-[var(--muted)]">
-          Nothing here yet. Add cards by name, scan them, or import a CSV from ManaBox, Moxfield, Deckbox or TCGplayer.
-        </p>
+        <p className="mt-10 text-center text-[var(--muted)]">Nothing in {where.kind === 'box' ? boxName(where.name) : 'here'} yet.</p>
       )}
       {totals.copies > 0 && !rows.length && <p className="mt-8 text-center text-[var(--muted)]">No cards match.</p>}
 
-      <ul className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+      {rows.length > 0 && <ul className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
         {rows.slice(0, 500).map((r) => (
           <CollectionRow
             key={`${r.deck ? `d:${r.listId}` : 'b'}:${r.card.id}:${r.finish}:${r.location}`}
@@ -173,8 +196,9 @@ export default function CollectionPage() {
             onCount={r.deck ? undefined : (n) => setCount(r as BoxCopies, n)}
           />
         ))}
-      </ul>
+      </ul>}
       {rows.length > 500 && <p className="mt-2 text-center text-xs text-[var(--muted)]">Showing 500 of {rows.length} — filter to narrow it down.</p>}
+      </>}
 
       <CardModal
         card={selected?.card ?? null}

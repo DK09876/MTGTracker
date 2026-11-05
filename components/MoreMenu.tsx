@@ -12,6 +12,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { bottomFloor } from '@/lib/bottom-floor';
+
 export interface MoreItem {
   label: string;
   /** Not needed for an item that only opens a submenu. */
@@ -72,7 +74,7 @@ export default function MoreMenu({ items, label = 'More actions', triggerClassNa
   // Too little room below (the phone's tab bar counts): open upwards instead, measured before it paints.
   useLayoutEffect(() => {
     if (!at || !popup.current) return;
-    const floor = window.innerHeight - (document.querySelector('[data-bottom-nav]')?.getBoundingClientRect().height ?? 0) - 8;
+    const floor = bottomFloor();
     const h = popup.current.getBoundingClientRect().height;
     if (at.top + h > floor && at.above - h >= 8) popup.current.style.top = `${at.above - h}px`;
     else popup.current.style.top = `${Math.max(8, Math.min(at.top, floor - h))}px`;

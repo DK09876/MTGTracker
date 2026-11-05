@@ -15,7 +15,7 @@ import { sameSession, type SavedSearch, type Session } from '@/lib/recent';
 import { steady } from '@/lib/steady-tap';
 
 const input = 'min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]';
-const button = 'min-h-9 shrink-0 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
+const button = 'min-h-8 shrink-0 rounded-full px-2.5 text-sm text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] disabled:opacity-50';
 const primary = 'min-h-9 shrink-0 rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
 export function SaveBar({ session, saved, onSave, onSaveChanges, onNew }: {
@@ -37,7 +37,7 @@ export function SaveBar({ session, saved, onSave, onSaveChanges, onNew }: {
   if (saved) {
     const unchanged = sameSession(saved.session, session);
     return (
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="min-w-0 truncate text-[var(--muted)]">
           <span aria-hidden className="text-[var(--accent)]">★</span> Saved as <span className="text-[var(--foreground)]">{saved.name}</span>
           {!unchanged && ' - changed since'}
@@ -55,11 +55,11 @@ export function SaveBar({ session, saved, onSave, onSaveChanges, onNew }: {
   }
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+    <div className="flex flex-wrap items-center gap-2 text-sm">
       {naming === null ? (
         <>
           <button onClick={() => setNaming(session.thread.join(' › ').slice(0, 80))} className={button}>
-            <span aria-hidden>☆</span> Save search
+            <span aria-hidden>☆</span> Save
           </button>
           <button onClick={onNew} className={`${button} ml-auto lg:hidden`}>New search</button>
         </>

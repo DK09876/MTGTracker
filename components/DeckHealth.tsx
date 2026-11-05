@@ -112,7 +112,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
                   {c.fetchLandSources > 0 && <> ({c.fetchLandSources} by fetching)</>}
                   {c.otherSources > 0 && <> · {c.otherSources} other source{c.otherSources === 1 ? '' : 's'}</>}
                   {c.needed !== null && (
-                    <span className="block" title={`${c.neededFor} sets it: Karsten's sources to cast it on curve about 90% of the time. Lands count in full, rocks and dorks at three quarters.`}>
+                    <span className="block" title={`${c.neededFor} sets it: the sources to cast it on curve about 90% of the time. Lands count in full, rocks and dorks at three quarters.`}>
                       <span className={c.sources < c.needed - 1 ? 'font-semibold text-amber-300' : 'text-emerald-400'}>
                         {c.sources < c.needed - 1 ? '▲' : '✓'} {c.sources} of {c.needed} sources
                       </span>{' '}
@@ -232,13 +232,13 @@ function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
   if (!bracket) {
     return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Commander Spellbook for the bracket — try again in a moment.</p>;
   }
+  // A caution naming the same cards as a reason above says the same thing twice.
+  const shown = new Set(bracket.reasons.map((r) => [...r.cards].sort().join('|')));
+  const cautions = bracket.cautions.filter((c) => !shown.has([...c.cards].sort().join('|')));
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-lg font-semibold">{bracket.label}</p>
-        <p className="text-xs text-[var(--muted)]">
-          Commander Spellbook calls it <span className="text-[var(--foreground)]">{bracket.spellbook.label}</span> (its own scale)
-        </p>
+        <p className="text-lg font-semibold" title={`Commander Spellbook's own scale calls it ${bracket.spellbook.label}`}>{bracket.label}</p>
       </div>
       <p className="text-sm text-[var(--muted)]">
         {bracket.floor === 1
@@ -255,9 +255,9 @@ function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
           ))}
         </ul>
       )}
-      {bracket.cautions.length > 0 && (
+      {cautions.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1 text-sm">
-          {bracket.cautions.map((c) => (
+          {cautions.map((c) => (
             <li key={c.text} className="flex gap-2">
               <span aria-hidden className="font-bold" style={{ color: STATUS.warning }}>▲</span>
               <span><span className="sr-only">Check: </span>{c.text}<span className="text-[var(--muted)]"> — {c.cards.join(', ')}</span></span>

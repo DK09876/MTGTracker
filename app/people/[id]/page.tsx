@@ -29,7 +29,8 @@ export default function PersonPage({ params }: { params: Promise<{ id: string }>
   return (
     <div className="flex flex-col gap-8" style={identityStyle(commander?.identity ?? null)}>
       <section data-tour="profile-banner" className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
-        <div className="relative h-44 sm:h-56">
+        {/* The favourite commander's art as a banner; without one, a slim band rather than a big grey box. */}
+        <div className={`relative ${commander?.art ? 'h-44 sm:h-56' : 'h-20'}`}>
           {commander?.art
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={commander.art} alt="" className="h-full w-full object-cover" />
@@ -69,9 +70,9 @@ export default function PersonPage({ params }: { params: Promise<{ id: string }>
                   {self && (
                     <button
                       onClick={async () => { await api.setDeckPublic(d.id, !d.public); void load(); }}
-                      className="self-start text-xs text-[var(--accent)] hover:underline"
+                      className="self-start text-xs text-[var(--muted)] hover:text-[var(--foreground)] hover:underline"
                     >
-                      {d.public ? 'Public · make private' : 'Private · make public'}
+                      {d.public ? 'Make private' : 'Show on my profile'}
                     </button>
                   )}
                 </li>
@@ -99,7 +100,7 @@ function DeckCard({ deck, owner, big = false }: { deck: api.ShownDeck; owner: st
         : <div className="id-grad absolute inset-0 opacity-30" />}
       <div className="absolute inset-0 bg-gradient-to-t from-[var(--surface)] via-[var(--surface)]/40 to-transparent" />
       <div className="relative mt-auto p-3">
-        <p className={`font-display font-bold ${big ? 'text-2xl' : 'text-lg'}`}><span className="id-text">{deck.name}</span></p>
+        <p className={`font-display font-bold ${big ? 'text-2xl' : 'text-lg'}`}>{deck.name}</p>
         <p className="text-xs text-[var(--muted)]">{deck.commander ?? 'No commander'} · {deck.cards} cards{!deck.public ? ' · private' : ''}</p>
       </div>
     </Link>

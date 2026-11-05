@@ -118,23 +118,24 @@ function List({ entries, active, newLabel, onNew, ...actions }: {
     <div className="flex flex-col gap-4">
       <button
         {...steady(onNew)}
-        className="flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] text-sm font-medium hover:bg-[var(--surface-hover)]"
+        className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
       >
-        <span aria-hidden>＋</span> {newLabel}
+        <span aria-hidden className="text-base leading-none">＋</span> {newLabel}
       </button>
 
-      <section aria-label="Saved">
-        <h3 className="mb-1 flex items-baseline justify-between px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">
-          <span><span aria-hidden className="text-[var(--accent)]">★</span> Saved</span>
-          <span className="font-normal normal-case tracking-normal">kept until you delete</span>
-        </h3>
-        {saved.length === 0 && <p className="px-2 text-xs text-[var(--muted)]">Nothing saved yet. Use ⋯ › Save on one below.</p>}
-        {saved.map((e) => <Row key={e.id} entry={e} on={e.id === active} {...actions} />)}
-      </section>
+      {saved.length > 0 && (
+        <section aria-label="Saved">
+          <h3 title="Kept until you delete them" className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--faint)]">
+            <span aria-hidden className="text-[var(--accent)]">★</span> Saved
+          </h3>
+          {saved.map((e) => <Row key={e.id} entry={e} on={e.id === active} {...actions} />)}
+        </section>
+      )}
+      {!entries.length && <p className="px-2 text-xs leading-relaxed text-[var(--faint)]">What you ask shows up here, to open again without asking twice. Save the ones to keep.</p>}
 
       {recent.length > 0 && (
         <section aria-label="Recent">
-          <h3 className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--muted)]">Recent</h3>
+          <h3 className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--faint)]">Recent</h3>
           {days.map((day) => (
             <div key={day}>
               <p className="mx-2 mb-0.5 mt-2 text-[11px] text-[var(--muted)]">{day}</p>

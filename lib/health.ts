@@ -187,7 +187,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
     warnings_.push({
       level: 'warning',
       title: `Short on ${COLOR_NAME[c.color]} sources: ${c.sources} of ${c.needed}`,
-      detail: `${c.neededFor} wants ${c.needed} to be castable on curve about 90% of the time (Karsten). Add lands or rocks that make ${COLOR_NAME[c.color].toLowerCase()}.`,
+      detail: `${c.neededFor} wants ${c.needed} to be castable on curve about 90% of the time. Add lands or rocks that make ${COLOR_NAME[c.color].toLowerCase()}.`,
     });
   }
 

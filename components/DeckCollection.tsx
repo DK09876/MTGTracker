@@ -34,7 +34,8 @@ const GROUPS: Array<{ status: Status; title: string; hint: string }> = [
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const box = (name: string) => name || 'Unsorted';
-const small = 'min-h-9 rounded-lg border border-[var(--border)] px-2.5 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50';
+// Row actions stay quiet - a bordered button on each of 100 rows was the loudest thing on the tab.
+const small = 'min-h-8 rounded-full px-2.5 text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] disabled:opacity-50';
 const primary = 'min-h-9 rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
 export default function DeckCollection({ listId, version }: Props) {
@@ -75,7 +76,7 @@ export default function DeckCollection({ listId, version }: Props) {
   return (
     <div data-tour="deck-collection" className="mt-5 flex flex-col gap-6">
       <section data-tour="collection-summary" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
-        <p className="text-base font-medium">{summary.inDeck} of {summary.need} cards in the deck{summary.proxies ? `, plus ${summary.proxies} proxies` : ''}</p>
+        <p className="text-base font-medium">{summary.inDeck} of {summary.need} cards owned and in this deck{summary.proxies ? `, plus ${summary.proxies} proxies` : ''}</p>
         <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[var(--muted)] sm:grid-cols-4">
           <li><span className="text-[var(--foreground)]">{summary.inBoxes}</span> in your boxes</li>
           <li><span className="text-[var(--foreground)]">{summary.inOtherDecks}</span> in other decks</li>

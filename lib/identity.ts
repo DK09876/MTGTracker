@@ -51,5 +51,7 @@ export function identityStops(identity: string | string[] | null | undefined): [
 /** Style that sets --c1..--c3 on an element, for everything inside it. */
 export function identityStyle(identity: string | string[] | null | undefined): CSSProperties {
   const [c1, c2, c3] = identityStops(identity);
-  return { '--c1': c1, '--c2': c2, '--c3': c3 } as CSSProperties;
+  // The accent follows: a solid accent button in a deck is the commander's
+  // first colour, not gold beside its gradient.
+  return { '--c1': c1, '--c2': c2, '--c3': c3, '--accent': c1 } as CSSProperties;
 }

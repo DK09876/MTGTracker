@@ -10,9 +10,7 @@
 
 import Image from 'next/image';
 
-import ManaCost from './ManaCost';
 import Tilt from './Tilt';
-import { RarityBadge } from './CardDetail';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { imageOf, priceOf } from '@/lib/scryfall';
 import { steady } from '@/lib/steady-tap';
@@ -71,33 +69,28 @@ export default function CardTile({ card, inLists, owned, onSelect, onAdd, footer
         )}
       </button>
 
+      {/* Under the picture, one quiet line: the name (the cost and rarity are on the card), set and price, and Add. */}
       {!compact && <div className="flex flex-1 flex-col gap-1.5 px-0.5">
-        <div className="flex items-start justify-between gap-2">
-          <p className="min-w-0 flex-1 truncate text-sm font-semibold" title={card.name}>
-            {card.name}
-          </p>
-          <ManaCost cost={card.mana_cost ?? card.card_faces?.[0]?.mana_cost} size={14} />
-        </div>
-
-        <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-          <RarityBadge rarity={card.rarity} />
-          <span className="truncate uppercase">{card.set}</span>
-          {finish !== 'nonfoil' && (
-            <span className="rounded bg-gradient-to-r from-amber-300/30 via-fuchsia-300/30 to-sky-300/30 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--foreground)]">
-              {finish === 'etched' ? 'Etched' : 'Foil'}
-            </span>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-medium leading-tight" title={card.name}>{card.name}</p>
+            <p className="mt-0.5 flex items-center gap-1.5 text-[11px] tabular-nums text-[var(--muted)]">
+              <span className="uppercase" title={card.set_name}>{card.set}</span>
+              {finish !== 'nonfoil' && <span className="font-semibold text-[var(--foreground)]/80">· {finish === 'etched' ? 'Etched' : 'Foil'}</span>}
+              <span>· {usd === null ? '—' : `$${usd.toFixed(2)}`}</span>
+            </p>
+          </div>
+          {onAdd && (
+            <button
+              {...steady(() => onAdd(card))}
+              aria-label={`Add ${card.name} to a list`}
+              title="Add to a list"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--border)] text-base text-[var(--muted)] transition-colors hover:border-[var(--c1)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
+            >
+              ＋
+            </button>
           )}
-          <span className="ml-auto tabular-nums">{usd === null ? '—' : `$${usd.toFixed(2)}`}</span>
         </div>
-
-        {onAdd && (
-          <button
-            {...steady(() => onAdd(card))}
-            className="mt-auto rounded-full border border-[var(--border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--surface-hover)]"
-          >
-            Add to list
-          </button>
-        )}
         {footer}
       </div>}
     </div>

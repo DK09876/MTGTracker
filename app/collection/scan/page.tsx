@@ -184,7 +184,7 @@ export default function ScanPage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <Link href="/collection" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">← Collection</Link>
-          <h1 className="text-xl font-semibold">Scan cards</h1>
+          <h1 className="font-display text-3xl font-extrabold">Scan cards</h1>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-[var(--muted)]">Into</span>

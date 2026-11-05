@@ -7,10 +7,14 @@
  * page marks with data-section, so each tab names its own parts - on Cards,
  * every group with its count - and keeps up as they change.
  *
- * The deck itself heads it - its art, name, count and Add cards - so those
- * stay in reach as the page scrolls without a second bar appearing.
+ * Add cards heads it, in reach as the page scrolls; the deck's name and
+ * count are the header's (they were both, one above the other).
+ *
+ * On a phone it is the only bar along the bottom: the app's own tab bar
+ * steps aside on a deck (Nav.tsx), and "‹" leads back to the decks.
  */
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import type { DeckTab } from './DeckBuild';
@@ -19,6 +23,25 @@ const TABS: Array<[DeckTab, string]> = [
   ['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'],
   ['health', 'Health'], ['playtest', 'Playtest'], ['chat', 'Chat'], ['collection', 'Collection'],
 ];
+// A quiet line between building the deck, checking it, and the rest.
+const BREAK_AFTER: DeckTab[] = ['tags', 'playtest'];
+
+// 16px line icons, one per tab.
+const ICON: Partial<Record<DeckTab, string>> = {
+  cards: 'M4 5.5h6v9H4zM8.5 3.5l5.6 1.5-2.3 8.7',
+  plan: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
+  tune: 'M3 4.5h6M12 4.5h1M3 8h1M7 8h6M3 11.5h5M11 11.5h2M10.5 3v3M5.5 6.5v3M9.5 10v3',
+  tags: 'M2.75 2.75h5l5.5 5.5-5 5-5.5-5.5zM5.5 5.5h.01',
+  health: 'M2 8.5h2.5l1.5-4 3 7 1.5-3H14',
+  playtest: 'M5 3.5v9l7.5-4.5z',
+  chat: 'M3 3.5h10v7H7l-3 2.5v-2.5H3z',
+  collection: 'M2.5 5h11v8h-11zM4 2.75h8M3.25 5V3.5',
+};
+const Icon = ({ tab }: { tab: DeckTab }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="shrink-0 max-lg:hidden" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d={ICON[tab] ?? ''} />
+  </svg>
+);
 
 interface Section { id: string; label: string; count: string | null }
 
@@ -66,59 +89,60 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
       data-tour="deck-tabs"
       data-deck-rail
       aria-label="Deck"
-      className="fixed inset-x-2 bottom-[calc(var(--nav-h)+0.5rem)] z-30 flex gap-1 overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-lg backdrop-blur
-        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:p-2 lg:shadow-none"
+      className="fixed inset-x-2 bottom-[calc(var(--nav-h)+max(0.5rem,env(safe-area-inset-bottom)))] z-30 flex items-center gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-1.5 text-sm shadow-[0_8px_30px_rgba(0,0,0,0.45)] backdrop-blur
+        lg:sticky lg:inset-x-auto lg:bottom-auto lg:top-20 lg:z-0 lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-y-auto lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none"
     >
-      {/* Wide screens: the deck heads the rail. */}
-      <div className="hidden flex-col gap-2 border-b border-[var(--border)] px-1.5 pb-3 pt-1 lg:flex">
-        <div className="flex items-center gap-2.5">
-          {deck.art
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={deck.art} alt="" aria-hidden className="h-10 w-10 shrink-0 rounded-lg object-cover object-[50%_25%]" />
-            : <span aria-hidden className="id-grad h-10 w-10 shrink-0 rounded-lg opacity-60" />}
-          <span className="flex min-w-0 flex-col leading-tight">
-            <b className="line-clamp-2 font-display text-[15px]">{deck.name}</b>
-            <button
-              onClick={() => go(deck.size === 100 ? 'cards' : 'tune')}
-              title={deck.size === 100 ? undefined : deck.size > 100 ? `Tune: cut ${deck.size - 100}` : `Tune: add ${100 - deck.size}`}
-              className={`mt-1 self-start rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${deck.size === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}
-            >
-              {deck.size} / 100
-            </button>
-          </span>
-        </div>
-        <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
+      {/* Wide screens: Add cards heads the rail; the deck's name is in the header above. */}
+      <div className="hidden pb-4 lg:block">
+        <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go w-full rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
       </div>
-      {/* Phones: Add cards leads the bar. */}
+      {/* Phones: back to the decks, then Add cards, lead the bar. */}
+      <Link href="/decks" aria-label="All decks" className="flex h-9 w-7 shrink-0 items-center justify-center text-xl text-[var(--muted)] lg:hidden">‹</Link>
       <button onClick={deck.onAdd} aria-label="Add cards" className="btn-go flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg font-semibold lg:hidden">＋</button>
-      <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col">
-        {TABS.map(([value, label]) => (
-          <button
-            key={value}
-            role="tab"
-            data-tour-tab={value}
-            aria-selected={section === value}
-            onClick={() => go(value)}
-            className={`flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-left ${section === value ? 'id-grad font-semibold text-[#15110a]' : 'text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]'}`}
-          >
-            <span>{value === 'chat' && !planConfirmed && <span aria-hidden>🔒 </span>}{label}</span>
-            {value === 'plan' && !planConfirmed && section !== 'plan' && <span className="rounded-full bg-amber-300/15 px-1.5 text-xs font-semibold text-amber-300">start here</span>}
-          </button>
-        ))}
+      {/* Phones: ‹ and ＋ stay put; the tabs and sections swipe, fading out at the edge. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-visible lg:[mask-image:none]">
+      <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col lg:gap-0.5">
+        {TABS.map(([value, label]) => {
+          const on = section === value;
+          return (
+            <div key={value} className="contents">
+              <button
+                role="tab"
+                data-tour-tab={value}
+                aria-selected={on}
+                onClick={() => go(value)}
+                className={`relative flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-left transition-colors lg:rounded-lg lg:px-2.5 ${on
+                  ? 'bg-[var(--surface-hover)] font-semibold text-[var(--foreground)] max-lg:bg-[color-mix(in_srgb,var(--c1)_22%,var(--surface))] lg:before:absolute lg:before:inset-y-1.5 lg:before:-left-2 lg:before:w-[3px] lg:before:rounded-full lg:before:bg-[linear-gradient(var(--c1),var(--c2),var(--c3))]'
+                  : 'text-[var(--muted)] hover:bg-[var(--surface-hover)]/60 hover:text-[var(--foreground)]'}`}
+              >
+                <span className={on ? 'text-[var(--c1)]' : ''}><Icon tab={value} /></span>
+                <span className="flex-1">{label}</span>
+                {value === 'chat' && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
+                {value === 'plan' && !planConfirmed && !on && <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300">start here</span>}
+              </button>
+              {BREAK_AFTER.includes(value) && <span aria-hidden className="mx-2.5 my-1.5 hidden h-px bg-[var(--border)] lg:block" />}
+            </div>
+          );
+        })}
       </div>
-      <div className="flex shrink-0 gap-1 border-l border-[var(--border)] pl-1 lg:mt-2 lg:flex-col lg:border-l-0 lg:border-t lg:pl-0 lg:pt-2">
-        <span className="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)] lg:block">On this page</span>
-        <button onClick={() => window.scrollTo({ top: 0, behavior: smooth() })} className="shrink-0 whitespace-nowrap rounded-xl px-3 py-1 text-left text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">↑ Top</button>
-        {parts.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => document.getElementById(p.id)?.scrollIntoView({ behavior: smooth(), block: 'start' })}
-            className="flex shrink-0 items-center justify-between gap-3 whitespace-nowrap rounded-xl px-3 py-1 text-left text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] lg:text-[13px]"
-          >
-            <span className="truncate">{p.label}</span>
-            {p.count && <span className="tabular-nums">{p.count}</span>}
-          </button>
-        ))}
+      {parts.length > 0 && (
+        <div className="flex shrink-0 gap-1 border-l border-[var(--border)] pl-1 lg:mt-4 lg:flex-col lg:gap-0 lg:border-l-0 lg:pl-0">
+          <span className="hidden px-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--faint)] lg:block">On this page</span>
+          {parts.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => document.getElementById(p.id)?.scrollIntoView({ behavior: smooth(), block: 'start' })}
+              className="flex shrink-0 items-center justify-between gap-3 whitespace-nowrap rounded-lg px-2.5 py-1 text-left text-[var(--muted)] hover:text-[var(--foreground)] lg:text-[13px]"
+            >
+              <span className="truncate">{p.label}</span>
+              {p.count && <span className="tabular-nums text-[var(--faint)]">{p.count}</span>}
+            </button>
+          ))}
+          <button onClick={() => window.scrollTo({ top: 0, behavior: smooth() })} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-left text-[var(--faint)] hover:text-[var(--foreground)] lg:text-[13px]">↑ Back to top</button>
+        </div>
+      )}
+      {/* Room to scroll the last item clear of the fade. */}
+      <span aria-hidden className="w-4 shrink-0 lg:hidden" />
       </div>
     </nav>
   );

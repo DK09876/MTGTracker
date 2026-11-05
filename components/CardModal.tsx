@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 import CardDetail from './CardDetail';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -32,7 +33,9 @@ export default function CardModal({
 
   if (!card) return null;
 
-  return (
+  // Through a portal: inside the page, an ancestor's stacking context let
+  // sticky bars draw over the backdrop.
+  return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       <div className="fixed inset-0 bg-black/70" onClick={onClose} aria-hidden="true" />
       <div className="relative flex min-h-full items-start justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] sm:items-center">
@@ -43,20 +46,21 @@ export default function CardModal({
           aria-label={card.name}
           className="relative w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl"
         >
-          {/* ✕ stays at the top while a tall card scrolls (phones). The actions stay in the flow: with tags they are tall. */}
-          <div className="sticky top-0 z-10 -mx-5 -mt-5 mb-1 flex items-center justify-end rounded-t-2xl bg-[var(--surface)]/95 px-2 pt-2 backdrop-blur">
+          {/* ✕ floats at the top right while a tall card scrolls (phones), taking no room from the card. */}
+          <div className="sticky top-0 z-10 -mr-3 -mt-3 flex h-0 justify-end">
             <button
               onClick={onClose}
               aria-label="Close"
-              className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface)]/85 text-[var(--muted)] backdrop-blur hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]"
             >
               ✕
             </button>
           </div>
-          <div className="-mt-10"><CardDetail card={card} /></div>
+          <CardDetail card={card} />
           {actions && <div className="mt-5 border-t border-[var(--border)] pt-4">{actions}</div>}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

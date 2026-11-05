@@ -19,6 +19,7 @@ import { Fragment, useEffect, useState } from 'react';
 
 import DeckSuggestions from './DeckSuggestions';
 import ManaCost from './ManaCost';
+import PlanLine from './PlanLine';
 import TuneCut from './TuneCut';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
@@ -105,11 +106,14 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
 
   return (
     <div className="mt-5 flex flex-col gap-6">
-      <div data-tour="tune-plan" className="flex max-w-3xl flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <span className="text-[var(--muted)]">{planConfirmed ? 'The plan:' : 'Write the plan first - everything here reads it.'}</span>
-        <span className="min-w-0 flex-[1_1_20rem]">{planConfirmed ? brief || 'Not written.' : ''}{plan.style && <span className="text-[var(--muted)]"> · {plan.style.label}</span>}</span>
-        <button onClick={() => onTab('plan')} className="text-[var(--accent)] hover:underline">{planConfirmed ? 'Edit' : 'Go to Plan'}</button>
-      </div>
+      {planConfirmed
+        ? <PlanLine data-tour="tune-plan" brief={brief} note={plan.style?.label} action="Edit" onAction={() => onTab('plan')} />
+        : (
+          <div data-tour="tune-plan" className="flex max-w-3xl items-center gap-3 rounded-xl border border-amber-300/30 bg-amber-300/5 px-4 py-2.5 text-sm">
+            <span className="flex-1">Write the plan first - everything here reads it.</span>
+            <button onClick={() => onTab('plan')} className="text-[var(--c1)] hover:underline">Go to Plan</button>
+          </div>
+        )}
 
       <div data-tour="tune-modes" className="flex w-fit max-w-full gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-1 text-sm" role="tablist" aria-label="Tune">
         {([['add', 'Add'], ['cut', 'Cut']] as const).map(([v, label]) => (
@@ -172,7 +176,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
           <h3 data-section="Mana" className="font-display text-xl font-semibold">Mana</h3>
           <div className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
             <p>
-              <span className="font-semibold">{plan.lands.have} lands.</span> Karsten&apos;s formula suggests <span className="font-semibold">{plan.lands.want}</span>
+              <span className="font-semibold">{plan.lands.have} lands.</span> The usual formula suggests <span className="font-semibold">{plan.lands.want}</span>
               <span className="text-[var(--muted)]"> for an average mana value of {plan.lands.averageMv.toFixed(2)} with {plan.lands.cheap} ramp and draw spells at two mana or less.</span>
             </p>
             {plan.colors.some((c) => c.needed !== null) && (
@@ -189,7 +193,7 @@ export default function DeckBuild({ listId, cards, commander, version, onAdd, on
                 })}
               </ul>
             )}
-            <p className="text-xs text-[var(--muted)]">Sources each colour needs come from its most demanding spell, by Karsten&apos;s table; rocks and dorks count three-quarters.</p>
+            <p className="text-xs text-[var(--muted)]">Sources each colour needs come from its most demanding spell, by the standard table; rocks and dorks count three-quarters.</p>
             <div>
               <button
                 onClick={async () => {

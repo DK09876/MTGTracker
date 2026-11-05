@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 
 import CommanderPicker from '@/components/CommanderPicker';
 import { DECK_DRAG, FolderPill, FolderRail, type FolderPick, type FolderProps } from '@/components/DeckFolders';
+import EmptyState from '@/components/EmptyState';
 import ImportResult from '@/components/ImportResult';
 import ManaCost, { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
@@ -20,7 +21,7 @@ import PasteFormats from '@/components/PasteFormats';
 import StickyBar from '@/components/StickyBar';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
-import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
+import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { parseDecklist } from '@/lib/decklist';
 import { identityStyle, MANA } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
@@ -84,6 +85,15 @@ export default function DecksPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
+  // "/decks?new" (the ⌘K palette's New deck) opens the form.
+  useEffect(() => {
+    const fromLink = () => {
+      if (!new URLSearchParams(window.location.search).has('new')) return;
+      window.history.replaceState(null, '', window.location.pathname);
+      setCreating(true);
+    };
+    fromLink();
+  }, []);
   const [name, setName] = useState('');
   const [commander, setCommander] = useState<api.CommanderOption | null>(null);
   const [decklist, setDecklist] = useState('');
@@ -287,7 +297,7 @@ export default function DecksPage() {
                 {narrowed > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold text-[#221c08]">{narrowed}</span>}
               </button>
             )}
-            {!creating && (
+            {!creating && (decks.length > 0 || loading) && (
               <button data-tour="new-deck" onClick={() => setCreating(true)} aria-label="New deck" className={`btn-go flex shrink-0 items-center justify-center rounded-full font-semibold max-md:h-10 max-md:w-10 md:px-4 md:py-2 ${decks.length ? '' : 'ml-auto'}`}>
                 ＋<span className="max-md:hidden">&nbsp;New deck</span>
               </button>
@@ -301,7 +311,8 @@ export default function DecksPage() {
           )}
 
           {creating && (
-            <form onSubmit={create} className="mt-4 flex flex-col gap-4 rounded-xl border border-[var(--border)] p-4">
+            <form onSubmit={create} className="mt-4 flex max-w-3xl flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 p-5">
+              <h2 className="font-display text-lg font-bold">New deck</h2>
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="text-[var(--muted)]">Commander</span>
                 <CommanderPicker value={commander} onChange={setCommander} autoFocus />
@@ -317,15 +328,15 @@ export default function DecksPage() {
               </label>
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="text-[var(--muted)]">
-                  Bring a deck <span className="opacity-70">(optional) - paste its list, or a link to it on Archidekt. Moxfield links aren&apos;t supported: use its Export and paste the list.</span>{' '}
+                  Bring a deck <span className="opacity-70">(optional) - an Archidekt link or a pasted list. From Moxfield, paste its Export.</span>{' '}
                   <PasteFormats />
                 </span>
                 <textarea
                   value={decklist}
                   onChange={(e) => { setDecklist(e.target.value); setError(null); }}
-                  // Tall enough for the whole example while empty.
-                  rows={decklist.trim() ? 10 : 16}
-                  placeholder={`https://archidekt.com/decks/…\n\nor a list:\n${DECKLIST_EXAMPLE}`}
+                  // Short while empty - it is optional - and growing with what is pasted.
+                  rows={decklist.trim() ? Math.min(18, Math.max(6, decklist.split('\n').length + 1)) : 4}
+                  placeholder={'https://archidekt.com/decks/…\n\nor a list:\n1 Sol Ring\n1 Lightning Bolt *F*\n…'}
                   spellCheck={false}
                   className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
                 />
@@ -378,14 +389,14 @@ export default function DecksPage() {
               <div className="flex gap-2">
                 <button
                   disabled={busy || blocked}
-                  className="rounded-xl bg-[var(--accent)] px-4 py-2 font-medium text-[#221c08] hover:brightness-110 disabled:opacity-60"
+                  className="btn-go rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60"
                 >
                   {busy ? (box.kind === 'link' ? 'Fetching the deck…' : decklist.trim() ? 'Importing…' : 'Creating…') : 'Create deck'}
                 </button>
                 <button
                   type="button"
                   onClick={() => { setCreating(false); setError(null); }}
-                  className="rounded-xl border border-[var(--border)] px-4 py-2 hover:bg-[var(--surface)]"
+                  className="rounded-full px-4 py-2 text-sm text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
                 >
                   Cancel
                 </button>
@@ -402,20 +413,16 @@ export default function DecksPage() {
             </div>
           )}
 
-
-          {imported && (
-            <div className="mt-4">
-              <ImportResult result={imported.result} />
-              <Link href={`/decks/${imported.id}`} className="mt-2 inline-block text-sm text-[var(--accent)] underline">
-                Open the deck →
-              </Link>
-            </div>
-          )}
-
           {!creating && error && <p className="mt-3 text-sm text-red-400">{error}</p>}
           {loading && <p className="mt-8 text-[var(--muted)]">Loading…</p>}
           {!loading && !decks.length && !creating && (
-            <p className="mt-10 text-center text-[var(--muted)]">No decks yet.</p>
+            <EmptyState
+              title="Build your first deck"
+              actions={<button onClick={() => setCreating(true)} className="btn-go rounded-full px-5 py-2 text-sm font-semibold">＋ New deck</button>}
+            >
+              Pick a commander and start from a suggested list, or bring a deck you already have - paste its list or an Archidekt link.
+              <p className="mt-3 text-xs">New here? The <span className="rounded-full border border-[var(--border)] px-1.5">?</span> at the top walks you through a sample deck.</p>
+            </EmptyState>
           )}
           {!loading && decks.length > 0 && !shown.length && !filtered && (
             <p className="mt-6 rounded-2xl border border-dashed border-[var(--border)] px-4 py-10 text-center text-sm text-[var(--muted)]">

@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { access } from '@/lib/auth';
 import { listLists } from '@/lib/db';
 import { recentJobs, RECENT_MS, type Job } from '@/lib/jobs';
 import { requireProfile } from '@/lib/profile-route';
@@ -31,7 +32,11 @@ export async function GET(request: Request) {
       startedAt: t.startedAt, finishedAt: t.finishedAt,
     }];
   });
-  const jobs = [...recentJobs(who.profile), ...tagging].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  // App-wide work (the card data refresh) is the admins' business; for
+  // everyone else it was a "1 running" they never started.
+  const admin = !!access(who.profile)?.isAdmin;
+  const own = recentJobs(who.profile).filter((j) => j.profileId || admin);
+  const jobs = [...own, ...tagging].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   // Only what the menu needs.
   return NextResponse.json({ jobs: jobs.map((j) => Object.fromEntries(Object.entries(j).filter(([k]) => k !== 'result'))) });
 }

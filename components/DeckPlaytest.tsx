@@ -173,9 +173,8 @@ function Goldfish({ listId, deck, commander, byName, settings }: SimProps) {
   return (
     <div className="flex flex-col gap-4">
       <div data-tour="goldfish-run" className="flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <p>
-          Plays the deck alone {settings.games.toLocaleString()} times, {settings.turns} turns each, on autopilot: a land a turn, then what it can pay for in your order. Sevens that fail your keep rule ({describeKeep(settings.keep)}) are mulliganed, up to {settings.maxMulligans} times. Change any of it under How it plays.
-        </p>
+        {/* What a run does is the "How it plays" line above; here, just the doing. */}
+        <p className="text-[var(--muted)]">Plays the deck alone on autopilot - a land a turn, then what it can pay for - and mulligans the sevens your keep rule ({describeKeep(settings.keep)}) throws back.</p>
         <div className="flex flex-wrap items-center gap-3">
           <button data-tour="goldfish-play" onClick={play} disabled={run.state === 'running' || !deck.length} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50">
             {run.state === 'running' ? 'Playing…' : r ? 'Play again' : `Play ${settings.games.toLocaleString()} games`}
