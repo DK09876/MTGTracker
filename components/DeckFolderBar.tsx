@@ -26,9 +26,11 @@ interface Props {
   /** Open the new-folder box from elsewhere (a deck's "New folder with this deck"). */
   naming: boolean;
   setNaming: (on: boolean) => void;
+  /** The slim bar shown once the page has scrolled: one row of folders to pick or drop on, nothing to edit. */
+  compact?: boolean;
 }
 
-export default function DeckFolderBar({ folders, counts, active, onPick, onCreate, onRename, onDelete, onDrop, naming, setNaming }: Props) {
+export default function DeckFolderBar({ folders, counts, active, onPick, onCreate, onRename, onDelete, onDrop, naming, setNaming, compact = false }: Props) {
   const [draft, setDraft] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,13 +49,14 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
       if (deck && target !== 'all') { e.preventDefault(); onDrop(deck, target === 'none' ? null : target); }
     },
   });
-  const chip = (pick: FolderPick, label: React.ReactNode, count: number) => (
+  // joined: the open folder's chip, with its ⋯ attached on the right as one pill.
+  const chip = (pick: FolderPick, label: React.ReactNode, count: number, joined = false) => (
     <button
       key={pick}
       onClick={() => onPick(pick)}
       aria-pressed={active === pick}
       {...drop(pick)}
-      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm transition ${
+      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border px-3 py-1.5 text-sm transition ${joined ? 'rounded-l-full border-r-0 pr-2' : 'rounded-full'} ${
         over === pick ? 'border-[var(--accent)] bg-[var(--accent)]/20'
           : active === pick ? 'border-[var(--accent)] text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}
     >
@@ -86,18 +89,21 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
   );
 
   return (
-    <div data-tour="deck-folders" className="mt-6">
-      {/* One row to swipe on a phone; wrapped on wider screens. */}
-      <div role="group" aria-label="Folders" className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
+    <div data-tour={compact ? undefined : 'deck-folders'} className={compact ? '' : 'mt-6'}>
+      {/* One row to swipe on a phone (and always in the slim bar); wrapped on wider screens. */}
+      <div role="group" aria-label={compact ? 'Folders (bar)' : 'Folders'} className={compact
+        ? 'flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none]'
+        : '-mx-4 flex items-center gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0'}>
         {chip('all', 'All decks', counts.all)}
         {folders.length > 0 && chip('none', 'Unfiled', counts.none)}
         {folders.map((f) => (
           renaming === f.id ? <span key={f.id}>{nameBox(f.id)}</span> : (
             <span key={f.id} className="flex shrink-0 items-center">
-              {chip(f.id, <><FolderIcon />{f.name}</>, counts.byFolder[f.id] ?? 0)}
-              {active === f.id && (
+              {chip(f.id, <><FolderIcon />{f.name}</>, counts.byFolder[f.id] ?? 0, active === f.id && !compact)}
+              {active === f.id && !compact && (
                 <MoreMenu
                   label={`More for the ${f.name} folder`}
+                  triggerClassName="flex h-full min-h-[34px] items-center rounded-r-full border border-l-0 border-[var(--accent)] pl-1 pr-2.5 text-[var(--muted)] hover:text-[var(--foreground)]"
                   items={[
                     { label: 'Rename', onClick: () => { setDraft(f.name); setRenaming(f.id); setError(null); } },
                     { label: 'Delete folder…', danger: true, confirm: `Delete “${f.name}”? Its decks stay, out of any folder.`, onClick: () => onDelete(f.id) },
@@ -107,7 +113,7 @@ export default function DeckFolderBar({ folders, counts, active, onPick, onCreat
             </span>
           )
         ))}
-        {naming ? nameBox() : (
+        {compact ? null : naming ? nameBox() : (
           <button onClick={() => { setDraft(''); setNaming(true); setError(null); }} className="shrink-0 whitespace-nowrap rounded-full border border-dashed border-[var(--border)] px-3 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
             ＋ Folder
           </button>

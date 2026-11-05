@@ -23,7 +23,12 @@ export interface MoreItem {
   confirm?: string;
 }
 
-export default function MoreMenu({ items, label = 'More actions' }: { items: MoreItem[]; label?: string }) {
+export default function MoreMenu({ items, label = 'More actions', triggerClassName }: {
+  items: MoreItem[];
+  label?: string;
+  /** In place of the round ⋯ button's own look, to sit joined to something. */
+  triggerClassName?: string;
+}) {
   // Where the menu sits on screen, from the button; null while closed.
   // `above` is the button's top: where the menu ends when it opens upwards.
   const [at, setAt] = useState<{ top: number; right: number; above: number } | null>(null);
@@ -136,7 +141,7 @@ export default function MoreMenu({ items, label = 'More actions' }: { items: Mor
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-full min-h-9 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-lg leading-none hover:bg-[var(--surface-hover)]"
+        className={triggerClassName ?? 'flex h-full min-h-9 w-10 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-lg leading-none hover:bg-[var(--surface-hover)]'}
       >
         ⋯
       </button>

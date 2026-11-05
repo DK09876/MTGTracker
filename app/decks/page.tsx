@@ -95,6 +95,21 @@ export default function DecksPage() {
     none: decks.filter((d) => !placed[d.id]).length,
     byFolder: decks.reduce<Record<string, number>>((n, d) => { if (placed[d.id]) n[placed[d.id]] = (n[placed[d.id]] ?? 0) + 1; return n; }, {}),
   };
+  // Once the toolbar has scrolled away, a slim bar under the app's nav keeps the folders, find and New deck.
+  const [toolsEl, setToolsEl] = useState<HTMLDivElement | null>(null);
+  const [toolsGone, setToolsGone] = useState(false);
+  const [navHeight] = useState(() => (typeof document === 'undefined' ? 57 : document.querySelector('body header')?.getBoundingClientRect().height ?? 57));
+  useEffect(() => {
+    if (!toolsEl) return;
+    // Measured on scroll and resize, not watched for crossings: opening New deck moves the toolbar
+    // from above the screen to below it in one go, which an IntersectionObserver never reports.
+    let frame = 0;
+    const check = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => setToolsGone(toolsEl.getBoundingClientRect().bottom < navHeight)); };
+    check();
+    window.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', check); window.removeEventListener('resize', check); };
+  }, [toolsEl, navHeight]);
   const refreshFolders = () => api.fetchFolders().then(setFolders).catch(() => {});
   const fileDeck = async (deckId: string, folderId: string | null) => {
     // Shown moved at once; the answer confirms it.
@@ -147,6 +162,37 @@ export default function DecksPage() {
 
   return (
     <div>
+      {toolsGone && (
+        <div data-tour="decks-compact" style={{ top: navHeight }} className="fixed inset-x-0 z-30 border-b border-[var(--border)] bg-[var(--background)]/92 backdrop-blur">
+          <div className="safe-x mx-auto flex max-w-[1680px] items-center gap-2 py-2">
+            <div className="min-w-0 flex-1">
+              <DeckFolderBar
+                compact
+          folders={folders.folders}
+          counts={counts}
+          active={folderPick}
+          onPick={(folder) => changeView({ folder })}
+                naming={false}
+                setNaming={() => {}}
+                onCreate={async () => null}
+                onRename={async () => null}
+                onDelete={async () => {}}
+                onDrop={(deckId, folderId) => void fileDeck(deckId, folderId)}
+              />
+            </div>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find a deck"
+              aria-label="Find a deck or commander"
+              className="hidden w-48 rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] md:block"
+            />
+            <button onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setCreating(true); }} className="btn-go shrink-0 rounded-full px-3 py-1.5 text-sm font-semibold">
+              ＋ New deck
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-3xl font-extrabold">Decks</h1>
@@ -271,11 +317,6 @@ export default function DecksPage() {
       {!loading && !decks.length && !creating && (
         <p className="mt-10 text-center text-[var(--muted)]">No decks yet.</p>
       )}
-      {!loading && decks.length > 0 && !shown.length && !filtered && (
-        <p className="mt-8 text-center text-sm text-[var(--muted)]">
-          {folderPick === 'none' ? 'Every deck is in a folder.' : 'Nothing in this folder yet. Drag a deck onto it, or use a deck’s ⋯ → Move to.'}
-        </p>
-      )}
 
       {decks.length > 0 && (
         <DeckFolderBar
@@ -304,7 +345,7 @@ export default function DecksPage() {
       )}
 
       {decks.length > 0 && (
-        <div data-tour="deck-sort" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <div ref={setToolsEl} data-tour="deck-sort" className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -352,6 +393,11 @@ export default function DecksPage() {
         </div>
       )}
 
+      {!loading && decks.length > 0 && !shown.length && !filtered && (
+        <p className="mt-10 rounded-2xl border border-dashed border-[var(--border)] px-4 py-10 text-center text-sm text-[var(--muted)]">
+          {folderPick === 'none' ? 'Every deck is in a folder.' : 'Nothing in this folder yet. Drag a deck onto it, or use a deck’s ⋯ → Move to.'}
+        </p>
+      )}
       <div data-tour="deck-grid" className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(16.5rem,1fr))] gap-3">
         {shown.map((deck) => {
           const art = deck.commander ? deck.commander.image_uris?.art_crop ?? deck.commander.card_faces?.[0]?.image_uris?.art_crop ?? imageOf(deck.commander, 'normal') : null;
@@ -368,16 +414,15 @@ export default function DecksPage() {
             <Link
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
-              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
+              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] bg-[linear-gradient(105deg,color-mix(in_srgb,var(--c1)_15%,var(--surface)),color-mix(in_srgb,var(--c2)_15%,var(--surface))_55%,color-mix(in_srgb,var(--c3)_15%,var(--surface)))] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
             >
               {/* Nothing on the tile moves or is filtered on hover - a lift, a scale or a brightness filter
                   each left seams on the art's edges; the border and glow show it instead.
                   The art is framed from near its top, where the faces are. */}
-              <div className="relative h-36 overflow-hidden bg-[var(--surface)]">
+              <div className="relative h-36 overflow-hidden [mask-image:linear-gradient(to_bottom,black_58%,transparent)]">
                 {art ? <Image src={art} alt="" width={626} height={457} className="absolute inset-0 h-full w-full object-cover object-[50%_22%]" unoptimized />
                   : <div aria-hidden className="id-glow absolute -inset-6 blur-xl" />}
-                {/* Only the bottom fades, under the name: a shade or a fade over the whole art washed it out. */}
-                <div aria-hidden className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-b from-transparent to-[var(--surface)]" />
+                {/* Only the art's bottom fades, under the name, into the tile's own colours (a shade over all of it washed it out). */}
                 <span className="absolute left-3 top-3"><IdentitySymbols identity={identity.join('')} size={18} /></span>
               </div>
               <div className="relative -mt-5 flex flex-1 flex-col gap-0.5 px-3.5 pb-3.5">
@@ -388,7 +433,7 @@ export default function DecksPage() {
                   {deck.totalValue > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${deck.totalValue.toFixed(2)}</span>}
                 </div>
               </div>
-              <div aria-hidden className="id-grad h-[3px]" />
+              <div aria-hidden className="id-grad h-[5px] shadow-[0_-4px_16px_color-mix(in_srgb,var(--c2)_45%,transparent)]" />
             </Link>
             <div data-tour="deck-tile-more" className="absolute right-2 top-2 z-10 rounded-full bg-black/45 backdrop-blur">
               <MoreMenu
