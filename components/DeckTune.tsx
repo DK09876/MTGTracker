@@ -469,7 +469,9 @@ function FinishPicks({ finish, busy, job, instructions, onInstructions, onChoose
           placeholder="Optional, e.g. Lean into the graveyard. No cards over $5."
           className="resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
       )}
-      {claude && !finish.claudeReady && !running && <p className="text-xs text-[var(--muted)]">No picks from Claude yet for this deck. {finish.showRules ? 'The rules’ picks are below meanwhile.' : 'Press Pick with Claude, or show the rules’ picks.'}</p>}
+      {claude && !finish.claudeReady && !running && (finish.claudeEmpty
+        ? <p className="text-xs text-amber-300">Claude’s last picks had no card the app could use: names it didn’t recognise, cards outside your colours, or past your bracket, budget or deck rule. Pick again, or show the rules’ picks.</p>
+        : <p className="text-xs text-[var(--muted)]">No picks from Claude yet for this deck. {finish.showRules ? 'The rules’ picks are below meanwhile.' : 'Press Pick with Claude, or show the rules’ picks.'}</p>)}
     </div>
   );
 }

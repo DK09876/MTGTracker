@@ -278,7 +278,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="your-tags" data-section="Tags" className="font-medium">Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
+        <h3 data-tour="your-tags" data-section="Your tags" className="font-medium">Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The description is the test the model tags by, so make it say exactly what belongs — and what doesn&apos;t.
         </p>

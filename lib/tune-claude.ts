@@ -235,6 +235,6 @@ export async function finishPicks(model: JsonModel, list: List, profileId: strin
     return out;
   };
   const groups = parseFinish(answer.data, room, allowed, (key, card, why, count) => addItem(ctx, key, card, why, count), answer.model ?? '');
-  updateTune(list.id, (s) => { s.proposals.finish = groups; s.finishPicks = 'claude'; });
+  updateTune(list.id, (s) => { s.proposals.finish = groups; s.finishPicks = 'claude'; s.finishEmpty = groups.length === 0; });
   return groups;
 }

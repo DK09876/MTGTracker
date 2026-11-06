@@ -73,8 +73,23 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setTab(place.tab);
     if (place.check) setCheckPart(place.check);
     if (place.copies) setOwner((o) => (o === 'all' ? 'mine' : o));
-    if (place.anchor) setTimeout(() => document.getElementById(place.anchor!)?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }), 120);
+    // The section may not be drawn yet (the tab loads its data first): look for it for a few seconds.
+    if (place.anchor) {
+      let tries = 0;
+      const find = () => {
+        const el = document.getElementById(place.anchor!);
+        if (el) el.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        else if (tries++ < 30) setTimeout(find, 150);
+      };
+      setTimeout(find, 120);
+    }
   }, []);
+  // A link can open a tab: ?tab=plan, and the old names too (?tab=tags, ?tab=health, ?tab=collection…).
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the address on arrival
+    if (tab) setSection(tab);
+  }, [setSection]);
   // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
   const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
   // How many parts of the plan are left to confirm, for the locked screens.

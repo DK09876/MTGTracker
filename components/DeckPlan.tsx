@@ -174,7 +174,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
         </span>
         {plan.confirmed
           ? <span className="text-sm font-semibold text-emerald-300">✓ Plan confirmed · Tune and Chat are open</span>
-          : <button data-tour="plan-confirm" onClick={() => change({ confirm: true })} disabled={busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-60">Confirm the whole plan</button>}
+          : null}
         <AiModelPicker area="deck" align="right" />
       </div>
       {!plan.confirmed && <p className="-mt-4 max-w-3xl text-xs text-[var(--muted)]">Tune, Chat and Claude&apos;s reviews open when the whole plan is confirmed. Confirming the whole plan accepts what&apos;s shown for the {left} part{left === 1 ? '' : 's'} left.</p>}
@@ -228,9 +228,9 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {!plan.confirmed && (
-        <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-3 shadow-xl backdrop-blur lg:bottom-4">
-          <button onClick={() => change({ confirm: true })} disabled={busy} className="btn-go rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60">Confirm the whole plan</button>
-          <span className="text-sm text-[var(--muted)]">{plan.progress.done} of {plan.progress.total} confirmed. Opens Tune, Chat and Claude&apos;s reviews.</span>
+        <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-2 shadow-xl backdrop-blur sm:p-3 lg:bottom-4">
+          <button data-tour="plan-confirm" onClick={() => change({ confirm: true })} disabled={busy} className="btn-go rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60">Confirm the whole plan</button>
+          <span className="text-sm text-[var(--muted)]">{plan.progress.done} of {plan.progress.total} confirmed<span className="max-sm:hidden">. Opens Tune, Chat and Claude&apos;s reviews</span>.</span>
         </div>
       )}
     </div>

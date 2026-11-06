@@ -202,7 +202,7 @@ describe('Claude finishing the deck', { timeout: 30_000 }, () => {
     expect(groups.flatMap((g) => g.items.map((i) => i.add?.name))).toEqual(['Mountain', 'Rakdos Charm']);
     expect(store.tuneStore(list.id).finishPicks).toBe('claude');
     const s = await tune.tuneState(list, 'dk', { intent: 'finish' });
-    expect(s.finish).toEqual({ picks: 'claude', showRules: false, claudeReady: true });
+    expect(s.finish).toEqual({ picks: 'claude', showRules: false, claudeReady: true, claudeEmpty: false });
     expect(s.groups.every((g) => g.source === 'claude')).toBe(true);
     store.updateTune(list.id, (x) => { x.finishShowRules = true; });
     expect((await tune.tuneState(list, 'dk', { intent: 'finish' })).finish?.showRules).toBe(true);

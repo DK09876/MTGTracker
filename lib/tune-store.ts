@@ -32,6 +32,8 @@ export interface TuneStore {
   /** Finish the deck: where the picks come from, remembered per deck, and whether the rules' picks show beside Claude's. */
   finishPicks?: 'rules' | 'claude';
   finishShowRules?: boolean;
+  /** When Claude's last picks came back with no card the app could use. */
+  finishEmpty?: boolean;
 }
 
 const EMPTY: TuneStore = { changes: { add: [], cut: [] }, dismissed: [], proposals: {}, cutReasons: {}, pile: null, log: [], finishPicks: 'rules', finishShowRules: false };
@@ -50,6 +52,7 @@ export function tuneStore(listId: string): TuneStore {
       log: Array.isArray(s.log) ? s.log : [],
       finishPicks: s.finishPicks === 'claude' ? 'claude' : 'rules',
       finishShowRules: s.finishShowRules === true,
+      finishEmpty: s.finishEmpty === true,
     };
   } catch {
     return structuredClone(EMPTY);
