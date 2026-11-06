@@ -131,3 +131,10 @@ describe('parseDecklist', () => {
     ]);
   });
 });
+
+describe('companions', () => {
+  it('reads a Companion heading apart from the sideboard', () => {
+    const { entries } = parseDecklist('Commander\n1 Tymna the Weaver\nCompanion\n1 Lurrus of the Dream-Den\nSideboard\n1 Pyroblast');
+    expect(entries.map((e) => [e.name, e.section])).toEqual([['Tymna the Weaver', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Pyroblast', 'side']]);
+  });
+});

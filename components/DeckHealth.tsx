@@ -69,7 +69,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
   if (error) return <p className="mt-8 text-center text-red-400">{error}</p>;
   if (!data) return <p className="mt-8 text-center text-[var(--muted)]">Checking the deck…</p>;
-  const { health, landTarget } = data;
+  const { health, landTarget, landCount } = data;
   const short = commander?.card.name.split(',')[0] ?? 'the commander';
 
   return (
@@ -128,7 +128,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
       <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from Scryfall.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
-          <RoleRow label="Lands" count={health.lands} target={landTarget} />
+          <RoleRow label="Lands" count={landCount ?? health.lands} target={landTarget} />
           {roles === 'loading' && (
             <p className="px-4 py-3 text-sm text-[var(--muted)]">
               Tagging this deck&apos;s cards with Scryfall… The first time takes up to a minute; after that it is instant.
@@ -199,7 +199,7 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
     <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 data-section="How it wins" className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
-        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Draft with AI on the Tags tab for the full read.</p>
+        <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Have Claude read the deck on the Plan tab for the full read.</p>
       </div>
       {routes.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -482,7 +482,7 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
         >
           {label}
         </button>
-        <span className="w-8 text-right text-lg font-semibold tabular-nums">{count}</span>
+        <span className="min-w-8 text-right text-lg font-semibold tabular-nums">{count}</span>
         <div className="relative h-2 min-w-[8rem] flex-1 rounded-full" style={{ background: TRACK }} aria-hidden>
           {target && (
             <div className="absolute inset-y-[-3px] rounded border border-[var(--muted)]/60"
@@ -490,9 +490,9 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
           )}
           <div className="h-full rounded-full" style={{ width: `${(count / max) * 100}%`, background: SERIES }} />
         </div>
-        <span className="w-16 text-sm text-[var(--muted)]">{target ? `${target[0]}–${target[1]}` : 'no target'}</span>
+        <span className="min-w-16 text-sm text-[var(--muted)]">{target ? `${target[0]}–${target[1]}` : 'no target'}</span>
         {chip && (
-          <span className="flex w-24 items-center gap-1.5 text-xs">
+          <span className="flex min-w-24 items-center gap-1.5 whitespace-nowrap text-xs">
             <span aria-hidden className="font-bold" style={{ color: chip.color }}>{chip.icon}</span>
             {chip.text}
           </span>

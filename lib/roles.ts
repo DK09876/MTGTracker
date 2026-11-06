@@ -35,14 +35,13 @@ export interface Role {
    * card itself, so it costs no lookup.
    */
   text?: RegExp;
-  /** A common guideline for a Commander deck, as a range - or none. */
+  /** Always null here: ranges belong to jobs (deck-numbers.ts), which a deck's roles carry. */
   target: [number, number] | null;
 }
 
 // Every role is a Scryfall community tag (scryfall.com/docs/tagger-tags),
-// checked to exist on 2026-10-31 - no model involved. Guideline ranges are
-// where most Commander deckbuilding advice lands; a deck's plan may want
-// more or fewer of any.
+// checked to exist on 2026-10-31 - no model involved. The ranges a deck is
+// judged against belong to its jobs (deck-numbers.ts), not to these roles.
 //
 // Scryfall's tags are broader than deckbuilders mean, so some are narrowed:
 // otag:tutor includes every land-fetcher (Cultivate, Evolving Wilds) and
@@ -66,21 +65,21 @@ const FINISHER = new RegExp([
 ].join('|'), 'i');
 
 export const ROLES: Role[] = [
-  { id: 'ramp', label: 'Ramp', group: 'mana', tag: 'otag:ramp -t:land', target: [11, 13] },
+  { id: 'ramp', label: 'Ramp', group: 'mana', tag: 'otag:ramp -t:land', target: null },
   { id: 'rock', label: 'Mana rocks', group: 'mana', tag: 'otag:mana-rock -t:land', target: null },
   { id: 'dork', label: 'Mana creatures', group: 'mana', tag: 'otag:mana-dork', target: null },
   { id: 'land-ramp', label: 'Land ramp', group: 'mana', tag: 'otag:land-ramp -t:land', target: null },
   { id: 'ritual', label: 'Rituals', group: 'mana', tag: 'otag:ritual', target: null },
   { id: 'reducer', label: 'Cost reducers', group: 'mana', tag: 'otag:cost-reducer -t:land', target: null },
 
-  { id: 'draw', label: 'Card draw', group: 'cards', tag: 'otag:card-advantage -otag:cantrip -t:land', target: [9, 11] },
+  { id: 'draw', label: 'Card draw', group: 'cards', tag: 'otag:card-advantage -otag:cantrip -t:land', target: null },
   { id: 'engine', label: 'Draw engines', group: 'cards', tag: 'otag:draw-engine -t:land', target: null },
   { id: 'cantrip', label: 'Cantrips', group: 'cards', tag: 'otag:cantrip', target: null },
   { id: 'tutor', label: 'Tutors', group: 'cards', tag: 'otag:tutor -otag:ramp -t:land', target: null },
   { id: 'wheel', label: 'Wheels', group: 'cards', tag: 'otag:wheel', target: null },
 
-  { id: 'removal', label: 'Targeted removal', group: 'interaction', tag: 'otag:spot-removal -t:land', target: [9, 11] },
-  { id: 'wipe', label: 'Board wipes', group: 'interaction', tag: 'otag:board-wipe -t:land', target: [1, 2] },
+  { id: 'removal', label: 'Targeted removal', group: 'interaction', tag: 'otag:spot-removal -t:land', target: null },
+  { id: 'wipe', label: 'Board wipes', group: 'interaction', tag: 'otag:board-wipe -t:land', target: null },
   { id: 'counter', label: 'Counterspells', group: 'interaction', tag: 'otag:counterspell', target: null },
   { id: 'gy-hate', label: 'Graveyard hate', group: 'interaction', tag: 'otag:graveyard-hate -t:land', target: null },
   // Slows the whole table down. Scryfall has no single stax tag; these are
@@ -128,8 +127,6 @@ export function tagSets(query: string): { any: string[]; none: string[] } {
   return { any, none };
 }
 
-export const LAND_TARGET: [number, number] = [35, 38];
-
 const QUERY_BUDGET = 950;
 const RETRY_MS = process.env.VITEST ? 0 : 2_000;
 // Looked-up roles are trusted for a month; Scryfall's tags change slowly.
@@ -138,6 +135,8 @@ const FRESH_DAYS = 30;
 export interface RoleCount extends Omit<Role, 'tag'> {
   count: number;
   cards: string[];
+  /** For a job (deck-numbers.ts): what went into its count and range, for "How?". */
+  how?: { inputs: string[]; steps: string[] };
 }
 
 export interface Deps {

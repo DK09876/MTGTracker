@@ -27,6 +27,14 @@ interface Props {
   onTags: (tags: DeckTags) => void;
   /** A first brief drafted from the cards, shown until the owner writes one. */
   drafted?: string;
+  /** After the owner saves the brief. */
+  onSaved?: () => void;
+  /** After a read finishes, so the plan can show what Claude proposes. */
+  onRead?: () => void;
+  /** Changes when a read was started elsewhere on the page, so this one looks for it. */
+  kick?: number;
+  /** Inside a part card that already has the title: leave the heading out. */
+  bare?: boolean;
 }
 
 const POLL_MS = 2_500;
@@ -41,7 +49,7 @@ const MODES: Array<{ mode: ReadMode; label: string; note: string; free?: boolean
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const by = (r: DeckRead) => (r.model ? modelLabel(r.model).replace(/^Claude /, '') : 'Quick read');
 
-export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props) {
+export default function DeckBrief({ listId, tags, onTags, drafted = '', onSaved, onRead, kick = 0, bare = false }: Props) {
   const [brief, setBrief] = useState<string | null>(null);
   const [reads, setReads] = useState<api.DeckReads | null>(() => api.peek<api.DeckReads>(api.paths.reads(listId)) ?? null);
   const [menu, setMenu] = useState(false);
@@ -53,7 +61,13 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
 
   const running = reads?.job?.status === 'running';
   const load = useCallback(() => api.deckReads(listId).then(setReads).catch(() => {}), [listId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, kick]);
+  // When a read finishes, the plan looks again for Claude's proposals.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) onRead?.();
+    wasRunning.current = !!running;
+  }, [running, onRead]);
   // While a read runs, look until it is done; leaving the page does not stop it.
   useEffect(() => {
     if (!running) return;
@@ -114,6 +128,7 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
     try {
       onTags(await api.setTagBrief(listId, value));
       setBrief(null);
+      onSaved?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the brief');
     }
@@ -126,7 +141,9 @@ export default function DeckBrief({ listId, tags, onTags, drafted = '' }: Props)
   return (
     <section data-tour="brief" className="flex flex-col gap-3">
       <div className="flex max-w-3xl flex-wrap items-center justify-between gap-2">
-        <h3 data-section="What it does" className="flex items-center gap-2 font-medium">What this deck does <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.brief.map((x) => <li key={x}>{x}</li>)}</ul></Tip></h3>
+        {bare
+          ? <span className="flex items-center gap-2 text-sm text-[var(--muted)]">In your words. Claude reads it in every step. <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.brief.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
+          : <h3 data-section="What it does" className="flex items-center gap-2 font-medium">What this deck does <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.brief.map((x) => <li key={x}>{x}</li>)}</ul></Tip></h3>}
         <div className="relative" ref={menuRef}>
           <div data-tour="draft-menu" className="btn-go inline-flex overflow-hidden rounded-full text-sm font-semibold">
             <button onClick={() => start(tags.brief.trim() ? 'build' : 'scratch')} disabled={running} className="px-3.5 py-1.5 disabled:opacity-60">

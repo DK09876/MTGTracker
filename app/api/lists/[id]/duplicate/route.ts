@@ -10,6 +10,8 @@ import { duplicateList, getList } from '@/lib/db';
 import { copyPlacement } from '@/lib/deck-folders';
 import { copyPlan } from '@/lib/deck-plan';
 import { copyDeckRoles } from '@/lib/deck-roles';
+import { copySections } from '@/lib/sections';
+import { copyTune } from '@/lib/tune-store';
 import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -26,5 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   copyDeckRoles(id, copy);
   copyPlan(id, copy);
   copyPlacement(id, copy);
+  copySections(id, copy);
+  copyTune(id, copy);
   return NextResponse.json({ list: getList(copy, owned.profile) }, { status: 201 });
 }

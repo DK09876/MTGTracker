@@ -16,7 +16,7 @@ export type Replay =
   /** A commander's combos. */
   | { kind: 'combos'; commander: string; explanation?: string; note?: string }
   /** Anything else: the query as Scryfall ran it. `card` for a search that was for one card by name. */
-  | { kind: 'query'; query: string; commander?: string; sort?: string; explanation?: string; constraints?: string; card?: boolean; note?: string };
+  | { kind: 'query'; query: string; commander?: string; sort?: string; explanation?: string; card?: boolean; note?: string };
 
 export interface RecentSearch {
   /** What was typed; a follow-up is the whole thread, "green ramp for omnath › only instants". */
@@ -28,7 +28,7 @@ export interface RecentSearch {
 /** How to run this answer again, or null for one that has nothing to replay (it stopped to ask). */
 export function replayOf(answer: Pick<Interpreted, 'interpretation' | 'choice'>): Replay | null {
   if (answer.choice) return null;
-  const { kind, query, commander, sort, explanation, constraints, note } = answer.interpretation;
+  const { kind, query, commander, sort, explanation, note } = answer.interpretation;
   if (kind === 'combos') {
     return commander ? { kind: 'combos', commander: commander.name, explanation, note } : null;
   }
@@ -40,7 +40,6 @@ export function replayOf(answer: Pick<Interpreted, 'interpretation' | 'choice'>)
     ...(commander ? { commander: commander.name } : {}),
     ...(sort ? { sort: sortKey(sort) } : {}),
     ...(explanation ? { explanation } : {}),
-    ...(constraints !== undefined ? { constraints } : {}),
   };
 }
 
@@ -71,7 +70,6 @@ export function parseReplay(value: unknown): Replay | null {
       commander: str(v.commander),
       sort: str(v.sort, 40),
       explanation: str(v.explanation),
-      constraints: str(v.constraints, MAX_QUERY),
     };
   }
   return null;
@@ -85,20 +83,19 @@ export const cleanText = (text: unknown): string | null => {
 
 // --- sessions: a search as it was left ----------------------------------------
 
-export type SessionTab = 'edhrec' | 'cards' | 'combos';
+export type SessionTab = 'cards' | 'combos';
 
 /**
  * A search as it was left, to carry on from: what was asked (the request and
  * each refinement), how to run it again without the model, and what was on
- * screen - the tab, how many pages were loaded, EDHREC narrowed or matched to
- * the full search, and how far down the page was scrolled.
+ * screen - the tab, how many pages were loaded, and how far down the page
+ * was scrolled.
  */
 export interface Session {
   thread: string[];
   replay: Replay;
   tab?: SessionTab;
   pages?: number;
-  edhrecFull?: boolean;
   /** Only for the search on screen on a device, not a saved one. */
   scrollY?: number;
 }
@@ -112,7 +109,8 @@ export interface SavedSearch {
   updatedAt: string;
 }
 
-const TABS = new Set<SessionTab>(['edhrec', 'cards', 'combos']);
+// Saved before 2026-11 a session could be on the EDHREC tab, which is gone: it opens on the cards.
+const TABS = new Set<SessionTab>(['cards', 'combos']);
 
 export function parseSession(value: unknown): Session | null {
   const v = value as Record<string, unknown> | null;
@@ -125,12 +123,11 @@ export function parseSession(value: unknown): Session | null {
     replay,
     ...(TABS.has(v.tab as SessionTab) ? { tab: v.tab as SessionTab } : {}),
     ...(typeof v.pages === 'number' && v.pages > 1 ? { pages: Math.min(10, Math.trunc(v.pages)) } : {}),
-    ...(v.edhrecFull === true ? { edhrecFull: true } : {}),
   };
 }
 
 /** Whether two sessions are the same search in the same state, scroll aside. */
 export function sameSession(a: Session, b: Session): boolean {
-  const key = (s: Session) => JSON.stringify([s.thread, s.replay, s.tab ?? null, s.pages ?? 1, !!s.edhrecFull]);
+  const key = (s: Session) => JSON.stringify([s.thread, s.replay, s.tab ?? null, s.pages ?? 1]);
   return key(a) === key(b);
 }

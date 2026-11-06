@@ -82,6 +82,8 @@ const SCHEMA = {
 export interface ReviewInput {
   commander: ScryfallCard | null;
   brief: string;
+  /** The plan as Claude reads it (plan-context.ts). */
+  plan?: string;
   styles: string[];
   tags: Array<{ name: string; description: string; cards: string[] }>;
   candidates: Array<CutCandidate & { card: ScryfallCard }>;
@@ -140,6 +142,7 @@ export function reviewMessage(input: ReviewInput): string {
     '',
     `The plan, in the owner's words:\n"""\n${input.brief.trim() || '(not written)'}\n"""`,
     input.styles.length ? `Styles: ${input.styles.join(' + ')}` : '',
+    input.plan ?? '',
     input.tags.length ? `The owner's tags:\n${input.tags.map((t) => `- ${t.name}${t.description ? `: ${t.description}` : ''} (${t.cards.length} cards)`).join('\n')}` : '',
     '',
   ];
@@ -198,6 +201,8 @@ export async function reviewCuts(model: JsonModel, input: ReviewInput): Promise<
 export interface RerateInput {
   commander: ScryfallCard | null;
   brief: string;
+  /** The plan as Claude reads it (plan-context.ts). */
+  plan?: string;
   styles: string[];
   card: ScryfallCard;
   was: ReviewItem | null;
@@ -211,6 +216,7 @@ export function rerateMessage(input: RerateInput): string {
     input.commander ? `Commander: ${input.commander.name}` : 'No commander set.',
     `The plan, in the owner's words:\n"""\n${input.brief.trim() || '(not written)'}\n"""`,
     input.styles.length ? `Styles: ${input.styles.join(' + ')}` : '',
+    input.plan ?? '',
     '',
     `The card: ${c.name} ${manaCostOf(c)} - ${typeLineOf(c)}\n  ${oracleTextOf(c).replace(/\n+/g, ' | ') || '(no rules text)'}`,
     input.was ? `You said: ${input.was.tier ? `tier ${input.was.tier}` : input.was.verdict} - ${input.was.why}` : '',

@@ -5,14 +5,14 @@ import { cleanText, parseReplay, parseSession, replayOf, sameSession } from './r
 const interpretation = {
   via: 'ai' as const, kind: 'cards' as const, query: 't:enchantment',
   commander: { name: 'Fire Lord Azula', id: 'x', colorIdentity: ['U', 'B', 'R'] },
-  sort: { order: 'edhrec', dir: 'auto' }, explanation: 'Enchantments for Azula', constraints: 't:enchantment',
+  sort: { order: 'released', dir: 'desc' }, explanation: 'Enchantments for Azula',
 };
 
 describe('replayOf', () => {
   it('keeps what the model read the request as, so it can run again without it', () => {
     expect(replayOf({ interpretation } as never)).toEqual({
-      kind: 'query', query: 't:enchantment', commander: 'Fire Lord Azula', sort: 'edhrec:auto',
-      explanation: 'Enchantments for Azula', constraints: 't:enchantment',
+      kind: 'query', query: 't:enchantment', commander: 'Fire Lord Azula', sort: 'released:desc',
+      explanation: 'Enchantments for Azula',
     });
   });
   it('keeps a combo search by its commander', () => {
@@ -48,8 +48,10 @@ describe('sessions', () => {
   const replay = { kind: 'query' as const, query: 't:instant', commander: 'Omnath, Locus of Rage' };
 
   it('keeps what was asked and what was on screen, and checks it', () => {
-    expect(parseSession({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3, edhrecFull: true, junk: 1 }))
-      .toEqual({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3, edhrecFull: true });
+    expect(parseSession({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3, junk: 1 }))
+      .toEqual({ thread: ['green ramp for omnath', 'only instants'], replay, tab: 'cards', pages: 3 });
+    // A session left on the EDHREC tab, which is gone, opens on the cards.
+    expect(parseSession({ thread: ['a'], replay, tab: 'edhrec' })?.tab).toBeUndefined();
     expect(parseSession({ thread: ['x'], replay, tab: 'nope', pages: 999 })).toEqual({ thread: ['x'], replay, pages: 10 });
     expect(parseSession({ thread: ['x'] })).toBeNull();
   });
@@ -61,7 +63,7 @@ describe('sessions', () => {
   it('tells a changed session from the same one, scroll aside', () => {
     const a = { thread: ['a'], replay, tab: 'cards' as const, scrollY: 100 };
     expect(sameSession(a, { ...a, scrollY: 900 })).toBe(true);
-    expect(sameSession(a, { ...a, tab: 'edhrec' })).toBe(false);
+    expect(sameSession(a, { ...a, tab: 'combos' })).toBe(false);
     expect(sameSession(a, { ...a, thread: ['a', 'b'] })).toBe(false);
     expect(sameSession(a, { ...a, pages: 1 })).toBe(true);
   });

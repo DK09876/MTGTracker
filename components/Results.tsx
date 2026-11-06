@@ -3,10 +3,9 @@
 /**
  * The answer to a search, as views.
  *
- * With a commander named there are three, as tabs, each answering its own
+ * With a commander named there are two, as tabs, each answering its own
  * question:
  *
- *   Played in <commander> decks   what its decks actually run (EDHREC)
  *   All matching cards            everything that fits (Scryfall)
  *   Combos                        what goes infinite (Commander Spellbook)
  *
@@ -15,27 +14,22 @@
 
 import CardTile from './CardTile';
 import ComboList from './ComboList';
-import type { CardStats } from '@/lib/edhrec';
-import type { EdhrecView } from '@/lib/interpret';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { parseSortKey, SORT_OPTIONS, sortKey, sortLabel, type Sort } from '@/lib/sort';
 import type { Combo } from '@/lib/spellbook';
 
-export type Tab = 'edhrec' | 'cards' | 'combos';
+export type Tab = 'cards' | 'combos';
 
 /** What the page has for each view; undefined means not loaded yet. */
 export interface Views {
   cards?: {
     cards: ScryfallCard[];
     total: number;
-    stats?: Record<string, CardStats>;
     sort?: Sort;
     /** Scryfall pages of 175; more can be loaded when there are. */
     page?: number;
     hasMore?: boolean;
   };
-  /** null: EDHREC has nothing for this commander. */
-  edhrec?: EdhrecView | null;
   combos?: { combos: Combo[]; cards: ScryfallCard[]; note?: string };
 }
 
@@ -59,25 +53,15 @@ interface Props {
   actions?: (card: ScryfallCard) => React.ReactNode;
   /** Fewer columns, for a panel rather than the whole page. */
   dense?: boolean;
-  /**
-   * Offered when the EDHREC tab was narrowed by less than the whole search:
-   * whether it now matches the whole search, and the switch.
-   */
-  edhrecFull?: boolean;
-  onEdhrecFull?: () => void;
 }
-
-const short = (name: string) => name.split(',')[0];
 
 export default function Results({
   views, commander, tab, onTab, loading, inLists, owned, onSort, onLoadMore, loadingMore, onSelect, onAdd, actions, dense,
-  edhrecFull, onEdhrecFull,
 }: Props) {
   const grid = { inLists, owned, onSelect, onAdd, actions, dense };
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = commander
     ? [
-      { id: 'edhrec', label: `Played in ${short(commander)} decks`, count: views.edhrec?.cards.length },
       { id: 'cards', label: 'All matching cards', count: views.cards?.total },
       { id: 'combos', label: 'Combos', count: views.combos?.combos.length },
     ]
@@ -108,14 +92,6 @@ export default function Results({
 
       {loading && <p className="mt-8 text-center text-[var(--muted)]">Loading…</p>}
 
-      {!loading && tab === 'edhrec' && (
-        views.edhrec
-          ? <EdhrecTab view={views.edhrec} full={edhrecFull} onFull={onEdhrecFull} {...grid} />
-          : <p className="mt-8 text-center text-[var(--muted)]">
-            EDHREC has no data for {commander ?? 'this commander'} yet — try <button className="underline" onClick={() => onTab('cards')}>All matching cards</button>.
-          </p>
-      )}
-
       {!loading && tab === 'cards' && views.cards && (
         views.cards.cards.length
           ? (
@@ -127,7 +103,7 @@ export default function Results({
                 </p>
                 {views.cards.sort && <SortMenu sort={views.cards.sort} onChange={onSort} />}
               </div>
-              <CardGrid cards={views.cards.cards} stats={views.cards.stats} commander={commander} {...grid} />
+              <CardGrid cards={views.cards.cards} {...grid} />
               {views.cards.hasMore && onLoadMore && (
                 <div className="mt-6 text-center">
                   <button
@@ -153,84 +129,22 @@ export default function Results({
   );
 }
 
-function EdhrecTab({ view, full, onFull, inLists, owned, onSelect, onAdd, actions, dense }: {
-  view: EdhrecView;
-  full?: boolean;
-  onFull?: () => void;
-} & Pick<Props, 'inLists' | 'owned' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
-  const byId = new Map(view.cards.map((c) => [c.id, c]));
-  return (
-    <div>
-      <p className="mt-4 text-sm text-[var(--muted)]">
-        What {view.decks.toLocaleString()} {short(view.commander)} decks on EDHREC play
-        {view.filtered ? ', narrowed to your search' : ''}.{' '}
-        <a href={view.url} target="_blank" rel="noreferrer" className="underline hover:text-[var(--foreground)]">EDHREC ↗</a>
-      </p>
-      {(view.narrowedBy || onFull) && (
-        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--muted)]">
-          {view.narrowedBy && <span>Narrowed by: <span className="text-[var(--foreground)]">{view.narrowedBy}</span></span>}
-          {onFull && (
-            <button onClick={onFull} className="rounded-md border border-[var(--border)] px-2 py-0.5 hover:bg-[var(--surface)] hover:text-[var(--foreground)]">
-              {full ? 'Use only what you asked for' : 'Match the full search instead'}
-            </button>
-          )}
-        </p>
-      )}
-      {view.cards.length === 0 && (
-        <p className="mt-8 text-center text-[var(--muted)]">
-          None of the cards {short(view.commander)} decks play match this search — see All matching cards.
-        </p>
-      )}
-      {view.sections.map((section) => (
-        <section key={section.header} className="mt-6">
-          {(view.sections.length > 1) && <h3 className="mb-2 font-medium">{section.header}</h3>}
-          <CardGrid
-            cards={section.ids.map((id) => byId.get(id)).filter((c): c is ScryfallCard => !!c)}
-            stats={view.stats}
-            commander={view.commander}
-            inLists={inLists}
-            owned={owned}
-            onSelect={onSelect}
-            onAdd={onAdd}
-            actions={actions}
-            dense={dense}
-          />
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function CardGrid({ cards, stats, commander, inLists, owned, onSelect, onAdd, actions, dense }: {
+function CardGrid({ cards, inLists, owned, onSelect, onAdd, actions, dense }: {
   cards: ScryfallCard[];
-  stats?: Record<string, CardStats>;
-  commander?: string;
 } & Pick<Props, 'inLists' | 'owned' | 'onSelect' | 'onAdd' | 'actions' | 'dense'>) {
   return (
     <div className={`mt-3 grid gap-4 ${dense ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4'}`}>
-      {cards.map((card) => {
-        const s = stats?.[card.id];
-        return (
-          <CardTile
-            key={card.id}
-            card={card}
-            inLists={inLists[card.id]}
-            owned={owned?.[card.id]}
-            onSelect={onSelect}
-            onAdd={onAdd}
-            footer={(s && commander) || actions ? (
-              <>
-                {s && commander && (
-                  <p className="text-xs text-[var(--muted)]">
-                    In {Math.round(s.inclusion * 100)}% of {short(commander)} decks
-                  </p>
-                )}
-                {actions?.(card)}
-              </>
-            ) : undefined}
-          />
-        );
-      })}
+      {cards.map((card) => (
+        <CardTile
+          key={card.id}
+          card={card}
+          inLists={inLists[card.id]}
+          owned={owned?.[card.id]}
+          onSelect={onSelect}
+          onAdd={onAdd}
+          footer={actions ? actions(card) : undefined}
+        />
+      ))}
     </div>
   );
 }

@@ -11,13 +11,13 @@
 import { NextResponse } from 'next/server';
 
 import { addCardToList, removeCardFromList, setQuantity, updateListCard } from '@/lib/db';
-import type { Board } from '@/lib/decklist';
 import { requireList } from '@/lib/profile-route';
 import { getCard, ScryfallError, type Finish } from '@/lib/scryfall';
+import { hasBoard } from '@/lib/sections';
 
-const BOARDS = new Set<Board>(['main', 'side', 'maybe']);
 const FINISHES = new Set<Finish>(['nonfoil', 'foil', 'etched']);
-const boardOf = (v: unknown) => (BOARDS.has(v as Board) ? (v as Board) : undefined);
+// Main, the Sideboard, the Maybeboard, or one of this deck's own sections.
+const boardOf = (listId: string, v: unknown) => (hasBoard(listId, v) ? v : undefined);
 const finishOf = (v: unknown) => (FINISHES.has(v as Finish) ? (v as Finish) : undefined);
 
 export const runtime = 'nodejs';
@@ -37,7 +37,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const card = await getCard(body.cardId);
-    const before = addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(body.board));
+    const before = addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(listId, body.board));
     // What was there before, so the page can offer to undo the add.
     return NextResponse.json({ ok: true, card, before });
   } catch (error) {
@@ -62,7 +62,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!body.cardId) return NextResponse.json({ error: 'cardId required' }, { status: 400 });
   try {
     if (typeof body.quantity === 'number') setQuantity(listId, body.cardId, Math.trunc(body.quantity));
-    const board = boardOf(body.board);
+    const board = boardOf(listId, body.board);
     const finish = finishOf(body.finish);
     // A new printing comes from Scryfall by id, like any card added.
     const printing = body.printingId ? await getCard(body.printingId) : undefined;

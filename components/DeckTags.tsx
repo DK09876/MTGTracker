@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The Tags tab: the deck's own categories, made by hand or with the model,
+ * Your tags, under the Plan tab: the deck's own categories, made by hand or with the model,
  * in two steps the owner controls.
  *
  *   1. Tags.  Write what the deck should do; the model reads every card and
@@ -25,6 +25,7 @@ import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
+import { DEFAULT_SECTIONS, type DeckSection } from '@/lib/sections-shared';
 import { modelLabel, requestsFor, tagRunCost, type Budget, type Mode } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import type { TagJob } from '@/lib/tag-jobs';
@@ -40,6 +41,8 @@ interface Props {
   onSelect: (card: ScryfallCard) => void;
   /** Send the owner to the Plan tab, where the brief now lives. */
   onPlan: () => void;
+  /** The deck's sections beyond Main, which the tagger can also read. */
+  sections?: DeckSection[];
 }
 
 const POLL_MS = 2_500;
@@ -52,7 +55,7 @@ const input = 'rounded-lg border border-[var(--border)] bg-[var(--background)] p
 const button = 'rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
 const primary = 'rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
-export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPlan }: Props) {
+export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPlan, sections = DEFAULT_SECTIONS }: Props) {
   const [instructions, setInstructions] = useState('');
   // Which boards the tagger reads, remembered for this deck in this browser.
   const [boards, setBoardsState] = useState<Board[]>(() => {
@@ -181,22 +184,23 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
   return (
     <div className="mt-5 flex flex-col gap-8">
       <div className="flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">
-          Tags
+        <h2 className="flex items-center gap-2 font-display text-2xl font-semibold">
+          Your tags
           <Tip label="About tags">
             Tags are this deck&apos;s own categories: its engines, payoffs and ways to win. The jobs every deck needs -
-            ramp, draw, removal - are tagged automatically. Group the deck by tags from the Cards tab, and open any
+            ramp, draw, removal - are tagged automatically. Theme tags become the plan&apos;s themes; a tag named for a job
+            (Ramp, Draw, Removal) stays a tag, since the built-in jobs count those. Group the deck by tags from the Cards tab, and open any
             card to see and change its tags.
           </Tip>
         </h2>
         <AiModelPicker area="deck" className="ml-auto" />
       </div>
-      <PlanLine data-tour="brief" label="Plan the tagger reads" brief={tags.brief} action="Edit" onAction={onPlan} />
+      <PlanLine data-tour="tags-brief" label="Plan the tagger reads" brief={tags.brief} action="Edit above" onAction={onPlan} />
       <BasicRoles listId={listId} />
       {budget && <BudgetLine budget={budget} />}
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="suggest-tags" data-section="1 · Suggest tags" className="font-medium">1 · Suggest tags</h3>
+        <h3 data-tour="suggest-tags" data-section="Suggest tags" className="font-medium">Suggest tags with Claude</h3>
         <p className="flex max-w-3xl items-center gap-2 text-sm text-[var(--muted)]">
           Claude suggests tags for this deck&apos;s plan; you keep, edit or drop each one.
           <Tip label="How suggesting works">
@@ -219,10 +223,10 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
           </button>
           <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.proposeTags.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
           <span className="text-[var(--muted)]">Include:</span>
-          {(['maybe', 'side'] as Board[]).map((b) => (
-            <label key={b} className="flex items-center gap-1.5 text-[var(--muted)]">
-              <input type="checkbox" checked={boards.includes(b)} onChange={() => toggleBoard(b)} disabled={running} />
-              {b === 'maybe' ? 'Maybeboard' : 'Sideboard'}
+          {sections.map((s) => (
+            <label key={s.id} className="flex items-center gap-1.5 text-[var(--muted)]">
+              <input type="checkbox" checked={boards.includes(s.id)} onChange={() => toggleBoard(s.id)} disabled={running} />
+              {s.name}
             </label>
           ))}
         </div>
@@ -274,7 +278,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="your-tags" data-section="2 · Your tags" className="font-medium">2 · Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
+        <h3 data-tour="your-tags" data-section="Your tags" className="font-medium">Your tags {accepted.length > 0 && <span className="text-[var(--muted)]">({accepted.length})</span>}</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The description is the test the model tags by, so make it say exactly what belongs — and what doesn&apos;t.
         </p>
@@ -343,7 +347,7 @@ export default function DeckTags({ listId, entries, tags, onTags, onSelect, onPl
       </section>
 
       <section className="flex flex-col gap-3">
-        <h3 data-tour="tag-cards" data-section="3 · Put them on cards" className="font-medium">3 · Put them on the cards</h3>
+        <h3 data-tour="tag-cards" data-section="Tag the cards" className="font-medium">Put them on the cards</h3>
         <p className="max-w-3xl text-sm text-[var(--muted)]">
           The model weighs every tag you kept against each card&apos;s full text and says why for each one it applies,
           then checks each tag across the deck. Tags you put on or took off by hand are never changed.
@@ -469,7 +473,7 @@ function BasicRoles({ listId }: { listId: string }) {
     <section data-tour="basic-roles" className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 data-section="Built-in tags" className="font-medium">Built-in tags <span className="text-sm font-normal text-emerald-400">· automatic, free</span></h3>
-        <span className="text-xs text-[var(--muted)]">From Scryfall&apos;s card tags · the Health tab has the full table</span>
+        <span className="text-xs text-[var(--muted)]">From Scryfall&apos;s card tags · Check has the full table</span>
       </div>
       {roles === 'loading' && <p className="text-sm text-[var(--muted)]">Reading the cards&apos; built-in tags… the first time takes up to a minute.</p>}
       {roles === 'failed' && <p className="text-sm text-[var(--muted)]">Couldn&apos;t reach Scryfall for the built-in tags just now.</p>}

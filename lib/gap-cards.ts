@@ -1,16 +1,17 @@
 /**
  * Cards to fill a role in a deck - in the role, in the commander's colours,
  * legal, not already in the deck - ranked by how well they fit the
- * commander (fit.ts) and how much Commander plays them, EDHREC's numbers
- * for the commander nudging when it is on; with where the profile already
+ * commander and how good they are at the job (fit.ts: cheaper, instant
+ * speed, more than one job); with where the profile already
  * has a copy. From the card data on the Pi; no
  * model. Used by the Tune tab and the deck chat. Server only.
  */
 
 import { localCardsByOracle, localCards, searchLocalText } from './card-store';
+import { deckIdentity } from './commanders';
 import { cardsInList, database, type List } from './db';
-import { commanderPage, edhrecEnabled } from './edhrec';
-import { fitOf, fitProfile, popularity } from './fit';
+import { fitOf, fitProfile, quality } from './fit';
+import { JOB_LABELS, JOB_ROLES, type JobId } from './deck-numbers';
 import { ROLES } from './roles';
 import { imageOf, type ScryfallCard } from './scryfall';
 
@@ -52,18 +53,29 @@ export function heldByName(profileId: string, exceptList: string | null, names: 
 }
 
 export async function gapCards(list: List, profileId: string, roleId: string, opts: { owned: boolean; max: number | null; show?: number }):
-  Promise<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }> {
-  const role = ROLES.find((r) => r.id === roleId);
-  if (!role) throw new Error(`No such role: ${roleId}`);
-  const candidates = role.text && !role.tag
+  Promise<{ role: { id: string; label: string }; source: 'fit'; cards: GapCard[] }> {
+  // A job (interaction, ways to finish) is found through the roles it is made of.
+  const job = JOB_ROLES[roleId as JobId] && roleId !== 'impulse' ? roleId as JobId : null;
+  const roleIds = job ? JOB_ROLES[job] : [roleId];
+  const roles = roleIds.map((id) => ROLES.find((r) => r.id === id)).filter((r): r is NonNullable<typeof r> => !!r);
+  if (!roles.length) throw new Error(`No such role: ${roleId}`);
+  const seen = new Set<string>();
+  const candidates = roles.flatMap((role) => (role.text && !role.tag
     ? searchLocalText(role.text)
-    : localCardsByOracle((database().all('SELECT oracleId FROM card_roles WHERE role = ?', [role.id]) as Array<{ oracleId: string }>).map((r) => r.oracleId));
+    : localCardsByOracle((database().all('SELECT oracleId FROM card_roles WHERE role = ?', [role.id]) as Array<{ oracleId: string }>).map((r) => r.oracleId))))
+    .filter((c) => !seen.has(c.oracle_id ?? c.id) && seen.add(c.oracle_id ?? c.id));
+  const rolesOfCard = new Map<string, string[]>();
+  for (const r of database().all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${candidates.map(() => '?').join(',') || "''"})`, candidates.map((c) => c.oracle_id ?? '')) as Array<{ oracleId: string; role: string }>) {
+    rolesOfCard.set(r.oracleId, [...(rolesOfCard.get(r.oracleId) ?? []), r.role]);
+  }
+  const label = job ? JOB_LABELS[job] : roles[0].label;
 
-  const identity = new Set(list.commander?.color_identity ?? []);
-  const inDeck = new Set(cardsInList(list.id).map((c) => front(c.card.name)));
+  const listed = cardsInList(list.id);
+  // Both commanders' colours, when the deck has two.
+  const identity = deckIdentity([list.commander, listed.find((c) => c.slot === 'partner')?.card]);
+  const inDeck = new Set(listed.map((c) => front(c.card.name)));
   if (list.commander) inDeck.add(front(list.commander.name));
   const where = holdings(profileId, list.id);
-  const page = list.commander && edhrecEnabled() ? await commanderPage(list.commander.name).catch(() => null) : null;
 
   const fits = candidates.filter((c) => (c.color_identity ?? []).every((x) => identity.has(x))
     && c.legalities?.commander === 'legal'
@@ -71,25 +83,23 @@ export async function gapCards(list: List, profileId: string, roleId: string, op
     && !inDeck.has(front(c.name))
     && (opts.max === null || Number(c.prices?.usd ?? 0) <= opts.max));
 
-  // Fit with the commander first, then how much Commander plays it; EDHREC's
-  // share for this commander, when it is on, only nudges.
+  // Fit with the commander first, then how good it is at the job.
   const profile = fitProfile(list.commander);
   const scored = fits.map((c) => {
-    const stats = page?.stats.get(front(c.name)) ?? page?.stats.get(c.name);
     const fit = fitOf(c, profile);
-    const inclusion = stats?.inclusion ?? null;
-    const score = fit.score * 0.55 + popularity(c) * 0.45 + (inclusion ?? 0) * 0.3;
-    return { card: c, fit, inclusion, score, rank: (c as { edhrec_rank?: number }).edhrec_rank ?? null, held: where.get(c.oracle_id ?? '') ?? null };
-  }).sort((a, b) => (opts.owned ? Number(!!b.held) - Number(!!a.held) : 0) || b.score - a.score);
+    const q = quality(c, rolesOfCard.get(c.oracle_id ?? '') ?? []);
+    const score = fit.score * 0.55 + q.score * 0.45;
+    return { card: c, fit, q, score, held: where.get(c.oracle_id ?? '') ?? null };
+  }).sort((a, b) => (opts.owned ? Number(!!b.held) - Number(!!a.held) : 0) || b.score - a.score || (a.card.cmc ?? 0) - (b.card.cmc ?? 0) || a.card.name.localeCompare(b.card.name));
 
   const why = (s: (typeof scored)[number]) => [
     s.fit.matches.length ? `Fits ${profile!.commander}: ${s.fit.matches.join(', ')}` : '',
-    s.inclusion !== null ? `in ${Math.round(s.inclusion * 100)}% of ${profile?.commander ?? 'its'} decks on EDHREC` : s.rank ? `#${s.rank.toLocaleString()} in Commander` : '',
+    s.q.reasons.join(', '),
   ].filter(Boolean).join(' · ') || 'In the role, in your colours';
 
   return {
-    role: { id: role.id, label: role.label },
-    source: page ? 'edhrec' : 'fit',
+    role: { id: roleId, label },
+    source: 'fit',
     cards: scored.slice(0, opts.show ?? 12).map((s) => ({
       id: s.card.id, name: s.card.name, image: imageOf(s.card, 'small'), price: s.card.prices?.usd ?? null,
       typeLine: s.card.type_line ?? '', cmc: s.card.cmc ?? 0, held: s.held,

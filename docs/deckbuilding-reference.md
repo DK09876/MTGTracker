@@ -1,6 +1,6 @@
 # MTG Tracker Deck-Building Reference
 
-31 October 2026, revised 2 November 2026. This file is the source of truth; it began as the shared doc at https://claude.ai/artifact/Qy5JxVAnr4gojbFhvTxEm6, which is no longer kept in step.
+31 October 2026, revised 5 November 2026 (EDHREC removed; one shared set of deck numbers). This file is the source of truth; it began as the shared doc at https://claude.ai/artifact/Qy5JxVAnr4gojbFhvTxEm6, which is no longer kept in step.
 
 ## Summary
 
@@ -84,7 +84,7 @@ The creators do push back on each other a little (V13: "reject synergy, embrace 
 
 | Angle | What it is | What it means for the app |
 | --- | --- | --- |
-| Unpopular commander | A commander few people build (EDHREC rank in the thousands). | EDHREC averages and "played in N decks" are thin or empty. Fall back on Scryfall data and the deck's own cards, and don't call a card wrong for being rare in other lists. |
+| Unpopular commander | A commander few people build. | The app judges cards by what they do for the plan, never by how often other decks play them (no EDHREC since 5 November 2026), so a rare card is never called wrong for being rare. |
 | Breaking the colour pie | A colour doing what it usually doesn't: mono-blue sea-monster stompy, mono-red control, flash outside blue. | Style detection must read the cards, not assume a style from the colours. The usual counts may not fit (a mono-red control deck wants more draw and interaction than a red deck usually runs). |
 | Theme deck | A restriction that isn't a creature type: every creature wears a hat, only 1-mana spells, only 7-drops. Not bracket 1 by default; it can still be consistent. | The owner's restriction belongs in the brief. Suggestions and the cut list must keep to it, and lower card quality from a smaller pool is expected, not a fault. |
 | Rube Goldberg combo | A win that needs four to six permanents working together (energy decks, for example). Cards are often mana-inefficient on their own. | The pieces should be marked as protected (wincon or engine) so the cut list doesn't trim them for being slow or weak alone. Expect more draw and tutors, and protection for the board. |
@@ -132,7 +132,7 @@ Adjustments, all from Karsten:
 
 **What the app should do:**
 
-- Replace the fixed 35–38 land target with Karsten's formula, kept at 37 or more.
+- Replace the fixed 35–38 land target with Karsten's formula, kept at 37 or more. *Done 5 November 2026 (`lib/deck-numbers.ts`): one land number on every page; the flip turn moves ramp only.*
 - For each colour, show sources needed, sources the deck has (weighted as above) and the card that sets the requirement.
 - Add a "copy decklist and open Salubrious Snail" button for the full simulation.
 - Today's on-curve odds skip mulligans, rocks and dorks, so they read about 7–10 points below Karsten's. Either switch to his conditional method or compare source counts against the table.
@@ -208,19 +208,21 @@ None of the videos define the brackets; the app's bracket floor comes from Wizar
 - **Brackets:** Wizards' 1–5 scale. The app computes the lowest bracket a list can be from Game Changers (53 cards since the 9 February 2026 update), mass land denial, extra turns and two-card combos. The videos mention brackets only in passing (V2, V5, V11, V15).
 - **Stax:** a piece that slows the whole table. Scryfall has no stax tag; the app approximates it from eight rule-setting tags, which caught 8 of 16 stax cards in the test. V7 treats stax as its own style; V16 notes that lockout and land destruction are "type-2 fun" some groups accept.
 - **Combo locks:** Commander Spellbook's bracket estimate marks combos that lock a player or skip turns, a stax signal the app does not use yet.
-- **Salt:** EDHREC publishes the top 100 saltiest cards (Stasis first, salt 3.05) and a salt score on each card's page; there is none on commander pages.
+- **Salt:** EDHREC publishes salt scores, but the app no longer uses EDHREC (see Data sources), so there is no salt reading.
 - **Free spells:** cards that cost no mana to cast. Scryfall has no single tag; `pitch-spell` (42 cards) and `potentially-free` (67) come closest. The friend's list is the better source.
 - **Table manners:** real tables are "pretty chill with most things outside of hard stax or super fast combo"; removal and counterspells are not rude (V7). Feast-or-famine and linchpin commanders make bad games (V8, V15).
 
 ## Data sources
 
-Scryfall and Commander Spellbook are the backbone: both are free, documented and allow app use. EDHREC is used knowingly against its terms on this private tool. Moxfield and Gatherer are link-only.
+Scryfall and Commander Spellbook are the backbone: both are free, documented and allow app use. Moxfield and Gatherer are link-only.
+
+**EDHREC was removed from the app on 5 November 2026**, on the owner's call: its terms forbid using its data in another app. Nothing reads it any more - not its commander pages, not Scryfall's `edhrec_rank`, not the "most played" search order. Cards are judged by what they do for the deck's plan and by things anyone can check on the card (mana value, speed, how many jobs it fills). Search sorts newest first. The row below is kept for the record.
 
 | Source | Useful data | How to get it | Terms | Use |
 | --- | --- | --- | --- | --- |
-| [Scryfall](https://scryfall.com/docs/api) | Card data; about 5,400 community tags (`otag:`) for what cards do; `game_changer`, `keywords`, `produced_mana`, `edhrec_rank` | Search API, batched `otag:X (card names)`; requests spaced, descriptive User-Agent | Free; asks for caching and a User-Agent | Use; cache roles per card for 30 days |
+| [Scryfall](https://scryfall.com/docs/api) | Card data; about 5,400 community tags (`otag:`) for what cards do; `game_changer`, `keywords`, `produced_mana` | Search API, batched `otag:X (card names)`; requests spaced, descriptive User-Agent | Free; asks for caching and a User-Agent | Use; cache roles per card for 30 days |
 | [Commander Spellbook](https://commanderspellbook.com/) | Combos in a deck and one card away; combo results ("Win the game", "Infinite colored mana"); 156 card-level features ("Card that Tutors", "Boardwipe"); bracket estimate with lock and skip-turn flags | Public REST API | MIT-licensed backend, public API | Use; cache features weekly |
-| [EDHREC](https://edhrec.com/) | Per-commander inclusion and synergy, 184 themes, curve, decks per bracket; top-100 salt list; "decks with this card" view | Commander JSON the app already reads; salt at `json.edhrec.com/pages/top/salt.json`; card filter is a link, `edhrec.com/commanders/<name>?f=in=<Card>` | Forbids automated access (section 3.1); used knowingly on this private app | Use once a day per commander; link the card filter |
+| [EDHREC](https://edhrec.com/) | Per-commander inclusion and synergy, 184 themes, curve, decks per bracket; top-100 salt list; "decks with this card" view | Commander JSON the app read until 5 November 2026; salt at `json.edhrec.com/pages/top/salt.json`; card filter is a link, `edhrec.com/commanders/<name>?f=in=<Card>` | Forbids automated access (section 3.1); used knowingly on this private app | Not used: removed 5 November 2026 |
 | [Salubrious Snail](https://www.salubrioussnail.com/manabase-tool) | Cast rate and delay for an existing manabase; tapland impact | Browser tool only; no public API, no deep links | No licence, no terms | Link only; reimplement Karsten's maths |
 | Moxfield lists ([stax](https://moxfield.com/decks/tLk6Un447kiBV0Tf8X0VBQ), [free spells](https://moxfield.com/decks/BEieV2xNVEigpXuHrOWKhg)) | Hand-curated stax and free-spell cards, better than any Scryfall tag | Manual export from each deck page (text or CSV) | API blocked to automated clients by Cloudflare and robots.txt | Import a manual export; refresh by hand |
 | [Gatherer](https://gatherer.wizards.com/) | Official Oracle text and rulings | Website only, no API | Wizards' site | Link only; Scryfall already carries the rulings |
@@ -294,7 +296,8 @@ The AI explains numbers the app computes; it never calculates them itself. These
 - [ ] Detect finishers better: mass-steal spells, sacrifice and aristocrats payoffs, damage on death; ignore ramp and protection auras when guessing commander damage
 - [ ] Widen protection with redirect and fog tags; show interaction as one group
 - [ ] Use Commander Spellbook's card features and combo lock flags
-- [ ] Add Karsten's land formula and per-colour source table to deck health; add the "open in Salubrious Snail" button
+- [x] Karsten's land formula and per-colour source weights in deck health (5 November 2026)
+- [ ] Add the "open in Salubrious Snail" button
 - [ ] Tag decks in the background on import (the first tagging takes 33–47 seconds)
 - [ ] Re-score the four test decks after each change
 - [ ] Label about 25 Azula Madness cards yourself, to score the AI's deck-specific layer

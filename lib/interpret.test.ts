@@ -1,14 +1,13 @@
 /**
  * Routing a search.
  *
- * Scryfall, Commander Spellbook, EDHREC and the model are all stand-ins
+ * Scryfall, Commander Spellbook and the model are all stand-ins
  * here: each test says what they would answer, and checks which of them got
  * asked what. Nothing leaves the machine and nothing costs model usage.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CommanderPage } from './edhrec';
 import type { Translation, Translator } from './gemini';
 import { interpret, pickCommander, runCombos, runQuery, scoped, type Deps } from './interpret';
 import { ScryfallError, type ScryfallCard, type SearchResult } from './scryfall';
@@ -24,7 +23,7 @@ const found = (...names: string[]): SearchResult =>
 const nothing = found();
 
 const plan = (over: Partial<Translation> = {}): Translation =>
-  ({ kind: 'cards', query: 'otag:ramp c:g', constraints: null, explanation: 'Something', commander: null, cardName: null, ...over });
+  ({ kind: 'cards', query: 'otag:ramp c:g', explanation: 'Something', commander: null, cardName: null, ...over });
 
 const azula = card('Fire Lord Azula', {
   color_identity: ['U', 'B', 'R'],
@@ -35,7 +34,7 @@ const azula = card('Fire Lord Azula', {
 
 const combo = (id: string, cards: string[], over: Partial<Combo> = {}): Combo => ({
   id, cards, produces: ['Infinite mana'], steps: '', prerequisites: '', identity: 'UR',
-  popularity: 10, price: 5, url: `https://commanderspellbook.com/combo/${id}`, ...over,
+  price: 5, url: `https://commanderspellbook.com/combo/${id}`, ...over,
 });
 
 function deps(over: Partial<Deps> = {}): Deps {
@@ -45,7 +44,6 @@ function deps(over: Partial<Deps> = {}): Deps {
     findCommanders: vi.fn(async () => []),
     cardsNamed: vi.fn(async (names: string[]) => names.map((n) => card(n))),
     searchCombos: vi.fn(async () => []),
-    edhrec: null,
     translate: vi.fn(async () => plan()),
     ...over,
   };
@@ -58,7 +56,7 @@ describe('syntax and fallbacks', () => {
     expect(d.search).toHaveBeenCalledWith('t:goblin c:r', DEFAULT_SORT, 1);
     expect(d.translate).not.toHaveBeenCalled();
     expect(result.interpretation).toMatchObject({ via: 'syntax', query: 't:goblin c:r', sort: DEFAULT_SORT });
-    expect(result.trace[1]).toMatchObject({ query: 't:goblin c:r order:edhrec', count: 1 });
+    expect(result.trace[1]).toMatchObject({ query: 't:goblin c:r order:released direction:desc', count: 1 });
   });
 
   it('does nothing for an empty search', async () => {
@@ -135,7 +133,7 @@ describe('cards for a commander', () => {
       '(t:enchantment (o:copy or o:"whenever you cast")) id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
     expect(result.interpretation).toMatchObject({
       query: 't:enchantment (o:copy or o:"whenever you cast")',
-      commander: { name: 'Fire Lord Azula', identity: 'UBR', edhrecUrl: 'https://edhrec.com/commanders/fire-lord-azula' },
+      commander: { name: 'Fire Lord Azula', identity: 'UBR' },
     });
   });
 
@@ -205,107 +203,35 @@ describe('scoped', () => {
   });
 });
 
-describe('the EDHREC view', () => {
-  const page: CommanderPage = {
-    decks: 37882,
-    stats: new Map([
-      ['Leyline of Anticipation', { decks: 18565, inclusion: 0.49, synergy: 0.4 }],
-      ['Rhystic Study', { decks: 7831, inclusion: 0.21, synergy: 0.01 }],
-      ['Sol Ring', { decks: 37000, inclusion: 0.98, synergy: 0 }],
-    ]),
-    sections: [
-      { header: 'High Synergy Cards', names: ['Leyline of Anticipation'] },
-      { header: 'Top Cards', names: ['Sol Ring', 'Rhystic Study'] },
-    ],
-  };
-  const withEdhrec = (over: Partial<Deps> = {}) => deps({
+describe('a commander search', () => {
+  const forAzula = (over: Partial<Deps> = {}) => deps({
     translate: vi.fn(async () => plan({ commander: 'azula', query: 't:enchantment' })),
     findCommanders: vi.fn(async () => [azula]),
-    edhrec: vi.fn(async () => page),
     ...over,
   });
 
-  it('keeps only what the commander\'s decks play that fits the search, most played first', async () => {
-    const search = vi.fn()
-      .mockResolvedValueOnce(found('Rhystic Study', 'Some Random Card'))                  // All matching cards
-      .mockResolvedValueOnce(found('Rhystic Study', 'Leyline of Anticipation'));          // EDHREC names, checked
-    const result = await interpret('enchantments for azula', withEdhrec({ search }));
-
-    expect(search.mock.calls[1][0]).toContain('t:enchantment id<=ubr f:commander -!"Fire Lord Azula" (!"Leyline of Anticipation" or');
-    expect(result.edhrec).toMatchObject({ commander: 'Fire Lord Azula', decks: 37882, filtered: true });
-    expect(result.edhrec!.cards.map((c) => c.name)).toEqual(['Leyline of Anticipation', 'Rhystic Study']);
+  it('asks Scryfall once, scoped to the commander, and nothing else', async () => {
+    const search = vi.fn<Deps['search']>(async () => found('Rhystic Study', 'Some Random Card'));
+    const result = await interpret('enchantments for azula', forAzula({ search }));
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search.mock.calls[0][0]).toContain('t:enchantment');
+    expect(search.mock.calls[0][0]).toContain('id<=ubr f:commander -!"Fire Lord Azula"');
+    expect(result.cards.map((c) => c.name)).toEqual(['Rhystic Study', 'Some Random Card']);
   });
 
-  // Azula's enchantments: the model's synergy words cut EDHREC's 20 to 12.
-  it('narrows by what was asked for, not by the model\'s synergy guesses', async () => {
-    const search = vi.fn<Deps['search']>(async () => found('Leyline of Anticipation'));
-    const d = withEdhrec({
-      search,
-      translate: vi.fn(async () => plan({
-        commander: 'azula', query: 't:enchantment (o:copy or o:cast)', constraints: 't:enchantment',
-      })),
-    });
-    const result = await interpret('enchantments that work well for azula', d);
-
-    expect(search.mock.calls[0][0]).toContain('(t:enchantment (o:copy or o:cast))');
-    expect(search.mock.calls[1][0]).toMatch(/^t:enchantment id<=ubr f:commander -!"Fire Lord Azula" \(!"/);
-    expect(result.interpretation.constraints).toBe('t:enchantment');
-    expect(result.edhrec?.narrowedBy).toBe('type enchantment');
-  });
-
-  it('shows EDHREC\'s own lists when the request states no conditions', async () => {
-    const d = withEdhrec({
-      translate: vi.fn(async () => plan({ commander: 'azula', query: 'o:copy', constraints: '' })),
-    });
-    const result = await interpret('good cards for azula', d);
-    expect(result.edhrec?.filtered).toBe(false);
-  });
-
-  it('fetches a later page of results on its own, without the EDHREC tab', async () => {
-    const d = withEdhrec();
+  it('fetches a later page of results on its own', async () => {
+    const d = forAzula();
     const result = await runQuery('t:enchantment', 'Fire Lord Azula', d, null, { page: 2 });
     expect(d.search).toHaveBeenCalledTimes(1);
     expect(d.search).toHaveBeenCalledWith('t:enchantment id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 2);
-    expect(result.edhrec).toBeUndefined();
     expect(result.trace.some((s) => s.text === 'Searched Scryfall, page 2')).toBe(true);
   });
 
-  it('shows EDHREC\'s own lists when nothing narrows them', async () => {
-    const d = withEdhrec({ translate: vi.fn(async () => plan({ commander: 'azula', query: '' })) });
-    const result = await interpret('cards for azula', d);
-
-    expect(d.cardsNamed).toHaveBeenCalledWith(['Leyline of Anticipation', 'Rhystic Study', 'Sol Ring']);
-    expect(result.edhrec!.sections.map((s) => s.header)).toEqual(['High Synergy Cards', 'Top Cards']);
-    expect(result.edhrec!.sections[1].ids).toEqual(['sol-ring', 'rhystic-study']);
-    expect(result.edhrec!.filtered).toBe(false);
-  });
-
-  it('puts the commander\'s figures on the Scryfall results too, without reordering them', async () => {
-    const result = await interpret('enchantments for azula', withEdhrec({
-      search: vi.fn(async () => found('Some Random Card', 'Rhystic Study')),
-    }));
-    expect(result.cards.map((c) => c.name)).toEqual(['Some Random Card', 'Rhystic Study']);
-    expect(result.stats).toEqual({ 'rhystic-study': page.stats.get('Rhystic Study') });
-  });
-
-  it('is left out when EDHREC is switched off', async () => {
-    const result = await interpret('enchantments for azula', withEdhrec({ edhrec: null }));
-    expect(result.edhrec).toBeUndefined();
-    expect(result.stats).toBeUndefined();
-  });
-
-  it('says so when EDHREC does not know the commander', async () => {
-    const result = await interpret('enchantments for azula', withEdhrec({ edhrec: vi.fn(async () => null) }));
-    expect(result.edhrec).toBeUndefined();
-    expect(result.trace.some((s) => s.text === 'EDHREC has no data for Fire Lord Azula yet')).toBe(true);
-  });
-
-  it('is not rebuilt when only the sort changes', async () => {
-    const d = withEdhrec();
-    const result = await runQuery('t:enchantment', 'Fire Lord Azula', d, { order: 'usd', dir: 'asc' }, { withEdhrec: false });
+  it('runs again with only the sort changed', async () => {
+    const d = forAzula();
+    const result = await runQuery('t:enchantment', 'Fire Lord Azula', d, { order: 'usd', dir: 'asc' });
     expect(d.search).toHaveBeenCalledTimes(1);
     expect(d.search).toHaveBeenCalledWith('t:enchantment id<=ubr f:commander -!"Fire Lord Azula"', { order: 'usd', dir: 'asc' }, 1);
-    expect(result.edhrec).toBeUndefined();
     expect(result.interpretation.sort).toEqual({ order: 'usd', dir: 'asc' });
   });
 });

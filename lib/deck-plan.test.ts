@@ -70,4 +70,79 @@ describe('the plan', () => {
     expect(plan.draftFromCards(lands, styles.styleById('landfall')!, null, ['Craterhoof Behemoth']))
       .toBe('Omnath · Lands. Rewards land drops: extra lands, fetches and landfall payoffs. It wins with Craterhoof Behemoth.');
   });
+
+  it('confirms part by part or all at once, and taking one back keeps the rest', async () => {
+    const db = await import('./db');
+    const plan = await import('./deck-plan');
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Omnath', '', { kind: 'deck' });
+    plan.changePlan(deck.id, { confirmPart: 'flip' });
+    let p = plan.planFor(deck.id, '', lands, cards);
+    expect([p.confirmed, p.confirmedParts.flip, p.confirmedParts.style]).toEqual([false, true, false]);
+    // Changing a part makes it the owner's and confirms it.
+    plan.changePlan(deck.id, { budget: 5 });
+    p = plan.planFor(deck.id, '', lands, cards);
+    expect([p.budget, p.stored.budget?.by, p.confirmedParts.budget]).toEqual([5, 'yours', true]);
+    expect(plan.planProgress(deck.id)).toEqual({ done: 2, total: plan.PARTS.length });
+
+    plan.changePlan(deck.id, { confirm: true });
+    expect(plan.planConfirmed(deck.id)).toBe(true);
+    plan.changePlan(deck.id, { unconfirmPart: 'lands' });
+    p = plan.planFor(deck.id, '', lands, cards);
+    expect([p.confirmed, p.confirmedParts.lands, p.confirmedParts.style]).toEqual([false, false, true]);
+    // Confirming the last part confirms the plan again.
+    plan.changePlan(deck.id, { confirmPart: 'lands' });
+    expect(plan.planConfirmed(deck.id)).toBe(true);
+  });
+
+  it('treats a plan confirmed before parts existed as confirmed in every part', async () => {
+    const db = await import('./db');
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Old', '', { kind: 'deck' });
+    // A row from before the new columns: only the old ones written.
+    db.database().run(`CREATE TABLE IF NOT EXISTS deck_plans (listId TEXT PRIMARY KEY, style TEXT, style2 TEXT, targets TEXT NOT NULL DEFAULT '{}', draft TEXT NOT NULL DEFAULT '', confirmedAt TEXT, updatedAt TEXT NOT NULL)`);
+    db.database().run(`INSERT INTO deck_plans (listId, style, style2, targets, draft, confirmedAt, updatedAt) VALUES (?, 'spells', NULL, '{"ramp":[9,10]}', '', '2026-11-01', '2026-11-01')`, [deck.id]);
+    const plan = await import('./deck-plan');
+    const p = plan.planFor(deck.id, 'Spells.', lands, cards);
+    expect([p.confirmed, p.style.id, p.targets.find((t) => t.role === 'ramp')?.range]).toEqual([true, 'spells', [9, 10]]);
+    expect(Object.values(p.confirmedParts).every(Boolean)).toBe(true);
+  });
+
+  it('layers changes to the usual rules: yours, then accepted overrides, then detected', async () => {
+    const db = await import('./db');
+    const plan = await import('./deck-plan');
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Omnath', '', { kind: 'deck' });
+    plan.changePlan(deck.id, { overrides: { add: { kind: 'range', target: 'draw', value: [6, 8], what: 'Card draw → 6–8', why: 'Draws off landfall.', affects: 'Cuts', by: 'claude' } } });
+    plan.changePlan(deck.id, { overrides: { add: { kind: 'lands', target: 'lands', value: 40, what: 'Lands → 40', why: 'Landfall.', affects: 'Lands', by: 'claude' } } });
+    plan.changePlan(deck.id, { overrides: { add: { kind: 'rule-off', target: 'curve', value: null, what: 'Curve off', why: 'Big deck.', affects: 'Cuts', by: 'claude' } } });
+    let p = plan.planFor(deck.id, '', lands, cards);
+    expect(p.targets.find((t) => t.role === 'draw')).toMatchObject({ range: [6, 8], source: 'override' });
+    expect([p.lands, p.landsSource]).toEqual([[40, 40], 'claude']);
+    expect(plan.effectiveCutSettings(deck.id).settings.rules.curve).toEqual({ on: false });
+    // The owner's own range wins over the override.
+    plan.changePlan(deck.id, { targets: { draw: [9, 9] } });
+    p = plan.planFor(deck.id, '', lands, cards);
+    expect(p.targets.find((t) => t.role === 'draw')).toMatchObject({ range: [9, 9], source: 'yours' });
+    // Undo is switching it off.
+    const id = p.overrides.find((o) => o.kind === 'lands')!.id;
+    plan.changePlan(deck.id, { overrides: { toggle: { id, on: false } } });
+    expect(plan.planFor(deck.id, '', lands, cards).landsSource).toBe('detected');
+    // A bad override is ignored.
+    plan.changePlan(deck.id, { overrides: { add: { kind: 'range', target: 'nonsense', value: [1, 2], what: '', why: '', affects: '', by: 'claude' } } });
+    expect(plan.planFor(deck.id, '', lands, cards).overrides).toHaveLength(3);
+  });
+
+  it('moves protection with how much the deck leans on its commander', async () => {
+    const db = await import('./db');
+    const plan = await import('./deck-plan');
+    db.addProfile('dk', 'DK');
+    const deck = db.createList('dk', 'Omnath', '', { kind: 'deck' });
+    expect(plan.planFor(deck.id, '', lands, cards).targets.find((t) => t.role === 'protection')?.range).toEqual([2, 3]);
+    plan.saveSnapshot(deck.id, { lean: 'High' });
+    expect(plan.planFor(deck.id, '', lands, cards).targets.find((t) => t.role === 'protection')?.range).toEqual([3, 5]);
+    plan.changePlan(deck.id, { lean: 'Low' });
+    expect(plan.planFor(deck.id, '', lands, cards).targets.find((t) => t.role === 'protection')?.range).toEqual([1, 2]);
+  });
 });
+

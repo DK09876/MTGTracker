@@ -3,7 +3,7 @@
 /**
  * The deck's Chat tab: ask Claude about the deck - what to add, what to
  * cut, whether the plan holds. Every chat is saved. Claude looks things up
- * (Scryfall, your collection, EDHREC) and puts each change it recommends
+ * (Scryfall, your collection) and puts each change it recommends
  * on a button; nothing changes until you press one. Replies run in the
  * background, so the page can be left while Claude thinks.
  */
@@ -16,14 +16,11 @@ import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { DeckChat as Chat } from '@/lib/deck-chat';
 import type { ListedCard } from '@/lib/db';
-import type { Board } from '@/lib/decklist';
 import { modelLabel } from '@/lib/quota';
 
 interface Props {
   listId: string;
   cards: ListedCard[];
-  onAdd: (cardId: string, board: Board) => Promise<void>;
-  onRemove: (cardId: string) => Promise<void> | void;
   /** A question to start a new chat with, ready to send (from Tune). */
   question?: string;
 }
@@ -32,7 +29,7 @@ const POLL_MS = 2_000;
 const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?'];
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export default function DeckChat({ listId, cards, onAdd, onRemove, question = '' }: Props) {
+export default function DeckChat({ listId, cards, question = '' }: Props) {
   const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
@@ -78,18 +75,32 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
     }
   };
 
-  const apply = async (m: number, c: number) => {
-    const change = chat?.messages[m]?.changes?.[c];
-    if (!chat || !change?.cardId) return;
+  // Claude's changes go to Tune, as swaps where an add and a cut pair up: they wait there with the rest.
+  const sendToTune = async (m: number, only?: number) => {
+    const changes = chat?.messages[m]?.changes ?? [];
+    if (!chat) return;
+    const open = changes.map((c, j) => ({ c, j })).filter(({ c, j }) => !c.done && c.cardId && (only === undefined || j === only) && (c.kind === 'add' || inDeck.has(c.cardId)));
+    if (!open.length) return;
+    const card = (c: (typeof open)[number]['c']) => ({ id: c.cardId!, name: c.name, cmc: 0, manaCost: '', typeLine: '', image: null, where: c.held ?? null, price: c.price ?? null, quantity: 1 });
+    const adds = open.filter(({ c }) => c.kind === 'add');
+    const cuts = open.filter(({ c }) => c.kind === 'cut');
+    const items = [
+      ...adds.map((a, k) => ({ key: `${chat.id}:${m}:${a.j}`, add: card(a.c), ...(cuts[k] ? { cut: card(cuts[k].c) } : {}), why: [a.c.why, cuts[k]?.c.why].filter(Boolean).join(' Out: ') })),
+      ...cuts.slice(adds.length).map((x) => ({ key: `${chat.id}:${m}:${x.j}`, cut: card(x.c), why: x.c.why })),
+    ];
+    const intent = adds.length && cuts.length ? 'swaps' : adds.length ? 'find' : 'cuts';
     try {
-      if (change.kind === 'add') await onAdd(change.cardId, 'main');
-      else await onRemove(change.cardId);
-      setChat((await api.markChange(listId, chat.id, m, c)).chat);
+      await api.tuneAct(listId, { action: 'propose', intent, title: `From Chat · ${items.length}`, why: `Claude proposed these in “${chat.title}”.`, items });
+      let next = chat;
+      for (const { j } of open) next = (await api.markChange(listId, chat.id, m, j)).chat;
+      setChat(next);
+      setSent((s) => ({ ...s, [`${m}`]: intent }));
       void loadList();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not change the deck');
+      setError(e instanceof Error ? e.message : 'Could not send that to Tune');
     }
   };
+  const [sent, setSent] = useState<Record<string, string>>({});
 
   const inDeck = new Set(cards.map((c) => c.card.id));
 
@@ -120,7 +131,7 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
           <div className="flex flex-col gap-2">
             <h3 className="font-display text-lg font-semibold">Ask about this deck</h3>
             <p className="text-sm text-[var(--muted)]">
-              Claude knows the deck, its plan and your collection. What it suggests comes as buttons - nothing changes until you press one.
+              Claude knows the deck, its plan and your collection. What it suggests can be sent to Tune, where it waits with the other suggestions - nothing changes until you accept it there.
             </p>
           </div>
         )}
@@ -146,16 +157,22 @@ export default function DeckChat({ listId, cards, onAdd, onRemove, question = ''
                     <p className="text-xs text-[var(--muted)]">{c.why}</p>
                   </div>
                   {c.done ? (
-                    <span className="text-xs text-emerald-400">Done</span>
+                    <span className="text-xs text-emerald-400">In Tune</span>
                   ) : !c.cardId || (c.kind === 'cut' && !inDeck.has(c.cardId)) ? (
                     <span className="text-xs text-[var(--muted)]">{c.kind === 'add' ? 'Card not found' : 'Not in the deck'}</span>
                   ) : (
-                    <button onClick={() => apply(i, j)} className="rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)]">
-                      {c.kind === 'add' ? 'Add' : 'Cut'}
+                    <button onClick={() => sendToTune(i, j)} className="rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)]">
+                      Send to Tune
                     </button>
                   )}
                 </div>
               ))}
+              {(m.changes?.filter((c) => !c.done && c.cardId).length ?? 0) > 1 && (
+                <button onClick={() => sendToTune(i)} className="self-start rounded-full bg-[var(--accent)] px-3.5 py-1 text-sm font-semibold text-[#221c08]">
+                  Send all {m.changes!.filter((c) => !c.done && c.cardId).length} to Tune
+                </button>
+              )}
+              {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps & upgrades' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>
           )

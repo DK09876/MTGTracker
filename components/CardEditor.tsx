@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 
 import * as api from '@/lib/api';
 import type { Board } from '@/lib/decklist';
+import { DEFAULT_SECTIONS, type DeckSection } from '@/lib/sections-shared';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 
 interface Props {
@@ -21,13 +22,15 @@ interface Props {
   isDeck: boolean;
   /** After a change: the printing now in the deck, to show in the modal. */
   onChanged: (printingId: string) => void;
+  /** A deck's sections beyond Main. */
+  sections?: DeckSection[];
 }
 
 const FINISH_LABEL: Record<Finish, string> = { nonfoil: 'Non-foil', foil: 'Foil', etched: 'Etched' };
 const priceFor = (p: api.Printing, finish: Finish) =>
   finish === 'foil' ? p.prices.usd_foil : finish === 'etched' ? p.prices.usd_etched : p.prices.usd;
 
-export default function CardEditor({ listId, card, finish, board, isDeck, onChanged }: Props) {
+export default function CardEditor({ listId, card, finish, board, isDeck, onChanged, sections = DEFAULT_SECTIONS }: Props) {
   const [printings, setPrintings] = useState<api.Printing[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +77,7 @@ export default function CardEditor({ listId, card, finish, board, isDeck, onChan
         </div>
         {isDeck && (
           <label className="flex items-center gap-2">
-            <span className="text-[var(--muted)]">Board</span>
+            <span className="text-[var(--muted)]">Section</span>
             <select
               value={board}
               disabled={busy}
@@ -82,8 +85,7 @@ export default function CardEditor({ listId, card, finish, board, isDeck, onChan
               className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5"
             >
               <option value="main">Main</option>
-              <option value="maybe">Maybeboard</option>
-              <option value="side">Sideboard</option>
+              {sections.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
           </label>
         )}

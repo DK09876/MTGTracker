@@ -51,9 +51,9 @@ export function guessWinRoutes(input: {
   const { cards, roles, combos } = input;
   const routes: WinRoute[] = [];
 
-  // Combos that end the game, most played first, one route per result.
+  // Combos that end the game, fewest pieces first, one route per result.
   const winning = (combos ?? []).filter((c) => c.produces.some((p) => WINS.test(p)))
-    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+    .sort((a, b) => a.cards.length - b.cards.length);
   if (winning.length) {
     const best = winning.slice(0, 3);
     routes.push({
@@ -68,7 +68,7 @@ export function guessWinRoutes(input: {
   // Combos that make something infinite - mana, spells, triggers - win only
   // with a card that turns it into damage or life loss.
   const engines = (combos ?? []).filter((c) => !winning.includes(c) && c.produces.some((p) => ENGINE.test(p)))
-    .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+    .sort((a, b) => a.cards.length - b.cards.length);
   if (engines.length) {
     const payoffs = [...new Set([...named(roles, 'finisher'), ...named(roles, 'drain'), ...named(roles, 'wincon')])];
     const what = [...new Set(engines.flatMap((c) => c.produces.filter((p) => ENGINE.test(p)).map((p) => p.replace(/^(near-)?infinite /i, ''))))].slice(0, 3);

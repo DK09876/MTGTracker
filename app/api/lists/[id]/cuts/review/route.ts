@@ -15,6 +15,7 @@ import { appModel, ModelError } from '@/lib/ai';
 import { deckCutList } from '@/lib/cut-list';
 import { deckNames, lastReview, reviewCuts, reviewSize, saveReview, settled, type CutReview, type ReviewMode } from '@/lib/cut-review';
 import { latestJob, startJob } from '@/lib/jobs';
+import { planContext } from '@/lib/plan-context';
 import { requireList, requirePlan } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -62,6 +63,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const found = await reviewCuts(model, {
       commander: list.commander,
       brief: cut.tags.brief,
+      plan: await planContext(list).catch(() => ''),
       styles: cut.styles.map((s) => s.label),
       tags: cut.tags.tags.filter((t) => t.status === 'accepted').map((t) => ({ name: t.name, description: t.description, cards: on.filter((x) => x.tagId === t.id).map((x) => x.key) })),
       candidates: top,

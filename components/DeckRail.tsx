@@ -14,28 +14,21 @@
  * steps aside on a deck (Nav.tsx), and "‹" leads back to the decks.
  */
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import type { DeckTab } from './DeckBuild';
+import { DECK_TABS, type DeckTab } from '@/lib/deck-tabs';
 
-const TABS: Array<[DeckTab, string]> = [
-  ['cards', 'Cards'], ['plan', 'Plan'], ['tune', 'Tune'], ['tags', 'Tags'],
-  ['health', 'Health'], ['playtest', 'Playtest'], ['chat', 'Chat'], ['collection', 'Collection'],
-];
-// A quiet line between building the deck, checking it, and the rest.
-const BREAK_AFTER: DeckTab[] = ['tags', 'playtest'];
+const TABS = DECK_TABS;
+// A quiet line between changing the deck and checking it, and before Chat.
+const BREAK_AFTER: DeckTab[] = ['tune', 'check'];
 
 // 16px line icons, one per tab.
 const ICON: Partial<Record<DeckTab, string>> = {
   cards: 'M4 5.5h6v9H4zM8.5 3.5l5.6 1.5-2.3 8.7',
   plan: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
   tune: 'M3 4.5h6M12 4.5h1M3 8h1M7 8h6M3 11.5h5M11 11.5h2M10.5 3v3M5.5 6.5v3M9.5 10v3',
-  tags: 'M2.75 2.75h5l5.5 5.5-5 5-5.5-5.5zM5.5 5.5h.01',
-  health: 'M2 8.5h2.5l1.5-4 3 7 1.5-3H14',
-  playtest: 'M5 3.5v9l7.5-4.5z',
+  check: 'M2 8.5h2.5l1.5-4 3 7 1.5-3H14',
   chat: 'M3 3.5h10v7H7l-3 2.5v-2.5H3z',
-  collection: 'M2.5 5h11v8h-11zM4 2.75h8M3.25 5V3.5',
 };
 const Icon = ({ tab }: { tab: DeckTab }) => (
   <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="shrink-0 max-lg:hidden" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -96,10 +89,10 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
       <div className="hidden pb-4 lg:block">
         <button data-tour="add-cards" onClick={deck.onAdd} className="btn-go w-full rounded-full px-3 py-1.5 text-sm font-semibold">＋ Add cards</button>
       </div>
-      {/* Phones: back to the decks, then Add cards, lead the bar. */}
-      <Link href="/decks" aria-label="All decks" className="flex h-9 w-7 shrink-0 items-center justify-center text-xl text-[var(--muted)] lg:hidden">‹</Link>
+      {/* Phones: Add cards leads the bar. */}
+      {/* No ‹ back here: the deck header has "All decks", and the five tabs need the room. */}
       <button onClick={deck.onAdd} aria-label="Add cards" className="btn-go flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-lg font-semibold lg:hidden">＋</button>
-      {/* Phones: ‹ and ＋ stay put; the tabs and sections swipe, fading out at the edge. */}
+      {/* Phones: ＋ stays put; the tabs and sections swipe, fading out at the edge. */}
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] lg:flex-col lg:items-stretch lg:gap-0.5 lg:overflow-visible lg:[mask-image:none]">
       <div role="tablist" aria-label="Deck view" className="flex gap-1 lg:flex-col lg:gap-0.5">
         {TABS.map(([value, label]) => {
@@ -111,14 +104,18 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
                 data-tour-tab={value}
                 aria-selected={on}
                 onClick={() => go(value)}
-                className={`relative flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-1.5 text-left transition-colors lg:rounded-lg lg:px-2.5 ${on
+                className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-left lg:gap-2.5 transition-colors lg:rounded-lg lg:px-2.5 ${on
                   ? 'bg-[var(--surface-hover)] font-semibold text-[var(--foreground)] max-lg:bg-[color-mix(in_srgb,var(--c1)_22%,var(--surface))] lg:before:absolute lg:before:inset-y-1.5 lg:before:-left-2 lg:before:w-[3px] lg:before:rounded-full lg:before:bg-[linear-gradient(var(--c1),var(--c2),var(--c3))]'
                   : 'text-[var(--muted)] hover:bg-[var(--surface-hover)]/60 hover:text-[var(--foreground)]'}`}
               >
                 <span className={on ? 'text-[var(--c1)]' : ''}><Icon tab={value} /></span>
                 <span className="flex-1">{label}</span>
-                {value === 'chat' && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
-                {value === 'plan' && !planConfirmed && !on && <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300">start here</span>}
+                {(value === 'chat' || value === 'tune') && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
+                {value === 'plan' && !planConfirmed && !on && (<>
+                  <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300 max-lg:hidden">start here</span>
+                  {/* Phones: a dot, so all five tabs still fit the bar. */}
+                  <span aria-label="start here" className="h-1.5 w-1.5 rounded-full bg-amber-300 lg:hidden" />
+                </>)}
               </button>
               {BREAK_AFTER.includes(value) && <span aria-hidden className="mx-2.5 my-1.5 hidden h-px bg-[var(--border)] lg:block" />}
             </div>

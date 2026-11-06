@@ -22,9 +22,12 @@ import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, Rule
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
 import type { Previous, Translation } from './gemini';
+import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
+import type { DeckSection, Purpose } from './sections-shared';
 import type { BracketFloor } from './bracket';
-import type { CutGroup } from './cuts';
+import type { PlanChange as PlanChangeCore } from './deck-plan';
+import type { ChangeLine, PlanPart, PlanState, ProposalLine, RouteView, RuleLine, ThemeView } from './plan-server';
 import type { Health } from './health';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Interpreted } from './interpret';
@@ -34,7 +37,6 @@ import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
 import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
-import type { BuildPlan } from './build';
 import type { CardDataStatus } from './card-store';
 import type { CutReview, ReviewItem, ReviewMode, Tier as CardTier } from './cut-review-shared';
 import type { GoldfishSettings } from './goldfish';
@@ -43,7 +45,6 @@ import type { CutCandidate, DeckType } from './cut-score';
 import type { DeckChat } from './deck-chat';
 import type { FavouriteCommander, ProfileStyle } from './profile-style';
 import type { ThemeId } from './themes';
-import type { GapCard } from './gap-cards';
 import type { CheckRun } from './checks';
 import type { AppError } from './errors';
 import type { Job } from './jobs';
@@ -151,17 +152,14 @@ export const resume = (q: string, previous: Previous | undefined, plan: Translat
 
 /**
  * Re-run a query as written - edited, re-sorted, or for a tab opened later -
- * scoped to the same commander. `edhrec: false` skips rebuilding the EDHREC
- * tab, for a change that only affects the Scryfall one.
+ * scoped to the same commander.
  */
-export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; edhrec?: boolean; page?: number; constraints?: string } = {}) =>
+export const runQuery = (query: string, opts: { commander?: string; sort?: Sort; page?: number } = {}) =>
   fetch(url(`ask?${new URLSearchParams({
     query,
     ...(opts.commander ? { commander: opts.commander } : {}),
     ...(opts.sort ? { sort: sortKey(opts.sort) } : {}),
-    ...(opts.edhrec === false ? { edhrec: '0' } : {}),
     ...(opts.page && opts.page > 1 ? { page: String(opts.page) } : {}),
-    ...(opts.constraints !== undefined ? { constraints: opts.constraints } : {}),
   })}`)).then(json<AskResponse>);
 
 /** A commander's combos, for the Combos tab. */
@@ -284,7 +282,7 @@ export const placeDeck = (listId: string, folderId: string | null) =>
 export const deleteList = (id: string) =>
   fetch(url(`lists/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
-export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean };
+export type ListPage = { list: List; cards: ListedCard[]; public?: boolean; planConfirmed?: boolean; planProgress?: { done: number; total: number } | null; sections?: DeckSection[]; slotQuestions?: SlotQuestion[] };
 export const fetchList = async (id: string) => {
   const before = peek<ListPage>(paths.list(id));
   const now = await get<ListPage>(paths.list(id));
@@ -317,6 +315,21 @@ export const updateCard = (listId: string, cardId: string, change: { board?: Boa
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ cardId, ...change }),
   }).then(json<{ ok: true }>);
+
+// --- a deck's sections, second commander and companion ---------------------------
+
+export const addSection = (listId: string, name: string, purpose: Purpose) =>
+  fetch(url(`lists/${listId}/sections`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, purpose }) })
+    .then(json<{ section: DeckSection; sections: DeckSection[] }>);
+export const changeSection = (listId: string, id: string, change: { name?: string; purpose?: Purpose }) =>
+  fetch(url(`lists/${listId}/sections`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...change }) })
+    .then(json<{ sections: DeckSection[] }>);
+export const deleteSection = (listId: string, id: string) =>
+  fetch(url(`lists/${listId}/sections?id=${encodeURIComponent(id)}`), { method: 'DELETE' }).then(json<{ moved: number; sections: DeckSection[] }>);
+/** Make a card the second commander or the companion, or neither (null); or answer an import's question with "neither". */
+export const setSlot = (listId: string, change: { cardId: string; slot: Slot | null } | { dismiss: Slot }) =>
+  fetch(url(`lists/${listId}/slots`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) })
+    .then(json<{ cards: ListedCard[]; questions: SlotQuestion[] }>);
 
 export interface Printing {
   id: string;
@@ -409,6 +422,8 @@ export const createProfile = (name: string) =>
 export interface DeckHealth {
   health: Health;
   landTarget: [number, number];
+  /** Lands as the plan counts them: a land on the back of a double-faced card is part of one. */
+  landCount?: number;
 }
 
 /** Everything that comes from the stored cards - immediate. */
@@ -427,10 +442,9 @@ export interface DeckInsights {
       id: string | null;
       image: string | null;
       price: string | null;
-      combos: Array<{ id: string; url: string; produces: string[]; popularity: number | null; have: string[] }>;
+      combos: Array<{ id: string; url: string; produces: string[]; have: string[] }>;
     }>;
   } | null;
-  cuts: CutGroup[];
   /** How it wins, guessed from the cards alone; null when the roles could not be read. */
   wincons: WinGuess | null;
   /** Parts that could not be worked out just now: 'bracket', 'combos'. */
@@ -491,10 +505,6 @@ export const keepCard = (listId: string, oracleId: string, keep: boolean) => sen
 /** Save the deck's own cut rules. */
 export const saveCutSettings = (listId: string, settings: CutSettings) => send(`lists/${listId}/cuts`, 'PATCH', { settings }).then(json<{ settings: CutSettings }>);
 
-export const buildPlan = (listId: string) => get<BuildPlan>(paths.build(listId));
-export const gapCards = (listId: string, role: string, opts: { owned: boolean; max: number | null }) =>
-  fetch(url(`lists/${listId}/build/suggest?role=${encodeURIComponent(role)}${opts.owned ? '&owned=1' : ''}${opts.max ? `&max=${opts.max}` : ''}`))
-    .then(json<{ role: { id: string; label: string }; source: 'edhrec' | 'fit'; cards: GapCard[] }>);
 
 export type ChatSummary = { id: string; title: string; updatedAt: string; added: number; cut: number };
 export const deckChats = (listId: string) => get<{ chats: ChatSummary[] }>(paths.chats(listId));
@@ -674,32 +684,17 @@ export const aiUsage = (days = 7) =>
 export const testModel = (model: string) => send('ai/models', 'POST', { model }).then(json<AiState>).then(changed);
 
 /** A deck's plan: what it does, its styles, the ranges it uses, how it wins. */
-export interface DeckPlanState {
-  brief: string;
-  /** A first brief drafted from the cards, until one is written. */
-  draft: string;
-  confirmed: boolean;
-  detected: { primary: string; secondary: string | null; support: Record<string, number> };
-  style: string;
-  style2: string | null;
-  chosen: { style: boolean; style2: boolean };
-  targets: Array<{ role: string; label: string; range: [number, number]; styleRange: [number, number]; mine: boolean }>;
-  wins: { tagged: string[]; finishers: string[] };
-  styles: Array<{ id: string; label: string; note: string; cards: number }>;
-  flip: { value: number; mine: boolean };
-  lands: [number, number];
-  landsDefault: [number, number];
-  packages: Array<{ tagId: string; name: string; kind: string | null; size: number; count: number }>;
-}
-export interface PlanChange {
+/** The Plan tab's picture of a deck (plan-server.ts). */
+export type DeckPlanState = PlanState;
+export type { PlanPart, ThemeView, RouteView, RuleLine, ChangeLine, ProposalLine };
+/** A change to the plan, plus what only the route does: keep or drop a detected theme, settle one of Claude's proposals, the brief. */
+export type PlanChange = PlanChangeCore & {
   brief?: string;
-  style?: string | null;
-  style2?: string | null;
-  targets?: Record<string, [number, number] | null>;
-  confirm?: boolean;
-  flip?: number | null;
-  packages?: Record<string, number | null>;
-}
+  keepTheme?: string;
+  unkeepTheme?: string;
+  settle?: { key: string; status: 'accepted' | 'skipped' };
+  acceptBrief?: string;
+};
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 
@@ -723,3 +718,29 @@ export interface PlaytestState {
 export const deckPlaytest = (listId: string) => get<PlaytestState>(paths.playtest(listId));
 export const savePlaytest = (listId: string, change: { settings?: GoldfishSettings; presets?: PlaytestState['presets'] }) =>
   send(`lists/${listId}/playtest`, 'PUT', change).then(json<{ settings: GoldfishSettings; presets: PlaytestState['presets'] }>);
+
+// --- Tune ----------------------------------------------------------------------
+
+export type TuneState = import('./tune').TuneState;
+type TuneAction =
+  | { action: 'stage'; items: import('./tune-shared').Suggestion[] }
+  | { action: 'unstage'; keys: string[] }
+  | { action: 'dismiss' | 'undismiss'; keys: string[] }
+  | { action: 'save'; section: string; items: import('./tune-shared').Suggestion[] }
+  | { action: 'clear' }
+  | { action: 'apply'; cutsTo?: string }
+  | { action: 'undo'; undo: unknown }
+  | { action: 'keep'; cardId: string; keep: boolean }
+  | { action: 'pile'; choice: 'fill' | 'best' | null }
+  | { action: 'finishPicks'; choice?: 'rules' | 'claude'; showRules?: boolean }
+  | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
+  | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };
+
+export const tunePath = (listId: string, intent?: string, symptom?: string) =>
+  `lists/${listId}/tune${intent ? `?intent=${intent}${symptom ? `&symptom=${symptom}` : ''}` : ''}`;
+export const tune = (listId: string, intent?: string, symptom?: string) => get<TuneState>(tunePath(listId, intent, symptom));
+export const tuneAct = <T = { ok: true; staged?: number; capped?: number; saved?: number; added?: number; cut?: number }>(listId: string, act: TuneAction) =>
+  send(`lists/${listId}/tune`, 'POST', act).then(json<T>).finally(() => { if (act.action === 'apply' || act.action === 'undo' || act.action === 'save' || act.action === 'keep') forgetDeck(listId); });
+export const tuneIdeasJob = (listId: string) => get<{ job: Job | null }>(`lists/${listId}/tune/claude`);
+export const startTuneIdeas = (listId: string, intent: string, instructions: string, problem?: string) =>
+  spending(send(`lists/${listId}/tune/claude`, 'POST', { intent, instructions, problem }).then(json<{ job: Job }>).finally(jobsChanged));

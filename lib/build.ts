@@ -8,6 +8,7 @@
  * skeleton of roles, a way to win, the lands and the colour sources.
  */
 
+import { karstenLands } from './deck-numbers';
 import type { RoleCount, RoleGroup } from './roles';
 import type { ScryfallCard } from './scryfall';
 import { detectStyles } from './styles';
@@ -66,21 +67,14 @@ export function commanderStyle(commander: ScryfallCard | null): { label: string;
   return { label: primary.label, note: primary.note };
 }
 
-/**
- * Karsten's land count for Commander, never below 37: 31.42 + 3.13 x the
- * average mana value of the spells - 0.28 x the cheap (MV 2 or less) draw
- * and ramp spells.
- */
-export function karstenLands(averageMv: number, cheapDrawAndRamp: number): number {
-  return Math.max(37, Math.round(31.42 + 3.13 * averageMv - 0.28 * cheapDrawAndRamp));
-}
-
 // Why each role with a guideline matters, for the issue that says it is short.
 const WHY: Record<string, string> = {
   ramp: 'Ramp puts you a turn or two ahead of the table and gets the commander out early.',
   draw: 'Card advantage keeps your hand full after turn five, when a deck without it runs out of things to do.',
-  removal: 'Spot removal answers the one creature or artifact that would otherwise beat you.',
+  interaction: 'Removal, counterspells and board wipes answer what would otherwise beat you. Flexible, instant-speed answers are worth the most.',
   wipe: 'Board wipes reset a game the table is winning and you are not.',
+  protection: 'Protection keeps the commander and the plan alive through removal.',
+  finishers: 'Ways to finish turn a good position into a win, so games do not drag on.',
 };
 
 /** Roles that close out a game. */
@@ -102,6 +96,8 @@ export function buildPlan(input: {
   targets?: Record<string, [number, number]>;
   /** The plan's land range and the flip turn it comes from. */
   landRange?: [number, number];
+  /** The plan's land number: what the formula wants and from how many cheap spells. */
+  landNumber?: { want: number; cheap: number };
   flip?: number;
 }): BuildPlan {
   const style = input.style !== undefined ? input.style : commanderStyle(input.commander);
@@ -110,9 +106,10 @@ export function buildPlan(input: {
     .map((r) => ({ role: r.id, label: r.label, have: r.count, want: r.target! }));
   const finishers = [...new Set([...roles.filter((r) => FINISHING.includes(r.id)).flatMap((r) => r.cards), ...(input.wincons ?? [])])].sort();
 
-  const cheapNames = new Set(roles.filter((r) => ['ramp', 'draw'].includes(r.id)).flatMap((r) => r.cards));
-  const cheap = input.cards.filter((c) => cheapNames.has(c.card.name) && (c.card.cmc ?? 0) <= 2).reduce((n, c) => n + c.quantity, 0);
-  const want = karstenLands(input.averageMv, cheap);
+  // The plan's land number when given (deck-numbers.ts), so every page says the same.
+  const cheapNames = new Set(roles.filter((r) => ['ramp', 'draw', 'impulse'].includes(r.id)).flatMap((r) => r.cards));
+  const cheap = input.landNumber?.cheap ?? input.cards.filter((c) => cheapNames.has(c.card.name) && (c.card.cmc ?? 0) <= 2).reduce((n, c) => n + c.quantity, 0);
+  const want = input.landNumber?.want ?? karstenLands(input.averageMv, cheap);
   const colors = input.colors ?? [];
 
   const issues: Issue[] = [];
@@ -131,7 +128,8 @@ export function buildPlan(input: {
     });
   }
   if (input.roles) {
-    for (const r of roles.filter((x) => x.target && x.count < x.target[0])) {
+    // No way to finish at all has its own, plainer issue below.
+    for (const r of roles.filter((x) => x.target && x.count < x.target[0] && !(x.id === 'finishers' && x.count === 0))) {
       const [lo, hi] = r.target!;
       issues.push({
         id: `role:${r.id}`, level: r.count < lo - 2 ? 'fix' : 'consider',
@@ -149,7 +147,8 @@ export function buildPlan(input: {
     }
   }
   const range = input.landRange ?? [want - 1, want + 1];
-  const second = input.landRange ? ` The usual formula, a second opinion, says ${want} for this curve (average mana value ${input.averageMv.toFixed(2)}, ${cheap} cheap ramp and draw spells).` : '';
+  // The plan's range is the formula's unless the owner set one; then the formula is worth saying.
+  const second = input.landRange && input.landRange[0] !== want ? ` The formula says ${want} for this curve (average mana value ${input.averageMv.toFixed(2)}, ${cheap} cheap ramp and draw spells).` : '';
   if (input.lands < range[0]) {
     issues.push({
       id: 'lands', level: input.lands < range[0] - 2 ? 'fix' : 'consider', title: `${input.lands} lands, the plan wants ${range[0]}-${range[1]}`,

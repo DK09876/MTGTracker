@@ -17,6 +17,7 @@ import { appModel, ModelError } from '@/lib/ai';
 import { cardsInList, type List } from '@/lib/db';
 import { latestJob, startJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
+import { changePlan } from '@/lib/deck-plan';
 import { addRead, cardChange, compareReads, deleteRead, readsFor, setSaved, type ReadMode } from '@/lib/reads';
 import { ScryfallError } from '@/lib/scryfall';
 import { combosInDeck } from '@/lib/spellbook';
@@ -86,7 +87,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }, async ({ progress }) => {
     progress(mode === 'quick' ? 'Reading roles and combos' : 'The model is reading the deck');
     const found = mode === 'quick' ? await quickRead(list) : await briefStep(model!, { list, boards: ['main'] }, { maxBusy: 1 }, mode, instructions);
-    const read = addRead({ listId: id, profileId: profile, mode, model: found.model, winConditions: found.winConditions, missing: found.missing, brief: found.brief, cards: mainNames(id) });
+    const suggestions = 'suggestions' in found ? found.suggestions : [];
+    const read = addRead({ listId: id, profileId: profile, mode, model: found.model, winConditions: found.winConditions, missing: found.missing, brief: found.brief, cards: mainNames(id), suggestions });
+    // Claude's notes that fit no part are kept with the plan, for every later step to read.
+    const notes = suggestions.filter((s) => s.kind === 'note').map((s) => s.value);
+    if (notes.length) changePlan(id, { notes: { add: notes } });
     return { readId: read.id };
   });
   return NextResponse.json({ job });

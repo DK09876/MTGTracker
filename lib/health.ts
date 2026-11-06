@@ -11,14 +11,16 @@ import { primaryType } from './deckview';
 import { distribution } from './odds';
 import type { Finish, ScryfallCard } from './scryfall';
 import { manaCostOf } from './scryfall';
+import { deckIdentity, type Slot } from './commanders';
+import { sourceWeight } from './deck-numbers';
 
 export type Color = 'W' | 'U' | 'B' | 'R' | 'G';
 export const COLORS: Color[] = ['W', 'U', 'B', 'R', 'G'];
 
 export interface HealthInput {
   commander: ScryfallCard | null;
-  /** The main board: the 99. Sideboard and maybeboard are not the deck. */
-  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish }>;
+  /** The main board: the 99, a second commander among them. Sideboard and maybeboard are not the deck. */
+  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; slot?: Slot | null }>;
 }
 
 export interface Warning {
@@ -43,7 +45,10 @@ export interface Health {
     /** Sources Karsten's table wants for the colour's hungriest spell (null without coloured spells), and that spell. */
     needed: number | null;
     neededFor: string | null;
-    /** Sources counted his way: lands in full, mana rocks and dorks at three quarters. */
+    /**
+     * Sources for the hungriest spell: lands in full; rocks, mana creatures,
+     * land ramp and treasure at part of a source each (deck-numbers.ts).
+     */
     sources: number;
   }>;
   gameChangers: string[];
@@ -88,9 +93,64 @@ export function fetchedColors(card: ScryfallCard, basics: Set<Color>, lands: Set
   return out;
 }
 
-/** Cards a Commander deck may run more than one of. */
-function anyNumberAllowed(card: ScryfallCard): boolean {
-  return /\bBasic\b/.test(typeLine(card)) || /A deck can have (any number of|up to \w+) cards named/i.test(oracle(card));
+const NUMBERS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+
+/**
+ * How many copies of a card a Commander deck may run: one, any number
+ * (basics, Relentless Rats), or the number the card names (Seven Dwarves
+ * up to seven, Nazgûl up to nine).
+ */
+export function copyLimit(card: ScryfallCard): number {
+  if (/\bBasic\b/.test(typeLine(card)) || /A deck can have any number of cards named/i.test(oracle(card))) return Infinity;
+  const upTo = oracle(card).match(/A deck can have up to (\w+) cards named/i)?.[1]?.toLowerCase();
+  return upTo ? NUMBERS[upTo] ?? (Number(upTo) || 1) : 1;
+}
+
+/** Something wrong with a card in the deck, whatever the plan: easy to fix, and the first place to look. */
+export interface Flag {
+  kind: 'copies' | 'colours' | 'banned' | 'not-legal';
+  cardId: string;
+  name: string;
+  quantity: number;
+  /** For too many copies: how many it may have. */
+  limit?: number;
+  why: string;
+  /** The commander (or second commander) itself: fixed by changing it, not by moving it. */
+  commander?: boolean;
+}
+
+/**
+ * The cards a Commander deck can't have as it stands: more copies than
+ * allowed, colours outside its commanders', banned, or not legal at all.
+ */
+export function deckFlags({ commander, cards }: HealthInput): Flag[] {
+  const partner = cards.find((c) => c.slot === 'partner')?.card ?? null;
+  const identity = deckIdentity([commander, partner]);
+  const who = [commander, partner].filter((c): c is ScryfallCard => !!c).map((c) => c.name.split(',')[0]).join(' and ');
+  const out: Flag[] = [];
+  const leaders = [commander, partner].filter((c): c is ScryfallCard => !!c);
+  for (const card of leaders) {
+    const status = card.legalities?.commander;
+    if (status === 'banned' || status === 'not_legal') {
+      out.push({ kind: status === 'banned' ? 'banned' : 'not-legal', cardId: card.id, name: card.name, quantity: 1, commander: true,
+        why: status === 'banned' ? 'Banned in Commander, as a commander too.' : 'Not legal in Commander.' });
+    }
+  }
+  for (const { card, quantity, slot } of cards) {
+    if (slot === 'partner') continue;
+    const base = { cardId: card.id, name: card.name, quantity };
+    const status = card.legalities?.commander;
+    if (status === 'banned') out.push({ ...base, kind: 'banned', why: 'Banned in Commander.' });
+    else if (status === 'not_legal') out.push({ ...base, kind: 'not-legal', why: 'Not legal in Commander.' });
+    else if (commander && (card.color_identity ?? []).some((x) => !identity.has(x))) {
+      out.push({ ...base, kind: 'colours', why: `Outside ${who}'s colours.` });
+    }
+    const limit = copyLimit(card);
+    if (quantity > limit) {
+      out.push({ ...base, kind: 'copies', limit, why: limit === 1 ? `${quantity} copies. Commander allows one of each card.` : `${quantity} copies. This card allows up to ${limit}.` });
+    }
+  }
+  return out;
 }
 
 /**
@@ -116,11 +176,15 @@ export function sourcesNeeded(pipCount: number, manaValue: number, gold = false)
 
 const COLOR_NAME: Record<Color, string> = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
 
-export function analyse({ commander, cards }: HealthInput): Health {
+export function analyse(input: HealthInput): Health {
+  const { commander } = input;
   const count = (list: typeof cards) => list.reduce((n, c) => n + c.quantity, 0);
+  // A second commander is one of the 100, but starts in the command zone, like the first.
+  const partner = input.cards.find((c) => c.slot === 'partner')?.card ?? null;
+  const cards = input.cards.filter((c) => c.slot !== 'partner');
   const lands = cards.filter((c) => isLand(c.card));
   const spells = cards.filter((c) => !isLand(c.card));
-  const size = count(cards) + (commander ? 1 : 0);
+  const size = count(input.cards) + (commander ? 1 : 0);
 
   // Curve: mana value 0 to 7+, spells only.
   const curve = Array.from({ length: 8 }, (_, mv) => ({ label: mv === 7 ? '7+' : String(mv), count: 0, cards: [] as string[] }));
@@ -138,7 +202,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
   const types = typeOrder.filter((t) => typeCounts.has(t)).map((label) => ({ label, count: typeCounts.get(label)! }));
 
   // Colour demand (pips in spells) against supply (what the mana cards make).
-  const identity = new Set<string>(commander?.color_identity ?? []);
+  const identity = deckIdentity([commander, partner]);
   const demand: Record<Color, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 };
   for (const { card, quantity } of spells) {
     const p = pips(manaCostOf(card));
@@ -153,21 +217,25 @@ export function analyse({ commander, cards }: HealthInput): Health {
   const makes = (card: ScryfallCard, color: Color) =>
     !!card.produced_mana?.includes(color) || fetchedColors(card, basics, landColors).has(color);
   const warnings_: Warning[] = [];
-  const casts = [...spells, ...(commander ? [{ card: commander, quantity: 1 }] : [])];
+  const casts = [...spells, ...[commander, partner].filter((c): c is ScryfallCard => !!c).map((card) => ({ card, quantity: 1 }))];
   const colors = shown.map((color) => {
     const landSources = count(lands.filter((c) => makes(c.card, color)));
-    const otherSources = count(spells.filter((c) => makes(c.card, color)));
+    const others = spells.filter((c) => makes(c.card, color));
+    const otherSources = count(others);
     // The spell that asks the most of this colour sets how many sources it needs.
     let needed: number | null = null;
     let neededFor: string | null = null;
+    let neededMv = 3;
     for (const { card } of casts) {
       const cost = manaCostOf(card);
       const want = Math.ceil(pips(cost)[color]);
       if (!want) continue;
       const gold = COLORS.filter((c) => pips(cost)[c] > 0).length > 1;
       const n = sourcesNeeded(want, card.cmc ?? want, gold);
-      if (needed === null || n > needed) { needed = n; neededFor = card.name; }
+      if (needed === null || n > needed) { needed = n; neededFor = card.name; neededMv = card.cmc ?? want; }
     }
+    // Spells that make the colour count for part of a source, by kind and by the mana value of the spell they help cast.
+    const weighted = others.reduce((n, c) => n + sourceWeight(c.card, neededMv) * c.quantity, 0);
     return {
       color,
       pips: Math.round(demand[color] * 10) / 10,
@@ -177,7 +245,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
       fetchLandSources: count(lands.filter((c) => !c.card.produced_mana?.includes(color) && makes(c.card, color))),
       needed,
       neededFor,
-      sources: Math.round((landSources + otherSources * 0.75) * 10) / 10,
+      sources: Math.round((landSources + weighted) * 10) / 10,
     };
   });
 
@@ -191,7 +259,7 @@ export function analyse({ commander, cards }: HealthInput): Health {
     });
   }
 
-  const gameChangers = [commander, ...cards.map((c) => c.card)]
+  const gameChangers = [commander, partner, ...cards.map((c) => c.card)]
     .filter((c): c is ScryfallCard => !!c && c.game_changer === true).map((c) => c.name);
 
   const warnings: Warning[] = [];
@@ -203,25 +271,16 @@ export function analyse({ commander, cards }: HealthInput): Health {
       detail: size > 100 ? `${size - 100} to cut.` : `${100 - size} to add.`,
     });
   }
-  if (commander) {
-    const outside = cards.filter((c) => (c.card.color_identity ?? []).some((x) => !identity.has(x)));
-    if (outside.length) {
-      warnings.push({
-        level: 'critical',
-        title: `${outside.length} card${outside.length === 1 ? '' : 's'} outside ${commander.name.split(',')[0]}'s colours`,
-        cards: outside.map((c) => c.card.name),
-      });
-    }
-  }
-  const extra = cards.filter((c) => c.quantity > 1 && !anyNumberAllowed(c.card));
-  if (extra.length) {
-    warnings.push({ level: 'critical', title: 'More than one copy of a card', detail: 'Commander is singleton.', cards: extra.map((c) => `${c.quantity}× ${c.card.name}`) });
-  }
-  for (const [status, label] of [['banned', 'Banned in Commander'], ['not_legal', 'Not legal in Commander']] as const) {
-    const hit = [commander, ...cards.map((c) => c.card)]
-      .filter((c): c is ScryfallCard => !!c && c.legalities?.commander === status).map((c) => c.name);
-    if (hit.length) warnings.push({ level: 'critical', title: label, cards: hit });
-  }
+  // The cards the deck can't have as it stands (the flagged zone on Cards and Tune), grouped.
+  const flags = deckFlags(input);
+  const flagged = (kind: Flag['kind'], title: (n: number) => string, detail?: string) => {
+    const hit = flags.filter((f) => f.kind === kind);
+    if (hit.length) warnings.push({ level: 'critical', title: title(hit.length), detail, cards: hit.map((f) => (kind === 'copies' ? `${f.quantity}× ${f.name}` : f.name)) });
+  };
+  flagged('colours', (n) => `${n} card${n === 1 ? '' : 's'} outside ${[commander, partner].filter(Boolean).map((c) => c!.name.split(',')[0]).join(' and ')}'s colours`);
+  flagged('copies', () => 'More than one copy of a card', 'Commander is singleton.');
+  flagged('banned', () => 'Banned in Commander');
+  flagged('not-legal', () => 'Not legal in Commander');
   if (gameChangers.length) {
     warnings.push({
       level: 'info',

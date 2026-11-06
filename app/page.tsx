@@ -36,14 +36,13 @@ const EXAMPLES = [
 
 /** The search that ran, for a follow-up to refine. */
 function previousOf(answer: api.AskResponse, thread: string[]): Previous {
-  const { kind, commander, query, constraints } = answer.interpretation;
+  const { kind, commander, query } = answer.interpretation;
   return {
     request: thread.join(' › '),
     kind,
     commander: commander?.name,
     cardName: kind === 'card' ? query.replace(/^!"|"$/g, '') : undefined,
     query,
-    constraints,
   };
 }
 
@@ -174,7 +173,7 @@ export default function SearchPage() {
   /**
    * Carry on a search - a recent one, a saved one, or the one on screen before
    * a reload - as it was left: run straight to Scryfall as it was read the
-   * first time, then its tab, pages and EDHREC toggle, then where it was
+   * first time, then its tab and pages, then where it was
    * scrolled. Refining it from there builds on the whole of it. Opening one
    * from the lists does not move it in Recent; refining it does.
    */
@@ -210,7 +209,7 @@ export default function SearchPage() {
       run('searching', () => api.combosFor(r.commander), done);
     } else {
       run('searching', () => api.runQuery(r.query, {
-        commander: r.commander, sort: parseSortKey(r.sort ?? null) ?? undefined, constraints: r.constraints,
+        commander: r.commander, sort: parseSortKey(r.sort ?? null) ?? undefined,
       }), done);
     }
   };
@@ -247,7 +246,6 @@ export default function SearchPage() {
     replay: replayNow,
     tab: s.tab,
     ...(views.cards?.page && views.cards.page > 1 ? { pages: views.cards.page } : {}),
-    ...(s.edhrecFull ? { edhrecFull: true } : {}),
   } : null;
   const sessionKey = session ? JSON.stringify(session) : '';
   useEffect(() => {
@@ -512,9 +510,6 @@ export default function SearchPage() {
           loadingMore={s.loadingMore}
           onSelect={setSelected}
           onAdd={setAdding}
-          edhrecFull={s.edhrecFull}
-          onEdhrecFull={answer && answer.interpretation.constraints !== undefined
-            && answer.interpretation.constraints !== answer.interpretation.query ? s.toggleEdhrecFull : undefined}
         />
       )}
 

@@ -21,7 +21,7 @@ import type { Finish, Identifier, ScryfallCard } from './scryfall';
 
 export interface Resolved {
   /** Cards for the deck, with how many of each, which finish and which board. */
-  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish; board: Board }>;
+  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish; board: Board; named?: 'commander' | 'companion' }>;
   /** The commander, when the list says or implies one. */
   commander: ScryfallCard | null;
   /** The finish of the commander's line, including a picked commander's. */
@@ -120,10 +120,13 @@ export async function resolveDecklist(
       commanderFinish = entry.finish;
       continue;
     }
-    const board: Board = entry.section === 'side' || entry.section === 'maybe' ? entry.section : 'main';
+    // A second card under Commander stays in the deck, named as a commander;
+    // a companion waits on the sideboard, named as the companion (commanders.ts).
+    const board: Board = entry.section === 'side' || entry.section === 'maybe' ? entry.section : entry.section === 'companion' ? 'side' : 'main';
+    const named = entry.section === 'commander' ? 'commander' as const : entry.section === 'companion' ? 'companion' as const : undefined;
     const existing = cards.find((c) => c.card.id === card.id);
     if (existing) existing.quantity += entry.quantity;
-    else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board });
+    else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board, ...(named ? { named } : {}) });
   }
   return { cards, commander, commanderFinish, outvoted: outvoted?.card.name ?? null, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
 }

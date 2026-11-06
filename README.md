@@ -7,8 +7,7 @@ Card data comes from [Scryfall](https://scryfall.com) and combos from
 [Commander Spellbook](https://commanderspellbook.com). The text of a
 plain-English search goes to Gemini to be planned — only if you give it an
 API key — as does a deck's card list and brief when you ask the model to tag
-it, and, if you switch it on, a commander's name goes to EDHREC. There
-is no account.
+it. There is no account.
 
 ## What it does
 
@@ -27,19 +26,18 @@ is plain English:
 - a card name spelled wrong
 
 A model reads the request and plans the search; the server runs it. The
-model only ever plans: every card and combo you see came back from Scryfall,
-EDHREC or Commander Spellbook, so a model that misremembers a card can give
+model only ever plans: every card and combo you see came back from Scryfall
+or Commander Spellbook, so a model that misremembers a card can give
 you a bad search but never a card that doesn't exist.
 
 The *All matching cards* view shows 175 cards at a time, with *Load more*
 for the next page in the same order.
 
-**Name a commander and the answer comes in three tabs:**
+**Name a commander and the answer comes in two tabs:**
 
 | Tab | Shows | Order |
 |---|---|---|
-| *Played in Omnath decks* (opens first) | what that commander's decks actually run, from EDHREC — narrowed by the conditions you stated ("enchantments", "under 5 mana") but not by the AI's guesses at synergy, or EDHREC's own lists when you stated none | share of its decks |
-| *All matching cards* | everything that fits the search in its colours and legal in Commander, from Scryfall — including cards nobody has tried yet | the sort menu; most played in Commander by default |
+| *All matching cards* | everything that fits the search in its colours and legal in Commander, from Scryfall | the sort menu; newest first by default |
 | *Combos* | Commander Spellbook's combos for it | most popular |
 
 Without a commander there is just the one view the search was for.
@@ -62,9 +60,8 @@ any profile.
 
 **Building a deck** happens on its page:
 
-- **Add cards** opens a window that starts on suggestions - what the
-  commander's decks play on EDHREC that this deck does not have yet - and
-  takes plain English (*ramp that fetches lands*), Scryfall syntax or a card
+- **Add cards** opens a window that starts on the newest cards in the
+  commander's colours, and takes plain English (*ramp that fetches lands*), Scryfall syntax or a card
   name, always for the deck's commander. Each card has *Add* and *Maybe*.
 - **Main, maybeboard and sideboard.** Only the main board and the commander
   count towards 100.
@@ -345,7 +342,6 @@ npm run dev          # http://localhost:3000
 | `MISTRAL_API_KEY` | *(none)* | Mistral's models in Settings |
 | `GEMINI_MODEL` | `gemini-flash-lite-latest` | which model translates |
 | `GEMINI_TAG_MODELS` | 3.8, 3.7, 3.6, 3.5 Flash | the ladder of models that suggest and apply deck tags, best first, comma-separated; each thinks at `high`. Leave out aliases such as `gemini-flash-latest`, which share another model's allowance |
-| `MTG_EDHREC` | *(off)* | `on` adds the *Played in … decks* tab to commander searches — [read this first](#edhrec) |
 
 Put these in `.env` next to `package.json`; `next start` reads it.
 
@@ -407,8 +403,6 @@ Enter   → Scryfall syntax?  → run as written, no model
                         (several fit? → ask which, carry on with the pick)
                       → model shown its real rules text, asked again
                       → All matching cards: Scryfall, scoped to its colours
-                      → Played in its decks: EDHREC's cards checked
-                        against the same search, by share of decks
                       ├ rejected, empty, or filters nothing → model retries once, told why
                       └ still nothing → Scryfall's fuzzy name match
 
@@ -418,7 +412,7 @@ sort / edit / tab   → re-run without the model
 
 The sort is sent to Scryfall rather than applied in the browser: only the
 first page of results is on screen, and sorting that would show "the
-cheapest of the 175 most played" rather than the cheapest.
+cheapest of the 175 newest" rather than the cheapest.
 
 A few choices in there are deliberate:
 
@@ -428,15 +422,15 @@ A few choices in there are deliberate:
   slower and harder to reason about. That style is kept for a future deck
   assistant, where open-ended reasoning pays for itself.
 - **Commanders are looked up, not remembered.** The model only says who the
-  commander is — "azula", "vivi" is fine. Scryfall supplies the card, most
-  played namesake first, and with it the real colour identity. The model is
+  commander is — "azula", "vivi" is fine. Scryfall supplies the card, newest
+  namesake first, and with it the real colour identity. The model is
   then shown the commander's rules text and asked again, so "works well with
   Azula" is judged against what Azula actually does. This is what makes a
   commander printed after the model was trained work at all.
 - **Combos come from Commander Spellbook.** Scryfall has no notion of a
   combo, so no query the model could write would find one.
-- **A query that filters nothing is sent back.** `f:commander order:edhrec`
-  is 30,000 cards led by Sol Ring — a non-answer that looks like an answer.
+- **A query that filters nothing is sent back.** `f:commander` is 30,000
+  cards — a non-answer that looks like an answer.
   The model gets one more try; if it insists, it may be what was meant.
 - **Fuzzy name matching is the last resort, not the first.** It is generous
   enough that "green ramp" finds *Greenbelt Rampager*, so trying it first
@@ -455,26 +449,15 @@ A few choices in there are deliberate:
 
 | | What for | Access |
 |---|---|---|
-| [Scryfall](https://scryfall.com/docs/api) | cards, prices, tags, popularity order | official API |
+| [Scryfall](https://scryfall.com/docs/api) | cards, prices, tags | official API |
 | [Commander Spellbook](https://backend.commanderspellbook.com/schema/swagger/) | combos | official API, MIT-licensed |
-| [EDHREC](https://edhrec.com) | how often a commander's decks play each card | **off by default**, see below |
 
-### EDHREC
+### No EDHREC
 
-EDHREC is the best source there is for "cards that work well with this
-commander", but it has no public API, and its terms of use forbid automated
-requests to the site. Its website loads each commander's data as a JSON
-file (`json.edhrec.com/pages/commanders/<name>.json`); with `MTG_EDHREC=on`,
-the server reads that same file. From it come the *Played in … decks* tab
-and the "in 74% of Omnath decks" line on each card. Off, commander searches
-still work, without that tab.
-
-That is a knowing choice for a personal, self-hosted tool, and it is kept
-small — each commander is fetched at most once a day, and a failure is
-remembered for an hour. The endpoint is undocumented and may change or be
-blocked; if it is, searches carry on without it. The *EDHREC ↗* link on
-every commander search is always there, since a person following a link is
-how the site is meant to be used.
+Until November 2026 the app could read EDHREC's commander pages. It no
+longer does: EDHREC's terms forbid using its data in another app, so cards
+are judged by what they do for a deck's plan, never by how many other decks
+play them, and search sorts newest first rather than "most played".
 
 ## Being a good Scryfall citizen
 

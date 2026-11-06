@@ -8,8 +8,7 @@
  *     cards                -> a Scryfall query, scoped to the commander if any
  *
  * When a commander is named, the answer comes in views the page shows as
- * tabs: what that commander's decks actually play (EDHREC), every card that
- * fits (Scryfall), and combos (Commander Spellbook).
+ * tabs: every card that fits (Scryfall) and combos (Commander Spellbook).
  *
  * The model plans; this runs the plan. A commander is looked up on Scryfall
  * rather than taken from the model's memory, and the model is shown its real
@@ -21,11 +20,10 @@
  *
  * Every step is recorded, so the page can show exactly what ran. Everything
  * that talks to the network is passed in, so the routing can be tested
- * without Scryfall, Spellbook, EDHREC or a model.
+ * without Scryfall, Spellbook or a model.
  */
 
 import { colours, describeQuery, isUnfiltered } from './describe';
-import { edhrecUrl, type CardStats, type CommanderPage } from './edhrec';
 import type { Context, Kind, Previous, Translation, Translator } from './gemini';
 import type { ScryfallCard, SearchResult } from './scryfall';
 import { imageOf, manaCostOf, oracleTextOf, ScryfallError, typeLineOf } from './scryfall';
@@ -39,7 +37,6 @@ export interface CommanderRef {
   /** Colour identity as letters, e.g. "UBR". Empty for colourless. */
   identity: string;
   manaCost: string;
-  edhrecUrl: string;
   image?: string | null;
 }
 
@@ -71,34 +68,12 @@ export interface Interpretation {
   commander?: CommanderRef;
   /** The order the card results are in. */
   sort?: Sort;
-  /** What the EDHREC tab was narrowed by: only the conditions the request stated. */
-  constraints?: string;
-}
-
-/** What a commander's decks play, from EDHREC, as the page's first tab. */
-export interface EdhrecView {
-  commander: string;
-  /** Decks EDHREC has seen for this commander. */
-  decks: number;
-  url: string;
-  cards: ScryfallCard[];
-  /** Figures by Scryfall card id. */
-  stats: Record<string, CardStats>;
-  /** EDHREC's own lists when nothing narrowed them; one list of matches when the search did. */
-  sections: Array<{ header: string; ids: string[] }>;
-  /** True when the search's conditions narrowed EDHREC's list. */
-  filtered: boolean;
-  /** Those conditions in plain English, so the tab can say what it kept. */
-  narrowedBy?: string;
 }
 
 export interface Interpreted extends SearchResult {
   interpretation: Interpretation;
   trace: Step[];
   combos?: Combo[];
-  /** EDHREC figures for the Scryfall results, by card id, when a commander is named. */
-  stats?: Record<string, CardStats>;
-  edhrec?: EdhrecView;
   /**
    * The commander named could be several; the page asks which, then sends
    * `plan` back with the answer so the search carries on without asking the
@@ -120,8 +95,6 @@ export interface Deps {
   findCommanders: (mention: string) => Promise<ScryfallCard[]>;
   cardsNamed: (names: string[]) => Promise<ScryfallCard[]>;
   searchCombos: (query: string) => Promise<Combo[]>;
-  /** Null unless EDHREC is switched on. */
-  edhrec: ((commander: string) => Promise<CommanderPage | null>) | null;
   /** Null when no model is configured; searches then run as typed. */
   translate: Translator | null;
   /** The clock, so the time budget can be tested. */
@@ -134,9 +107,6 @@ const EMPTY: SearchResult = { cards: [], totalCards: 0, hasMore: false };
 // that is mostly the model guessing, at a second or more per guess.
 const ATTEMPTS = 2;
 
-// Scryfall stops parsing a query at around 1,000 characters, so EDHREC's
-// card names are checked against a search in batches that fit.
-const QUERY_BUDGET = 950;
 
 // A search makes up to three model calls. When the model is slow each can
 // take its full timeout, so the optional ones - the rules-text pass and the
@@ -247,32 +217,25 @@ export async function interpret(
  */
 export async function runQuery(
   query: string, commanderName: string | null, deps: Deps,
-  sort: Sort | null = null, { withEdhrec = true, page = 1, constraints }: { withEdhrec?: boolean; page?: number; constraints?: string } = {},
+  sort: Sort | null = null, { page = 1 }: { page?: number } = {},
 ): Promise<Interpreted> {
   const trace: Step[] = [{ text: 'Ran the query without the AI' }];
   const commander = commanderName ? await findExactly(commanderName, deps) : null;
   // An `order:` typed into the query wins over the menu.
   const { filters, sort: typed } = splitSort(query);
-  const edhrecPage = commander ? await pageFor(commander, deps, trace) : null;
-  const { sort: used, ...result } = await runCards(filters, commander, edhrecPage, deps, trace, typed ?? sort ?? DEFAULT_SORT, page);
-  // A later page of results only adds to the Scryfall tab.
-  const edhrec = commander && edhrecPage && withEdhrec && page === 1
-    ? await edhrecView(constraints ?? filters, commander, edhrecPage, deps, trace)
-    : undefined;
-  // A search run again from the recent list narrows EDHREC as it first did.
+  const { sort: used, ...result } = await runCards(filters, commander, deps, trace, typed ?? sort ?? DEFAULT_SORT, page);
   const interpretation: Interpretation = {
     via: 'syntax', kind: 'cards', query: filters, sort: used,
     commander: commander ? refOf(commander) : undefined,
-    ...(constraints !== undefined ? { constraints } : {}),
   };
-  return { ...result, trace, interpretation, edhrec };
+  return { ...result, trace, interpretation };
 }
 
 /** Combos for a commander, for the Combos tab when it is opened later. */
 export async function runCombos(commanderName: string, deps: Deps): Promise<Interpreted> {
   const trace: Step[] = [];
   const commander = await findExactly(commanderName, deps);
-  const plan: Translation = { kind: 'combos', cardName: null, commander: commanderName, query: '', constraints: null, explanation: '' };
+  const plan: Translation = { kind: 'combos', cardName: null, commander: commanderName, query: '', explanation: '' };
   return comboRoute(plan, commander, deps, trace);
 }
 
@@ -376,7 +339,6 @@ async function cardsRoute(
   }
 
   const ref = commander ? refOf(commander) : undefined;
-  const page = commander ? await pageFor(commander, deps, trace) : null;
   let last: Interpretation | undefined;
   let unfiltered: Interpreted | undefined;
   let feedback: string | undefined;
@@ -400,9 +362,9 @@ async function cardsRoute(
     const { filters, sort } = splitSort(plan.query);
     last = { via: 'ai', kind: 'cards', query: filters, explanation: plan.explanation || undefined, commander: ref };
 
-    let result: SearchResult & { stats?: Record<string, CardStats> };
+    let result: SearchResult;
     try {
-      const { sort: used, ...found } = await runCards(filters, commander, page, deps, trace, sort ?? DEFAULT_SORT);
+      const { sort: used, ...found } = await runCards(filters, commander, deps, trace, sort ?? DEFAULT_SORT);
       result = found;
       last = { ...last, sort: used };
     } catch (error) {
@@ -428,10 +390,7 @@ async function cardsRoute(
       continue;
     }
 
-    // The EDHREC tab takes only what was asked for, not the model's synergy guesses.
-    const stated = plan.constraints === null ? filters : splitSort(plan.constraints).filters;
-    const edhrec = commander && page ? await edhrecView(stated, commander, page, deps, trace) : undefined;
-    return { ...result, trace, interpretation: { ...last, constraints: stated }, edhrec };
+    return { ...result, trace, interpretation: last };
   }
 
   if (unfiltered) return unfiltered;
@@ -478,113 +437,16 @@ async function comboStep(query: string, deps: Deps, trace: Step[]): Promise<Comb
   }
 }
 
-/** A commander's EDHREC page, noting in the trace when there is none. */
-async function pageFor(commander: ScryfallCard, deps: Deps, trace: Step[]): Promise<CommanderPage | null> {
-  if (!deps.edhrec) return null;
-  const page = await deps.edhrec(commander.name);
-  trace.push({
-    text: page
-      ? `Read EDHREC's page for ${commander.name}: ${page.decks.toLocaleString()} decks, ${page.stats.size} cards listed`
-      : `EDHREC has no data for ${commander.name} yet`,
-  });
-  return page;
-}
-
-/**
- * Every card that fits, from Scryfall, scoped to the commander if there is
- * one. With EDHREC data, each card also carries how often that commander's
- * decks play it - shown on the tile, whatever the sort.
- */
+/** Every card that fits, from Scryfall, scoped to the commander if there is one. */
 async function runCards(
-  filters: string, commander: ScryfallCard | null, edhrecPage: CommanderPage | null,
+  filters: string, commander: ScryfallCard | null,
   deps: Deps, trace: Step[], sort: Sort, page = 1,
-): Promise<SearchResult & { stats?: Record<string, CardStats>; sort: Sort }> {
+): Promise<SearchResult & { sort: Sort }> {
   const result = await searchStep(scoped(filters, commander), deps, trace, sort, page);
-  if (!edhrecPage) return { ...result, sort };
-  return { ...result, sort, stats: statsById(result.cards, edhrecPage.stats) };
-}
-
-/**
- * What the commander's decks actually play, for the EDHREC tab.
- *
- * With no conditions this is EDHREC's own lists. With conditions ("green
- * ramp"), every card EDHREC lists is checked against the same Scryfall
- * search, in batches that fit Scryfall's query length, and the matches are
- * ranked by how many of the commander's decks run them. Only cards those
- * decks really play can appear here.
- */
-async function edhrecView(
-  filters: string, commander: ScryfallCard, page: CommanderPage, deps: Deps, trace: Step[],
-): Promise<EdhrecView> {
-  const names = [...page.stats.keys()];
-  const base = { commander: commander.name, decks: page.decks, url: edhrecUrl(commander.name) };
-
-  if (!filters.trim()) {
-    const cards = await deps.cardsNamed(names);
-    trace.push({ text: `Fetched the ${cards.length} cards EDHREC lists for ${commander.name} from Scryfall` });
-    const idOf = nameIndex(cards);
-    const sections = page.sections
-      .map((s) => ({ header: s.header, ids: s.names.map(idOf).filter((id): id is string => !!id) }))
-      .filter((s) => s.ids.length);
-    return { ...base, cards, stats: statsById(cards, page.stats), sections, filtered: false };
-  }
-
-  const full = scoped(filters, commander);
-  const found = new Map<string, ScryfallCard>();
-  // All at once: the Scryfall client spaces them out. One failed batch only
-  // costs its own cards.
-  const results = await Promise.all(batches(full, names).map((batch) =>
-    deps.search(batch, DEFAULT_SORT).catch(() => ({ cards: [] as ScryfallCard[] }))));
-  for (const { cards } of results) for (const card of cards) found.set(card.id, card);
-  const stats = statsById([...found.values()], page.stats);
-  const cards = [...found.values()].sort((a, b) => (stats[b.id]?.inclusion ?? 0) - (stats[a.id]?.inclusion ?? 0));
-  trace.push({
-    text: `Checked all ${names.length} cards EDHREC lists for ${commander.name} against the same search`,
-    described: describeQuery(full),
-    count: cards.length,
-  });
-  return {
-    ...base, cards, stats, sections: [{ header: 'Matching your search', ids: cards.map((c) => c.id) }],
-    filtered: true, narrowedBy: describeQuery(filters),
-  };
-}
-
-function statsById(cards: ScryfallCard[], stats: Map<string, CardStats>): Record<string, CardStats> {
-  const byId: Record<string, CardStats> = {};
-  for (const card of cards) {
-    const s = stats.get(card.name) ?? stats.get(front(card.name));
-    if (s) byId[card.id] = s;
-  }
-  return byId;
-}
-
-/** Name -> card id, matching a double-faced card by either its full name or its front. */
-function nameIndex(cards: ScryfallCard[]): (name: string) => string | undefined {
-  const ids = new Map<string, string>();
-  for (const card of cards) {
-    ids.set(card.name, card.id);
-    ids.set(front(card.name), card.id);
-  }
-  return (name) => ids.get(name) ?? ids.get(front(name));
+  return { ...result, sort };
 }
 
 const front = (name: string) => name.split(' // ')[0];
-
-/** `full` plus an exact-name group, as many names per query as fit. */
-function batches(full: string, names: string[]): string[] {
-  const out: string[] = [];
-  let group: string[] = [];
-  const build = (g: string[]) => `${full} (${g.map(exactName).join(' or ')})`;
-  for (const name of names) {
-    if (group.length && build([...group, name]).length > QUERY_BUDGET) {
-      out.push(build(group));
-      group = [];
-    }
-    group.push(name);
-  }
-  if (group.length) out.push(build(group));
-  return out;
-}
 
 /**
  * Add a commander's colour identity and Commander legality to a query, and
@@ -741,7 +603,7 @@ const identityOf = (card: ScryfallCard) =>
 function refOf(card: ScryfallCard): CommanderRef {
   return {
     name: card.name, identity: identityOf(card), manaCost: manaCostOf(card),
-    edhrecUrl: edhrecUrl(card.name), image: imageOf(card, 'small'),
+    image: imageOf(card, 'small'),
   };
 }
 

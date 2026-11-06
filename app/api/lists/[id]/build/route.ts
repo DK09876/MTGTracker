@@ -35,7 +35,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     commander: list.commander,
     cards: main,
     roles,
-    lands: health.lands,
+    lands: plan.landNumber.have,
     averageMv: health.averageMv,
     size: health.size,
     colors: health.colors.map((c) => ({ color: c.color, sources: c.sources, needed: c.needed, neededFor: c.neededFor })),
@@ -44,6 +44,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // The plan's styles, flip turn and land range, as the owner set them.
     style: { label: plan.style2 ? `${plan.style.label} + ${plan.style2.label}` : plan.style.label, note: plan.style.note },
     landRange: plan.lands,
+    landNumber: plan.landNumber,
     flip: plan.flip.value,
   }));
 }

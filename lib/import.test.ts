@@ -150,3 +150,25 @@ describe('resolving from the local copy first', () => {
     expect(result.later).toEqual([]);
   });
 });
+
+describe('second commanders and companions in a list', () => {
+  const tymna = card('Tymna the Weaver', 'c16', '32', { type_line: 'Legendary Creature — Human Cleric' });
+  const thrasios = card('Thrasios, Triton Hero', 'c16', '46', { type_line: 'Legendary Creature — Merfolk Wizard' });
+  const lurrus = card('Lurrus of the Dream-Den', 'iko', '226', { type_line: 'Legendary Creature — Cat Nightmare' });
+  const collection = () => vi.fn(async (identifiers: Identifier[]) => ({
+    cards: identifiers.map((id) => [tymna, thrasios, lurrus, bolt].find((c) => 'name' in id && c.name === id.name)!).filter(Boolean),
+    notFound: [],
+  }));
+
+  it('keeps a second card under Commander in the deck, named as a commander', async () => {
+    const result = await resolveDecklist('Commander\n1 Tymna the Weaver\n1 Thrasios, Triton Hero\nDeck\n1 Lightning Bolt', collection(), { commanderPicked: null });
+    expect(result.commander?.name).toBe('Tymna the Weaver');
+    expect(result.cards.find((c) => c.card.name === 'Thrasios, Triton Hero')).toMatchObject({ board: 'main', named: 'commander' });
+    expect(result.cards.find((c) => c.card.name === 'Lightning Bolt')?.named).toBeUndefined();
+  });
+
+  it('puts a companion on the sideboard, named as the companion', async () => {
+    const result = await resolveDecklist('Commander\n1 Tymna the Weaver\nCompanion\n1 Lurrus of the Dream-Den\nDeck\n1 Lightning Bolt', collection(), { commanderPicked: null });
+    expect(result.cards.find((c) => c.card.name === 'Lurrus of the Dream-Den')).toMatchObject({ board: 'side', named: 'companion' });
+  });
+});
