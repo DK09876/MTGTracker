@@ -732,6 +732,7 @@ type TuneAction =
   | { action: 'undo'; undo: unknown }
   | { action: 'keep'; cardId: string; keep: boolean }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
+  | { action: 'finishPicks'; choice?: 'rules' | 'claude'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
   | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };
 

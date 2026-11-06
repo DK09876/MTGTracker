@@ -29,9 +29,12 @@ export interface TuneStore {
   /** For a pile: fill to 100, or pick the best 100 from everything. */
   pile?: 'fill' | 'best' | null;
   log: FixLog[];
+  /** Finish the deck: where the picks come from, remembered per deck, and whether the rules' picks show beside Claude's. */
+  finishPicks?: 'rules' | 'claude';
+  finishShowRules?: boolean;
 }
 
-const EMPTY: TuneStore = { changes: { add: [], cut: [] }, dismissed: [], proposals: {}, cutReasons: {}, pile: null, log: [] };
+const EMPTY: TuneStore = { changes: { add: [], cut: [] }, dismissed: [], proposals: {}, cutReasons: {}, pile: null, log: [], finishPicks: 'rules', finishShowRules: false };
 
 export function tuneStore(listId: string): TuneStore {
   const r = db().get('SELECT state FROM deck_tune WHERE listId = ?', [listId]) as { state: string } | null;
@@ -45,6 +48,8 @@ export function tuneStore(listId: string): TuneStore {
       cutReasons: s.cutReasons && typeof s.cutReasons === 'object' ? s.cutReasons : {},
       pile: s.pile ?? null,
       log: Array.isArray(s.log) ? s.log : [],
+      finishPicks: s.finishPicks === 'claude' ? 'claude' : 'rules',
+      finishShowRules: s.finishShowRules === true,
     };
   } catch {
     return structuredClone(EMPTY);

@@ -13,6 +13,7 @@
  *   undo {undo}            put back exactly what an apply moved; staged changes stay
  *   keep {cardId, keep}    ★ keep a card (Claude's "keep this")
  *   pile {choice}          for a pile: 'fill' to 100, or the 'best' 100 from everything
+ *   finishPicks {choice?, showRules?}  Finish the deck: picks from the rules or Claude, remembered per deck
  *   verdict {id, verdict}  how a fix went; "worse" stages undoing it
  *   propose {intent, title, why, items}  Claude's changes from Chat, waiting in Tune
  */
@@ -102,6 +103,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       setKeep(id, card.oracle_id ?? card.id, b.keep !== false);
       return NextResponse.json({ ok: true });
     }
+    case 'finishPicks':
+      updateTune(id, (s) => {
+        if (b.choice === 'rules' || b.choice === 'claude') s.finishPicks = b.choice;
+        if (typeof b.showRules === 'boolean') s.finishShowRules = b.showRules;
+      });
+      return NextResponse.json({ ok: true });
     case 'pile':
       updateTune(id, (s) => { s.pile = b.choice === 'fill' || b.choice === 'best' ? b.choice : null; });
       return NextResponse.json({ ok: true });

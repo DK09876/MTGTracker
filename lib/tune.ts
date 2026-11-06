@@ -231,7 +231,7 @@ function planOf(ctx: Context, card: ScryfallCard): string[] {
 }
 
 /** Cards that may be suggested to add: in the colours, legal, not in the deck, within the bracket, budget, "only mine" and deck rule. */
-function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | null): ScryfallCard[] {
+export function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | null): ScryfallCard[] {
   const inDeck = new Set(ctx.all.filter((c) => c.board === 'main').map((c) => front(c.card.name)));
   for (const c of ctx.commanders) inDeck.add(front(c.name));
   const budget = ctx.plan.budget;
@@ -251,7 +251,7 @@ function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | null): Sc
   return out;
 }
 
-const gcRoomOf = (ctx: Context) => (ctx.gcLimit === null ? null : Math.max(0, ctx.gcLimit - [...ctx.commanders, ...ctx.main.map((c) => c.card)].filter((c) => c.game_changer === true).length));
+export const gcRoomOf = (ctx: Context) => (ctx.gcLimit === null ? null : Math.max(0, ctx.gcLimit - [...ctx.commanders, ...ctx.main.map((c) => c.card)].filter((c) => c.game_changer === true).length));
 
 const whereOf = (ctx: Context, card: ScryfallCard) => {
   const inPool = ctx.pool.find((p) => p.card.name === card.name);
@@ -270,7 +270,7 @@ const reasonText = (ctx: Context, card: ScryfallCard) => {
   return [r.fit.matches.length ? `Fits ${short(ctx.list.commander?.name ?? 'the commander')}: ${r.fit.matches.join(', ')}` : '', r.q.reasons.join(', '), whereOf(ctx, card) ?? ''].filter(Boolean).join(' · ') || 'In your colours';
 };
 
-function addItem(ctx: Context, key: string, card: ScryfallCard, why?: string, quantity = 1, how?: How): Suggestion {
+export function addItem(ctx: Context, key: string, card: ScryfallCard, why?: string, quantity = 1, how?: How): Suggestion {
   return { key, add: { ...ref(card, { where: whereOf(ctx, card), from: ctx.pool.find((p) => p.card.id === card.id)?.board }), quantity }, why: why ?? reasonText(ctx, card), how };
 }
 
@@ -678,6 +678,8 @@ export interface TuneState {
   fix?: { symptom: Symptom; evidence: string[] };
   lands?: { have: number; range: [number, number]; want: number; how: { inputs: string[]; steps: string[] }; mine: boolean; colors: Array<{ color: string; name: string; share: number; sources: number; needed: number | null; neededFor: string | null }> };
   cuts?: { counts: Record<string, number>; type: { type: 'A' | 'B'; why: string }; curve: string | null; settings: unknown; overridden: Record<string, string> };
+  /** Finish the deck: where the picks come from, and whether Claude's are in. */
+  finish?: { picks: 'rules' | 'claude'; showRules: boolean; claudeReady: boolean };
 }
 
 export async function tuneState(list: List, profileId: string, opts: { intent?: Intent; symptom?: Symptom } = {}): Promise<TuneState> {
@@ -699,7 +701,14 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
 
   let groups: SuggestionGroup[] = [];
   const out: Partial<TuneState> = {};
-  if (intent === 'finish') groups = finishGroups(ctx);
+  if (intent === 'finish') {
+    // Rules by default; Claude's picks when chosen for this deck, with the rules' beside them if asked.
+    const picks = ctx.store.finishPicks ?? 'rules';
+    const claude = ctx.store.proposals.finish ?? [];
+    const showRules = picks === 'rules' || !!ctx.store.finishShowRules;
+    groups = picks === 'claude' ? [...claude, ...(showRules ? finishGroups(ctx) : [])] : finishGroups(ctx);
+    out.finish = { picks, showRules: !!ctx.store.finishShowRules, claudeReady: claude.length > 0 };
+  }
   else if (intent === 'find') { const f = await findGroups(ctx); groups = f.groups; out.pile = f.pile; }
   else if (intent === 'swaps') groups = [...poolSwaps(ctx, 'swaps', '', 12), ...upgradeGroups(ctx)];
   else if (intent === 'cuts') { const c = await cutGroups(ctx, lp.landCut); groups = [...c.groups]; if (lp.have > lp.range[1]) groups.splice(flags ? 1 : 0, 0, ...lp.groups.map((g) => ({ ...g, filter: 'other' as CutFilter }))); out.cuts = { counts: c.counts, type: c.type, curve: c.curve, settings: c.settings, overridden: c.overridden }; }
@@ -707,7 +716,7 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
   else if (intent === 'lands') groups = lp.groups;
   if (intent === 'lands') out.lands = { have: lp.have, range: lp.range, want: lp.want, how: lp.how, mine: lp.mine, colors: lp.colors };
   // Claude's proposals for this intent join the rules' groups.
-  groups = [...(ctx.store.proposals[intent] ?? []), ...groups];
+  if (intent !== 'finish') groups = [...(ctx.store.proposals[intent] ?? []), ...groups];
   const cutsTo = cutBoard(ctx.sections);
   return {
     intent, suggested, size: ctx.size, pool: poolCount, badges,
