@@ -13,13 +13,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
+import DeckPicker from '@/components/DeckPicker';
+import LayoutThumb from '@/components/LayoutThumb';
 import { SeatAvatar } from '@/components/GameBits';
 import * as api from '@/lib/api';
+import { LAYOUTS, layoutFor } from '@/lib/game-layouts';
 import { SEAT_COLOURS, seatLabels } from '@/lib/game-play';
 
 const MAX = 6;
 const LIVES = [40, 30, 20];
-const OTHER = '__other';
 
 interface Pick { key: number; memberId: string; deckId: string | null; deckName: string }
 
@@ -39,6 +41,8 @@ export default function NewGamePage() {
   const [life, setLife] = useState(40);
   const [first, setFirst] = useState<number | 'random'>('random');
   const [borrowing, setBorrowing] = useState(false);
+  // The table layout picked for each number of players; the last game's to start with.
+  const [layouts, setLayouts] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -54,6 +58,10 @@ export default function NewGamePage() {
       const owned = new Set(Object.values(d.decks).flat().map((x) => x.id));
       const fromLast = lastGame?.seats.filter((s) => here.has(s.memberId))
         .map((s) => ({ key: nextKey++, memberId: s.memberId, deckId: s.deckId && owned.has(s.deckId) ? s.deckId : null, deckName: s.deckName })) ?? [];
+      // One deck at one seat: a repeat (an old game from before that rule) takes the player's next free deck.
+      for (let k = 0; k < fromLast.length; k++) {
+        if (fromLast[k].deckId && fromLast.slice(0, k).some((x) => x.deckId === fromLast[k].deckId)) fromLast[k] = { ...seatFor(fromLast[k].memberId, fromLast.slice(0, k), d.decks), key: fromLast[k].key };
+      }
       if (fromLast.length >= 2) {
         setSeats(fromLast);
         setBorrowing(lastGame.borrowing);
@@ -63,6 +71,9 @@ export default function NewGamePage() {
         setSeats(fresh);
       }
       if (lastGame) setLife(lastGame.startingLife);
+      const picked: Record<number, string> = {};
+      for (const g of [...p.games].reverse()) if (g.layout) picked[g.seats.length] = g.layout;
+      setLayouts(picked);
     }).catch((e: Error) => setError(e.message));
   }, [groupId, router]);
 
@@ -98,7 +109,7 @@ export default function NewGamePage() {
     setStarting(true);
     try {
       const firstSeat = first === 'random' ? Math.floor(Math.random() * seats.length) : first;
-      const { id } = await api.startGame(groupId, seats, life, firstSeat, borrowing);
+      const { id } = await api.startGame(groupId, seats, life, firstSeat, borrowing, layoutFor(seats.length, layouts[seats.length]).id);
       router.push(`/games/play/${id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start the game');
@@ -160,14 +171,6 @@ export default function NewGamePage() {
           <ol className="flex flex-col gap-2">
             {seats.map((s, i) => {
               const m = members.get(s.memberId);
-              const own = decks[s.memberId] ?? [];
-              const chosen = s.deckId ? owners.get(s.deckId)?.deck : undefined;
-              const lender = s.deckId && owners.get(s.deckId)?.owner !== s.memberId ? members.get(owners.get(s.deckId)!.owner) : undefined;
-              // With borrowing, everyone's decks: the pilot's own first, then each other member's.
-              const groups = borrowing
-                ? [{ owner: s.memberId, list: own }, ...page.group.members.filter((x) => x.id !== s.memberId).map((x) => ({ owner: x.id, list: decks[x.id] ?? [] }))].filter((g) => g.list.length)
-                : [{ owner: s.memberId, list: own }].filter((g) => g.list.length);
-              const typing = !s.deckId;
               const arrows = (
                 <>
                   <button type="button" aria-label={`Move ${m?.name} up`} disabled={i === 0} onClick={() => move(i, -1)} className="h-8 w-8 rounded-lg border border-[var(--border)] disabled:opacity-30">↑</button>
@@ -179,47 +182,45 @@ export default function NewGamePage() {
                 <li key={s.key} className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 sm:flex-row sm:items-center">
                   <span className="flex min-w-0 items-center gap-2 sm:w-44 sm:shrink-0">
                     <span className="w-5 text-center text-sm font-bold" style={{ color: SEAT_COLOURS[i] }}>{i + 1}</span>
-                    <SeatAvatar art={chosen?.commander?.art ?? m?.art} name={m?.name ?? '?'} seat={i} size={34} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold" title={m?.name}>{m?.name}</span>
-                      {lender && <span className="block truncate text-[11px] text-[var(--muted)]">borrowing {lender.name}’s</span>}
-                    </span>
+                    <SeatAvatar art={m?.art} name={m?.name ?? '?'} seat={i} size={34} />
+                    <span className="min-w-0 flex-1 truncate font-semibold" title={m?.name}>{m?.name}</span>
                     <span className="flex shrink-0 gap-1 sm:hidden">{arrows}</span>
                   </span>
-                  <div className="flex min-w-0 flex-1 gap-2">
-                    {groups.length > 0 && (
-                      <select
-                        aria-label={`Seat ${i + 1} deck`}
-                        value={typing ? OTHER : s.deckId!}
-                        onChange={(e) => {
-                          const d = owners.get(e.target.value)?.deck;
-                          setDeck(i, d ? { deckId: d.id, deckName: d.name } : { deckId: null, deckName: '' });
-                        }}
-                        className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-                      >
-                        {groups.map((g) => {
-                          const options = g.list.map((d) => <option key={d.id} value={d.id}>{d.name}{d.commander ? ` - ${d.commander.name.split(',')[0]}` : ''}</option>);
-                          return groups.length > 1 ? <optgroup key={g.owner} label={g.owner === s.memberId ? `${m?.name}’s decks` : `Borrow from ${members.get(g.owner)?.name}`}>{options}</optgroup> : options;
-                        })}
-                        <option value={OTHER}>Another deck…</option>
-                      </select>
-                    )}
-                    {typing && (
-                      <input
-                        aria-label={`${m?.name}’s deck name`}
-                        value={s.deckName}
-                        onChange={(e) => setDeck(i, { deckName: e.target.value })}
-                        placeholder="Deck or commander (optional)"
-                        maxLength={60}
-                        className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1.5 text-sm"
-                      />
-                    )}
-                  </div>
+                  <DeckPicker
+                    seat={i}
+                    pilot={m!}
+                    members={page.group.members}
+                    decks={decks}
+                    borrowing={borrowing}
+                    value={{ deckId: s.deckId, deckName: s.deckName }}
+                    taken={Object.fromEntries(seats.flatMap((x, k) => (x.deckId && k !== i ? [[x.deckId, k]] : [])))}
+                    onChange={(c) => setDeck(i, c)}
+                  />
                   <span className="flex shrink-0 gap-1 max-sm:hidden">{arrows}</span>
                 </li>
               );
             })}
           </ol>
+        </section>
+      )}
+
+      {(LAYOUTS[seats.length] ?? []).length > 1 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--muted)]">Table layout</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {LAYOUTS[seats.length].map((l) => {
+              const on = layoutFor(seats.length, layouts[seats.length]).id === l.id;
+              return (
+                <button key={l.id} type="button" aria-pressed={on} onClick={() => setLayouts((x) => ({ ...x, [seats.length]: l.id }))}
+                  className={`flex flex-col items-center gap-2 rounded-2xl border p-3 text-center ${on ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
+                  <span className="grid h-[66px] place-items-center"><LayoutThumb layout={l} size={42} /></span>
+                  <span className="text-sm font-semibold">{l.name}</span>
+                  <span className="text-[11px] leading-snug text-[var(--muted)]">{l.hint}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-[var(--muted)]">Seat 1 is top left, then clockwise. Lay the phone either way - the board turns to fit - and it can be changed from the game’s menu.</p>
         </section>
       )}
 

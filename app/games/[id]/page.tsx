@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { use, useEffect, useMemo, useRef, useState } from 'react';
 
+import DeckPicker from '@/components/DeckPicker';
 import { clock, shortDate } from '@/components/GameBits';
 import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
@@ -19,6 +20,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
   const router = useRouter();
   const [game, setGame] = useState<api.Game | null>(null);
   const [decks, setDecks] = useState<Record<string, api.PickDeck[]>>({});
+  const [members, setMembers] = useState<api.Member[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [fixing, setFixing] = useState(false);
@@ -29,6 +31,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
       setGame(g);
       setNote(g.note);
       api.playgroupDecks(g.groupId).then((d) => setDecks(d.decks)).catch(() => {});
+      api.playgroup(g.groupId).then((p) => setMembers(p.group.members)).catch(() => {});
     }).catch((e: Error) => setError(e.message));
   }, [id, router]);
 
@@ -66,8 +69,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
       <ul className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         {order.map((s) => {
-          // The decks this seat could have played: its pilot's, or everyone's if borrowing was on.
-          const own = game.borrowing ? Object.values(decks).flat() : decks[s.memberId] ?? [];
+          const pilot = members.find((m) => m.id === s.memberId);
           return (
             <li key={s.seat} className={`relative flex flex-col overflow-hidden rounded-2xl border bg-[var(--surface)] ${s.won ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}>
               <div className="relative h-24">
@@ -80,16 +82,17 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
               </div>
               <div className="flex flex-col gap-0.5 px-3 pb-3">
                 <p className="flex items-center gap-1.5 truncate font-semibold"><span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: SEAT_COLOURS[s.seat] }} />{s.name}</p>
-                {fixing && own.length > 0 ? (
-                  <select
-                    aria-label={`${s.name}’s deck`}
-                    value={s.deckId ?? ''}
-                    onChange={(e) => { const d = own.find((x) => x.id === e.target.value); if (d) edit({ seat: { seat: s.seat, deckId: d.id, deckName: d.name } }); }}
-                    className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-1.5 py-1 text-xs"
-                  >
-                    {!s.deckId && <option value="">{s.deckName || 'No deck named'}</option>}
-                    {own.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  </select>
+                {fixing && pilot ? (
+                  <DeckPicker
+                    seat={s.seat}
+                    pilot={pilot}
+                    members={members}
+                    decks={decks}
+                    borrowing={game.borrowing}
+                    value={{ deckId: s.deckId, deckName: s.deckName }}
+                    taken={Object.fromEntries(game.seats.flatMap((x) => (x.deckId && x.seat !== s.seat ? [[x.deckId, x.seat]] : [])))}
+                    onChange={(c) => edit({ seat: { seat: s.seat, ...c } })}
+                  />
                 ) : (
                   <p className="truncate text-xs text-[var(--muted)]">{s.deckName || 'No deck named'}</p>
                 )}
@@ -154,6 +157,8 @@ function line(e: GameEvent, game: api.Game) {
   if (e.k === 'cmd') return e.d > 0 ? `${name(e.s)} took ${e.d} commander damage from ${name(e.from)}` : `${name(e.s)}: ${-e.d} commander damage from ${name(e.from)} taken back`;
   if (e.k === 'poison') return e.d > 0 ? `${name(e.s)} got ${e.d} poison` : `${name(e.s)} lost ${-e.d} poison`;
   if (e.k === 'out') return `${name(e.s)} is out`;
+  if (e.k === 'monarch') return e.s >= 0 ? `${name(e.s)} became the monarch` : 'Nobody is the monarch';
+  if (e.k === 'initiative') return e.s >= 0 ? `${name(e.s)} took the initiative` : 'Nobody has the initiative';
   return 'Turn passed';
 }
 

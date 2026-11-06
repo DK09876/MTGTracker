@@ -50,6 +50,29 @@ describe('the life counter', () => {
     expect(next.active).toBe(1);
   });
 
+  it('passes the monarch to the player whose turn it is when the monarch goes out', () => {
+    const t = 0;
+    const state = playState(3, 40, 0, [{ k: 'monarch', s: 2, t }, { k: 'initiative', s: 1, t }, { k: 'out', s: 2, t }]);
+    expect(state.monarch).toBe(0);
+    expect(state.initiative).toBe(1);
+    expect(playState(3, 40, 0, [{ k: 'monarch', s: 2, t }, { k: 'monarch', s: -1, t }]).monarch).toBeNull();
+    expect(cleanEvents([{ k: 'monarch', s: -1, t: 1 }], 3)).toHaveLength(1);
+    expect(cleanEvents([{ k: 'monarch', s: 3, t: 1 }], 3)).toBeNull();
+  });
+
+  it('has a layout for every table size, a spot for every seat', async () => {
+    const { LAYOUTS, layoutFor, isLayout } = await import('./game-layouts');
+    for (const n of [2, 3, 4, 5, 6]) {
+      expect(LAYOUTS[n].length).toBeGreaterThan(1);
+      for (const l of LAYOUTS[n]) expect(l.spots).toHaveLength(n);
+      expect(new Set(LAYOUTS[n].map((l) => l.id)).size).toBe(LAYOUTS[n].length);
+    }
+    expect(layoutFor(4, null).id).toBe('across');
+    expect(layoutFor(4, 'nope').id).toBe('across');
+    expect(isLayout(4, 'sides')).toBe(true);
+    expect(isLayout(2, 'across')).toBe(false);
+  });
+
   it('merges quick taps on the same counter and drops a change that nets to nothing', () => {
     let e: GameEvent[] = [];
     for (let i = 0; i < 3; i++) e = addChange(e, { k: 'life', s: 1, d: -1, t: 1000 + i * 300 });
@@ -94,6 +117,10 @@ describe('the life counter', () => {
     expect(cleanEvents('[]', 2)).toBeNull();
   });
 });
+
+// Each database test opens a fresh SQLite file and imports the modules anew; under a full,
+// parallel run that alone can pass vitest's 5 seconds.
+vi.setConfig({ testTimeout: 20_000 });
 
 let dir: string;
 beforeEach(() => {

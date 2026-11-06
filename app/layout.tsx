@@ -47,13 +47,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${display.variable} ${ui.variable}`}>
       <body className="flex min-h-dvh flex-col">
         <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-[var(--background)]/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl backdrop-saturate-150">
-          <nav className="safe-x mx-auto flex h-14 max-w-[1680px] items-center gap-2 sm:gap-6">
+          <nav className="safe-x mx-auto flex h-14 max-w-[1680px] items-center gap-2 sm:gap-3 lg:gap-6">
             <Link href="/" className="font-display flex items-center gap-2 whitespace-nowrap text-lg font-extrabold">
               {/* The five colours around a dark centre. */}
               <span aria-hidden className="grid h-6 w-6 place-items-center rounded-[7px] bg-[conic-gradient(from_210deg,#f2dfa0,#5aa8e6,#a98bd0,#ef6d4f,#4fbf7a,#f2dfa0)]">
                 <span className="h-3 w-3 rounded-[3px] bg-[var(--background)]" />
               </span>
-              <span className="max-sm:sr-only">MTG Tracker</span>
+              {/* Only where there is room beside the six sections. */}
+              <span className="max-lg:sr-only">MTG Tracker</span>
             </Link>
             <TopLinks />
             <div className="ml-auto flex items-center gap-1 text-sm">

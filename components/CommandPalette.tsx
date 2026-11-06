@@ -233,11 +233,11 @@ export function PaletteButton() {
     <button
       onClick={() => window.dispatchEvent(new Event(PALETTE_OPEN))}
       aria-label="Jump to (⌘K)"
-      className="flex h-8 items-center gap-2 rounded-full border border-[var(--border)] px-2.5 text-xs text-[var(--muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] hover:text-[var(--foreground)] md:w-48 md:px-3"
+      className="flex h-8 items-center gap-2 rounded-full border border-[var(--border)] px-2.5 text-xs text-[var(--muted)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] hover:text-[var(--foreground)] xl:w-48 xl:px-3"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4.5 4.5" strokeLinecap="round" /></svg>
-      <span className="hidden flex-1 text-left md:block">Jump to…</span>
-      <kbd className="hidden rounded border border-[var(--border)] px-1 text-[10px] md:block">{mac ? '⌘K' : 'Ctrl K'}</kbd>
+      <span className="hidden flex-1 text-left xl:block">Jump to…</span>
+      <kbd className="hidden rounded border border-[var(--border)] px-1 text-[10px] xl:block">{mac ? '⌘K' : 'Ctrl K'}</kbd>
     </button>
   );
 }

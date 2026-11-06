@@ -3,7 +3,8 @@
  * PUT { events, base }: keep a live game's events; `base` is how many the
  * sender last saw saved. 409 with the saved ones when another device moved on.
  * POST { winner, events }: finish it (winner null for a draw).
- * PATCH { winner?, note?, seat? }: fix a game afterwards.
+ * PATCH { winner?, note?, seat?, layout? }: fix a game afterwards, or change
+ * how a live game's panels sit.
  * DELETE: throw it away.
  */
 
@@ -11,6 +12,7 @@ import { NextResponse } from 'next/server';
 
 import { getList } from '@/lib/db';
 import { cleanEvents } from '@/lib/game-play';
+import { isLayout } from '@/lib/game-layouts';
 import { deleteGame, editGame, finishGame, gameFor, groupsOf, saveEvents, seatDeck } from '@/lib/games';
 import { requireProfile } from '@/lib/profile-route';
 
@@ -65,7 +67,7 @@ export async function PATCH(request: Request, { params }: Params) {
   const found = find(request, id);
   if (found instanceof NextResponse) return found;
   const { game } = found;
-  const body = await request.json().catch(() => ({})) as { winner?: unknown; note?: unknown; seat?: { seat?: unknown; deckId?: unknown; deckName?: unknown } };
+  const body = await request.json().catch(() => ({})) as { winner?: unknown; note?: unknown; layout?: unknown; seat?: { seat?: unknown; deckId?: unknown; deckName?: unknown } };
   const change: Parameters<typeof editGame>[1] = {};
   if ('winner' in body) {
     const w = winnerOf(body.winner, game.seats.length);
@@ -73,6 +75,10 @@ export async function PATCH(request: Request, { params }: Params) {
     change.winner = w;
   }
   if (typeof body.note === 'string') change.note = body.note.slice(0, 2000);
+  if (body.layout !== undefined) {
+    if (!isLayout(game.seats.length, body.layout)) return NextResponse.json({ error: 'No such layout' }, { status: 400 });
+    change.layout = body.layout as string;
+  }
   if (body.seat) {
     const seat = game.seats.find((s) => s.seat === body.seat!.seat);
     const members = groupsOf(found.profile).find((g) => g.id === game.groupId)?.members ?? [];

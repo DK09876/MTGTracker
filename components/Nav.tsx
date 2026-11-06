@@ -31,8 +31,8 @@ export function TopLinks() {
           href={s.href}
           aria-current={active(path, s.href) ? 'page' : undefined}
           // The page you are on: brighter, with the accent underneath - no filled pill.
-          className={`relative flex items-center px-3 transition-colors hover:text-[var(--foreground)] ${active(path, s.href)
-            ? 'font-medium text-[var(--foreground)] after:absolute after:inset-x-3 after:bottom-0 after:h-[2px] after:rounded-full after:bg-[var(--accent)]'
+          className={`relative flex items-center px-2 transition-colors lg:px-3 hover:text-[var(--foreground)] ${active(path, s.href)
+            ? 'font-medium text-[var(--foreground)] after:absolute after:inset-x-2 after:bottom-0 lg:after:inset-x-3 after:h-[2px] after:rounded-full after:bg-[var(--accent)]'
             : 'text-[var(--muted)]'}`}
         >
           {s.label}

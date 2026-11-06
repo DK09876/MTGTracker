@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { database, type Profile } from './db';
+import { foldersFor } from './deck-folders';
 import { commanderDealt, placings, playState, type GameEvent } from './game-play';
 import { getStyle } from './profile-style';
 import type { ScryfallCard } from './scryfall';
@@ -51,6 +52,8 @@ function db() {
     if (!seatCols.includes('deckOwner')) d.run('ALTER TABLE game_seats ADD COLUMN deckOwner TEXT');
     const gameCols = (d.all('PRAGMA table_info(games)') as Array<{ name: string }>).map((c) => c.name);
     if (!gameCols.includes('borrowing')) d.run('ALTER TABLE games ADD COLUMN borrowing INTEGER NOT NULL DEFAULT 0');
+    // How the counter's panels sit round the table (lib/game-layouts.ts); null is the usual one.
+    if (!gameCols.includes('layout')) d.run('ALTER TABLE games ADD COLUMN layout TEXT');
     ready = true;
   }
   return d;
@@ -147,7 +150,16 @@ export function removeMember(groupId: string, memberId: string): void {
 // --- decks to pick from --------------------------------------------------------
 
 export interface SeatCommander { name: string; art: string | null; identity: string[] }
-export interface PickDeck { id: string; name: string; commander: SeatCommander | null }
+export interface PickDeck {
+  id: string;
+  name: string;
+  commander: SeatCommander | null;
+  /** The owner's folder it sits in, if any. */
+  folder: string | null;
+  /** Its record across every group. */
+  games: number;
+  wins: number;
+}
 
 export function commanderOf(card: ScryfallCard | null): SeatCommander | null {
   if (!card) return null;
@@ -171,7 +183,14 @@ export function decksForGroup(groupId: string): Record<string, PickDeck[]> {
       FROM lists l LEFT JOIN cards c ON c.id = l.commanderId
       WHERE l.profileId = ? AND l.kind = 'deck'
       ORDER BY lastPlayed IS NULL, lastPlayed DESC, l.updatedAt DESC`, [groupId, m.profileId]) as Array<{ id: string; name: string; commander: string | null }>;
-    out[m.id] = rows.map((r) => ({ id: r.id, name: r.name, commander: commanderOf(r.commander ? JSON.parse(r.commander) as ScryfallCard : null) }));
+    const { folders, placed } = foldersFor(m.profileId);
+    const folderName = new Map(folders.map((f) => [f.id, f.name]));
+    const records = deckRecords(m.profileId);
+    out[m.id] = rows.map((r) => ({
+      id: r.id, name: r.name, commander: commanderOf(r.commander ? JSON.parse(r.commander) as ScryfallCard : null),
+      folder: placed[r.id] ? folderName.get(placed[r.id]) ?? null : null,
+      games: records[r.id]?.games ?? 0, wins: records[r.id]?.wins ?? 0,
+    }));
   }
   return out;
 }
@@ -204,6 +223,7 @@ export interface Game {
   startingLife: number;
   /** Whether seats could play other members' decks. */
   borrowing: boolean;
+  layout: string | null;
   firstSeat: number;
   winnerSeat: number | null;
   events: GameEvent[];
@@ -220,12 +240,12 @@ type SeatRow = Omit<Seat, 'won' | 'commander' | 'name' | 'profileId' | 'deckOwne
 export interface NewSeat { memberId: string; deckId: string | null; deckName: string; commander: SeatCommander | null; deckOwner?: string | null }
 
 /** Start a game; seats are in order round the table. */
-export function startGame(groupId: string, createdBy: string, seats: NewSeat[], startingLife: number, firstSeat: number, borrowing = false): string {
+export function startGame(groupId: string, createdBy: string, seats: NewSeat[], startingLife: number, firstSeat: number, borrowing = false, layout: string | null = null): string {
   const d = db();
   const id = randomUUID();
   const at = now();
-  d.run(`INSERT INTO games (id, groupId, createdBy, status, startingLife, firstSeat, borrowing, startedAt, updatedAt)
-    VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?)`, [id, groupId, createdBy, startingLife, firstSeat, borrowing ? 1 : 0, at, at]);
+  d.run(`INSERT INTO games (id, groupId, createdBy, status, startingLife, firstSeat, borrowing, layout, startedAt, updatedAt)
+    VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?)`, [id, groupId, createdBy, startingLife, firstSeat, borrowing ? 1 : 0, layout, at, at]);
   seats.forEach((s, i) => d.run(
     'INSERT INTO game_seats (gameId, seat, memberId, deckId, deckName, commander, deckOwner) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [id, i, s.memberId, s.deckId, s.deckName, s.commander ? JSON.stringify(s.commander) : null, s.deckOwner && s.deckOwner !== s.memberId ? s.deckOwner : null],
@@ -292,8 +312,9 @@ export function finishGame(game: Game, winner: number | null, events: GameEvent[
 }
 
 /** Change a finished game's winner or note, or a seat's deck, afterwards. */
-export function editGame(game: Game, change: { winner?: number | null; note?: string; seat?: { seat: number } & Omit<NewSeat, 'memberId'> }): void {
+export function editGame(game: Game, change: { winner?: number | null; note?: string; layout?: string; seat?: { seat: number } & Omit<NewSeat, 'memberId'> }): void {
   const d = db();
+  if (change.layout !== undefined) d.run('UPDATE games SET layout = ? WHERE id = ?', [change.layout, game.id]);
   if (change.note !== undefined) d.run('UPDATE games SET note = ? WHERE id = ?', [change.note, game.id]);
   if (change.seat) {
     const pilot = game.seats.find((s) => s.seat === change.seat!.seat)?.memberId;

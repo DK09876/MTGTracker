@@ -14,25 +14,16 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
+import LayoutThumb from '@/components/LayoutThumb';
 import * as api from '@/lib/api';
 import {
   addChange, deathReason, formatDuration, LETHAL_COMMANDER, LETHAL_POISON, MERGE_MS, playState, SEAT_COLOURS, seatLabels,
   type GameEvent, type PlayState,
 } from '@/lib/game-play';
-
-type Spot = { row: string; col: string; rot: 0 | 90 | 180 | -90 };
-
-// Where each seat sits, clockwise round the table from the top-left; the
-// sides face their players, a lone seat at the top faces across.
-const LAYOUTS: Record<number, { rows: string; spots: Spot[] }> = {
-  2: { rows: '1fr 1fr', spots: [{ row: '1', col: '1 / -1', rot: 180 }, { row: '2', col: '1 / -1', rot: 0 }] },
-  3: { rows: '1fr 1.5fr', spots: [{ row: '1', col: '1 / -1', rot: 180 }, { row: '2', col: '2', rot: -90 }, { row: '2', col: '1', rot: 90 }] },
-  4: { rows: '1fr 1fr', spots: [{ row: '1', col: '1', rot: 90 }, { row: '1', col: '2', rot: -90 }, { row: '2', col: '2', rot: -90 }, { row: '2', col: '1', rot: 90 }] },
-  5: { rows: '0.8fr 1fr 1fr', spots: [{ row: '1', col: '1 / -1', rot: 180 }, { row: '2', col: '2', rot: -90 }, { row: '3', col: '2', rot: -90 }, { row: '3', col: '1', rot: 90 }, { row: '2', col: '1', rot: 90 }] },
-  6: { rows: '1fr 1fr 1fr', spots: [{ row: '1', col: '1', rot: 90 }, { row: '1', col: '2', rot: -90 }, { row: '2', col: '2', rot: -90 }, { row: '3', col: '2', rot: -90 }, { row: '3', col: '1', rot: 90 }, { row: '2', col: '1', rot: 90 }] },
-};
+import { LAYOUTS, layoutFor, type Spot } from '@/lib/game-layouts';
 
 const backupKey = (id: string) => `mtg-game-${id}`;
+const rollDie = (sides: number) => 1 + Math.floor(Math.random() * sides);
 
 export default function LifeCounter({ game: raw }: { game: api.Game }) {
   const router = useRouter();
@@ -57,12 +48,49 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
   const [ending, setEnding] = useState(false);
   const [damageFor, setDamageFor] = useState<number | null>(null);
   const [splash, setSplash] = useState(game.events.length === 0);
+  // A new game picks its first player with a light running round the table, landing on them.
+  const [spot, setSpot] = useState<number | null>(game.events.length === 0 ? 0 : null);
+  const [spun, setSpun] = useState(game.events.length !== 0);
+  useEffect(() => {
+    if (spun) return;
+    const steps: number[] = [];
+    const laps = n * 2 + ((raw.firstSeat - 0 + n) % n);
+    for (let k = 0; k <= laps; k++) steps.push(k % n);
+    let k = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const next = () => {
+      setSpot(steps[k]);
+      if (k === steps.length - 1) { timer = setTimeout(() => setSpun(true), 500); return; }
+      k++;
+      // Slowing down as it nears the end.
+      timer = setTimeout(next, 70 + (k / steps.length) ** 3 * 260);
+    };
+    timer = setTimeout(next, 250);
+    return () => clearTimeout(timer);
+  }, [spun, n, raw.firstSeat]);
+  const [roll, setRoll] = useState<string | null>(null);
+  const dice = (sides: number) => setRoll(`d${sides}: ${rollDie(sides)}`);
   // A death the table said "not yet" to, until that seat's numbers change again.
   const [notYet, setNotYet] = useState<Record<number, string>>({});
   // The clock the screen reads: the "-3" beside a total fades by it, and the menu shows the time played.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   const [problem, alertLine] = useState<string | null>(null);
+  const [layoutId, setLayoutId] = useState(raw.layout);
+  const layout = layoutFor(n, layoutId);
+  const pickLayout = (id: string) => { setLayoutId(id); api.editGame(raw.id, { layout: id }).catch(() => {}); };
+  // Turned round for a phone placed the other way up; kept on this phone only.
+  const [flipped, setFlipped] = useState(() => { try { return localStorage.getItem(`${backupKey(raw.id)}-flip`) === '1'; } catch { return false; } });
+  const flip = () => setFlipped((f) => { try { localStorage.setItem(`${backupKey(raw.id)}-flip`, f ? '0' : '1'); } catch { /* this visit only */ } return !f; });
+  // The screen's shape: a layout drawn for the other shape is turned a quarter round to fit.
+  const area = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    if (!area.current) return;
+    const watch = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
+    watch.observe(area.current);
+    return () => watch.disconnect();
+  }, []);
 
   // Keep the screen on while the game is up.
   useEffect(() => {
@@ -105,14 +133,27 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
     }
   };
 
-  const layout = LAYOUTS[n] ?? LAYOUTS[4];
   const alive = state.alive;
   const winnerReady = alive.length === 1 && n > 1;
   const started = events.length ? events[0].t : Date.parse(game.startedAt);
 
   return (
     <div className="fixed inset-0 z-[70] flex touch-manipulation select-none flex-col overscroll-none bg-black pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-white [-webkit-tap-highlight-color:transparent]">
-      <div className="relative grid flex-1 grid-cols-2 gap-1.5 p-1.5" style={{ gridTemplateRows: layout.rows }}>
+      <div ref={area} className="relative flex-1 overflow-hidden">
+      {size && (() => {
+        const wide = size.w > size.h;
+        const turn = (layout.canvas === 'landscape') !== wide;
+        return (
+      <div
+        className="absolute left-1/2 top-1/2 grid gap-1.5 p-1.5"
+        style={{
+          gridTemplateColumns: layout.cols,
+          gridTemplateRows: layout.rows,
+          width: turn ? size.h : size.w,
+          height: turn ? size.w : size.h,
+          transform: `translate(-50%, -50%) rotate(${(turn ? 90 : 0) + (flipped ? 180 : 0)}deg)`,
+        }}
+      >
         {game.seats.map((seat, i) => (
           <Panel
             key={seat.seat}
@@ -125,6 +166,7 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
             events={events}
             now={now}
             onChange={change}
+            spotlight={!spun && spot === i}
             onDamage={() => setDamageFor(i)}
             onEndTurn={() => setEvents((all) => [...all, { k: 'turn', t: Date.now() }])}
             onOut={() => knockOut(i)}
@@ -146,8 +188,11 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
           <span aria-hidden className="text-base leading-none">☰</span>
         </button>
       </div>
+        );
+      })()}
+      </div>
 
-      {splash && (
+      {splash && spun && (
         <Overlay onClose={() => setSplash(false)}>
           <p className="text-sm uppercase tracking-widest text-[var(--muted)]">Going first</p>
           <p className="font-display text-4xl font-extrabold" style={{ color: SEAT_COLOURS[game.firstSeat] }}>{game.seats[game.firstSeat].name}</p>
@@ -176,6 +221,44 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
           <div className="mt-2 grid w-full max-w-xs gap-2">
             <button type="button" disabled={!events.length} onClick={undo} className="rounded-xl border border-[var(--border)] px-4 py-3 text-left disabled:opacity-40">
               Undo <span className="text-[var(--muted)]">{describe(events[events.length - 1], game)}</span>
+            </button>
+            <div className="flex items-center gap-1.5">
+              {[6, 20].map((d) => <button key={d} type="button" onClick={() => dice(d)} className="flex-1 rounded-xl border border-[var(--border)] px-2 py-2.5 text-sm">🎲 d{d}</button>)}
+              <button type="button" onClick={() => setRoll(rollDie(2) === 1 ? 'Coin: heads' : 'Coin: tails')} className="flex-1 rounded-xl border border-[var(--border)] px-2 py-2.5 text-sm">🪙 Coin</button>
+            </div>
+            {roll && <p className="font-display text-xl font-bold" aria-live="polite">{roll}</p>}
+            {(['monarch', 'initiative'] as const).map((k) => (
+              <div key={k} className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] p-2 text-left">
+                <span className="px-1 text-xs text-[var(--muted)]">{k === 'monarch' ? '👑 The monarch' : '🏰 The initiative'}</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[-1, ...state.alive].map((s) => {
+                    const on = (state[k] ?? -1) === s;
+                    return (
+                      <button key={s} type="button" aria-pressed={on} onClick={() => { if (!on) setEvents((all) => [...all, { k, s, t: Date.now() }]); }}
+                        className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs ${on ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-[var(--border)]'}`}>
+                        {s >= 0 && <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: SEAT_COLOURS[s] }} />}
+                        {s >= 0 ? game.seats[s].name : 'Nobody'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {(LAYOUTS[n] ?? []).length > 1 && (
+              <div className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] p-2 text-left">
+                <span className="px-1 text-xs text-[var(--muted)]">Table layout</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {LAYOUTS[n].map((l) => (
+                    <button key={l.id} type="button" aria-pressed={l.id === layout.id} onClick={() => pickLayout(l.id)}
+                      className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs ${l.id === layout.id ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-[var(--border)]'}`}>
+                      <LayoutThumb layout={l} size={28} /> {l.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button type="button" onClick={flip} className="rounded-xl border border-[var(--border)] px-4 py-3 text-left">
+              Turn the table round <span className="text-[var(--muted)]">- for a phone placed the other way up</span>
             </button>
             <button type="button" onClick={() => { setMenu(false); setEnding(true); }} className="rounded-xl border border-[var(--border)] px-4 py-3 text-left">End the game…</button>
             <button type="button" onClick={() => router.push(`/games/groups/${game.groupId}`)} className="rounded-xl border border-[var(--border)] px-4 py-3 text-left">
@@ -210,7 +293,7 @@ export default function LifeCounter({ game: raw }: { game: api.Game }) {
 function Overlay({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   return (
     <div className="absolute inset-0 z-20 grid place-items-center bg-black/80 p-6 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
-      <div className="flex w-full max-w-sm flex-col items-center gap-2 rounded-3xl border border-[var(--border)] bg-[var(--background)] p-6 text-center">{children}</div>
+      <div className="flex max-h-full w-full max-w-sm flex-col items-center gap-2 overflow-y-auto overscroll-contain rounded-3xl border border-[var(--border)] bg-[var(--background)] p-6 text-center">{children}</div>
     </div>
   );
 }
@@ -218,17 +301,19 @@ function Overlay({ children, onClose }: { children: React.ReactNode; onClose?: (
 /** What undo would take back, in a few words. */
 function describe(e: GameEvent | undefined, game: api.Game): string {
   if (!e) return '';
-  const who = 's' in e ? game.seats[e.s]?.name : '';
+  const who = 's' in e && e.s >= 0 ? game.seats[e.s]?.name : '';
   const sign = (d: number) => (d > 0 ? `+${d}` : `${d}`);
   if (e.k === 'life') return `${who} ${sign(e.d)}`;
   if (e.k === 'cmd') return `${who} ${sign(e.d)} from ${game.seats[e.from]?.name}`;
   if (e.k === 'poison') return `${who} ${sign(e.d)} poison`;
   if (e.k === 'out') return `${who} out`;
+  if (e.k === 'monarch') return e.s >= 0 ? `${who} the monarch` : 'no monarch';
+  if (e.k === 'initiative') return e.s >= 0 ? `${who} has the initiative` : 'no initiative';
   return 'turn passed';
 }
 
-function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDamage, onEndTurn, onOut, onBack, death, onNotYet, damageOpen, onCloseDamage }: {
-  spot: Spot; seat: api.Seat; pilot: string; i: number; state: PlayState; game: api.Game; events: GameEvent[]; now: number;
+function Panel({ spot, seat, pilot, i, state, game, events, now, spotlight, onChange, onDamage, onEndTurn, onOut, onBack, death, onNotYet, damageOpen, onCloseDamage }: {
+  spot: Spot; seat: api.Seat; pilot: string; i: number; state: PlayState; game: api.Game; events: GameEvent[]; now: number; spotlight: boolean;
   onChange: (e: GameEvent) => void; onDamage: () => void; onEndTurn: () => void; onOut: () => void; onBack: () => void;
   death: string | null; onNotYet: (reason: string) => void; damageOpen: boolean; onCloseDamage: () => void;
 }) {
@@ -251,7 +336,11 @@ function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDam
     <section
       aria-label={`${seat.name}: ${me.life} life`}
       className="relative overflow-hidden rounded-2xl [container-type:size]"
-      style={{ gridRow: spot.row, gridColumn: spot.col, boxShadow: active ? `inset 0 0 0 3px ${colour}` : undefined }}
+      style={{
+        gridRow: spot.row, gridColumn: spot.col,
+        boxShadow: spotlight ? `inset 0 0 0 4px #fff, 0 0 28px ${colour}` : active ? `inset 0 0 0 3px ${colour}` : undefined,
+        filter: spotlight ? 'brightness(1.35)' : undefined,
+      }}
     >
       <div className="absolute left-1/2 top-1/2 [container-type:size]" style={inner}>
         {/* The commander's art, dimmed, or the seat's colour. */}
@@ -268,8 +357,8 @@ function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDam
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className={`font-display font-extrabold tabular-nums leading-none ${me.out ? 'opacity-30' : ''}`} style={{ fontSize: 'min(46cqh, 34cqw)' }}>{me.life}</span>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-[16cqh]">
+          <span className={`font-display font-extrabold tabular-nums leading-none ${me.out ? 'opacity-30' : ''}`} style={{ fontSize: 'min(42cqh, 32cqw)' }}>{me.life}</span>
           {delta !== null && (
             <span className="absolute font-bold tabular-nums" style={{ fontSize: 'min(12cqh, 9cqw)', top: '14%', color: delta < 0 ? '#ff8a80' : '#9be7a8' }}>
               {delta > 0 ? `+${delta}` : delta}
@@ -277,9 +366,13 @@ function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDam
           )}
         </div>
 
-        {/* Top strip: what has been taken so far, and the ⚔ button. */}
-        <div className="pointer-events-none absolute inset-x-2 top-2 flex items-start gap-1.5">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+        {/* Everything to read or press sits along the panel's bottom - the edge by its player, on the
+            outside of the table - so the menu where the panels meet never covers any of it. */}
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-col gap-1">
+          <div className="flex min-w-0 flex-wrap gap-1">
+            {game.firstSeat === i && <Chip>1st</Chip>}
+            {state.monarch === i && <Chip>👑<span className="sr-only"> the monarch</span></Chip>}
+            {state.initiative === i && <Chip>🏰<span className="sr-only"> has the initiative</span></Chip>}
             {me.poison > 0 && <Chip tone={me.poison >= LETHAL_POISON ? 'bad' : undefined}>☠ {me.poison}</Chip>}
             {cmdTaken.map(([from, d]) => (
               <Chip key={from} tone={d >= LETHAL_COMMANDER ? 'bad' : undefined}>
@@ -288,22 +381,20 @@ function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDam
               </Chip>
             ))}
           </div>
-          {!me.out && (
-            <button type="button" onClick={onDamage} aria-label={`Commander damage and poison for ${seat.name}`} className="pointer-events-auto relative z-[1] rounded-full bg-black/55 px-2.5 py-1.5 text-sm backdrop-blur">⚔</button>
-          )}
-        </div>
-
-        {/* Bottom: who, what they are playing, and their turn. */}
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-end gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold"><span aria-hidden className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: colour }} />{pilot}</p>
-            {seat.deckName && <p className="truncate text-[11px] text-white/70">{seat.deckName}{seat.deckOwner ? ` · ${seat.deckOwner.name}’s` : ''}</p>}
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold"><span aria-hidden className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: colour }} />{pilot}</p>
+              {seat.deckName && <p className="truncate text-[11px] text-white/70">{seat.deckName}{seat.deckOwner ? ` · ${seat.deckOwner.name}’s` : ''}</p>}
+            </div>
+            {active && (
+              <button type="button" onClick={onEndTurn} className="pointer-events-auto relative z-[1] shrink-0 rounded-full px-3 py-1.5 text-xs font-bold text-black" style={{ background: colour }}>
+                End turn ▸
+              </button>
+            )}
+            {!me.out && (
+              <button type="button" onClick={onDamage} aria-label={`Commander damage and poison for ${seat.name}`} className="pointer-events-auto relative z-[1] shrink-0 rounded-full bg-black/55 px-2.5 py-1.5 text-sm backdrop-blur">⚔</button>
+            )}
           </div>
-          {active && (
-            <button type="button" onClick={onEndTurn} className="pointer-events-auto relative z-[1] shrink-0 rounded-full px-3 py-1.5 text-xs font-bold text-black" style={{ background: colour }}>
-              End turn ▸
-            </button>
-          )}
         </div>
 
         {me.out && (
@@ -354,6 +445,7 @@ function DamageSheet({ i, state, game, onChange, onOut, onClose }: {
             label={<><span aria-hidden className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: SEAT_COLOURS[from] }} /> <span className="truncate">{s.name}</span></>}
             value={me.cmd[from] ?? 0}
             lethal={(me.cmd[from] ?? 0) >= LETHAL_COMMANDER}
+            tint={SEAT_COLOURS[from]}
             onStep={(d) => onChange({ k: 'cmd', s: i, from, d, t: Date.now() })}
           />
         ))}
@@ -364,9 +456,12 @@ function DamageSheet({ i, state, game, onChange, onOut, onClose }: {
   );
 }
 
-function Stepper({ label, value, lethal, onStep }: { label: React.ReactNode; value: number; lethal: boolean; onStep: (d: number) => void }) {
+function Stepper({ label, value, lethal, tint, onStep }: { label: React.ReactNode; value: number; lethal: boolean; tint?: string; onStep: (d: number) => void }) {
   return (
-    <div className={`flex items-center gap-1 rounded-xl border px-1.5 py-1 ${lethal ? 'border-red-400/60 bg-red-500/15' : 'border-white/10 bg-white/5'}`}>
+    <div
+      className={`flex items-center gap-1 rounded-xl border px-1.5 py-1 ${lethal ? 'border-red-400/60 bg-red-500/15' : 'border-white/10 bg-white/5'}`}
+      style={tint && !lethal ? { background: `color-mix(in srgb, ${tint} 22%, #0d0c0b)`, borderColor: `color-mix(in srgb, ${tint} 45%, transparent)` } : undefined}
+    >
       <span className="flex min-w-0 flex-1 items-center gap-1 text-xs">{label}</span>
       <button type="button" aria-label="Less" onClick={() => onStep(-1)} disabled={value <= 0} className="h-8 w-8 rounded-lg bg-white/10 text-lg leading-none disabled:opacity-30">−</button>
       <span className="w-7 text-center font-bold tabular-nums">{value}</span>
@@ -379,19 +474,29 @@ function Chip({ children, tone }: { children: React.ReactNode; tone?: 'bad' }) {
   return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums backdrop-blur ${tone === 'bad' ? 'bg-red-500/70' : 'bg-black/55'}`}>{children}</span>;
 }
 
+const EDGE = 22;
+/** A short tick under the finger, where the phone can (not iPhones). */
+const buzz = () => { try { navigator.vibrate?.(8); } catch { /* no buzz */ } };
+
 /** Half a panel: a tap is one, holding steps by ten. */
 function Tapper({ label, onStep, side }: { label: string; onStep: (d: number) => void; side: string }) {
-  const hold = useRef<{ timer: ReturnType<typeof setTimeout> | null; held: boolean }>({ timer: null, held: false });
+  const hold = useRef<{ timer: ReturnType<typeof setTimeout> | null; held: boolean; edge: boolean }>({ timer: null, held: false, edge: false });
   const stop = () => { if (hold.current.timer) clearTimeout(hold.current.timer); hold.current.timer = null; };
-  const repeat = () => { hold.current.held = true; onStep(10); hold.current.timer = setTimeout(repeat, 700); };
+  const repeat = () => { hold.current.held = true; buzz(); onStep(10); hold.current.timer = setTimeout(repeat, 700); };
   return (
     <button
       type="button"
       aria-label={label}
       className="group relative flex items-center outline-none active:bg-white/[0.06]"
       style={{ justifyContent: side === '+' ? 'flex-end' : 'flex-start' }}
-      onPointerDown={() => { hold.current.held = false; stop(); hold.current.timer = setTimeout(repeat, 500); }}
-      onPointerUp={() => { stop(); if (!hold.current.held) onStep(1); }}
+      onPointerDown={(e) => {
+        // A touch that starts at the very top or bottom of the screen is a swipe for the phone's own
+        // notifications or home bar, not a change of life.
+        hold.current.edge = e.pointerType === 'touch' && (e.clientY < EDGE || e.clientY > window.innerHeight - EDGE);
+        if (hold.current.edge) return;
+        hold.current.held = false; stop(); hold.current.timer = setTimeout(repeat, 500);
+      }}
+      onPointerUp={() => { stop(); if (!hold.current.held && !hold.current.edge) { buzz(); onStep(1); } }}
       onPointerLeave={stop}
       onPointerCancel={stop}
       onContextMenu={(e) => e.preventDefault()}

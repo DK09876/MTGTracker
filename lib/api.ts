@@ -767,8 +767,8 @@ export const removePlaygroupMember = (id: string, member: string) =>
 export const playgroupDecks = (id: string) => get<{ decks: Record<string, PickDeck[]> }>(`playgroups/${id}/decks`);
 
 export interface NewGameSeat { memberId: string; deckId: string | null; deckName: string }
-export const startGame = (groupId: string, seats: NewGameSeat[], startingLife: number, firstSeat: number, borrowing: boolean) =>
-  send('games', 'POST', { groupId, seats: seats.map(({ memberId, deckId, deckName }) => ({ memberId, deckId, deckName })), startingLife, firstSeat, borrowing }).then(json<{ id: string }>);
+export const startGame = (groupId: string, seats: NewGameSeat[], startingLife: number, firstSeat: number, borrowing: boolean, layout: string) =>
+  send('games', 'POST', { groupId, seats: seats.map(({ memberId, deckId, deckName }) => ({ memberId, deckId, deckName })), startingLife, firstSeat, borrowing, layout }).then(json<{ id: string }>);
 export const deckRecords = () => get<{ records: Record<string, { games: number; wins: number }> }>('games');
 export const game = (id: string) => fetch(url(`games/${id}`)).then(json<{ game: Game }>);
 
@@ -782,6 +782,6 @@ export async function saveGame(id: string, events: GameEvent[], base: number): P
   return json<{ saved: number }>(r);
 }
 export const finishGame = (id: string, winner: number | null, events: GameEvent[]) => send(`games/${id}`, 'POST', { winner, events }).then(json<{ game: Game }>);
-export const editGame = (id: string, change: { winner?: number | null; note?: string; seat?: { seat: number; deckId: string | null; deckName: string } }) =>
+export const editGame = (id: string, change: { winner?: number | null; note?: string; layout?: string; seat?: { seat: number; deckId: string | null; deckName: string } }) =>
   send(`games/${id}`, 'PATCH', change).then(json<{ game: Game }>);
 export const deleteGame = (id: string) => fetch(url(`games/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);

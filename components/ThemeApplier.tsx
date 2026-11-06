@@ -36,5 +36,7 @@ export default function ThemeApplier() {
   }, [profile, me]);
 
   if (!motion) return null;
-  return <div aria-hidden className="living-bg" />;
+  // Held in a box the size of the screen: the glow reaches past the edges, and a phone on its
+  // side otherwise widened the page to fit it (zooming everything out a little).
+  return <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"><div className="living-bg" /></div>;
 }

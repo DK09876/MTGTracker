@@ -11,7 +11,7 @@
 export const LETHAL_COMMANDER = 21;
 export const LETHAL_POISON = 10;
 /** Taps on the same counter this close together are one change: "-7", not seven "-1"s. */
-export const MERGE_MS = 2500;
+export const MERGE_MS = 3000;
 
 /** The players' colours, in seat order - validated together for colour-blind readers on the app's dark surface. */
 export const SEAT_COLOURS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#9085e9'];
@@ -23,7 +23,9 @@ export type GameEvent =
   | { k: 'poison'; s: number; d: number; t: number }
   | { k: 'out'; s: number; t: number }
   /** The active player passes the turn to the next one still in. */
-  | { k: 'turn'; t: number };
+  | { k: 'turn'; t: number }
+  /** Who is the monarch, or who has the initiative - seat `s`, or nobody (-1). */
+  | { k: 'monarch' | 'initiative'; s: number; t: number };
 
 export interface SeatState {
   life: number;
@@ -43,6 +45,8 @@ export interface PlayState {
   round: number;
   /** Seats still in. */
   alive: number[];
+  monarch: number | null;
+  initiative: number | null;
 }
 
 /** Fold the events into where the game stands. */
@@ -51,6 +55,8 @@ export function playState(players: number, startingLife: number, first: number, 
   let active = first;
   let round = 1;
   let outs = 0;
+  let monarch: number | null = null;
+  let initiative: number | null = null;
   // Turn order position: 0 for the first player, then round the table.
   const pos = (s: number) => (s - first + players) % players;
   const pass = () => {
@@ -73,10 +79,15 @@ export function playState(players: number, startingLife: number, first: number, 
       seats[e.s].outOrder = ++outs;
       // Losing on your own turn ends it: the next player still in is up.
       if (e.s === active) pass();
+      // Leaving the game, a monarch or the one with the initiative gives it to the player whose turn it is.
+      if (monarch === e.s) monarch = seats[active].out ? null : active;
+      if (initiative === e.s) initiative = seats[active].out ? null : active;
     } else if (e.k === 'turn') pass();
+    else if (e.k === 'monarch') monarch = e.s >= 0 ? e.s : null;
+    else if (e.k === 'initiative') initiative = e.s >= 0 ? e.s : null;
   }
   const alive = seats.flatMap((s, i) => (s.out ? [] : [i]));
-  return { seats, active, round, alive };
+  return { seats, active, round, alive, monarch, initiative };
 }
 
 function nextIn(seats: SeatState[], from: number): number | null {
@@ -171,6 +182,7 @@ export function cleanEvents(raw: unknown, players: number): GameEvent[] | null {
     const t = e.t;
     if (e.k === 'turn') out.push({ k: 'turn', t });
     else if (e.k === 'out' && seat(e.s)) out.push({ k: 'out', s: e.s as number, t });
+    else if ((e.k === 'monarch' || e.k === 'initiative') && (e.s === -1 || seat(e.s))) out.push({ k: e.k, s: e.s as number, t });
     else if ((e.k === 'life' || e.k === 'poison') && seat(e.s) && amount(e.d)) out.push({ k: e.k, s: e.s as number, d: e.d as number, t });
     else if (e.k === 'cmd' && seat(e.s) && seat(e.from) && e.s !== e.from && amount(e.d)) out.push({ k: 'cmd', s: e.s as number, from: e.from as number, d: e.d as number, t });
     else return null;
