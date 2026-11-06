@@ -83,6 +83,9 @@ export default function DecksPage() {
   const [decks, setDecks] = useState<List[]>(() => api.peekLists('deck') ?? []);
   const [loading, setLoading] = useState(() => !api.peekLists('deck'));
   const [error, setError] = useState<string | null>(null);
+  // Each deck's record from game nights, for its tile.
+  const [records, setRecords] = useState<Record<string, { games: number; wins: number }>>({});
+  useEffect(() => { api.deckRecords().then((r) => setRecords(r.records)).catch(() => {}); }, []);
 
   const [creating, setCreating] = useState(false);
   // "/decks?new" (the ⌘K palette's New deck) opens the form.
@@ -473,6 +476,11 @@ export default function DecksPage() {
                 <div className="mt-1 flex flex-wrap gap-1 text-[11px] font-bold tabular-nums sm:mt-1.5 sm:gap-1.5 sm:text-xs">
                   <span className={`rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 ${total === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{total} / 100</span>
                   {deck.totalValue > 0 && <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1">${deck.totalValue.toFixed(2)}</span>}
+                  {records[deck.id] && (
+                    <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${records[deck.id].wins} won of ${records[deck.id].games} games played`}>
+                      {records[deck.id].wins}–{records[deck.id].games - records[deck.id].wins} · {Math.round((records[deck.id].wins / records[deck.id].games) * 100)}%
+                    </span>
+                  )}
                 </div>
               </div>
               {/* The colour bar glows brighter under the pointer. */}

@@ -15,6 +15,7 @@ const SECTIONS = [
   { href: '/rules', label: 'Rules', icon: 'M6 3h9l4 4v14H6V3Zm2 2v14h9V8h-3V5H8Zm2 5h5v1.6h-5V10Zm0 3.2h5v1.6h-5v-1.6Z' },
   { href: '/decks', label: 'Decks', icon: 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 2v14h10V5H7Zm-4 2h1v12h-1V7Zm17 0h1v12h-1V7Z' },
   { href: '/lists', label: 'Lists', icon: 'M4 6h2v2H4V6Zm4 0h12v2H8V6Zm-4 5h2v2H4v-2Zm4 0h12v2H8v-2Zm-4 5h2v2H4v-2Zm4 0h12v2H8v-2Z' },
+  { href: '/games', label: 'Games', icon: 'M12 20.5s-7.6-4.6-9.3-9.4C1.5 7.6 3.8 4.5 7.1 4.5c2 0 3.6 1.1 4.9 2.8 1.3-1.7 2.9-2.8 4.9-2.8 3.3 0 5.6 3.1 4.4 6.6-1.7 4.8-9.3 9.4-9.3 9.4Zm0-2.4c2.3-1.5 6.3-4.6 7.4-7.6.7-2.2-.6-4-2.5-4-1.5 0-2.7 1-3.9 2.9L12 10.8l-1-1.4C9.8 7.5 8.6 6.5 7.1 6.5c-1.9 0-3.2 1.8-2.5 4 1.1 3 5.1 6.1 7.4 7.6Z' },
   { href: '/collection', label: 'Collection', icon: 'M4 5h16v4H4V5Zm1 5h14v9H5v-9Zm2 2v5h10v-5H7Zm3 1h4v1.6h-4V13Z' },
 ];
 
@@ -30,8 +31,8 @@ export function TopLinks() {
           href={s.href}
           aria-current={active(path, s.href) ? 'page' : undefined}
           // The page you are on: brighter, with the accent underneath - no filled pill.
-          className={`relative flex items-center px-3 transition-colors hover:text-[var(--foreground)] ${active(path, s.href)
-            ? 'font-medium text-[var(--foreground)] after:absolute after:inset-x-3 after:bottom-0 after:h-[2px] after:rounded-full after:bg-[var(--accent)]'
+          className={`relative flex items-center px-2 transition-colors lg:px-3 hover:text-[var(--foreground)] ${active(path, s.href)
+            ? 'font-medium text-[var(--foreground)] after:absolute after:inset-x-2 after:bottom-0 lg:after:inset-x-3 after:h-[2px] after:rounded-full after:bg-[var(--accent)]'
             : 'text-[var(--muted)]'}`}
         >
           {s.label}
@@ -61,7 +62,8 @@ export function SettingsLink() {
 
 // A deck has its own bar along the bottom (DeckRail); two stacked bars took
 // a quarter of a phone's screen, so the app's steps aside there.
-const OWN_BAR = /^\/decks\/[^/]+/;
+// The life counter takes the whole screen.
+const OWN_BAR = /^\/decks\/[^/]+|^\/games\/play\//;
 
 export function TabBar() {
   const path = usePathname();

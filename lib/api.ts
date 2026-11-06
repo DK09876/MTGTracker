@@ -51,6 +51,9 @@ import type { Job } from './jobs';
 import type { CardChange, DeckRead, ReadChange, ReadMode } from './reads';
 import type { AiState } from './ai';
 import type { AiCall } from './db';
+import type { Game, GroupSummary, Member, PickDeck, Seat } from './games';
+import type { GameEvent } from './game-play';
+import type { GroupStats } from './game-stats';
 import type { AiArea, Tier } from './models';
 import type { Caps } from './spend';
 import type { Budget } from './quota';
@@ -744,3 +747,41 @@ export const tuneAct = <T = { ok: true; staged?: number; capped?: number; saved?
 export const tuneIdeasJob = (listId: string) => get<{ job: Job | null }>(`lists/${listId}/tune/claude`);
 export const startTuneIdeas = (listId: string, intent: string, instructions: string, problem?: string) =>
   spending(send(`lists/${listId}/tune/claude`, 'POST', { intent, instructions, problem }).then(json<{ job: Job }>).finally(jobsChanged));
+
+// --- playgroups and games --------------------------------------------------------
+
+
+export type GameSummary = Omit<Game, 'events'>;
+export type { Game, GroupSummary, Member, PickDeck, Seat, GroupStats };
+export interface GroupPage { group: GroupSummary; games: GameSummary[]; live: GameSummary[]; stats: GroupStats }
+
+export const playgroups = () => get<{ groups: GroupSummary[] }>('playgroups');
+export const createPlaygroup = (name: string) => send('playgroups', 'POST', { name }).then(json<{ group: { id: string } }>);
+export const playgroup = (id: string, players?: number) => get<GroupPage>(`playgroups/${id}${players ? `?players=${players}` : ''}`);
+export const renamePlaygroup = (id: string, name: string) => send(`playgroups/${id}`, 'PATCH', { name }).then(json<{ ok: true }>);
+export const deletePlaygroup = (id: string) => fetch(url(`playgroups/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+export const addPlaygroupMember = (id: string, who: { profileId: string } | { name: string }) =>
+  send(`playgroups/${id}/members`, 'POST', who).then(json<{ member: Member }>);
+export const removePlaygroupMember = (id: string, member: string) =>
+  fetch(url(`playgroups/${id}/members?member=${encodeURIComponent(member)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+export const playgroupDecks = (id: string) => get<{ decks: Record<string, PickDeck[]> }>(`playgroups/${id}/decks`);
+
+export interface NewGameSeat { memberId: string; deckId: string | null; deckName: string }
+export const startGame = (groupId: string, seats: NewGameSeat[], startingLife: number, firstSeat: number, borrowing: boolean, layout: string) =>
+  send('games', 'POST', { groupId, seats: seats.map(({ memberId, deckId, deckName }) => ({ memberId, deckId, deckName })), startingLife, firstSeat, borrowing, layout }).then(json<{ id: string }>);
+export const deckRecords = () => get<{ records: Record<string, { games: number; wins: number }> }>('games');
+export const game = (id: string) => fetch(url(`games/${id}`)).then(json<{ game: Game }>);
+
+/** Save a live game's events. On a 409 the saved events come back instead of throwing. */
+export async function saveGame(id: string, events: GameEvent[], base: number): Promise<{ saved: number } | { conflict: GameEvent[] }> {
+  const r = await send(`games/${id}`, 'PUT', { events, base });
+  if (r.status === 409) {
+    const body = await r.json().catch(() => ({})) as { events?: GameEvent[] };
+    if (body.events) return { conflict: body.events };
+  }
+  return json<{ saved: number }>(r);
+}
+export const finishGame = (id: string, winner: number | null, events: GameEvent[]) => send(`games/${id}`, 'POST', { winner, events }).then(json<{ game: Game }>);
+export const editGame = (id: string, change: { winner?: number | null; note?: string; layout?: string; seat?: { seat: number; deckId: string | null; deckName: string } }) =>
+  send(`games/${id}`, 'PATCH', change).then(json<{ game: Game }>);
+export const deleteGame = (id: string) => fetch(url(`games/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
