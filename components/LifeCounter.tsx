@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 
 import * as api from '@/lib/api';
 import {
-  addChange, deathReason, formatDuration, LETHAL_COMMANDER, LETHAL_POISON, MERGE_MS, playState, SEAT_COLOURS,
+  addChange, deathReason, formatDuration, LETHAL_COMMANDER, LETHAL_POISON, MERGE_MS, playState, SEAT_COLOURS, seatLabels,
   type GameEvent, type PlayState,
 } from '@/lib/game-play';
 
@@ -34,8 +34,13 @@ const LAYOUTS: Record<number, { rows: string; spots: Spot[] }> = {
 
 const backupKey = (id: string) => `mtg-game-${id}`;
 
-export default function LifeCounter({ game }: { game: api.Game }) {
+export default function LifeCounter({ game: raw }: { game: api.Game }) {
   const router = useRouter();
+  // Seats named so two of one player's are told apart everywhere: "DK · Azula".
+  const game = useMemo(() => {
+    const labels = seatLabels(raw.seats);
+    return { ...raw, seats: raw.seats.map((s, i) => ({ ...s, name: labels[i] })) };
+  }, [raw]);
   const n = game.seats.length;
   const [events, setEvents] = useState<GameEvent[]>(() => {
     // A copy kept on this phone wins if it has more than the server saw (it was offline).
@@ -113,6 +118,7 @@ export default function LifeCounter({ game }: { game: api.Game }) {
             key={seat.seat}
             spot={layout.spots[i]}
             seat={seat}
+            pilot={raw.seats[i].name}
             i={i}
             state={state}
             game={game}
@@ -221,8 +227,8 @@ function describe(e: GameEvent | undefined, game: api.Game): string {
   return 'turn passed';
 }
 
-function Panel({ spot, seat, i, state, game, events, now, onChange, onDamage, onEndTurn, onOut, onBack, death, onNotYet, damageOpen, onCloseDamage }: {
-  spot: Spot; seat: api.Seat; i: number; state: PlayState; game: api.Game; events: GameEvent[]; now: number;
+function Panel({ spot, seat, pilot, i, state, game, events, now, onChange, onDamage, onEndTurn, onOut, onBack, death, onNotYet, damageOpen, onCloseDamage }: {
+  spot: Spot; seat: api.Seat; pilot: string; i: number; state: PlayState; game: api.Game; events: GameEvent[]; now: number;
   onChange: (e: GameEvent) => void; onDamage: () => void; onEndTurn: () => void; onOut: () => void; onBack: () => void;
   death: string | null; onNotYet: (reason: string) => void; damageOpen: boolean; onCloseDamage: () => void;
 }) {
@@ -290,8 +296,8 @@ function Panel({ spot, seat, i, state, game, events, now, onChange, onDamage, on
         {/* Bottom: who, what they are playing, and their turn. */}
         <div className="pointer-events-none absolute inset-x-2 bottom-2 flex items-end gap-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold"><span aria-hidden className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: colour }} />{seat.name}</p>
-            {seat.deckName && <p className="truncate text-[11px] text-white/70">{seat.deckName}</p>}
+            <p className="truncate text-sm font-bold"><span aria-hidden className="mr-1.5 inline-block h-2 w-2 rounded-full align-middle" style={{ background: colour }} />{pilot}</p>
+            {seat.deckName && <p className="truncate text-[11px] text-white/70">{seat.deckName}{seat.deckOwner ? ` · ${seat.deckOwner.name}’s` : ''}</p>}
           </div>
           {active && (
             <button type="button" onClick={onEndTurn} className="pointer-events-auto relative z-[1] shrink-0 rounded-full px-3 py-1.5 text-xs font-bold text-black" style={{ background: colour }}>

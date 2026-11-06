@@ -224,3 +224,40 @@ describe('stats', () => {
     expect(twos.turnOrder).toBeNull();
   });
 });
+
+describe('two seats and borrowed decks', () => {
+  it('lets one player pilot two decks, and keeps a borrowed deck\'s record on its owner\'s deck', async () => {
+    const { db, games, stats, group, me, kevin } = await setUp();
+    const azula = db.createList('dk', 'Azula', '', { kind: 'deck' });
+    const kratos = db.createList('dk', 'Kratos', '', { kind: 'deck' });
+    const scry = db.createList('kevin', 'Scry', '', { kind: 'deck' });
+    const members = games.groupsOf('dk')[0].members;
+    const dk = members.find((m) => m.id === me.id)!;
+    const kev = members.find((m) => m.id === kevin.id)!;
+
+    // Without borrowing, Kevin cannot take DK's deck: it is only a name then.
+    expect(games.seatDeck(members, kev, azula.id, 'Azula', false, db.getList)).toMatchObject({ deckId: null, deckName: 'Azula', deckOwner: null });
+    const borrowed = games.seatDeck(members, kev, azula.id, '', true, db.getList);
+    expect(borrowed).toMatchObject({ deckId: azula.id, deckName: 'Azula', deckOwner: me.id });
+    expect(games.seatDeck(members, dk, kratos.id, '', true, db.getList).deckOwner).toBeNull();
+
+    // DK on two seats, Kevin on two - one of them on DK's Azula, and it wins.
+    const id = games.startGame(group.id, 'dk', [
+      { memberId: me.id, ...games.seatDeck(members, dk, kratos.id, '', true, db.getList) },
+      { memberId: kevin.id, ...games.seatDeck(members, kev, scry.id, '', true, db.getList) },
+      { memberId: me.id, deckId: null, deckName: 'Proxy pile', commander: null },
+      { memberId: kevin.id, ...borrowed },
+    ], 40, 0, true);
+    const g = games.gameFor('dk', id)!;
+    expect(g.borrowing).toBe(true);
+    expect(g.seats[3].deckOwner).toEqual({ memberId: me.id, name: 'DK' });
+    games.finishGame(g, 3, []);
+
+    // The deck's record is DK's Azula; the win in the standings is Kevin's, once for the game.
+    expect(games.deckRecords('dk')).toEqual({ [azula.id]: { games: 1, wins: 1 }, [kratos.id]: { games: 1, wins: 0 } });
+    expect(games.deckRecords('kevin')).toEqual({ [scry.id]: { games: 1, wins: 0 } });
+    const st = stats.groupStats(games.gamesIn(group.id), games.groupsOf('dk')[0].members);
+    expect(st.standings.filter((s) => s.games).map((s) => [s.name, s.wins, s.games])).toEqual([['Kevin', 1, 1], ['DK', 0, 1]]);
+    expect(st.decks.find((d) => d.deckId === azula.id)).toMatchObject({ player: 'DK', memberId: me.id, wins: 1, games: 1, borrowed: 1 });
+  });
+});

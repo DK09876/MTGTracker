@@ -767,8 +767,8 @@ export const removePlaygroupMember = (id: string, member: string) =>
 export const playgroupDecks = (id: string) => get<{ decks: Record<string, PickDeck[]> }>(`playgroups/${id}/decks`);
 
 export interface NewGameSeat { memberId: string; deckId: string | null; deckName: string }
-export const startGame = (groupId: string, seats: NewGameSeat[], startingLife: number, firstSeat: number) =>
-  send('games', 'POST', { groupId, seats, startingLife, firstSeat }).then(json<{ id: string }>);
+export const startGame = (groupId: string, seats: NewGameSeat[], startingLife: number, firstSeat: number, borrowing: boolean) =>
+  send('games', 'POST', { groupId, seats: seats.map(({ memberId, deckId, deckName }) => ({ memberId, deckId, deckName })), startingLife, firstSeat, borrowing }).then(json<{ id: string }>);
 export const deckRecords = () => get<{ records: Record<string, { games: number; wins: number }> }>('games');
 export const game = (id: string) => fetch(url(`games/${id}`)).then(json<{ game: Game }>);
 

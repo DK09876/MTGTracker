@@ -177,3 +177,14 @@ export function cleanEvents(raw: unknown, players: number): GameEvent[] | null {
   }
   return out;
 }
+
+/**
+ * What to call each seat: the player's name, and when they sit in more
+ * than one seat, the deck too - "DK · Azula" and "DK · Kratos" - or the
+ * seat number if a deck has no name.
+ */
+export function seatLabels(seats: Array<{ memberId: string; name: string; deckName: string }>): string[] {
+  const count = new Map<string, number>();
+  for (const s of seats) count.set(s.memberId, (count.get(s.memberId) ?? 0) + 1);
+  return seats.map((s, i) => ((count.get(s.memberId) ?? 0) > 1 ? `${s.name} · ${s.deckName || `seat ${i + 1}`}` : s.name));
+}

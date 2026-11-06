@@ -12,7 +12,7 @@ import { use, useEffect, useMemo, useRef, useState } from 'react';
 import { clock, shortDate } from '@/components/GameBits';
 import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
-import { formatDuration, lifeOverTime, SEAT_COLOURS, type GameEvent } from '@/lib/game-play';
+import { formatDuration, lifeOverTime, SEAT_COLOURS, seatLabels, type GameEvent } from '@/lib/game-play';
 
 export default function GamePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -38,6 +38,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
   if (error && !game) return <p className="text-sm text-red-300">{error}</p>;
   if (!game) return <p className="text-sm text-[var(--muted)]">Loading…</p>;
+  const labels = seatLabels(game.seats);
   const winner = game.seats.find((s) => s.won);
   const length = game.endedAt ? Date.parse(game.endedAt) - Date.parse(game.startedAt) : null;
   const first = game.events.find((e) => e.k === 'out');
@@ -48,7 +49,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <Link href={`/games/groups/${game.groupId}?tab=games`} className="text-sm text-[var(--muted)] hover:text-[var(--foreground)]">← Games</Link>
-          <h1 className="font-display text-3xl font-bold">{winner ? `${winner.name} won` : 'A draw'}</h1>
+          <h1 className="font-display text-3xl font-bold">{winner ? `${labels[winner.seat]} won` : 'A draw'}</h1>
           <p className="text-sm text-[var(--muted)]">
             {shortDate(game.startedAt)}, {clock(game.startedAt)}{length ? ` · ${formatDuration(length)}` : ''}{game.rounds ? ` · ${game.rounds} round${game.rounds === 1 ? '' : 's'}` : ''} · {game.seats.length} players · {game.startingLife} life
           </p>
@@ -65,7 +66,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 
       <ul className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         {order.map((s) => {
-          const own = decks[s.memberId] ?? [];
+          // The decks this seat could have played: its pilot's, or everyone's if borrowing was on.
+          const own = game.borrowing ? Object.values(decks).flat() : decks[s.memberId] ?? [];
           return (
             <li key={s.seat} className={`relative flex flex-col overflow-hidden rounded-2xl border bg-[var(--surface)] ${s.won ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}>
               <div className="relative h-24">
@@ -91,6 +93,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
                 ) : (
                   <p className="truncate text-xs text-[var(--muted)]">{s.deckName || 'No deck named'}</p>
                 )}
+                {s.deckOwner && <p className="truncate text-xs text-[var(--muted)]">Borrowed from {s.deckOwner.name}</p>}
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   {s.place ? (s.won ? '1st' : `${ordinal(s.place)}`) : ''}{s.seat === game.firstSeat ? ' · went first' : ''}{first && first.k === 'out' && first.s === s.seat ? ' · out first' : ''}{s.cmdDealt ? ` · ${s.cmdDealt} commander dmg` : ''}
                 </p>
@@ -105,7 +108,7 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
           <span className="text-[var(--muted)]">Winner</span>
           {game.seats.map((s) => (
             <button key={s.seat} type="button" aria-pressed={s.won} onClick={() => edit({ winner: s.seat })}
-              className={`rounded-full border px-3 py-1 ${s.won ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-[var(--border)]'}`}>{s.name}</button>
+              className={`rounded-full border px-3 py-1 ${s.won ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-[var(--border)]'}`}>{labels[s.seat]}</button>
           ))}
           <button type="button" aria-pressed={!winner} onClick={() => edit({ winner: null })}
             className={`rounded-full border px-3 py-1 ${!winner ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'border-[var(--border)]'}`}>Draw</button>
@@ -145,7 +148,8 @@ export default function GamePage({ params }: { params: Promise<{ id: string }> }
 }
 
 function line(e: GameEvent, game: api.Game) {
-  const name = (s: number) => game.seats[s]?.name ?? 'Someone';
+  const labels = seatLabels(game.seats);
+  const name = (s: number) => labels[s] ?? 'Someone';
   if (e.k === 'life') return `${name(e.s)} ${e.d < 0 ? `lost ${-e.d}` : `gained ${e.d}`} life`;
   if (e.k === 'cmd') return e.d > 0 ? `${name(e.s)} took ${e.d} commander damage from ${name(e.from)}` : `${name(e.s)}: ${-e.d} commander damage from ${name(e.from)} taken back`;
   if (e.k === 'poison') return e.d > 0 ? `${name(e.s)} got ${e.d} poison` : `${name(e.s)} lost ${-e.d} poison`;
@@ -155,6 +159,7 @@ function line(e: GameEvent, game: api.Game) {
 
 /** Life for each player over the game, by time; hover for everyone's life at that moment. */
 function LifeChart({ game }: { game: api.Game }) {
+  const labels = seatLabels(game.seats);
   const rows = useMemo(() => lifeOverTime(game.seats.length, game.startingLife, game.firstSeat, game.events), [game]);
   const [hover, setHover] = useState<number | null>(null);
   // Drawn at the box's own width, so text stays its size from a phone to a wide screen.
@@ -189,7 +194,7 @@ function LifeChart({ game }: { game: api.Game }) {
           {game.seats.map((s) => (
             <li key={s.seat} className="flex items-center gap-1.5">
               <span aria-hidden className="h-0.5 w-4 rounded-full" style={{ background: SEAT_COLOURS[s.seat] }} />
-              {s.name}{at ? <b className="tabular-nums">{at.life[s.seat]}</b> : null}
+              {labels[s.seat]}{at ? <b className="tabular-nums">{at.life[s.seat]}</b> : null}
             </li>
           ))}
         </ul>

@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
 
 import { getList } from '@/lib/db';
 import { cleanEvents } from '@/lib/game-play';
-import { cleanName, commanderOf, deleteGame, editGame, finishGame, gameFor, saveEvents } from '@/lib/games';
+import { deleteGame, editGame, finishGame, gameFor, groupsOf, saveEvents, seatDeck } from '@/lib/games';
 import { requireProfile } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -75,11 +75,10 @@ export async function PATCH(request: Request, { params }: Params) {
   if (typeof body.note === 'string') change.note = body.note.slice(0, 2000);
   if (body.seat) {
     const seat = game.seats.find((s) => s.seat === body.seat!.seat);
-    if (!seat) return NextResponse.json({ error: 'No such seat' }, { status: 400 });
-    const deck = typeof body.seat.deckId === 'string' && seat.profileId ? getList(body.seat.deckId, seat.profileId) : null;
-    change.seat = deck && deck.kind === 'deck'
-      ? { seat: seat.seat, deckId: deck.id, deckName: deck.name, commander: commanderOf(deck.commander) }
-      : { seat: seat.seat, deckId: null, deckName: cleanName(body.seat.deckName, 60), commander: null };
+    const members = groupsOf(found.profile).find((g) => g.id === game.groupId)?.members ?? [];
+    const pilot = members.find((m) => m.id === seat?.memberId);
+    if (!seat || !pilot) return NextResponse.json({ error: 'No such seat' }, { status: 400 });
+    change.seat = { seat: seat.seat, ...seatDeck(members, pilot, body.seat.deckId, body.seat.deckName, game.borrowing, getList) };
   }
   editGame(game, change);
   return NextResponse.json({ game: gameFor(found.profile, id) });

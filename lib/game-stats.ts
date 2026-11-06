@@ -25,8 +25,11 @@ export interface DeckStanding {
   deckId: string | null;
   name: string;
   commander: SeatCommander | null;
+  /** The deck's owner - who it belongs to, whoever piloted it. */
   memberId: string;
   player: string;
+  /** Games someone else piloted it, borrowed. */
+  borrowed: number;
   games: number;
   wins: number;
   lastPlayed: string;
@@ -63,27 +66,42 @@ export function groupStats(all: Game[], members: Member[], players?: number): Gr
   for (const m of members) {
     byMember.set(m.id, { memberId: m.id, name: m.name, profileId: m.profileId, art: m.art, games: 0, wins: 0, firstWins: 0, firstGames: 0, topDeck: null });
   }
+  const standingOf = (memberId: string, name: string, profileId: string | null) => {
+    let st = byMember.get(memberId);
+    if (!st) {
+      // Someone since taken out of the group still counts in the games they played.
+      st = { memberId, name, profileId, art: null, games: 0, wins: 0, firstWins: 0, firstGames: 0, topDeck: null };
+      byMember.set(memberId, st);
+    }
+    return st;
+  };
   for (const g of games) {
+    // A player counts once a game, however many seats they took: a win if any of their seats won.
+    const pilots = new Map<string, { won: boolean; first: boolean; firstWon: boolean }>();
     for (const s of g.seats) {
-      let st = byMember.get(s.memberId);
-      if (!st) {
-        // Someone since taken out of the group still counts in the games they played.
-        st = { memberId: s.memberId, name: s.name, profileId: s.profileId, art: null, games: 0, wins: 0, firstWins: 0, firstGames: 0, topDeck: null };
-        byMember.set(s.memberId, st);
-      }
-      st.games++;
-      if (s.won) st.wins++;
-      if (s.seat === g.firstSeat) { st.firstGames++; if (s.won) st.firstWins++; }
+      standingOf(s.memberId, s.name, s.profileId);
+      const p = pilots.get(s.memberId) ?? { won: false, first: false, firstWon: false };
+      const first = s.seat === g.firstSeat;
+      pilots.set(s.memberId, { won: p.won || s.won, first: p.first || first, firstWon: p.firstWon || (first && s.won) });
       if (s.deckName) {
         const counts = deckCounts.get(s.memberId) ?? new Map<string, number>();
         counts.set(s.deckName, (counts.get(s.deckName) ?? 0) + 1);
         deckCounts.set(s.memberId, counts);
-        const key = deckKey(s.memberId, s.deckId, s.deckName);
-        const deck = decks.get(key) ?? { key, deckId: s.deckId, name: s.deckName, commander: s.commander, memberId: s.memberId, player: s.name, games: 0, wins: 0, lastPlayed: g.startedAt };
+        // A borrowed deck's record is its owner's, as if they had piloted it.
+        const owner = s.deckOwner ?? { memberId: s.memberId, name: s.name };
+        const key = deckKey(owner.memberId, s.deckId, s.deckName);
+        const deck = decks.get(key) ?? { key, deckId: s.deckId, name: s.deckName, commander: s.commander, memberId: owner.memberId, player: owner.name, borrowed: 0, games: 0, wins: 0, lastPlayed: g.startedAt };
         deck.games++;
         if (s.won) deck.wins++;
+        if (s.deckOwner) deck.borrowed++;
         decks.set(key, deck);
       }
+    }
+    for (const [memberId, p] of pilots) {
+      const st = byMember.get(memberId)!;
+      st.games++;
+      if (p.won) st.wins++;
+      if (p.first) { st.firstGames++; if (p.firstWon) st.firstWins++; }
     }
   }
   for (const [memberId, counts] of deckCounts) {
@@ -172,11 +190,13 @@ function highlights(games: Game[], byMember: Map<string, Standing>): Highlight[]
   // Who beats whom: of two players' games together, who finished ahead more often.
   const ahead = new Map<string, number>();
   for (const g of games) {
+    // Once a game per pair, even when someone took two seats.
+    const seen = new Set<string>();
     for (const a of g.seats) for (const b of g.seats) {
       if (a.memberId === b.memberId || a.place === null || b.place === null || a.place >= b.place) continue;
-      const k = `${a.memberId}>${b.memberId}`;
-      ahead.set(k, (ahead.get(k) ?? 0) + 1);
+      seen.add(`${a.memberId}>${b.memberId}`);
     }
+    for (const k of seen) ahead.set(k, (ahead.get(k) ?? 0) + 1);
   }
   const nemesis = [...ahead].sort((x, y) => y[1] - x[1])[0];
   if (nemesis && nemesis[1] >= 3) {

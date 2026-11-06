@@ -13,7 +13,7 @@ import EmptyState from '@/components/EmptyState';
 import { clock, SeatAvatar, shortDate, WinRate } from '@/components/GameBits';
 import MoreMenu from '@/components/MoreMenu';
 import * as api from '@/lib/api';
-import { formatDuration } from '@/lib/game-play';
+import { formatDuration, seatLabels } from '@/lib/game-play';
 import { winRate } from '@/lib/game-stats';
 
 type Tab = 'stats' | 'games' | 'players';
@@ -87,7 +87,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
         </div>
         {live[0] && (
           <p className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_40%,var(--border))] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] px-4 py-2.5 text-sm">
-            A game is still going: {live[0].seats.map((s) => s.name).join(', ')}, started {clock(live[0].startedAt)}.{' '}
+            A game is still going: {[...new Set(live[0].seats.map((s) => s.name))].join(', ')}, started {clock(live[0].startedAt)}.{' '}
             <Link href={`/games/play/${live[0].id}`} className="font-semibold text-[var(--accent)] underline">Pick it up</Link>
           </p>
         )}
@@ -166,14 +166,16 @@ function Stats({ page, players, setPlayers }: { page: api.GroupPage; players: nu
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Decks" hint="Every deck played here, most played first.">
+        <Card title="Decks" hint="Every deck played here, most played first. A borrowed deck counts for its owner’s deck.">
           <ul className="flex flex-col">
             {stats.decks.map((d) => (
               <li key={d.key} className="flex items-center gap-2.5 border-t border-[var(--border)] py-2.5 first:border-0 first:pt-0">
                 <SeatAvatar art={d.commander?.art} name={d.name} size={34} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold">{d.name}</span>
-                  <span className="block truncate text-xs text-[var(--muted)]">{d.player}{d.commander ? ` · ${d.commander.name.split(',')[0]}` : ''}</span>
+                  <span className="block truncate text-xs text-[var(--muted)]">
+                    {d.player}’s{d.commander ? ` · ${d.commander.name.split(',')[0]}` : ''}{d.borrowed ? ` · borrowed ${d.borrowed}×` : ''}
+                  </span>
                 </span>
                 <WinRate wins={d.wins} games={d.games} />
               </li>
@@ -260,13 +262,14 @@ function Games({ games, groupId }: { games: api.GameSummary[]; groupId: string }
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {d.games.map((g) => {
               const winner = g.seats.find((s) => s.won);
+              const labels = seatLabels(g.seats);
               return (
                 <li key={g.id}>
                   <Link href={`/games/${g.id}`} className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 hover:border-[var(--accent)]">
                     <SeatAvatar art={winner?.commander?.art} name={winner?.name ?? '='} seat={winner?.seat} size={44} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{winner ? `${winner.name} won` : 'A draw'}</span>
-                      <span className="block truncate text-xs text-[var(--muted)]">{winner?.deckName || 'No deck named'}</span>
+                      <span className="block truncate font-semibold">{winner ? `${labels[winner.seat]} won` : 'A draw'}</span>
+                      <span className="block truncate text-xs text-[var(--muted)]">{winner?.deckName || 'No deck named'}{winner?.deckOwner ? ` · ${winner.deckOwner.name}’s` : ''}</span>
                       <span className="mt-1 flex items-center gap-1.5">
                         <span className="flex -space-x-1.5">{g.seats.map((s) => <SeatAvatar key={s.seat} art={s.commander?.art} name={s.name} seat={s.seat} size={20} ring />)}</span>
                         <span className="text-xs text-[var(--muted)]">{g.seats.length}p</span>

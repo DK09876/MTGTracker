@@ -9,6 +9,10 @@
  * it writes one row per seat with how it went, which is what the stats
  * read. Each seat keeps the deck's name and commander as they were, so a
  * deck renamed or deleted later still shows what was played.
+ *
+ * One person may sit in more than one seat (two players piloting two decks
+ * each), and with borrowing on a seat may play another member's deck: the
+ * deck's record is its owner's, the win or loss is the pilot's.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -42,6 +46,11 @@ function db() {
       life INTEGER, place INTEGER, won INTEGER NOT NULL DEFAULT 0, cmdDealt INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (gameId, seat))`);
     d.run('CREATE INDEX IF NOT EXISTS idx_seats_deck ON game_seats (deckId)');
+    // Borrowed decks: the member whose deck a seat played, when it is not the pilot's own.
+    const seatCols = (d.all('PRAGMA table_info(game_seats)') as Array<{ name: string }>).map((c) => c.name);
+    if (!seatCols.includes('deckOwner')) d.run('ALTER TABLE game_seats ADD COLUMN deckOwner TEXT');
+    const gameCols = (d.all('PRAGMA table_info(games)') as Array<{ name: string }>).map((c) => c.name);
+    if (!gameCols.includes('borrowing')) d.run('ALTER TABLE games ADD COLUMN borrowing INTEGER NOT NULL DEFAULT 0');
     ready = true;
   }
   return d;
@@ -179,6 +188,8 @@ export interface Seat {
   deckId: string | null;
   deckName: string;
   commander: SeatCommander | null;
+  /** The member whose deck this is, when it was borrowed from someone else. */
+  deckOwner: { memberId: string; name: string } | null;
   /** Set once the game is finished. */
   life: number | null;
   place: number | null;
@@ -191,6 +202,8 @@ export interface Game {
   groupId: string;
   status: GameStatus;
   startingLife: number;
+  /** Whether seats could play other members' decks. */
+  borrowing: boolean;
   firstSeat: number;
   winnerSeat: number | null;
   events: GameEvent[];
@@ -201,21 +214,21 @@ export interface Game {
   seats: Seat[];
 }
 
-type GameRow = Omit<Game, 'events' | 'seats'> & { events: string };
-type SeatRow = Omit<Seat, 'won' | 'commander' | 'name' | 'profileId'> & { won: number; commander: string | null };
+type GameRow = Omit<Game, 'events' | 'seats' | 'borrowing'> & { events: string; borrowing: number };
+type SeatRow = Omit<Seat, 'won' | 'commander' | 'name' | 'profileId' | 'deckOwner'> & { won: number; commander: string | null; deckOwner: string | null };
 
-export interface NewSeat { memberId: string; deckId: string | null; deckName: string; commander: SeatCommander | null }
+export interface NewSeat { memberId: string; deckId: string | null; deckName: string; commander: SeatCommander | null; deckOwner?: string | null }
 
 /** Start a game; seats are in order round the table. */
-export function startGame(groupId: string, createdBy: string, seats: NewSeat[], startingLife: number, firstSeat: number): string {
+export function startGame(groupId: string, createdBy: string, seats: NewSeat[], startingLife: number, firstSeat: number, borrowing = false): string {
   const d = db();
   const id = randomUUID();
   const at = now();
-  d.run(`INSERT INTO games (id, groupId, createdBy, status, startingLife, firstSeat, startedAt, updatedAt)
-    VALUES (?, ?, ?, 'live', ?, ?, ?, ?)`, [id, groupId, createdBy, startingLife, firstSeat, at, at]);
+  d.run(`INSERT INTO games (id, groupId, createdBy, status, startingLife, firstSeat, borrowing, startedAt, updatedAt)
+    VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?)`, [id, groupId, createdBy, startingLife, firstSeat, borrowing ? 1 : 0, at, at]);
   seats.forEach((s, i) => d.run(
-    'INSERT INTO game_seats (gameId, seat, memberId, deckId, deckName, commander) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, i, s.memberId, s.deckId, s.deckName, s.commander ? JSON.stringify(s.commander) : null],
+    'INSERT INTO game_seats (gameId, seat, memberId, deckId, deckName, commander, deckOwner) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, i, s.memberId, s.deckId, s.deckName, s.commander ? JSON.stringify(s.commander) : null, s.deckOwner && s.deckOwner !== s.memberId ? s.deckOwner : null],
   ));
   return id;
 }
@@ -226,6 +239,7 @@ function seatsOf(gameId: string, members: Map<string, Member>): Seat[] {
     return {
       seat: r.seat, memberId: r.memberId, name: m?.name ?? 'Someone', profileId: m?.profileId ?? null,
       deckId: r.deckId, deckName: r.deckName, commander: r.commander ? JSON.parse(r.commander) as SeatCommander : null,
+      deckOwner: r.deckOwner ? { memberId: r.deckOwner, name: members.get(r.deckOwner)?.name ?? 'Someone' } : null,
       life: r.life, place: r.place, won: !!r.won, cmdDealt: r.cmdDealt,
     };
   });
@@ -234,7 +248,7 @@ function seatsOf(gameId: string, members: Map<string, Member>): Seat[] {
 const memberMap = (groupId: string) => new Map(membersOf(groupId, true).map((m) => [m.id, m]));
 
 function toGame(row: GameRow, members: Map<string, Member>): Game {
-  return { ...row, events: JSON.parse(row.events) as GameEvent[], seats: seatsOf(row.id, members) };
+  return { ...row, borrowing: !!row.borrowing, events: JSON.parse(row.events) as GameEvent[], seats: seatsOf(row.id, members) };
 }
 
 /** The game, if this profile is in its group. */
@@ -278,17 +292,36 @@ export function finishGame(game: Game, winner: number | null, events: GameEvent[
 }
 
 /** Change a finished game's winner or note, or a seat's deck, afterwards. */
-export function editGame(game: Game, change: { winner?: number | null; note?: string; seat?: { seat: number; deckId: string | null; deckName: string; commander: SeatCommander | null } }): void {
+export function editGame(game: Game, change: { winner?: number | null; note?: string; seat?: { seat: number } & Omit<NewSeat, 'memberId'> }): void {
   const d = db();
   if (change.note !== undefined) d.run('UPDATE games SET note = ? WHERE id = ?', [change.note, game.id]);
-  if (change.seat) d.run('UPDATE game_seats SET deckId = ?, deckName = ?, commander = ? WHERE gameId = ? AND seat = ?',
-    [change.seat.deckId, change.seat.deckName, change.seat.commander ? JSON.stringify(change.seat.commander) : null, game.id, change.seat.seat]);
+  if (change.seat) {
+    const pilot = game.seats.find((s) => s.seat === change.seat!.seat)?.memberId;
+    d.run('UPDATE game_seats SET deckId = ?, deckName = ?, commander = ?, deckOwner = ? WHERE gameId = ? AND seat = ?',
+      [change.seat.deckId, change.seat.deckName, change.seat.commander ? JSON.stringify(change.seat.commander) : null,
+        change.seat.deckOwner && change.seat.deckOwner !== pilot ? change.seat.deckOwner : null, game.id, change.seat.seat]);
+  }
   if (change.winner !== undefined && game.status === 'done') finishGame(game, change.winner, game.events);
 }
 
 export function deleteGame(gameId: string): void {
   db().run('DELETE FROM game_seats WHERE gameId = ?', [gameId]);
   db().run('DELETE FROM games WHERE id = ?', [gameId]);
+}
+
+/**
+ * The deck a seat plays: one of the pilot's own, or with borrowing any
+ * member's - read here, never taken from the browser. A deck not on the app
+ * is just its name.
+ */
+export function seatDeck(members: Member[], pilot: Member, deckId: unknown, deckName: unknown, borrowing: boolean, getDeck: (id: string, profileId: string) => { id: string; name: string; kind: string; commander: ScryfallCard | null } | null): Omit<NewSeat, 'memberId'> {
+  if (typeof deckId === 'string') {
+    for (const owner of borrowing ? [pilot, ...members.filter((m) => m.id !== pilot.id)] : [pilot]) {
+      const deck = owner.profileId ? getDeck(deckId, owner.profileId) : null;
+      if (deck && deck.kind === 'deck') return { deckId: deck.id, deckName: deck.name, commander: commanderOf(deck.commander), deckOwner: owner.id === pilot.id ? null : owner.id };
+    }
+  }
+  return { deckId: null, deckName: cleanName(deckName, 60), commander: null, deckOwner: null };
 }
 
 // --- records -----------------------------------------------------------------------
