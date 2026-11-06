@@ -10,7 +10,8 @@ import { planConfirmed, planProgress } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
 import { isPublic, setPublic } from '@/lib/profile-style';
 import { getCard, ScryfallError } from '@/lib/scryfall';
-import { sectionsOf } from '@/lib/sections';
+import { dropSections, sectionsOf } from '@/lib/sections';
+import { dropTune } from '@/lib/tune-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,6 +73,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (owned instanceof NextResponse) return owned;
   try {
     deleteList(id);
+    // The deck's own sections and Tune state go with it.
+    dropSections(id);
+    dropTune(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[list] delete failed', error);

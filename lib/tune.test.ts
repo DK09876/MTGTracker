@@ -94,9 +94,28 @@ describe('applying', { timeout: 30_000 }, () => {
     const store = (await import('./tune-store')).tuneStore(list.id);
     expect(store.cutReasons['Spell 0'].why).toBe('Same job, more treasure');
     expect(store.changes).toEqual({ add: [], cut: [] });
-    // The undo is the swap the other way round.
-    expect(done.undo.add[0].card.name).toBe('Spell 0');
-    expect(done.undo.cut[0].card.name).toBe('Mahadi, Emporium Master');
+    // The undo puts back exactly what moved.
+    expect(done.undo.moves.map((m) => [m.name, m.to])).toEqual([['Spell 0', 'main'], ['Mahadi, Emporium Master', 'maybe']]);
+  });
+
+  it('undoes an apply exactly, leaving what you staged since alone', async () => {
+    const mahadi = card('Mahadi, Emporium Master', { color_identity: ['B', 'R'], cmc: 3 });
+    const { db, list } = await deck(62, { maybe: [mahadi] });
+    const tune = await import('./tune');
+    await tune.stage(list, 'dk', [{ key: 'swap', add: { ...addOf('Mahadi, Emporium Master').add! }, cut: cutOf('Spell 0').cut, why: 'Same job' }]);
+    await tune.stage(list, 'dk', [cutOf('Swamp', 'k:basic')]);
+    const done = await tune.applyChanges(list);
+    // Something new staged after the apply.
+    // (a swap: a cut on its own would be capped at 100)
+    await tune.stage(list, 'dk', [{ ...cutOf('Spell 5', 'k:later'), add: { id: 'Spell 9', name: 'Spell 9', cmc: 2, manaCost: '', typeLine: '', image: null, quantity: 1 } }]);
+    tune.undoApply(list, done.undo);
+    const cards = db.cardsInList(list.id);
+    expect(cards.find((c) => c.card.name === 'Mahadi, Emporium Master')?.board).toBe('maybe');
+    expect(cards.find((c) => c.card.name === 'Spell 0')?.board).toBe('main');
+    expect(cards.find((c) => c.card.name === 'Swamp')?.quantity).toBe(37);
+    const store = (await import('./tune-store')).tuneStore(list.id);
+    expect(store.changes.cut.map((c) => c.from)).toEqual(['k:later']);
+    expect(store.cutReasons['Spell 0']).toBeUndefined();
   });
 
   it('cuts one copy of a basic by lowering the count', async () => {

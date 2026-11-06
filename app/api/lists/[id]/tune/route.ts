@@ -10,6 +10,7 @@
  *   save {section, items}  the cards to add into a section, for later
  *   clear                  empty your changes
  *   apply {cutsTo?}        move the cards; cuts to the section for cards that came out
+ *   undo {undo}            put back exactly what an apply moved; staged changes stay
  *   keep {cardId, keep}    ★ keep a card (Claude's "keep this")
  *   pile {choice}          for a pile: 'fill' to 100, or the 'best' 100 from everything
  *   verdict {id, verdict}  how a fix went; "worse" stages undoing it
@@ -23,7 +24,7 @@ import { setKeep } from '@/lib/deck-roles';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { getCard } from '@/lib/scryfall';
 import { hasBoard } from '@/lib/sections';
-import { applyChanges, ref, stage, tuneState, unstage } from '@/lib/tune';
+import { applyChanges, ref, stage, tuneState, undoApply, unstage, type UndoMoves } from '@/lib/tune';
 import { INTENTS, SYMPTOMS, type Intent, type Suggestion, type Symptom } from '@/lib/tune-shared';
 import { newKey, updateTune } from '@/lib/tune-store';
 import { localCards } from '@/lib/card-store';
@@ -89,6 +90,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     case 'apply': {
       const cutsTo = typeof b.cutsTo === 'string' && b.cutsTo !== 'main' && hasBoard(id, b.cutsTo) ? b.cutsTo : undefined;
       return NextResponse.json(await applyChanges(list, cutsTo as Parameters<typeof applyChanges>[1]));
+    }
+    case 'undo': {
+      const undo = b.undo as UndoMoves | undefined;
+      if (!undo || !Array.isArray(undo.moves)) return NextResponse.json({ error: 'Nothing to undo' }, { status: 400 });
+      return NextResponse.json(undoApply(list, { moves: undo.moves.slice(0, 400) }));
     }
     case 'keep': {
       const card = cardsInList(id).find((c) => c.card.id === b.cardId)?.card;

@@ -151,18 +151,13 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   });
   const keep = (cardId: string) => act(async () => { await api.tuneAct(listId, { action: 'keep', cardId, keep: true }); await onChanged(); }, '★ Kept: never offered as a cut again.');
   const apply = () => act(async () => {
-    const r = await api.tuneAct<{ added: number; cut: number; undo: { add: Staged[]; cut: Staged[] } }>(listId, { action: 'apply', cutsTo: cutsTo ?? undefined });
+    const r = await api.tuneAct<{ added: number; cut: number; undo: unknown }>(listId, { action: 'apply', cutsTo: cutsTo ?? undefined });
     await onChanged();
-    const undoItems: Suggestion[] = [
-      // A swap undone is a swap: put each pair back together.
-      ...r.undo.add.map((a) => ({ key: `undo:${a.key}`, add: { ...a.card, quantity: a.quantity }, cut: r.undo.cut.find((c) => c.pair && c.pair === a.pair)?.card, why: 'Undo' } as Suggestion)),
-      ...r.undo.cut.filter((c) => !c.pair || !r.undo.add.some((a) => a.pair === c.pair)).map((c) => ({ key: `undo:${c.key}`, cut: { ...c.card, quantity: c.quantity }, why: 'Undo' } as Suggestion)),
-    ];
     setNote({
       text: `Applied: +${r.added} −${r.cut}.${r.cut ? ` Cuts are in ${sections.find((s) => s.id === (cutsTo ?? state.cutsTo.id))?.name ?? state.cutsTo.name}.` : ''}`,
+      // Puts back exactly what moved; anything you staged since stays staged.
       undo: async () => {
-        await api.tuneAct(listId, { action: 'stage', items: undoItems });
-        await api.tuneAct(listId, { action: 'apply' });
+        await api.tuneAct(listId, { action: 'undo', undo: r.undo });
         await onChanged();
       },
     });

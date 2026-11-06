@@ -772,48 +772,91 @@ export function unstage(listId: string, keys: string[]): void {
 /**
  * Apply your changes: adds go into the deck (from the section they wait in,
  * or as new cards), cuts go to the section for cards that came out, with
- * their reason kept. Returns what moved, for an undo.
+ * their reason kept. Returns the exact inverse, for an undo that touches
+ * nothing else you have staged since.
  */
-export async function applyChanges(list: List, cutsTo?: Board): Promise<{ added: number; cut: number; undo: Changes }> {
+export async function applyChanges(list: List, cutsTo?: Board): Promise<{ added: number; cut: number; undo: UndoMoves }> {
   const s = tuneStore(list.id);
-  const all = cardsInList(list.id);
   const sections = sectionsOf(list.id);
   const to: Board = cutsTo && cutsTo !== 'main' && sections.some((x) => x.id === cutsTo) ? cutsTo : cutBoard(sections);
+  const at = new Date().toISOString();
+  const done = await move(list, s.changes, () => to, (name, why) => { s.cutReasons[name] = { why, at }; }, (name) => { delete s.cutReasons[name]; });
+  // Fixes applied become a log entry that asks, next time, whether they helped.
+  const fixPairs = s.changes.add.filter((a) => a.from?.startsWith('fix:') && a.pair).map((a) => ({ add: a.card.name, cut: s.changes.cut.find((c) => c.pair === a.pair)?.card.name ?? '', symptom: a.from!.split(':')[1] as Symptom }));
+  if (fixPairs.length) s.log.push({ id: newKey('fix'), at, symptom: fixPairs[0].symptom, swaps: fixPairs.map(({ add, cut: c }) => ({ add, cut: c })) });
+  updateTune(list.id, (x) => { x.changes = { add: [], cut: [] }; x.cutReasons = s.cutReasons; x.log = s.log; });
+  return done;
+}
+
+/**
+ * What an apply moved, so it can be put back exactly: each card, how many,
+ * and the board it goes back to ('gone' for a card that was new to the deck).
+ */
+export interface UndoMoves {
+  moves: Array<{ id: string; name: string; quantity: number; to: Board | 'gone'; from: Board | 'gone' }>;
+}
+
+async function move(
+  list: List, changes: Changes, cutTo: (c: Staged) => Board,
+  onCut: (name: string, why: string) => void, onAdd: (name: string) => void,
+): Promise<{ added: number; cut: number; undo: UndoMoves }> {
+  const all = cardsInList(list.id);
+  const undo: UndoMoves = { moves: [] };
   let added = 0;
   let cut = 0;
-  const at = new Date().toISOString();
-  for (const c of s.changes.cut) {
+  for (const c of changes.cut) {
     const row = all.find((x) => x.card.id === c.card.id && x.board === 'main');
     if (!row) continue;
+    const dest = cutTo(c);
     // A card sits on one board at a time, so cutting some copies of a basic just lowers the count.
-    if (row.quantity > c.quantity) setQuantity(list.id, row.card.id, row.quantity - c.quantity);
-    else updateListCard(list.id, row.card.id, { board: to });
-    s.cutReasons[row.card.name] = { why: c.why, at };
+    if (row.quantity > c.quantity) { setQuantity(list.id, row.card.id, row.quantity - c.quantity); undo.moves.push({ id: row.card.id, name: row.card.name, quantity: c.quantity, to: 'main', from: 'gone' }); }
+    else { updateListCard(list.id, row.card.id, { board: dest }); undo.moves.push({ id: row.card.id, name: row.card.name, quantity: row.quantity, to: 'main', from: dest }); }
+    onCut(row.card.name, c.why);
     cut += c.quantity;
   }
-  for (const a of s.changes.add) {
+  for (const a of changes.add) {
     const row = all.find((x) => x.card.id === a.card.id && x.board !== 'main') ?? all.find((x) => x.card.name === a.card.name && x.board !== 'main');
     // From the section it waits in; a printing on one board at a time, so all its copies come.
-    if (row) updateListCard(list.id, row.card.id, { board: 'main' });
+    if (row) { updateListCard(list.id, row.card.id, { board: 'main' }); undo.moves.push({ id: row.card.id, name: row.card.name, quantity: row.quantity, to: row.board, from: 'main' }); }
     else {
       // The whole card, as adding from search stores it; the local copy when Scryfall can't be reached.
       const card = storedCard(a.card.id) ?? await getCard(a.card.id).catch(() => null) ?? localCards([a.card.name])[0];
       if (!card) continue;
       addCardToList(list.id, card, a.quantity, 'nonfoil', 'main');
+      undo.moves.push({ id: card.id, name: card.name, quantity: a.quantity, to: 'gone', from: 'main' });
     }
-    delete s.cutReasons[a.card.name];
+    onAdd(a.card.name);
     added += a.quantity;
   }
-  const undo: Changes = {
-    add: s.changes.cut.map((c) => ({ ...c, card: { ...c.card, from: to } })),
-    cut: s.changes.add.map((a) => ({ ...a, card: { ...a.card, from: 'main' as Board } })),
-  };
-  // Fixes applied become a log entry that asks, next time, whether they helped.
-  const fixPairs = s.changes.add.filter((a) => a.from?.startsWith('fix:') && a.pair).map((a) => ({ add: a.card.name, cut: s.changes.cut.find((c) => c.pair === a.pair)?.card.name ?? '', symptom: a.from!.split(':')[1] as Symptom }));
-  if (fixPairs.length) s.log.push({ id: newKey('fix'), at, symptom: fixPairs[0].symptom, swaps: fixPairs.map(({ add, cut: c }) => ({ add, cut: c })) });
-  s.changes = { add: [], cut: [] };
-  updateTune(list.id, (x) => { x.changes = s.changes; x.cutReasons = s.cutReasons; x.log = s.log; });
   return { added, cut, undo };
+}
+
+/** Put back what an apply moved. Anything staged since stays staged. */
+export function undoApply(list: List, undo: UndoMoves): { moved: number } {
+  const sections = new Set(sectionsOf(list.id).map((x) => x.id));
+  let moved = 0;
+  for (const m of [...(undo?.moves ?? [])].reverse()) {
+    const rows = cardsInList(list.id);
+    if (m.to === 'gone') {
+      // A card that was new to the deck leaves it again: only the copies the apply added.
+      const row = rows.find((x) => x.card.id === m.id && x.board === 'main');
+      if (!row) continue;
+      setQuantity(list.id, row.card.id, row.quantity - m.quantity);
+    } else if (m.from === 'gone') {
+      // Copies of a basic that were cut come back.
+      const row = rows.find((x) => x.card.id === m.id && x.board === 'main');
+      if (row) setQuantity(list.id, row.card.id, row.quantity + m.quantity);
+      else { const card = storedCard(m.id) ?? localCards([m.name])[0]; if (card) addCardToList(list.id, card, m.quantity, 'nonfoil', 'main'); }
+    } else {
+      const row = rows.find((x) => x.card.id === m.id && x.board === m.from);
+      if (!row) continue;
+      if (m.to !== 'main' && !sections.has(m.to)) continue;
+      updateListCard(list.id, row.card.id, { board: m.to });
+    }
+    moved += 1;
+  }
+  updateTune(list.id, (s) => { for (const m of undo?.moves ?? []) if (m.to === 'main') delete s.cutReasons[m.name]; });
+  return { moved };
 }
 
 export { JOB_LABELS };

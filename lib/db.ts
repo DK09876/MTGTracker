@@ -426,8 +426,8 @@ export function duplicateList(listId: string, profileId: string, name: string): 
       [id, profileId, from.kind, name, from.note ?? '', from.commanderId, from.commanderFinish ?? 'nonfoil', from.tagBrief ?? '', from.tagOverview ?? '', stamp, stamp],
     );
     database.run(
-      `INSERT INTO list_cards (listId, cardId, quantity, addedAt, finish, board, proxies)
-       SELECT ?, cardId, quantity, ?, finish, board, proxies FROM list_cards WHERE listId = ?`, [id, stamp, listId],
+      `INSERT INTO list_cards (listId, cardId, quantity, addedAt, finish, board, proxies, slot)
+       SELECT ?, cardId, quantity, ?, finish, board, proxies, slot FROM list_cards WHERE listId = ?`, [id, stamp, listId],
     );
     // Tags get new ids, and the cards' tags follow them.
     const tags = database.all('SELECT * FROM deck_tags WHERE listId = ?', [listId]) as Array<Record<string, string | number | null>>;

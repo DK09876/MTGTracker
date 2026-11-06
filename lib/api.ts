@@ -729,6 +729,7 @@ type TuneAction =
   | { action: 'save'; section: string; items: import('./tune-shared').Suggestion[] }
   | { action: 'clear' }
   | { action: 'apply'; cutsTo?: string }
+  | { action: 'undo'; undo: unknown }
   | { action: 'keep'; cardId: string; keep: boolean }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
@@ -738,7 +739,7 @@ export const tunePath = (listId: string, intent?: string, symptom?: string) =>
   `lists/${listId}/tune${intent ? `?intent=${intent}${symptom ? `&symptom=${symptom}` : ''}` : ''}`;
 export const tune = (listId: string, intent?: string, symptom?: string) => get<TuneState>(tunePath(listId, intent, symptom));
 export const tuneAct = <T = { ok: true; staged?: number; capped?: number; saved?: number; added?: number; cut?: number }>(listId: string, act: TuneAction) =>
-  send(`lists/${listId}/tune`, 'POST', act).then(json<T>).finally(() => { if (act.action === 'apply' || act.action === 'save' || act.action === 'keep') forgetDeck(listId); });
+  send(`lists/${listId}/tune`, 'POST', act).then(json<T>).finally(() => { if (act.action === 'apply' || act.action === 'undo' || act.action === 'save' || act.action === 'keep') forgetDeck(listId); });
 export const tuneIdeasJob = (listId: string) => get<{ job: Job | null }>(`lists/${listId}/tune/claude`);
 export const startTuneIdeas = (listId: string, intent: string, instructions: string, problem?: string) =>
   spending(send(`lists/${listId}/tune/claude`, 'POST', { intent, instructions, problem }).then(json<{ job: Job }>).finally(jobsChanged));
