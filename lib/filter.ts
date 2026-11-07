@@ -52,6 +52,8 @@ function patternOf(value: string): RegExp | null {
   }
 }
 
+const IS_VALUES = new Set(['creature', 'land', 'dfc', 'transform', 'gamechanger', 'gc', 'commander']);
+
 export function parseQuery(input: string): ParsedQuery {
   const terms: Term[] = [];
   const unsupported: string[] = [];
@@ -71,7 +73,8 @@ export function parseQuery(input: string): ParsedQuery {
 
     const [, key, op, value] = match;
     const lower = key.toLowerCase();
-    if (!KNOWN.has(lower)) {
+    // An is: this filter doesn't know is reported too, never a quiet empty list.
+    if (!KNOWN.has(lower) || (lower === 'is' && !IS_VALUES.has(strip(value).toLowerCase()))) {
       unsupported.push(`${key}${op}${value}`);
       continue;
     }
@@ -169,6 +172,8 @@ function matchesTerm(card: ScryfallCard, term: Term): boolean {
       if (value === 'creature') return typeLineOf(card).toLowerCase().includes('creature');
       if (value === 'land') return typeLineOf(card).toLowerCase().includes('land');
       if (value === 'dfc' || value === 'transform') return (card.card_faces?.length ?? 0) > 1;
+      if (value === 'gamechanger' || value === 'gc') return card.game_changer === true;
+      if (value === 'commander') return /legendary/i.test(typeLineOf(card)) && /creature/i.test(typeLineOf(card));
       return false;
     default:
       return false;
