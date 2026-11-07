@@ -30,10 +30,13 @@ describe('readCollectionFile', () => {
     ]);
   });
 
-  it('reads Moxfield, leaving out proxies', () => {
+  it('reads Moxfield, keeping proxies marked as proxies', () => {
     const { rows, format } = readCollectionFile(MOXFIELD);
     expect(format).toBe('Moxfield');
-    expect(rows).toEqual([expect.objectContaining({ name: 'Opt', set: 'm21', number: '59', finish: 'foil' })]);
+    expect(rows).toEqual([
+      expect.objectContaining({ name: 'Opt', set: 'm21', number: '59', finish: 'foil', variant: '' }),
+      expect.objectContaining({ name: 'Mana Crypt', set: '2xm', number: '270', variant: 'proxy' }),
+    ]);
   });
 
   it('reads TCGplayer by its plain names and set codes', () => {

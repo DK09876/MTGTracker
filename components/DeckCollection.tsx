@@ -7,15 +7,20 @@
  *
  * Pulling takes a copy out of its box and into the deck; returning puts it
  * back. A card can be marked as a proxy, filling its slot without a real
- * copy. Cutting a card from the deck returns its copies by itself.
+ * copy, or hold a proxy copy from a box. Basic lands are not tracked, so one
+ * not found is not to buy. Sideboard and maybeboard cards show only for the
+ * copies the deck keeps with it. Cutting a card from the deck returns its
+ * copies by itself.
  */
 
 import Image from 'next/image';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+import Tip from '@/components/Tip';
 import * as api from '@/lib/api';
 import type { Holding, Status } from '@/lib/collection';
+import { isProxy, variantBadges } from '@/lib/copy-variant';
 import { steady } from '@/lib/steady-tap';
 
 interface Props {
@@ -28,9 +33,15 @@ const GROUPS: Array<{ status: Status; title: string; hint: string }> = [
   { status: 'in-box', title: 'In your boxes', hint: 'Owned and free: pull them into the deck.' },
   { status: 'in-other-deck', title: 'In other decks', hint: 'Every copy you own is in another deck.' },
   { status: 'missing', title: 'To buy', hint: 'Not in your collection.' },
+  { status: 'basic', title: 'Basic lands', hint: 'Not tracked in your collection: take them from your land pile.' },
   { status: 'proxy', title: 'Proxies', hint: 'Filling a slot without a real copy.' },
   { status: 'in-deck', title: 'In the deck', hint: 'Pulled from your collection.' },
 ];
+
+/** "JA", "LP": what sets a copy apart, after its printing. A proxy has its own badge by the name. */
+const marks = (variant: string) => variantBadges(variant).filter((b) => b.text !== 'Proxy').map((b) => b.text).join(' ');
+const copyLabel = (c: { set: string; number: string; finish: string; variant: string }) =>
+  `${c.set.toUpperCase()} #${c.number}${c.finish !== 'nonfoil' ? ` · ${c.finish}` : ''}${marks(c.variant) ? ` · ${marks(c.variant)}` : ''}`;
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const box = (name: string) => name || 'Unsorted';
@@ -72,16 +83,28 @@ export default function DeckCollection({ listId, version }: Props) {
   if (error && !data) return <p className="mt-8 text-center text-red-400">{error}</p>;
   if (!data) return <p className="mt-8 text-center text-[var(--muted)]">Checking your collection…</p>;
   const { summary } = data;
+  const main = data.cards.filter((h) => h.board === 'main');
+  const extras = data.cards.filter((h) => h.board !== 'main');
 
   return (
     <div data-tour="deck-collection" className="mt-5 flex flex-col gap-6">
       <section data-tour="collection-summary" className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm">
-        <p className="text-base font-medium">{summary.inDeck} of {summary.need} cards owned and in this deck{summary.proxies ? `, plus ${summary.proxies} proxies` : ''}</p>
+        <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          Collection status
+          <Tip label="What these numbers mean">
+            <p><b>In this deck</b>: copies taken out of a box and kept with the deck.</p>
+            <p className="mt-1.5"><b>Proxies</b>: stand-ins - marked on the deck, or proxy copies from a box.</p>
+            <p className="mt-1.5"><b>In your boxes</b>: owned and free to pull. <b>In other decks</b>: every copy you own is in another deck.</p>
+            <p className="mt-1.5"><b>To buy</b>: not in your collection. Basic lands are not tracked, so they are never to buy.</p>
+          </Tip>
+        </p>
+        <p data-testid="collection-status" className="mt-1 text-base font-medium">{summary.inDeck} of {summary.need} cards owned and in this deck{summary.proxies ? `, plus ${summary.proxies} prox${summary.proxies === 1 ? 'y' : 'ies'}` : ''}</p>
         <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[var(--muted)] sm:grid-cols-4">
           <li><span className="text-[var(--foreground)]">{summary.inBoxes}</span> in your boxes</li>
           <li><span className="text-[var(--foreground)]">{summary.inOtherDecks}</span> in other decks</li>
           <li><span className="text-[var(--foreground)]">{summary.missing}</span> to buy</li>
           <li><span className="text-[var(--foreground)]">{money(summary.missingCost)}</span> to finish</li>
+          {summary.basics > 0 && <li><span className="text-[var(--foreground)]">{summary.basics}</span> basic land{summary.basics === 1 ? '' : 's'} to add</li>}
         </ul>
         <div className="mt-3 flex flex-wrap gap-2">
           {summary.inBoxes > 0 && (
@@ -97,7 +120,7 @@ export default function DeckCollection({ listId, version }: Props) {
       </section>
 
       {GROUPS.map((g) => {
-        const cards = data.cards.filter((h) => h.status === g.status);
+        const cards = main.filter((h) => h.status === g.status);
         if (!cards.length) return null;
         return (
           <section key={g.status}>
@@ -109,6 +132,15 @@ export default function DeckCollection({ listId, version }: Props) {
           </section>
         );
       })}
+      {extras.length > 0 && (
+        <section>
+          <h3 data-section="Kept with the deck" className="font-medium">Kept with the deck <span className="font-normal text-[var(--muted)]">({extras.reduce((n, h) => n + h.pulled, 0)})</span></h3>
+          <p className="mb-2 text-sm text-[var(--muted)]">Sideboard and maybeboard cards with a copy in the deck box. Not part of the 100.</p>
+          <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-xl border border-[var(--border)]">
+            {extras.map((h) => <HoldingRow key={h.key} h={h} busy={busy} act={act} />)}
+          </ul>
+        </section>
+      )}
       {!data.cards.length && <p className="text-center text-[var(--muted)]">This deck has no cards yet.</p>}
       <p className="text-xs text-[var(--muted)]">
         Cards come out of the boxes on your <Link href="/collection" className="underline">Collection</Link> page. Cutting a card from the deck puts its copies back where they came from.
@@ -126,13 +158,18 @@ function HoldingRow({ h, busy, act }: { h: Holding; busy: boolean; act: (a: api.
       <span className="flex min-w-0 flex-1 items-center gap-3">
         {h.image ? <Image src={h.image} alt="" width={32} height={45} className="shrink-0 rounded" unoptimized /> : null}
         <span className="min-w-0">
-          <span className="block truncate">{h.need > 1 ? `${h.need}× ` : ''}{h.name}{h.commander && <span className="text-[var(--muted)]"> · commander</span>}</span>
+          <span className="block truncate">
+            {h.need > 1 ? `${h.need}× ` : ''}{h.name}{h.commander && <span className="text-[var(--muted)]"> · commander</span>}
+            {h.board !== 'main' && <span className="text-[var(--muted)]"> · {h.board === 'side' ? 'sideboard' : 'maybeboard'}</span>}
+            {h.pulledCopies.some((p) => isProxy(p.variant)) && <span className="ml-1 rounded bg-amber-400/20 px-1 text-[10px] font-semibold text-amber-300">Proxy</span>}
+          </span>
           <span className="block truncate text-xs text-[var(--muted)]">
-            {h.status === 'in-box' && firstBox && <>In {box(firstBox.location)} · {firstBox.set.toUpperCase()} #{firstBox.number}{firstBox.finish !== 'nonfoil' ? ` · ${firstBox.finish}` : ''}{firstBox.exact ? '' : ' (another printing)'}</>}
+            {h.status === 'in-box' && firstBox && <>In {box(firstBox.location)} · {copyLabel(firstBox)}{firstBox.exact ? '' : ' (another printing)'}{h.inBoxes.length > 1 ? ` · +${h.inBoxes.slice(1).reduce((n, b) => n + b.quantity, 0)} more` : ''}</>}
             {h.status === 'in-other-deck' && <>In {h.inDecks.map((d) => d.listName).join(', ')}</>}
             {h.status === 'missing' && (h.price !== null ? `${money(h.price)} each` : 'No price')}
-            {h.status === 'proxy' && `${h.proxies} proxy${h.proxies === 1 ? '' : 'ies'}`}
-            {h.status === 'in-deck' && h.pulledCopies.map((p) => `${p.set.toUpperCase()} #${p.number} from ${box(p.fromLocation)}`).join(', ')}
+            {h.status === 'basic' && 'Basic land - not tracked'}
+            {(h.status === 'proxy' || h.status === 'in-deck') && h.pulledCopies.length > 0 && h.pulledCopies.map((p) => `${copyLabel(p)} from ${box(p.fromLocation)}`).join(', ')}
+            {h.status === 'proxy' && !h.pulledCopies.length && `${h.proxies} prox${h.proxies === 1 ? 'y' : 'ies'}`}
             {h.short > 0 && h.status !== 'missing' && h.pulled + h.proxies > 0 && ` · ${h.pulled + h.proxies} of ${h.need} in`}
           </span>
         </span>
@@ -147,10 +184,10 @@ function HoldingRow({ h, busy, act }: { h: Holding; busy: boolean; act: (a: api.
         {(h.status === 'missing' || h.status === 'in-other-deck') && canProxy && (
           <button disabled={busy} {...steady(() => act({ action: 'proxies', cardId: h.cardIds[0], proxies: h.proxies + h.short }))} className={small}>Proxy</button>
         )}
-        {h.status === 'proxy' && canProxy && (
+        {h.status === 'proxy' && canProxy && !h.pulled && (
           <button disabled={busy} {...steady(() => act({ action: 'proxies', cardId: h.cardIds[0], proxies: 0 }))} className={small}>Not a proxy</button>
         )}
-        {h.status === 'in-deck' && (
+        {(h.status === 'in-deck' || (h.status === 'proxy' && h.pulled > 0)) && (
           <button disabled={busy} {...steady(() => act({ action: 'return', key: h.key }))} className={small}>Return</button>
         )}
       </span>

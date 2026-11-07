@@ -169,17 +169,54 @@ function open(): Database {
   `);
   // What each profile owns, where it is kept, and which copies decks have
   // taken - see collection.ts. A copy is in a box or in a deck, never both.
-  db.run(`
-    CREATE TABLE IF NOT EXISTS collection_cards (
+  // `variant` tells apart copies of one printing that differ otherwise - a
+  // Japanese one, a played one, a proxy (copy-variant.ts); '' is a plain
+  // English near-mint copy.
+  const collectionTable = (name: string) => `
+    CREATE TABLE IF NOT EXISTS ${name} (
       profileId TEXT NOT NULL,
       cardId TEXT NOT NULL,
       finish TEXT NOT NULL DEFAULT 'nonfoil',
       location TEXT NOT NULL DEFAULT '',
+      variant TEXT NOT NULL DEFAULT '',
       quantity INTEGER NOT NULL,
       addedAt TEXT NOT NULL,
-      PRIMARY KEY (profileId, cardId, finish, location)
+      purchasePrice REAL,
+      PRIMARY KEY (profileId, cardId, finish, location, variant)
     );
-  `);
+  `;
+  const pullsTable = (name: string) => `
+    CREATE TABLE IF NOT EXISTS ${name} (
+      listId TEXT NOT NULL,
+      cardId TEXT NOT NULL,
+      finish TEXT NOT NULL DEFAULT 'nonfoil',
+      fromLocation TEXT NOT NULL DEFAULT '',
+      variant TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL,
+      kept INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (listId, cardId, finish, fromLocation, variant)
+    );
+  `;
+  db.run(collectionTable('collection_cards'));
+  // Before variants: the key has to change, so the table is rebuilt once.
+  if (!(db.all('PRAGMA table_info(collection_cards)') as Array<{ name: string }>).some((c) => c.name === 'variant')) {
+    db.run('BEGIN');
+    try {
+      db.run(collectionTable('collection_cards_v2'));
+      db.run(`INSERT INTO collection_cards_v2 (profileId, cardId, finish, location, quantity, addedAt)
+        SELECT profileId, cardId, finish, location, quantity, addedAt FROM collection_cards`);
+      db.run('DROP TABLE collection_cards');
+      db.run('ALTER TABLE collection_cards_v2 RENAME TO collection_cards');
+      db.run('COMMIT');
+    } catch (error) {
+      db.run('ROLLBACK');
+      throw error;
+    }
+  }
+  // Each collection file imported, so the same file is not added twice by mistake.
+  db.run(`CREATE TABLE IF NOT EXISTS collection_imports (
+    profileId TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, copies INTEGER NOT NULL, mode TEXT NOT NULL, at TEXT NOT NULL,
+    PRIMARY KEY (profileId, hash))`);
   db.run(`
     CREATE TABLE IF NOT EXISTS collection_locations (
       profileId TEXT NOT NULL,
@@ -189,16 +226,26 @@ function open(): Database {
       PRIMARY KEY (profileId, name)
     );
   `);
-  db.run(`
-    CREATE TABLE IF NOT EXISTS deck_pulls (
-      listId TEXT NOT NULL,
-      cardId TEXT NOT NULL,
-      finish TEXT NOT NULL DEFAULT 'nonfoil',
-      fromLocation TEXT NOT NULL DEFAULT '',
-      quantity INTEGER NOT NULL,
-      PRIMARY KEY (listId, cardId, finish, fromLocation)
-    );
-  `);
+  db.run(pullsTable('deck_pulls'));
+  if (!(db.all('PRAGMA table_info(deck_pulls)') as Array<{ name: string }>).some((c) => c.name === 'variant')) {
+    db.run('BEGIN');
+    try {
+      db.run(pullsTable('deck_pulls_v2'));
+      db.run(`INSERT INTO deck_pulls_v2 (listId, cardId, finish, fromLocation, quantity)
+        SELECT listId, cardId, finish, fromLocation, quantity FROM deck_pulls`);
+      db.run('DROP TABLE deck_pulls');
+      db.run('ALTER TABLE deck_pulls_v2 RENAME TO deck_pulls');
+      db.run('COMMIT');
+    } catch (error) {
+      db.run('ROLLBACK');
+      throw error;
+    }
+  }
+  // A sideboard card's copy kept with the deck on purpose (an import said
+  // so): it stays there, where a card cut to the sideboard gives its copy back.
+  if (!(db.all('PRAGMA table_info(deck_pulls)') as Array<{ name: string }>).some((c) => c.name === 'kept')) {
+    db.run('ALTER TABLE deck_pulls ADD COLUMN kept INTEGER NOT NULL DEFAULT 0');
+  }
   // How many of a deck row's copies are proxies: they fill the slot without
   // coming from the collection.
   if (!cardColumns.some((c) => c.name === 'proxies')) {
@@ -537,6 +584,8 @@ export interface ListedCard {
   addedAt: string;
   /** The deck's second commander (on main) or its companion (on the sideboard); commanders.ts. */
   slot?: Slot | null;
+  /** Copies marked as proxies. */
+  proxies?: number;
 }
 
 /** The open database, for modules that keep their own tables here (collection.ts). */
@@ -604,7 +653,9 @@ export function replaceListCards(
   listId: string, items: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board }>,
 ): void {
   const database = open();
-  database.run('BEGIN');
+  // Inside an import that holds a transaction already, this joins it.
+  const own = !database.inTransaction;
+  if (own) database.run('BEGIN');
   try {
     // The owner's own sections are not in a decklist's text, so replacing
     // the list keeps them - unless the new text has the card itself.
@@ -620,9 +671,9 @@ export function replaceListCards(
     }
     database.run('UPDATE lists SET updatedAt = ? WHERE id = ?', [now(), listId]);
     settle(listId);
-    database.run('COMMIT');
+    if (own) database.run('COMMIT');
   } catch (error) {
-    database.run('ROLLBACK');
+    if (own) database.run('ROLLBACK');
     throw error;
   }
 }
@@ -714,13 +765,13 @@ export function setSlotQuestions(listId: string, questions: SlotQuestion[]): voi
 
 export function cardsInList(listId: string): ListedCard[] {
   const rows = open().all(
-    `SELECT c.data, lc.quantity, lc.finish, lc.board, lc.addedAt, lc.slot
+    `SELECT c.data, lc.quantity, lc.finish, lc.board, lc.addedAt, lc.slot, lc.proxies
      FROM list_cards lc
      JOIN cards c ON c.id = lc.cardId
      WHERE lc.listId = ?
      ORDER BY c.name`,
     [listId],
-  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; board: Board; addedAt: string; slot: Slot | null }>;
+  ) as unknown as Array<{ data: string; quantity: number; finish: Finish; board: Board; addedAt: string; slot: Slot | null; proxies: number }>;
 
   return rows.map((row) => ({
     card: JSON.parse(row.data) as ScryfallCard,
@@ -729,6 +780,7 @@ export function cardsInList(listId: string): ListedCard[] {
     board: row.board,
     addedAt: row.addedAt,
     slot: row.slot === 'partner' || row.slot === 'companion' ? row.slot : null,
+    ...(row.proxies ? { proxies: row.proxies } : {}),
   }));
 }
 

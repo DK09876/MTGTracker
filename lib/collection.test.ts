@@ -165,3 +165,26 @@ describe('decks taking copies', () => {
     expect(buy).toBe('1 Hearthhull, the Worldseed\n1 Sol Ring');
   });
 });
+
+describe('a database from before copy variants', () => {
+  it('keeps every copy and what decks hold when the tables are rebuilt', async () => {
+    const { Database } = await import('node-sqlite3-wasm');
+    const old = new Database(join(dir, 'mtg.db'));
+    old.run(`CREATE TABLE collection_cards (profileId TEXT NOT NULL, cardId TEXT NOT NULL, finish TEXT NOT NULL DEFAULT 'nonfoil',
+      location TEXT NOT NULL DEFAULT '', quantity INTEGER NOT NULL, addedAt TEXT NOT NULL, PRIMARY KEY (profileId, cardId, finish, location))`);
+    old.run(`CREATE TABLE deck_pulls (listId TEXT NOT NULL, cardId TEXT NOT NULL, finish TEXT NOT NULL DEFAULT 'nonfoil',
+      fromLocation TEXT NOT NULL DEFAULT '', quantity INTEGER NOT NULL, PRIMARY KEY (listId, cardId, finish, fromLocation))`);
+    old.run(`INSERT INTO collection_cards VALUES ('dk', 'opt-1', 'foil', 'Binder', 3, 'then')`);
+    old.run(`INSERT INTO deck_pulls VALUES ('deck-1', 'opt-1', 'nonfoil', 'Binder', 1)`);
+    old.close();
+
+    const { db } = await load();
+    const d = db.database();
+    expect(d.all('SELECT cardId, finish, location, variant, quantity, purchasePrice FROM collection_cards')).toEqual([
+      { cardId: 'opt-1', finish: 'foil', location: 'Binder', variant: '', quantity: 3, purchasePrice: null },
+    ]);
+    expect(d.all('SELECT listId, cardId, fromLocation, variant, quantity, kept FROM deck_pulls')).toEqual([
+      { listId: 'deck-1', cardId: 'opt-1', fromLocation: 'Binder', variant: '', quantity: 1, kept: 0 },
+    ]);
+  });
+});

@@ -1,13 +1,18 @@
 /**
- * Import a collection: a CSV from ManaBox, Moxfield, Deckbox or TCGplayer,
- * or a plain list. POST {text, location?} - cards without a box column go
- * into `location`. Answers what was added and what could not be found.
+ * Import a collection: a CSV from Mythic Tools, ManaBox, Moxfield, Deckbox
+ * or TCGplayer, or a plain list. Cards without a box column go into
+ * `location`.
+ *
+ *   POST {text, location?, preview: true}            what the file holds, nothing written
+ *   POST {text, location?, mode?: 'add'|'replace', again?}
+ *        add (the default) puts the copies on top of what is there; adding a
+ *        file imported before is refused with 409 unless `again`. replace
+ *        makes the collection exactly the file.
  */
 
 import { NextResponse } from 'next/server';
 
-import { addManyToCollection } from '@/lib/collection';
-import { readCollectionFile, resolveRows } from '@/lib/collection-import';
+import { AlreadyImported, previewRows, runCollectionImport } from '@/lib/collection-import-run';
 import { requireProfile } from '@/lib/profile-route';
 import { collection, ScryfallError } from '@/lib/scryfall';
 
@@ -20,7 +25,7 @@ const MAX_TEXT = 3_000_000;
 export async function POST(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
-  let b: { text?: unknown; location?: unknown };
+  let b: { text?: unknown; location?: unknown; preview?: unknown; mode?: unknown; again?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -31,19 +36,16 @@ export async function POST(request: Request) {
   if (text.length > MAX_TEXT) return NextResponse.json({ error: 'That file is too big to import in one go' }, { status: 413 });
   const location = typeof b.location === 'string' ? b.location.trim().slice(0, 60) : '';
 
+  if (b.preview === true) {
+    return NextResponse.json(previewRows(who.profile, text, location));
+  }
   try {
-    const { rows, unreadable, format } = readCollectionFile(text, location);
-    const { items, missing, byName } = await resolveRows(rows, collection);
-    addManyToCollection(who.profile, items);
-    return NextResponse.json({
-      format,
-      copies: items.reduce((n, i) => n + i.quantity, 0),
-      unique: new Set(items.map((i) => i.card.oracle_id ?? i.card.id)).size,
-      missing,
-      byName,
-      unreadable,
+    const result = await runCollectionImport(who.profile, text, {
+      location, mode: b.mode === 'replace' ? 'replace' : 'add', again: b.again === true, lookup: collection,
     });
+    return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof AlreadyImported) return NextResponse.json({ error: error.message, before: error.before }, { status: 409 });
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[collection] import failed', error);
     return NextResponse.json({ error: 'Could not import that' }, { status: 500 });

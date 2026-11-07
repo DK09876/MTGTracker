@@ -3,8 +3,10 @@
  *
  *   GET                                               copies in boxes, copies decks hold, boxes, totals
  *   POST  {cardId, quantity?, finish?, location?}      add copies (the id is a Scryfall printing)
- *   PATCH {cardId, finish, location, quantity}          set how many are in that box (0 removes)
- *   PATCH {cardId, finish, location, move: {location?, finish?, quantity}}   move or relabel copies
+ *   PATCH {cardId, finish, location, variant?, quantity}          set how many are in that box (0 removes)
+ *   PATCH {cardId, finish, location, variant?, move: {location?, finish?, quantity}}   move or relabel copies
+ *
+ * `variant` picks out copies by language, condition, proxy...: copy-variant.ts. '' is a plain copy.
  */
 
 import { NextResponse } from 'next/server';
@@ -20,6 +22,7 @@ export const dynamic = 'force-dynamic';
 const FINISHES = new Set<Finish>(['nonfoil', 'foil', 'etched']);
 const finishOf = (v: unknown): Finish => (FINISHES.has(v as Finish) ? (v as Finish) : 'nonfoil');
 const locationOf = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 60) : '');
+const variantOf = (v: unknown) => (typeof v === 'string' ? v.slice(0, 120) : '');
 
 export async function GET(request: Request) {
   const who = requireProfile(request);
@@ -58,7 +61,7 @@ export async function PATCH(request: Request) {
   if (who instanceof NextResponse) return who;
   const b = await body(request);
   if (!b || typeof b.cardId !== 'string') return NextResponse.json({ error: 'cardId required' }, { status: 400 });
-  const at = { cardId: b.cardId, finish: finishOf(b.finish), location: locationOf(b.location) };
+  const at = { cardId: b.cardId, finish: finishOf(b.finish), location: locationOf(b.location), variant: variantOf(b.variant) };
   const move = b.move as Record<string, unknown> | undefined;
   if (move && typeof move === 'object') {
     moveCopies(who.profile, at, {
@@ -66,7 +69,7 @@ export async function PATCH(request: Request) {
       finish: move.finish === undefined ? undefined : finishOf(move.finish),
     }, Math.max(1, Math.trunc(Number(move.quantity) || 1)));
   } else if (typeof b.quantity === 'number') {
-    setCollectionCount(who.profile, at.cardId, at.finish, at.location, Math.max(0, Math.trunc(b.quantity)));
+    setCollectionCount(who.profile, at.cardId, at.finish, at.location, Math.max(0, Math.trunc(b.quantity)), at.variant);
   } else {
     return NextResponse.json({ error: 'quantity or move required' }, { status: 400 });
   }

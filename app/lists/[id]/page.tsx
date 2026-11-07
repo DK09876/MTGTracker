@@ -28,6 +28,7 @@ import PasteFormats from '@/components/PasteFormats';
 import ImportResult from '@/components/ImportResult';
 import { IdentitySymbols } from '@/components/ManaCost';
 import MoreMenu from '@/components/MoreMenu';
+import MythicLinked, { LinkResult } from '@/components/MythicLinked';
 import * as api from '@/lib/api';
 import type { List, ListedCard } from '@/lib/db';
 import { formatDecklist, type Board } from '@/lib/decklist';
@@ -39,6 +40,7 @@ import { boardName, cutBoard, DEFAULT_SECTIONS, type DeckSection } from '@/lib/s
 import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
+import type { LinkReport } from '@/lib/mythic';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { DeckTags as Tags } from '@/lib/tags';
 import { imageOf, priceOf } from '@/lib/scryfall';
@@ -119,6 +121,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [changingCommander, setChangingCommander] = useState(false);
   const [importing, setImporting] = useState(false);
   const [decklist, setDecklist] = useState('');
+  const [linkedList, setLinkedList] = useState('');
+  const [linkReport, setLinkReport] = useState<LinkReport | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [imported, setImported] = useState<ImportSummary | null>(null);
   const [rejected, setRejected] = useState(false);
@@ -267,6 +271,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setDecklist(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
     setImported(null);
     setRejected(false);
+    setLinkedList('');
+    setLinkReport(null);
     setImporting(true);
   };
 
@@ -275,9 +281,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     e?.preventDefault();
     setImportBusy(true);
     try {
-      const { imported: result, ok } = await api.replaceDecklist(id, text);
+      const { imported: result, ok, link } = await api.replaceDecklist(id, text, deck && readDeckBox(text).kind === 'list' ? linkedList : '');
       setImported(result);
       setRejected(!ok);
+      setLinkReport(link ?? null);
       if (ok) {
         setImporting(false);
         await load();
@@ -462,6 +469,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             spellCheck={false}
             className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 font-mono text-xs outline-none focus:border-[var(--accent)]"
           />
+          {deck && readDeckBox(decklist).kind === 'list' && <MythicLinked value={linkedList} onChange={setLinkedList} />}
           {(() => {
             const box = readDeckBox(decklist);
             if (box.kind === 'both') return <p role="alert" className="text-xs text-amber-300">There is a link and a list here. Remove one of them - the deck comes from the link or from the list, not both.</p>;
@@ -493,6 +501,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </form>
       )}
+      {linkReport && !importing && <LinkResult link={linkReport} />}
       {imported && rejected && (
         <p className="mt-3 text-sm text-amber-400">Nothing was changed — fix the lines below and save again.</p>
       )}
