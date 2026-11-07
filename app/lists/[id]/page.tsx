@@ -58,6 +58,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [loading, setLoading] = useState(!seen);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
+  // The card modal's printings: all of them, or only the copies you own.
+  const [mineOnly, setMineOnly] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(seen?.list.name ?? '');
   const [addOpen, setAddOpen] = useState(false);
@@ -686,6 +688,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 board={selectedEntry.board}
                 sections={sections}
                 isDeck={deck}
+                holding={deck ? deckCopies.holdingOf(selectedEntry) : undefined}
+                mine={mineOnly}
+                onMine={setMineOnly}
                 onChanged={async (printingId) => {
                   const data = await api.fetchList(id);
                   setList(data.list);
@@ -703,6 +708,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                 board="main"
                 isDeck
                 commander
+                holding={deckCopies.holdingOf({ card: list.commander, board: 'main' })}
+                mine={mineOnly}
+                onMine={setMineOnly}
                 onChanged={async () => {
                   const data = await api.fetchList(id);
                   setList(data.list);

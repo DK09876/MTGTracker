@@ -66,5 +66,5 @@ export function useDeckCopies(listId: string, isDeck: boolean, version: unknown)
     </div>
   );
 
-  return { data, setData, mark: data ? mark : undefined, isWord: data ? isWord : undefined, toastView };
+  return { data, setData, holdingOf, mark: data ? mark : undefined, isWord: data ? isWord : undefined, toastView };
 }
