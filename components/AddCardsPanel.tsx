@@ -92,7 +92,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
   // Ask for names as the text changes, a beat after typing stops.
   useEffect(() => {
     const q = text.trim();
-    if (q.length < 2 || looksLikeSyntax(q)) { setQuick(null); return; }
+    if (q.length < 2 || looksLikeSyntax(q)) return;
     const mine = ++seq.current;
     const timer = setTimeout(() => {
       api.quickCards(listId, q).then((r) => { if (seq.current === mine) { setQuick({ q, cards: r.cards }); setPick(0); } }).catch(() => {});
@@ -262,7 +262,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
               enterKeyHint="go"
               autoComplete="off"
               role="combobox"
-              aria-expanded={!!quick?.cards.length}
+              aria-expanded={!!quick?.cards.length && quick.q === text.trim()}
               aria-controls="quick-names"
               aria-activedescendant={quick?.cards.length ? `quick-${pick}` : undefined}
               placeholder={commander ? 'Type a name - Enter adds it. Or: cheap removal, t:artifact mv<3…' : 'Type a name - Enter adds it. Or describe what you want'}
