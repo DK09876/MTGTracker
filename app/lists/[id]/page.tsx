@@ -675,11 +675,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
             )}
             {deck && selectedInDeck && selected && (
-              <CardRoles key={selected.id} listId={id} card={selected} />
+              <CardRoles key={`roles-${selected.id}`} listId={id} card={selected} />
             )}
             {selectedEntry && (
               <CardEditor
-                key={selectedEntry.card.id}
+                key={`editor-${selectedEntry.card.id}`}
                 listId={id}
                 card={selectedEntry.card}
                 finish={selectedEntry.finish}
@@ -696,7 +696,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             )}
             {deck && list.commander && selected?.id === list.commander.id && (
               <CardEditor
-                key={list.commander.id}
+                key={`commander-${list.commander.id}`}
                 listId={id}
                 card={list.commander}
                 finish={list.commanderFinish}
