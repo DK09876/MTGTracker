@@ -225,7 +225,12 @@ export function describe(d: Diff): string {
     const t = d.tagged[0];
     return d.tagged.length === 1 ? `${t.to ? 'Tagged' : 'Untagged'} ${t.name} ${t.to ?? t.from}` : `${d.tagged.length} tags changed`;
   }
-  if (d.changed.length && !d.added.length && !d.removed.length && !d.moved.length) return `Changed ${one(d.changed)}`;
+  if (d.changed.length && !d.added.length && !d.removed.length && !d.moved.length) {
+    const c = d.changed[0];
+    // Only the count changed: say so, "Consider 1 → 2".
+    const [qa, ...ra] = (c.from ?? '').split('× '), [qb, ...rb] = (c.to ?? '').split('× ');
+    return d.changed.length === 1 && ra.join() === rb.join() && qa !== qb ? `${c.name} ${qa} → ${qb}` : `Changed ${one(d.changed)}`;
+  }
   return countLine(d);
 }
 
