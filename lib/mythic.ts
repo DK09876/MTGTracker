@@ -171,16 +171,39 @@ export interface LinkReport {
   unreadable: string[];
 }
 
-interface CopyRow { cardId: string; finish: Finish; location: string; variant: string; quantity: number; data: string }
+interface CopyRow { cardId: string; finish: Finish; location: string; variant: string; quantity: number }
 
-/** Copies of a printing in the profile's boxes - in `location` first - best match for the line first. */
-function copiesFor(profileId: string, l: LinkedLine, location: string | null, proxy: boolean): CopyRow[] {
+/**
+ * The profile's boxes, read once and looked up by printing and by name.
+ * Asking the database per line meant reading every copy's card data four
+ * times for each line of a deck - minutes per deck on the Pi.
+ */
+interface CopyIndex { byPrinting: Map<string, CopyRow[]>; byName: Map<string, CopyRow[]> }
+
+function copyIndex(profileId: string): CopyIndex {
   const rows = database().all(
     `SELECT cc.cardId, cc.finish, cc.location, cc.variant, cc.quantity, c.data FROM collection_cards cc JOIN cards c ON c.id = cc.cardId
-     WHERE cc.profileId = ? AND lower(json_extract(c.data, '$.set')) = ? AND json_extract(c.data, '$.collector_number') = ?`,
-    [profileId, l.set, l.number],
-  ) as unknown as CopyRow[];
-  return rows
+     WHERE cc.profileId = ?`, [profileId],
+  ) as unknown as Array<CopyRow & { data: string }>;
+  const index: CopyIndex = { byPrinting: new Map(), byName: new Map() };
+  const add = (map: Map<string, CopyRow[]>, key: string, row: CopyRow) => { const list = map.get(key); if (list) list.push(row); else map.set(key, [row]); };
+  const cards = new Map<string, ScryfallCard>();
+  for (const { data, ...row } of rows) {
+    let card = cards.get(row.cardId);
+    if (!card) { card = JSON.parse(data) as ScryfallCard; cards.set(row.cardId, card); }
+    add(index.byPrinting, printing({ set: card.set ?? '', number: card.collector_number ?? '' }), row);
+    // A line names the card or its front face ("Fire // Ice" is found as "Fire").
+    const name = card.name.toLowerCase();
+    add(index.byName, name, row);
+    const front = name.split(' // ')[0];
+    if (front !== name) add(index.byName, front, row);
+  }
+  return index;
+}
+
+/** Copies of a printing in the profile's boxes - in `location` first - best match for the line first. */
+function copiesFor(index: CopyIndex, l: LinkedLine, location: string | null, proxy: boolean): CopyRow[] {
+  return (index.byPrinting.get(printing(l)) ?? [])
     .filter((r) => location === null || r.location === location)
     .sort((a, b) => Number(b.finish === l.finish) - Number(a.finish === l.finish)
       || Number(isProxy(b.variant) === proxy) - Number(isProxy(a.variant) === proxy)
@@ -188,13 +211,8 @@ function copiesFor(profileId: string, l: LinkedLine, location: string | null, pr
 }
 
 /** The same card in any printing, in a box: for a copy whose printing the collection has under another number. */
-function anyPrinting(profileId: string, l: LinkedLine, location: string | null): CopyRow[] {
-  const rows = database().all(
-    `SELECT cc.cardId, cc.finish, cc.location, cc.variant, cc.quantity, c.data FROM collection_cards cc JOIN cards c ON c.id = cc.cardId
-     WHERE cc.profileId = ? AND (lower(json_extract(c.data, '$.name')) = ? OR lower(json_extract(c.data, '$.name')) LIKE ?)`,
-    [profileId, l.name.toLowerCase(), `${l.name.toLowerCase()} // %`],
-  ) as unknown as CopyRow[];
-  return rows.filter((r) => location === null || r.location === location)
+function anyPrinting(index: CopyIndex, l: LinkedLine, location: string | null): CopyRow[] {
+  return (index.byName.get(l.name.toLowerCase()) ?? []).filter((r) => location === null || r.location === location)
     .sort((a, b) => Number(b.finish === l.finish) - Number(a.finish === l.finish) || Number(isProxy(a.variant)) - Number(isProxy(b.variant)));
 }
 
@@ -240,6 +258,8 @@ export function linkMythic(listId: string, profileId: string, list: string, link
     ];
     for (const p of proxyLines) proxyLeft.set(printing(p), Math.max(proxyLeft.get(printing(p)) ?? 0, p.quantity));
     const proxyTotal = new Map(proxyLeft);
+    // Read after giving back, so copies this deck held before can be taken again.
+    const index = copyIndex(profileId);
 
     for (const l of parsed.fromBoxes) {
       const key = printing(l);
@@ -247,10 +267,10 @@ export function linkMythic(listId: string, profileId: string, list: string, link
       const wantProxy = (proxyLeft.get(key) ?? 0) > 0;
       const location = l.location || UNSORTED;
       const sources: Array<[CopyRow[], boolean]> = [
-        [copiesFor(profileId, l, location, wantProxy), false],
-        [copiesFor(profileId, l, null, wantProxy), true],
-        [anyPrinting(profileId, l, location), false],
-        [anyPrinting(profileId, l, null), true],
+        [copiesFor(index, l, location, wantProxy), false],
+        [copiesFor(index, l, null, wantProxy), true],
+        [anyPrinting(index, l, location), false],
+        [anyPrinting(index, l, null), true],
       ];
       let elsewhere = false;
       for (const [rows, other] of sources) {
