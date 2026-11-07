@@ -24,13 +24,15 @@ interface Props {
   onChanged: (printingId: string) => void;
   /** A deck's sections beyond Main. */
   sections?: DeckSection[];
+  /** The deck's commander: no section, and changes go to the deck itself. */
+  commander?: boolean;
 }
 
 const FINISH_LABEL: Record<Finish, string> = { nonfoil: 'Non-foil', foil: 'Foil', etched: 'Etched' };
 const priceFor = (p: api.Printing, finish: Finish) =>
   finish === 'foil' ? p.prices.usd_foil : finish === 'etched' ? p.prices.usd_etched : p.prices.usd;
 
-export default function CardEditor({ listId, card, finish, board, isDeck, onChanged, sections = DEFAULT_SECTIONS }: Props) {
+export default function CardEditor({ listId, card, finish, board, isDeck, onChanged, sections = DEFAULT_SECTIONS, commander = false }: Props) {
   const [printings, setPrintings] = useState<api.Printing[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,11 @@ export default function CardEditor({ listId, card, finish, board, isDeck, onChan
     setBusy(true);
     setError(null);
     try {
-      await api.updateCard(listId, card.id, update);
+      if (commander) {
+        await api.setCommanderPrinting(listId, { commanderId: update.printingId, commanderFinish: update.finish });
+      } else {
+        await api.updateCard(listId, card.id, update);
+      }
       onChanged(update.printingId ?? card.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not change that card');
@@ -75,7 +81,7 @@ export default function CardEditor({ listId, card, finish, board, isDeck, onChan
             ))}
           </div>
         </div>
-        {isDeck && (
+        {isDeck && !commander && (
           <label className="flex items-center gap-2">
             <span className="text-[var(--muted)]">Section</span>
             <select

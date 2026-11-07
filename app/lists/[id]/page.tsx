@@ -669,7 +669,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <CardModal
         card={selected}
         onClose={() => setSelected(null)}
-        actions={(selectedEntry || (deck && selectedInDeck && tags)) && (
+        actions={(selectedEntry || (deck && selectedInDeck && tags) || (deck && !!list.commander && selected?.id === list.commander.id)) && (
           <>
             {deck && selectedInDeck && tags && selected && (
               <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
@@ -691,6 +691,23 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                   setList(data.list);
                   setCards(data.cards);
                   setSelected(data.cards.find((c) => c.card.id === printingId)?.card ?? null);
+                }}
+              />
+            )}
+            {deck && list.commander && selected?.id === list.commander.id && (
+              <CardEditor
+                key={list.commander.id}
+                listId={id}
+                card={list.commander}
+                finish={list.commanderFinish}
+                board="main"
+                isDeck
+                commander
+                onChanged={async () => {
+                  const data = await api.fetchList(id);
+                  setList(data.list);
+                  setCards(data.cards);
+                  setSelected(data.list.commander ?? null);
                 }}
               />
             )}

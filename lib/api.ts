@@ -234,6 +234,14 @@ export const setCommander = (listId: string, commanderId: string | null, fromLis
     body: JSON.stringify({ commanderId, fromList }),
   }).then(json<{ list: List }>);
 
+/** Change the commander's printing or finish, keeping the other. */
+export const setCommanderPrinting = (listId: string, change: { commanderId?: string; commanderFinish?: Finish }) =>
+  fetch(url(`lists/${listId}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  }).then(json<{ list: List }>);
+
 /**
  * Make a list exactly this decklist. A 422 carries the lines that could not
  * be found, and means nothing was changed.

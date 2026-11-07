@@ -129,6 +129,17 @@ describe('decks taking copies', () => {
     expect(col.boxCopies('dk').map((c) => c.card.id)).toEqual(['hh-1']);
   });
 
+  it('keeps the commander\'s pulled copy when its printing or finish changes', async () => {
+    const { db, col, deck } = await setup();
+    col.addToCollection('dk', hearthhull, 1);
+    col.pull(deck.id, 'hh');
+    const promo = printing('hh-2', 'hh', 'Hearthhull, the Worldseed', 'peoc', '9.00');
+    db.setCommander(deck.id, promo, 'foil');
+    expect(db.getList(deck.id, 'dk')).toMatchObject({ commander: { id: 'hh-2' }, commanderFinish: 'foil' });
+    expect(col.boxCopies('dk')).toEqual([]);
+    expect(holding(col, deck.id, 'hh').pulledCopies.map((c) => c.cardId)).toEqual(['hh-1']);
+  });
+
   it('lets proxies fill a slot, returning a real copy the deck then has spare', async () => {
     const { db, col, deck } = await setup();
     db.addCardToList(deck.id, opt);
