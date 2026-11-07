@@ -131,3 +131,11 @@ describe('saving a list over the deck', () => {
     expect(db.cardsInList(id).length).toBe(before);
   });
 });
+
+describe('change labels', () => {
+  it('says how the count changed', async () => {
+    const { db, h, id, who } = await setup();
+    const { change } = await h.recorded(id, who, 'edit', '', () => db.setQuantity(id, 'bolt', 2));
+    expect(change?.label).toBe('Lightning Bolt 1 → 2');
+  });
+});
