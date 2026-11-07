@@ -27,6 +27,11 @@ interface Props {
   listId: string;
   /** Changes when the deck does, to reload. */
   version: string;
+  /** The deck's ownership, when the page already reads it (useDeckCopies): shown, and changed through onData, instead of read here. */
+  data?: api.DeckOwnership | null;
+  onData?: (data: api.DeckOwnership) => void;
+  /** Show only these cards in the deck's card view: a filter word, is:inbox. */
+  onFilter?: (words: string) => void;
 }
 
 const GROUPS: Array<{ status: Status; title: string; hint: string }> = [
@@ -49,14 +54,17 @@ const box = (name: string) => name || 'Unsorted';
 const small = 'min-h-8 rounded-full px-2.5 text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)] disabled:opacity-50';
 const primary = 'min-h-9 rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-[#221c08] hover:brightness-110 disabled:opacity-50';
 
-export default function DeckCollection({ listId, version }: Props) {
-  const [data, setData] = useState<api.DeckOwnership | null>(null);
+export default function DeckCollection({ listId, version, data: shared, onData, onFilter }: Props) {
+  const [own, setOwn] = useState<api.DeckOwnership | null>(null);
+  const controlled = onData !== undefined;
+  const data = controlled ? shared ?? null : own;
+  const setData = onData ?? setOwn;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const load = useCallback(() => api.deckOwnership(listId).then(setData).catch((e) => setError(e instanceof Error ? e.message : 'Could not load')), [listId]);
-  useEffect(() => { load(); }, [load, version]);
+  const load = useCallback(() => api.deckOwnership(listId).then(setOwn).catch((e) => setError(e instanceof Error ? e.message : 'Could not load')), [listId]);
+  useEffect(() => { if (!controlled) load(); }, [load, version, controlled]);
 
   const act = async (a: api.DeckCollectionAction) => {
     setBusy(true);
@@ -106,6 +114,21 @@ export default function DeckCollection({ listId, version }: Props) {
           <li><span className="text-[var(--foreground)]">{money(summary.missingCost)}</span> to finish</li>
           {summary.basics > 0 && <li><span className="text-[var(--foreground)]">{summary.basics}</span> basic land{summary.basics === 1 ? '' : 's'} to add</li>}
         </ul>
+        {onFilter && (
+          <div data-testid="copy-filters" className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="flex items-center gap-1 text-[var(--muted)]">
+              Show in the cards
+              <Tip label="About these filters">Each one filters the cards above with a word you can type yourself: is:held, is:proxy, is:inbox, is:otherdeck, is:tobuy.</Tip>
+            </span>
+            {([['is:held', 'Yours', summary.inDeck], ['is:proxy', 'Proxies', summary.proxies], ['is:inbox', 'In your boxes', summary.inBoxes],
+              ['is:otherdeck', 'In other decks', summary.inOtherDecks], ['is:tobuy', 'To buy', summary.missing]] as const).map(([word, label, n]) => (
+              <button key={word} data-filter={word} {...steady(() => onFilter(word))} disabled={!n}
+                className="min-h-8 rounded-full border border-[var(--border)] px-2.5 hover:bg-[var(--surface-hover)] disabled:opacity-40">
+                {label} <span className="tabular-nums text-[var(--muted)]">{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
           {summary.inBoxes > 0 && (
             <button disabled={busy} {...steady(() => act({ action: 'pullAll' }))} className={primary}>Pull all {summary.inBoxes} from your boxes</button>

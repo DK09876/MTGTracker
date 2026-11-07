@@ -210,7 +210,7 @@ body {
    next card's name bar sits where the pointer already is. */
 .stack-card { transition: margin-top 160ms ease; }
 .stack-card:hover + .stack-card,
-.stack-card:focus-visible + .stack-card { margin-top: -1% !important; }
+.stack-card:has(:focus-visible) + .stack-card { margin-top: -1% !important; }
 @media (prefers-reduced-motion: reduce) { .stack-card { transition: none; } }
 
 /* The ⌘K palette arrives quickly and from just above; never on reduced motion. */

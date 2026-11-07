@@ -85,7 +85,7 @@ async function main() {
   const { listProfiles } = await import('../lib/db');
   const { collectionState, ownership, locations } = await import('../lib/collection');
   const { fingerprint, previewRows, runCollectionImport } = await import('../lib/collection-import-run');
-  const { importMythicDeck } = await import('../lib/mythic');
+  const { importMythicDeck, importMythicDecks } = await import('../lib/mythic');
   const { collection, ScryfallError } = await import('../lib/scryfall');
   // A one-off run, not the app: when Scryfall asks to slow down, wait it out (twice at most) rather than stop halfway.
   const lookup: typeof collection = async (identifiers) => {
@@ -122,20 +122,21 @@ async function main() {
   const problems: string[] = [];
   const imported: Array<{ name: string; id: string }> = [];
   if (decks.length) console.log(`\n== Decks (${decks.length}) ==`);
-  for (const deck of decks) {
+  // In any order: a proxy line leaves a real copy to a later deck that claims it for real.
+  await importMythicDecks(profile, decks, async (deck, reserved) => {
     let r: Awaited<ReturnType<typeof importMythicDeck>>;
     try {
-      r = await importMythicDeck(profile, deck);
+      r = await importMythicDeck(profile, deck, reserved);
     } catch (error) {
       if (!(error instanceof ScryfallError) || error.status !== 429) throw error;
       console.log('  Scryfall asked to slow down - waiting a minute…');
       await new Promise((done) => setTimeout(done, 61_000));
-      r = await importMythicDeck(profile, deck);
+      r = await importMythicDeck(profile, deck, reserved);
     }
     if (!r.imported.applied) {
       problems.push(`${deck.name}: not imported - ${[...r.imported.missing, ...r.imported.unreadable].join('; ')}`);
       console.log(`✗ ${deck.name}: lines not found, deck left as it was:\n    ${[...r.imported.missing, ...r.imported.unreadable].join('\n    ')}`);
-      continue;
+      return r;
     }
     const boards = database().all(
       `SELECT board, SUM(quantity) AS n FROM list_cards WHERE listId = ? GROUP BY board`, [r.list.id],
@@ -146,6 +147,7 @@ async function main() {
     if (link) {
       console.log(`    linked ${link.linked} copies (${link.proxiesLinked} proxies); proxies marked ${link.proxiesMarked}; Mythic said available ${link.available}, to buy ${link.buy}`);
       if (link.otherBox.length) console.log(`    found in another box: ${link.otherBox.join('; ')}`);
+      if (link.yielded.length) console.log(`    left for a later deck (marked as proxies here): ${link.yielded.join('; ')}`);
       if (link.notLinked.length) {
         console.log(`    no copy to link: ${link.notLinked.join('; ')}`);
         problems.push(`${deck.name}: ${link.notLinked.length} line(s) with no copy to link`);
@@ -154,7 +156,8 @@ async function main() {
       if (link.unreadable.length) console.log(`    unreadable linked lines: ${link.unreadable.join('; ')}`);
     } else if (r.proxiesMarked) console.log(`    proxies marked ${r.proxiesMarked}`);
     imported.push({ name: deck.name, id: r.list.id });
-  }
+    return r;
+  });
   // After every deck has taken its copies: one deck's free copy may be another's.
   if (imported.length) console.log('\n== Each deck and the collection, after all of them ==');
   for (const d of imported) {

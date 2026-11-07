@@ -1,0 +1,85 @@
+1 Winota, Joiner of Forces (IKO) 216
+1 Ancient Stone Idol (CMM) 940
+1 Arachne, Psionic Weaver (SPM) 2 *F*
+1 Brazen Collector (BLB) 128
+1 Burnished Hart (THS) 213
+1 Clockwork Percussionist (DSK) 130
+1 Crusader of Odric (INR) 18
+1 Crystal Barricade (FDN) 7
+1 Discerning Financier (WOE) 10 *F*
+1 Duke Ulder Ravengard (CLB) 272
+1 Fallaji Vanguard (BRO) 210
+1 Forum Familiar (MKM) 16
+1 Freya Crescent (FIN) 138
+1 Frontline Medic (GTC) 12
+1 Glowrider (SLD) 7138 *F*
+1 Goblin Tomb Raider (LCI) 151
+1 Hedron Crawler (OGW) 164
+1 Linden, the Steadfast Queen (ELD) 20
+1 Loran, Disciple of History (BRO) 13
+1 Lossarnach Captain (LTC) 16
+1 Loyal Warhound (AFR) 23
+1 Mage's Attendant (SNC) 21
+1 Magebane Lizard (OTJ) 134
+1 Magnanimous Magistrate (J22) 7
+1 Myr Convert (ONE) 479 *F* *P*
+1 Ninth Bridge Patrol (J22) 221
+1 Odric, Lunarch Marshal (DMC) 103
+1 Odric, Master Tactician (CMM) 46
+1 Ogre-Head Helm (NEO) 155
+1 Okoye, Dora Milaje Leader (MSH) 27
+1 Opaline Unicorn (THS) 218
+1 Ornithopter (AER) 167
+1 Phyrexian Censor (MOM) 31
+1 Proud Pack-Rhino (MH3) 41
+1 Quicksilver, Brash Blur (MSH) 148
+1 Raphael, Tough Turtle (TMT) 104
+1 Razorkin Hordecaller (DSK) 152
+1 Rionya, Fire Dancer (SOC) 252
+1 Rosecot Knight (MH3) 42
+1 Rosie Cotton of South Lane (LTR) 440
+1 Savior of the Small (DSK) 27
+1 Skewer Slinger (WOE) 149
+1 Skirk Prospector (DMR) 137
+1 Skyclave Geopede (ZNR) 163
+1 Skyknight Squire (FDN) 301 *F*
+1 Skyknight Vanguard (M20) 218
+1 Thalia's Lancers (EMN) 47
+1 Topplegeist (DDQ) 21
+1 Vryn Wingmare (ORI) 40 *F*
+1 Windborn Muse (ONC) 91
+1 Wrecking Crew (SNC) 132
+1 Éowyn, Fearless Knight (LTR) 430
+1 Battle Angels of Tyr (CLB) 370 *F*
+1 Goblin Surprise (FDN) 200
+1 Kabira Takedown (ZNR) 19
+1 Orim's Thunder (DMR) 18
+1 Akroma's Will (SOA) 66 *P*
+1 Ravages of War (PIP) 354 *F*
+1 Vanquish the Horde (INR) 302
+1 Arcane Signet (ONC) 125
+1 Defense Grid (BRR) 76
+1 Disruptor Flute (MH3) 209
+1 Hourglass of the Lost (M3C) 92
+1 Mandibular Kite (MH3) 34
+1 Sol Ring (C21) 263
+1 Sphere of Resistance (SLD) 1484★ *F*
+1 White Auracite (FIN) 41
+1 Winter Orb (SLD) 1486★ *F*
+1 Authority of the Consuls (FDN) 137
+1 Deafening Silence (ELD) 10
+1 High Noon (OTJ) 15
+1 Legion's Landing (XLN) 22
+1 Skrelv's Hive (ONE) 34 *P*
+1 Vault 75: Middle School (PIP) 27
+1 Battlefield Forge (DMC) 198
+1 Command Tower (C17) 242
+1 Exotic Orchard (40K) 278
+1 Mirrex (ONE) 254
+9 Mountain (ACR) 108
+8 Plains (LCI) 287
+1 Snow-Covered Mountain (KHM) 283
+1 Stone Quarry (AKH) 274
+1 Tarnished Citadel (TLE) 59
+1 Temple of Triumph (PM20) 257p
+1 Wind-Scarred Crag (C17) 294
