@@ -30,7 +30,7 @@ import { filterCards, type IsWord } from '@/lib/filter';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
-import { tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
+import { nextColor, tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
 
 export type Entry = Item & { board: Board; slot?: Slot | null };
 
@@ -64,6 +64,8 @@ interface Props {
   isWord?: IsWord<Entry>;
   /** Sets the filter from outside - a count under "Where your copies are" - and brings the cards into view. */
   filterTo?: { text: string; n: number };
+  /** Read the deck again after a change made here directly (a finish toggled from the keyboard). */
+  onChanged?: () => void;
 }
 
 type View = 'grid' | 'stacks' | 'text';
@@ -99,12 +101,25 @@ const nearest = (size: number) => (size < 180 ? 'S' : size < 240 ? 'M' : 'L');
 const money = (entry: Entry) => { const p = priceOf(entry.card, entry.finish); return p === null ? '—' : `$${p.toFixed(2)}`; };
 
 const SHORTCUTS: Array<[string, string]> = [
-  ['/', 'Filter the cards'], ['G · S · T', 'Grid, Stacks or Text'], ['[ · ]', 'Cards smaller or bigger'],
+  ['N', 'Add cards (type a name, Enter adds it)'], ['/', 'Filter the cards'],
+  ['+ · −', 'One more or one fewer of the card under the pointer (or the selected cards)'],
+  ['M · B · D', 'Move it to the Maybeboard, the Sideboard, or back to the Deck'],
+  ['F', 'Foil on or off'], ['Delete', 'Remove it'],
+  ['⌘Z · Ctrl+Z', 'Undo the last change'],
   ['X', 'Select cards (again to finish)'], ['A', 'While selecting: pick everything shown'],
-  ['Esc', 'Close a menu · clear the selection · stop selecting'], ['N', 'Add cards'], ['1 – 8', 'Switch the deck\'s tabs'],
+  ['T · G · S', 'List, Grid or Stacks'], ['[ · ]', 'Cards smaller or bigger'],
+  ['Esc', 'Close a menu · clear the selection · stop selecting'], ['1 – 5', 'Switch the deck\'s tabs'], ['?', 'Show these keys'],
 ];
 
-export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot, mark, isWord, filterTo }: Props) {
+export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot, mark, isWord, filterTo, onChanged }: Props) {
+  // The card under the pointer, for the card keys; a ref, so hovering doesn't re-render the deck.
+  const hovered = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const over = (e: MouseEvent) => { hovered.current = (e.target as HTMLElement).closest?.('[data-card-id]') as HTMLElement | null; };
+    document.addEventListener('mouseover', over);
+    return () => document.removeEventListener('mouseover', over);
+  }, []);
+  const [help, setHelp] = useState(false);
   const [boardPicked, setBoard] = useState<Board>('main');
   // A section deleted elsewhere falls back to Main.
   const board: Board = boardPicked === 'main' || sections.some((x) => x.id === boardPicked) ? boardPicked : 'main';
@@ -202,15 +217,27 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
     lastPicked.current = id;
   };
   const pickedEntries = entries.filter((e) => picked.has(e.card.id) && !e.commander);
+  // A bulk action is one change in the history: one Undo puts all of it back.
   const bulk = async (work: (e: Entry) => Promise<void> | void) => {
     setBusy(true);
-    try { for (const e of pickedEntries) await work(e); stopSelecting(); } finally { setBusy(false); }
+    try { await api.inBatch(async () => { for (const e of pickedEntries) await work(e); }); stopSelecting(); } finally { setBusy(false); }
   };
   const tagCards = async (tagId: string, list: Entry[]) => {
     let latest: DeckTags | null = null;
-    for (const e of list) latest = await api.setCardTag(listId, tagKey(e.card), tagId, true);
+    await api.inBatch(async () => { for (const e of list) latest = await api.setCardTag(listId, tagKey(e.card), tagId, true); });
     if (latest) onTags?.(latest);
   };
+  /** A new tag, made right here; answers its id. */
+  const makeTag = async (name: string): Promise<string | null> => {
+    const n = name.trim().slice(0, 60);
+    if (!n) return null;
+    const existing = (tags?.tags ?? []).find((t) => t.name.toLowerCase() === n.toLowerCase());
+    if (existing) return existing.id;
+    const made = await api.createTag(listId, { name: n, color: nextColor((tags?.tags ?? []).map((t) => t.color)) });
+    onTags?.(made);
+    return made.created ?? made.tags.find((t) => t.name === n)?.id ?? null;
+  };
+  const [newTag, setNewTag] = useState<string | null>(null);
 
   // Shortcuts on this tab; the deck's tab keys (1-8, N) are the page's.
   useEffect(() => {
@@ -228,6 +255,29 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
         else if (selecting) stopSelecting();
         return;
       }
+      // Card keys act on the selected cards, or else the one under the pointer (or focused).
+      const targets = (): Entry[] => {
+        if (picked.size) return pickedEntries;
+        const el = (document.activeElement?.closest('[data-card-id]') as HTMLElement | null) ?? hovered.current;
+        const id = el?.dataset.cardId;
+        const one = id ? entries.find((x) => x.card.id === id && !x.commander) : undefined;
+        return one ? [one] : [];
+      };
+      const cardKey = (work: (x: Entry) => Promise<void> | void) => {
+        const list = targets();
+        if (!list.length) return false;
+        e.preventDefault();
+        void api.inBatch(async () => { for (const x of list) await work(x); });
+        return true;
+      };
+      if (k === '?') { e.preventDefault(); setHelp((v) => !v); return; }
+      if (k === '+' || k === '=') { if (cardKey((x) => onQuantity(x.card.id, x.quantity + 1))) return; }
+      if (k === '-' || k === '_') { if (cardKey((x) => onQuantity(x.card.id, x.quantity - 1))) return; }
+      if (k === 'delete' || k === 'backspace') { if (cardKey((x) => onQuantity(x.card.id, 0))) return; }
+      if (isDeck && k === 'm') { if (cardKey((x) => (x.board === 'maybe' ? undefined : onMove(x.card.id, 'maybe')))) return; }
+      if (isDeck && k === 'b') { if (cardKey((x) => (x.board === 'side' ? undefined : onMove(x.card.id, 'side')))) return; }
+      if (isDeck && k === 'd') { if (cardKey((x) => (x.board === 'main' ? undefined : onMove(x.card.id, 'main')))) return; }
+      if (k === 'f') { if (cardKey((x) => api.updateCard(listId, x.card.id, { finish: x.finish === 'nonfoil' ? 'foil' : 'nonfoil' }).then(() => onChanged?.()))) return; }
       if (k === '/') { e.preventDefault(); filterBox.current?.focus(); }
       else if (k === 'g' || k === 's' || k === 't') setPrefs((p) => ({ ...p, view: k === 'g' ? 'grid' : k === 's' ? 'stacks' : 'text' }));
       else if (k === '[' || k === ']') setPrefs((p) => ({ ...p, size: Math.max(MIN_SIZE, Math.min(MAX_SIZE, p.size + (k === ']' ? 20 : -20))) }));
@@ -320,6 +370,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
                 ))}
               </span>
             </div>
+            <button type="button" onClick={() => setHelp(true)} className="border-t border-[var(--border)] pt-2.5 text-left text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)] sm:hidden">Keyboard shortcuts</button>
             <details className="border-t border-[var(--border)] pt-2.5 max-sm:hidden">
               <summary className="cursor-pointer text-xs font-medium text-[var(--muted)] hover:text-[var(--foreground)]">Keyboard shortcuts</summary>
               <span className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
@@ -424,14 +475,31 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             <button key={t.id} disabled={!pickedEntries.length || busy} onClick={() => bulk((e) => onMove(e.card.id, t.id))}
               className="rounded-full border border-[var(--border)] px-3 py-1 hover:bg-[var(--surface)] disabled:opacity-40">To {t.name}</button>
           ))}
-          {isDeck && accepted.length > 0 && (
+          {isDeck && (newTag === null ? (
             <select aria-label="Tag the selected cards" disabled={!pickedEntries.length || busy} value=""
-              onChange={async (e) => { const tagId = e.target.value; if (!tagId) return; setBusy(true); try { await tagCards(tagId, pickedEntries); stopSelecting(); } finally { setBusy(false); } }}
+              onChange={async (e) => {
+                const tagId = e.target.value;
+                if (!tagId) return;
+                if (tagId === '__new') { setNewTag(''); return; }
+                setBusy(true); try { await tagCards(tagId, pickedEntries); stopSelecting(); } finally { setBusy(false); }
+              }}
               className="rounded-full border border-[var(--border)] bg-transparent px-3 py-1 disabled:opacity-40">
               <option value="">Tag…</option>
               {accepted.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="__new">New tag…</option>
             </select>
-          )}
+          ) : (
+            <form className="flex items-center gap-1" onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              try { const id = await makeTag(newTag); if (id) { await tagCards(id, pickedEntries); stopSelecting(); } } finally { setBusy(false); setNewTag(null); }
+            }}>
+              <input autoFocus value={newTag} onChange={(e) => setNewTag(e.target.value)} maxLength={60} placeholder="New tag" aria-label="New tag name"
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setNewTag(null); } }}
+                className="w-32 rounded-full border border-[var(--border)] bg-transparent px-3 py-1" />
+              <button disabled={busy} className="rounded-full border border-[var(--border)] px-3 py-1">Tag them</button>
+            </form>
+          ))}
           <button disabled={!pickedEntries.length || busy} onClick={() => bulk((e) => onQuantity(e.card.id, 0))}
             className="rounded-full border border-[var(--border)] px-3 py-1 text-red-300 hover:bg-[var(--surface)] disabled:opacity-40">Remove</button>
           <button onClick={() => (picked.size ? setPicked(new Set()) : stopSelecting())} className="ml-auto rounded-full border border-[var(--border)] px-3 py-1 hover:bg-[var(--surface)]">
@@ -440,6 +508,20 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
         </div>
       )}
 
+      {help && createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" onClick={() => setHelp(false)}>
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
+          <div role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Keyboard shortcuts</h2>
+              <button onClick={() => setHelp(false)} aria-label="Close" className="rounded-lg px-2 text-[var(--muted)] hover:text-[var(--foreground)]">✕</button></div>
+            <span className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+              {SHORTCUTS.map(([k, v]) => <span key={k} className="contents"><kbd className="whitespace-nowrap font-mono text-xs text-[var(--c1)]">{k}</kbd><span className="text-[var(--muted)]">{v}</span></span>)}
+            </span>
+          </div>
+        </div>,
+        document.body,
+      )}
       {menu && (
         <QuickMenu
           {...menu}
@@ -455,6 +537,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           onOpen={() => onSelect(menu.entry.card)}
           onMove={(b) => onMove(menu.entry.card.id, b)}
           onTag={(tagId) => tagCards(tagId, [menu.entry])}
+          onNewTag={async (name) => { const id = await makeTag(name); if (id) await tagCards(id, [menu.entry]); }}
           onKeep={() => api.keepCard(listId, menu.entry.card.oracle_id ?? menu.entry.card.id, true)}
           onAsk={onAsk && !menu.entry.commander ? () => onAsk(`Suggest replacements for ${menu.entry.card.name} that fit the plan.`) : undefined}
           onChangeCommander={menu.entry.commander && !menu.entry.slot ? onChangeCommander : undefined}
@@ -489,7 +572,7 @@ function GridCard({ entry, isDeck, picked, selecting, mark, onActivate, onQuanti
 }) {
   const { card, quantity } = entry;
   return (
-    <div className="group relative flex flex-col gap-1">
+    <div data-card-id={entry.card.id} className="group relative flex flex-col gap-1">
       <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
         aria-label={selecting ? `Pick ${card.name}` : `Show details for ${card.name}`}
         className={`relative block w-full text-left ${selecting ? 'cursor-copy' : ''}`}>
@@ -529,7 +612,7 @@ function StackCard({ entry, first, picked, selecting, mark, onActivate }: {
     // A percentage margin is of the column's width, which is the card's: it works at any size.
     // Hovered (or focused), it opens up: the cards under it slide down so the whole card shows (globals.css .stack-card).
     <div style={{ marginTop: first ? 0 : '-120.5%' }} className="stack-card relative hover:z-10 focus-within:z-10">
-      <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
+      <button data-card-id={entry.card.id} onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
         aria-label={selecting ? `Pick ${entry.card.name}` : `Show details for ${entry.card.name}`}
         className={`relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] ${selecting ? 'cursor-copy' : ''}`}>
         <Picture card={entry.card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
@@ -556,7 +639,7 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
   };
   const src = imageOf(entry.card, 'normal');
   return (
-    <li className={`flex items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
+    <li data-card-id={entry.card.id} className={`flex items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
       {selecting && (
         <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
@@ -704,14 +787,15 @@ function SectionTools({ listId, section, count, maybeName, onChanged, onDeleted 
 
 // --- a card's ⋯ ---------------------------------------------------------------------
 
-function QuickMenu({ entry, x, y, up, isDeck, tags, moveTo, slotOptions, onSlot, onClose, onOpen, onMove, onTag, onKeep, onAsk, onRemove, onChangeCommander }: {
+function QuickMenu({ entry, x, y, up, isDeck, tags, moveTo, slotOptions, onSlot, onClose, onOpen, onMove, onTag, onNewTag, onKeep, onAsk, onRemove, onChangeCommander }: {
   entry: Entry; x: number; y: number; up: boolean; isDeck: boolean; tags: Array<{ id: string; name: string }>;
   moveTo: Array<{ id: Board; name: string }>; slotOptions: { partner: boolean; companion: boolean } | null; onSlot?: (slot: Slot | null) => void;
-  onClose: () => void; onOpen: () => void; onMove: (b: Board) => void; onTag: (tagId: string) => Promise<void> | void;
+  onClose: () => void; onOpen: () => void; onMove: (b: Board) => void; onTag: (tagId: string) => Promise<void> | void; onNewTag: (name: string) => Promise<void>;
   onKeep: () => Promise<unknown> | void; onAsk?: () => void; onRemove: () => void; onChangeCommander?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [tagging, setTagging] = useState(false);
+  const [naming, setNaming] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   useEffect(() => {
     ref.current?.querySelector('button')?.focus();
@@ -739,9 +823,19 @@ function QuickMenu({ entry, x, y, up, isDeck, tags, moveTo, slotOptions, onSlot,
           {entry.slot === 'partner' ? 'Not a commander: back to the 99' : 'Not the companion'}
         </button>
       )}
-      {isDeck && tags.length > 0 && (tagging ? (
-        <div className="max-h-48 overflow-y-auto border-y border-[var(--border)] py-1">
+      {isDeck && (tagging ? (
+        <div className="max-h-56 overflow-y-auto border-y border-[var(--border)] py-1">
           {tags.map((t) => <button key={t.id} role="menuitem" className={`${item} pl-6`} onClick={act(() => onTag(t.id))}>{t.name}</button>)}
+          {naming === null
+            ? <button role="menuitem" className={`${item} pl-6 text-[var(--muted)]`} onClick={() => setNaming('')}>New tag…</button>
+            : (
+              <form className="flex gap-1 px-2 py-1" onSubmit={async (e) => { e.preventDefault(); if (naming.trim()) { await onNewTag(naming); onClose(); } }}>
+                <input autoFocus value={naming} onChange={(e) => setNaming(e.target.value)} maxLength={60} placeholder="New tag" aria-label="New tag name"
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setNaming(null); } }}
+                  className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm" />
+                <button className="rounded-lg border border-[var(--border)] px-2 text-sm">Add</button>
+              </form>
+            )}
         </div>
       ) : <button role="menuitem" className={item} onClick={() => setTagging(true)}>Add a tag ▸</button>)}
       {isDeck && !entry.commander && <button role="menuitem" className={item} onClick={async () => { await onKeep(); setDone('Kept: never offered as a cut'); setTimeout(onClose, 900); }}>Never cut this ★</button>}
