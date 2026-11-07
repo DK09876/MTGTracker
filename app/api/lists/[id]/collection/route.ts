@@ -2,7 +2,7 @@
  * A deck and the collection: where each card it wants is, and moving copies.
  *
  *   GET   ownership, and the fetch and buy lists
- *   POST  {action: 'pull', key, quantity?, from?: {cardId, finish, location}}
+ *   POST  {action: 'pull', key, quantity?, from?: {cardId, finish, location, variant?}}
  *         {action: 'pullAll'}
  *         {action: 'take', fromListId, key, quantity?}
  *         {action: 'return', key?, quantity?, to?}      key omitted: everything
@@ -43,9 +43,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   switch (b.action) {
     case 'pull': {
       if (!key) return NextResponse.json({ error: 'key required' }, { status: 400 });
-      const from = b.from as { cardId?: unknown; finish?: unknown; location?: unknown } | undefined;
+      const from = b.from as { cardId?: unknown; finish?: unknown; location?: unknown; variant?: unknown } | undefined;
       moved = pull(id, key, quantity, from && typeof from.cardId === 'string'
-        ? { cardId: from.cardId, finish: (from.finish as Finish) ?? 'nonfoil', location: typeof from.location === 'string' ? from.location : '' }
+        ? { cardId: from.cardId, finish: (from.finish as Finish) ?? 'nonfoil', location: typeof from.location === 'string' ? from.location : '',
+            variant: typeof from.variant === 'string' ? from.variant : undefined }
         : undefined);
       break;
     }

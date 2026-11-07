@@ -4,7 +4,7 @@
  * The common export shapes all come down to one card per line:
  *
  *   1x Kratos, God of War (SLD) 2207        Moxfield, Archidekt
- *   1 Lightning Bolt (PF19) 1 *F*           foil (*E* for etched)
+ *   1 Lightning Bolt (PF19) 1 *F*           foil (*E* for etched, *P* a proxy)
  *   33 Mountain                             MTGO, plain text
  *   Sol Ring                                no count means one
  *
@@ -40,6 +40,8 @@ export interface Entry {
   set?: string;
   collectorNumber?: string;
   finish: Finish;
+  /** Marked "*P*": a proxy stands in for the card (Mythic Tools, Moxfield). */
+  proxy?: boolean;
   section: Section;
   /** The line as written, for reporting a card that could not be found. */
   line: string;
@@ -95,6 +97,7 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
       set: parts[3]?.toLowerCase(),
       collectorNumber: parts[4],
       finish: /\*E\*/i.test(parts[5] ?? '') ? 'etched' : /\*F\*/i.test(parts[5] ?? '') ? 'foil' : 'nonfoil',
+      ...(/\*P\*/i.test(parts[5] ?? '') ? { proxy: true } : {}),
       section: board ?? section,
       line,
     });
@@ -104,10 +107,10 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
 
 const MARKER: Record<Finish, string> = { nonfoil: '', foil: ' *F*', etched: ' *E*' };
 
-const lineFor = (card: ScryfallCard, quantity: number, finish: Finish = 'nonfoil') =>
+const lineFor = (card: ScryfallCard, quantity: number, finish: Finish = 'nonfoil', proxy = false) =>
   `${quantity}x ${card.name}`
   + (card.set && card.collector_number ? ` (${card.set.toLowerCase()}) ${card.collector_number}` : '')
-  + MARKER[finish];
+  + MARKER[finish] + (proxy ? ' *P*' : '');
 
 /**
  * A deck written out as Moxfield exports it - one flat list, `1x Name (set)
@@ -115,16 +118,17 @@ const lineFor = (card: ScryfallCard, quantity: number, finish: Finish = 'nonfoil
  * copying it out and pasting it back changes nothing. The commander is the
  * first line: that is where an import looks for it. Sideboard and
  * maybeboard follow under their own headings, only when they hold cards.
+ * A card marked as a proxy keeps "*P*".
  */
 export function formatDecklist(
   commander: ScryfallCard | null,
-  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board }>,
+  cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board; proxies?: number }>,
   commanderFinish: Finish = 'nonfoil',
 ): string {
   const lines = (board: Board) => cards
     .filter((c) => (c.board ?? 'main') === board)
     .sort((a, b) => a.card.name.localeCompare(b.card.name))
-    .map(({ card, quantity, finish }) => lineFor(card, quantity, finish));
+    .map(({ card, quantity, finish, proxies }) => lineFor(card, quantity, finish, !!proxies));
   const out = [...(commander ? [lineFor(commander, 1, commanderFinish)] : []), ...lines('main')];
   for (const [board, heading] of [['side', 'SIDEBOARD:'], ['maybe', 'MAYBEBOARD:']] as const) {
     const rows = lines(board);

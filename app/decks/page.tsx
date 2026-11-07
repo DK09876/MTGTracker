@@ -23,6 +23,7 @@ import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { parseDecklist } from '@/lib/decklist';
+import MythicLinked from '@/components/MythicLinked';
 import { identityStyle, MANA } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
@@ -100,6 +101,7 @@ export default function DecksPage() {
   const [name, setName] = useState('');
   const [commander, setCommander] = useState<api.CommanderOption | null>(null);
   const [decklist, setDecklist] = useState('');
+  const [linkedList, setLinkedList] = useState('');
   // A suggested first list when starting from a commander with nothing pasted.
   const [starter, setStarter] = useState(true);
   const [ownedFirst, setOwnedFirst] = useState(true);
@@ -165,7 +167,7 @@ export default function DecksPage() {
     setError(null);
     try {
       const { list, imported: result } = await api.createDeck(deckName, commander, decklist,
-        commander && !decklist.trim() && starter ? { ownedFirst } : undefined);
+        commander && !decklist.trim() && starter ? { ownedFirst } : undefined, box.kind === 'list' ? linkedList : '');
       // Made while a folder is open: it goes in that folder.
       if (folderPick !== 'all' && folderPick !== 'none') await api.placeDeck(list.id, folderPick).then(refreshFolders).catch(() => {});
       // Show what an import did before moving on; otherwise go straight in.
@@ -368,6 +370,7 @@ export default function DecksPage() {
                   </span>
                 )}
               </label>
+              {box.kind === 'list' && <MythicLinked value={linkedList} onChange={setLinkedList} />}
               {commander && !decklist.trim() && (
                 <div data-tour="starter" className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
                   <label className="flex items-start gap-2">

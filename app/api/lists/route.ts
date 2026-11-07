@@ -2,10 +2,11 @@
  * One profile's lists and decks: read them, or make one. `?profile=` required.
  *
  *   GET  ?kind=deck|list
- *   POST {name, kind?, commanderId?, decklist?}
+ *   POST {name, kind?, commanderId?, decklist?, linked?}
  *
  * A deck can be made from a pasted decklist in one go; the answer then says
- * what was imported and which lines could not be found.
+ * what was imported and which lines could not be found. `linked` is Mythic
+ * Tools' collection-linked list: the deck then holds the copies it names.
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +16,7 @@ import { localCardsByOracle } from '@/lib/card-store';
 import { createList, getList, listLists, renameList, type ListKind } from '@/lib/db';
 import { deckText, DeckLinkError } from '@/lib/deck-links';
 import { importInto } from '@/lib/import-into';
+import { linkMythic, markListProxies, mythicDeckText } from '@/lib/mythic';
 import { requireProfile } from '@/lib/profile-route';
 import { startJob } from '@/lib/jobs';
 import { warmRoles } from '@/lib/role-warmup';
@@ -41,7 +43,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const who = requireProfile(request);
   if (who instanceof NextResponse) return who;
-  let body: { name?: string; note?: string; kind?: string; commanderId?: string; commanderOracleId?: string; decklist?: string; starter?: boolean; ownedFirst?: boolean };
+  let body: { name?: string; note?: string; kind?: string; commanderId?: string; commanderOracleId?: string; decklist?: string; linked?: string; starter?: boolean; ownedFirst?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -68,7 +70,11 @@ export async function POST(request: Request) {
     const local = kind === 'deck' && body.commanderOracleId ? localCardsByOracle([body.commanderOracleId]).find((c) => c.id === body.commanderId || !body.commanderId) : undefined;
     const commander = kind === 'deck' && body.commanderId ? local ?? await getCard(body.commanderId) : null;
     const list = createList(who.profile, name, (body.note ?? '').trim(), { kind, commander });
-    const imported = linked?.text.trim() ? await importInto(list, linked.text, who.profile) : undefined;
+    const mythic = kind === 'deck' && typeof body.linked === 'string' && body.linked.trim() ? body.linked : '';
+    const pasted = linked?.text.trim() ? linked.text : '';
+    const imported = pasted ? await importInto(list, mythic ? mythicDeckText(pasted, mythic) : pasted, who.profile) : undefined;
+    const link = imported && mythic ? linkMythic(list.id, who.profile, pasted, mythic) : null;
+    if (imported && !mythic) markListProxies(list.id, pasted);
     if (imported) warmRoles(list, who.profile);
     if (unnamed && imported?.commander) renameList(list.id, imported.commander);
     // A starter list, built in the background: the deck opens at once and fills in.
@@ -83,7 +89,7 @@ export async function POST(request: Request) {
         return { spells: starter.spells, lands: starter.lands };
       });
     }
-    return NextResponse.json({ list: getList(list.id, who.profile), imported });
+    return NextResponse.json({ list: getList(list.id, who.profile), imported, link });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[lists] create failed', error);

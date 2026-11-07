@@ -18,6 +18,7 @@ const url = (path: string) => {
 };
 
 import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
+import type { LinkReport } from './mythic';
 import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, RulesThreadSummary } from './db';
 import type { ImportSummary } from './import-into';
 import { getProfile } from './profile';
@@ -213,12 +214,15 @@ export const searchCommanders = (q: string, signal?: AbortSignal) =>
   fetch(url(`commanders?q=${encodeURIComponent(q)}`), { signal })
     .then(json<{ commanders: CommanderOption[] }>).then((b) => b.commanders);
 
-export const createDeck = (name: string, commander: CommanderOption | null, decklist: string, starter?: { ownedFirst: boolean }) =>
+export const createDeck = (name: string, commander: CommanderOption | null, decklist: string, starter?: { ownedFirst: boolean }, linked = '') =>
   fetch(url('lists'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, kind: 'deck', commanderId: commander?.id ?? null, commanderOracleId: commander?.oracleId ?? null, decklist, starter: !!starter, ownedFirst: starter?.ownedFirst }),
-  }).then(json<{ list: List; imported?: ImportSummary }>).finally(jobsChanged);
+    body: JSON.stringify({
+      name, kind: 'deck', commanderId: commander?.id ?? null, commanderOracleId: commander?.oracleId ?? null, decklist,
+      starter: !!starter, ownedFirst: starter?.ownedFirst, ...(linked.trim() ? { linked } : {}),
+    }),
+  }).then(json<{ list: List; imported?: ImportSummary; link?: LinkReport | null }>).finally(jobsChanged);
 
 /** Set a deck's commander; `fromList` takes a card already in the deck out of the 99. */
 export const setCommander = (listId: string, commanderId: string | null, fromList = false) =>
@@ -232,18 +236,20 @@ export const setCommander = (listId: string, commanderId: string | null, fromLis
  * Make a list exactly this decklist. A 422 carries the lines that could not
  * be found, and means nothing was changed.
  */
-export async function replaceDecklist(listId: string, decklist: string): Promise<{ imported: ImportSummary; ok: boolean }> {
+export async function replaceDecklist(
+  listId: string, decklist: string, linked = '',
+): Promise<{ imported: ImportSummary; ok: boolean; link?: LinkReport | null }> {
   const response = await fetch(url(`lists/${listId}/import`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decklist }),
+    body: JSON.stringify({ decklist, ...(linked.trim() ? { linked } : {}) }),
   });
   if (response.status === 422) {
     const body = (await response.json()) as { imported: ImportSummary };
     return { imported: body.imported, ok: false };
   }
-  const body = await json<{ imported: ImportSummary }>(response);
-  return { imported: body.imported, ok: true };
+  const body = await json<{ imported: ImportSummary; link?: LinkReport | null }>(response);
+  return { imported: body.imported, ok: true, link: body.link };
 }
 
 export const importDecklist = (listId: string, decklist: string) =>
@@ -581,7 +587,7 @@ export type CollectionState = {
   boxes: BoxCopies[];
   decks: DeckCopies[];
   locations: Location[];
-  totals: { copies: number; unique: number; inDecks: number; value: number };
+  totals: { copies: number; unique: number; inBoxes: number; inDecks: number; proxies: number; value: number };
 };
 
 export const collection = () => get<CollectionState>('collection');
@@ -590,14 +596,16 @@ export const peekCollection = () => peek<CollectionState>('collection');
 export const addToCollection = (cardId: string, opts: { quantity?: number; finish?: Finish; location?: string } = {}) =>
   send('collection', 'POST', { cardId, ...opts }).then(json<{ ok: true; count: number; card: ScryfallCard }>);
 
-export const setCollectionCount = (cardId: string, finish: Finish, location: string, quantity: number) =>
-  send('collection', 'PATCH', { cardId, finish, location, quantity }).then(json<CollectionState>);
+export const setCollectionCount = (cardId: string, finish: Finish, location: string, quantity: number, variant = '') =>
+  send('collection', 'PATCH', { cardId, finish, location, variant, quantity }).then(json<CollectionState>);
 
-export const moveCopies = (cardId: string, finish: Finish, location: string, move: { location?: string; finish?: Finish; quantity: number }) =>
-  send('collection', 'PATCH', { cardId, finish, location, move }).then(json<CollectionState>);
+export const moveCopies = (
+  cardId: string, finish: Finish, location: string, move: { location?: string; finish?: Finish; quantity: number }, variant = '',
+) => send('collection', 'PATCH', { cardId, finish, location, variant, move }).then(json<CollectionState>);
 
 export interface CollectionImport {
   format: string;
+  mode: 'add' | 'replace';
   copies: number;
   unique: number;
   missing: string[];
@@ -606,8 +614,38 @@ export interface CollectionImport {
   unreadable: string[];
 }
 
-export const importCollection = (text: string, location: string) =>
-  send('collection/import', 'POST', { text, location }).then(json<CollectionImport>);
+export interface CollectionImportPreview {
+  format: string;
+  copies: number;
+  rows: number;
+  locations: Array<{ name: string; kind: 'box' | 'binder'; copies: number }>;
+  proxies: number;
+  foil: number;
+  etched: number;
+  otherLanguage: number;
+  unreadable: string[];
+  current: { copies: number; inDecks: number };
+  before: { at: string; copies: number; mode: string } | null;
+}
+
+export const previewCollectionImport = (text: string, location: string) =>
+  send('collection/import', 'POST', { text, location, preview: true }).then(json<CollectionImportPreview>);
+
+/** Thrown when adding a file that was imported before: adding it again would double every copy. */
+export class ImportedBefore extends Error {
+  constructor(message: string, readonly before: { at: string; copies: number; mode: string }) { super(message); }
+}
+
+export async function importCollection(
+  text: string, location: string, opts: { mode?: 'add' | 'replace'; again?: boolean } = {},
+): Promise<CollectionImport> {
+  const response = await send('collection/import', 'POST', { text, location, ...opts });
+  if (response.status === 409) {
+    const body = await response.json() as { error: string; before: { at: string; copies: number; mode: string } };
+    throw new ImportedBefore(body.error, body.before);
+  }
+  return json<CollectionImport>(response);
+}
 
 export const collectionExportUrl = () => url('collection/export');
 
@@ -625,7 +663,7 @@ export type DeckOwnership = Ownership & { fetch: string; buy: string; moved?: nu
 export const deckOwnership = (listId: string) => fetch(url(`lists/${listId}/collection`)).then(json<DeckOwnership>);
 
 export type DeckCollectionAction =
-  | { action: 'pull'; key: string; quantity?: number; from?: { cardId: string; finish: Finish; location: string } }
+  | { action: 'pull'; key: string; quantity?: number; from?: { cardId: string; finish: Finish; location: string; variant?: string } }
   | { action: 'pullAll' }
   | { action: 'take'; fromListId: string; key: string; quantity?: number }
   | { action: 'return'; key?: string; quantity?: number; to?: string }
