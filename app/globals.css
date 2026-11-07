@@ -201,6 +201,8 @@ body {
 
 /* Below lg a deck's tab rail floats above the phone nav; the footer clears it too. */
 @media (width < 64rem) {
+  /* Whatever scrolls into view (focus, links to a section) stops above the deck's bottom bar. */
+  html:has([data-deck-rail]) { scroll-padding-bottom: calc(var(--nav-h) + 5rem); }
   body:has([data-deck-rail]) > footer { padding-bottom: calc(var(--nav-h) + 4.5rem + max(2rem, env(safe-area-inset-bottom))); }
 }
 
