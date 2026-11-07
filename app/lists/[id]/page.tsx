@@ -694,6 +694,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         )}
         <DeckCards
           listId={id}
+          onChanged={() => { void load(); }}
           entries={deck && owner !== 'all' && ownership ? entries.filter((e) => {
             if (e.board !== 'main') return owner === 'mine';
             const h = ownership.cards.find((x) => x.cardIds.includes(e.card.id) || x.name === e.card.name);
