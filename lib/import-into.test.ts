@@ -133,3 +133,21 @@ describe('replaceWith', () => {
     expect(db.cardsInList(list.id).map((c) => [c.card.name, c.finish])).toEqual([['Sol Ring', 'foil']]);
   });
 });
+
+describe('tags from the list', () => {
+  it('puts Moxfield tags and Archidekt categories on the cards, reusing the deck\'s tags by name', async () => {
+    const { db, list } = await deckWith(known[1], []);
+    const ramp = db.createTag(list.id, { name: 'Ramp', color: '#e0b64a', status: 'accepted', origin: 'manual' });
+    const { importInto } = await import('./import-into');
+
+    const result = await importInto(list, '1 Sol Ring (SOC) 128 #ramp\n1 Lightning Bolt [Removal,Instant]\n30 Mountain');
+
+    expect(result.missing).toEqual([]);
+    expect(result.tagged).toBe(2);
+    expect(result.newTags).toEqual(['Removal']);
+    const tags = db.deckTags(list.id);
+    const nameOf = new Map(tags.tags.map((t) => [t.id, t.name]));
+    expect(tags.cardTags.filter((c) => c.on).map((c) => [c.key, nameOf.get(c.tagId)]).sort()).toEqual([['pf19-1', 'Removal'], ['soc-128', 'Ramp']]);
+    expect(tags.tags.find((t) => t.id === ramp.id)).toBeTruthy();
+  });
+});

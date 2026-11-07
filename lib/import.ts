@@ -21,7 +21,9 @@ import type { Finish, Identifier, ScryfallCard } from './scryfall';
 
 export interface Resolved {
   /** Cards for the deck, with how many of each, which finish and which board. */
-  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish; board: Board; named?: 'commander' | 'companion' }>;
+  cards: Array<{ card: ScryfallCard; quantity: number; finish: Finish; board: Board; named?: 'commander' | 'companion'; tags?: string[] }>;
+  /** Tags the list gave the commander's own line. */
+  commanderTags?: string[];
   /** The commander, when the list says or implies one. */
   commander: ScryfallCard | null;
   /** The finish of the commander's line, including a picked commander's. */
@@ -108,6 +110,7 @@ export async function resolveDecklist(
   if (named && !outvoted) commander = named.card;
   else if (!commanderPicked && resolved[0]?.entry.section === 'main' && canLead(resolved[0].card)) commander = resolved[0].card;
   let commanderFinish: Finish | null = null;
+  let commanderTags: string[] = [];
 
   // The commander sits in the header, not in the 99 - whether it came from
   // the list or was picked separately and also appears in it.
@@ -118,6 +121,7 @@ export async function resolveDecklist(
     if (leader && !leaderRemoved && front(card.name) === leader) {
       leaderRemoved = true;
       commanderFinish = entry.finish;
+      commanderTags = entry.tags ?? [];
       continue;
     }
     // A second card under Commander stays in the deck, named as a commander;
@@ -125,10 +129,13 @@ export async function resolveDecklist(
     const board: Board = entry.section === 'side' || entry.section === 'maybe' ? entry.section : entry.section === 'companion' ? 'side' : 'main';
     const named = entry.section === 'commander' ? 'commander' as const : entry.section === 'companion' ? 'companion' as const : undefined;
     const existing = cards.find((c) => c.card.id === card.id);
-    if (existing) existing.quantity += entry.quantity;
-    else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board, ...(named ? { named } : {}) });
+    const tags = entry.tags ?? [];
+    if (existing) {
+      existing.quantity += entry.quantity;
+      if (tags.length) existing.tags = [...new Set([...(existing.tags ?? []), ...tags])];
+    } else cards.push({ card, quantity: entry.quantity, finish: entry.finish, board, ...(named ? { named } : {}), ...(tags.length ? { tags } : {}) });
   }
-  return { cards, commander, commanderFinish, outvoted: outvoted?.card.name ?? null, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
+  return { cards, commander, commanderFinish, commanderTags, outvoted: outvoted?.card.name ?? null, missing, unreadable, skipped, later: later.filter((l) => cards.some((c) => c.card.id === l.cardId)) };
 }
 
 async function lookUp(entries: Entry[], collection: Collection, printings: boolean): Promise<Map<Entry, ScryfallCard>> {
