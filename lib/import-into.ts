@@ -12,6 +12,7 @@ import { captureState, diffStates, type DeckState, type Diff } from './deck-hist
 import { resolveDecklist, type Resolved } from './import';
 import { startJob } from './jobs';
 import { collection } from './scryfall';
+import { sectionsOf } from './sections';
 import { settleSlots } from './slots';
 import { nextColor } from './tags';
 
@@ -70,6 +71,9 @@ export function applyListTags(listId: string, resolved: Pick<Resolved, 'cards' |
   return { tagged, made };
 }
 
+/** The deck's own sections, for a list that names them. */
+const ownOf = (listId: string) => sectionsOf(listId).filter((x) => !x.builtIn).map((x) => ({ id: x.id, name: x.name }));
+
 /** Cards the list itself put under Commander or Companion, by id. */
 const namedIn = (resolved: Resolved) => new Map(resolved.cards.flatMap((c) => (c.named ? [[c.card.id, c.named] as const] : [])));
 
@@ -94,6 +98,7 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     commanderPicked: list.commander?.name ?? null,
     keepPicked: true,
     local: { byName: localCards, printingsLater: true },
+    ownSections: list.kind === 'deck' ? ownOf(list.id) : undefined,
   });
   const takeCommander = list.kind === 'deck' && !list.commander && resolved.commander;
   if (takeCommander) setCommander(list.id, resolved.commander, resolved.commanderFinish ?? 'nonfoil');
@@ -150,6 +155,7 @@ export async function replaceWith(
   const resolved = await resolveDecklist(text, collection, {
     commanderPicked: list.commander?.name ?? null,
     local: { byName: localCards, printingsLater: false },
+    ownSections: list.kind === 'deck' ? ownOf(list.id) : undefined,
   });
   const summary = {
     added: resolved.cards.length,
@@ -189,6 +195,7 @@ export async function previewReplace(
   const resolved = await resolveDecklist(text, collection, {
     commanderPicked: list.commander?.name ?? null,
     local: { byName: localCards, printingsLater: true },
+    ownSections: list.kind === 'deck' ? ownOf(list.id) : undefined,
   });
   const before = captureState(list.id);
   const named = new Set(resolved.cards.map((c) => c.card.id));
