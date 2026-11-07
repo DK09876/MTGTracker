@@ -351,6 +351,11 @@ export const previewDecklist = (listId: string, decklist: string) =>
   fetch(url(`lists/${listId}/import`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decklist, preview: true }) })
     .then(json<{ preview: { diff: HistoryDiff; summary: string; missing: string[]; unreadable: string[] } }>).then((b) => b.preview);
 
+/** Card names as you type, from the Pi's copy, in the deck's colours, with where each already sits. */
+export interface QuickCard { id: string; oracleId: string; name: string; cost: string; type: string; image: string | null; gameChanger: boolean; inDeck: string | null }
+export const quickCards = (listId: string, q: string) =>
+  fetch(url(`lists/${listId}/quick?q=${encodeURIComponent(q)}`)).then(json<{ q: string; cards: QuickCard[] }>);
+
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
     method: 'POST',

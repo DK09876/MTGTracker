@@ -778,6 +778,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           inDeck={inDeck}
           onAdded={() => { load().catch(() => {}); }}
           onClose={() => setAddOpen(false)}
+          sections={deck ? sections : []}
+          tags={deck ? tags : null}
+          onTags={setTags}
         />
       )}
     </div>
