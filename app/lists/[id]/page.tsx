@@ -14,7 +14,9 @@ import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
 import DeckPlan from '@/components/DeckPlan';
+import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
 import DeckRail from '@/components/DeckRail';
+import Tip from '@/components/Tip';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
@@ -135,7 +137,15 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [imported, setImported] = useState<ImportSummary | null>(null);
   const [rejected, setRejected] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [exported, setExported] = useState<'copied' | 'copied-own' | 'failed' | null>(null);
+  const [exported, setExported] = useState<'copied' | 'downloaded' | 'failed' | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportTags, setExportTags] = useState(true);
+  // The last change made here, offered for undo for a few seconds.
+  const [lastChange, setLastChange] = useState<api.DeckChange | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  // Saving text over a deck that has cards shows what would change first.
+  const [preview, setPreview] = useState<{ diff: api.HistoryDiff; summary: string } | null>(null);
 
 
   // Whether others can see this deck on the owner's profile; private until made public.
@@ -151,6 +161,37 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     if (data.sections?.length) setSections(data.sections);
     setQuestions(data.slotQuestions ?? []);
   }, [id]);
+
+  // Every change recorded for this deck comes back as an event: offer Undo for a few seconds.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const on = (e: Event) => {
+      const { listId, change } = (e as CustomEvent<{ listId: string; change: api.DeckChange }>).detail;
+      if (listId !== id) return;
+      setLastChange(change);
+      clearTimeout(timer);
+      timer = setTimeout(() => setLastChange(null), 7000);
+    };
+    window.addEventListener(api.DECK_CHANGED, on);
+    return () => { window.removeEventListener(api.DECK_CHANGED, on); clearTimeout(timer); };
+  }, [id]);
+  const undo = useCallback(async () => {
+    setUndoing(true);
+    try { await api.undoLast(id); } catch { /* nothing left to undo */ } finally { setUndoing(false); }
+    await load().catch(() => {});
+    void api.deckTags(id).then(setTags).catch(() => {});
+  }, [id, load]);
+  // Cmd/Ctrl+Z undoes the last change to the deck, outside text boxes.
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      if ((e.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]')) return;
+      e.preventDefault();
+      void undo();
+    };
+    document.addEventListener('keydown', key);
+    return () => document.removeEventListener('keydown', key);
+  }, [undo]);
 
   // A starter list being built for this deck in the background: the page
   // looks every few seconds and fills in when it is done.
@@ -284,12 +325,22 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setImporting(true);
   };
 
-  /** Save the text back: the list becomes exactly what it says. */
-  const saveText = async (e?: React.FormEvent, text = decklist) => {
+  /** Save the text back: the list becomes exactly what it says. Over a deck with cards, see what changes first. */
+  const saveText = async (e?: React.FormEvent, text = decklist, confirmed = false) => {
     e?.preventDefault();
     setImportBusy(true);
     try {
-      const { imported: result, ok, link } = await api.replaceDecklist(id, text, deck && readDeckBox(text).kind === 'list' ? linkedList : '');
+      const linked = deck && readDeckBox(text).kind === 'list' ? linkedList : '';
+      if (!confirmed && cards.length > 0) {
+        const p = await api.previewDecklist(id, text, linked);
+        // Lines that can't be found go through the save, which refuses them and lists them to fix.
+        if (!p.missing.length && !p.unreadable.length) {
+          setPreview({ diff: p.diff, summary: p.summary });
+          return;
+        }
+      }
+      setPreview(null);
+      const { imported: result, ok, link } = await api.replaceDecklist(id, text, linked);
       setImported(result);
       setRejected(!ok);
       setLinkReport(link ?? null);
@@ -390,18 +441,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             </button>
             <div data-tour="deck-more"><MoreMenu
               items={[
-                { label: importing ? 'Close the import' : 'Import', onClick: () => (importing ? setImporting(false) : openText()) },
-                {
-                  label: 'Export',
-                  onClick: async () => {
-                    try {
-                      await navigator.clipboard.writeText(formatDecklist(deck ? list.commander : null, cards, list.commanderFinish));
-                      setExported(cards.some((c) => c.board.startsWith('s-')) ? 'copied-own' : 'copied');
-                    } catch { setExported('failed'); }
-                    setTimeout(() => setExported(null), 2500);
-                  },
-                },
-
+                { label: importing ? 'Close the import' : 'Import', onClick: () => { setExportOpen(false); if (importing) setImporting(false); else openText(); } },
+                { label: exportOpen ? 'Close the export' : 'Export', onClick: () => { setExportOpen((v) => !v); setImporting(false); } },
+                ...(deck ? [{ label: 'History and snapshots', onClick: () => setHistoryOpen(true) }] : []),
                 { label: 'Rename', onClick: () => { setDraftName(list.name); setRenaming(true); } },
                 { label: `Duplicate ${deck ? 'deck' : 'list'}`, onClick: async () => { const copy = await api.duplicateList(id); router.push(`${deck ? '/decks' : '/lists'}/${copy.id}`); } },
                 ...(deck && list.commander ? [{ label: 'Change commander', onClick: () => setChangingCommander(true) }] : []),
@@ -490,7 +532,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             <button disabled={importBusy || ['both', 'links'].includes(readDeckBox(decklist).kind) || readDeckBox(decklist).link?.site === 'moxfield'} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">
               {importBusy ? 'Saving…' : 'Save'}
             </button>
-            <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
+            <button type="button" onClick={() => { setImporting(false); setPreview(null); }} className="rounded-lg border border-[var(--border)] px-3 py-1.5">
               Cancel
             </button>
             <button
@@ -510,16 +552,64 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </form>
       )}
       {linkReport && !importing && <LinkResult link={linkReport} />}
+      {exportOpen && (() => {
+        const text = formatDecklist(deck ? list.commander : null, cards, list.commanderFinish, { tags: exportTags ? tags ?? undefined : undefined, sections });
+        const download = () => {
+          const blob = new Blob([text + '\n'], { type: 'text/plain' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `${list.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'deck'}.txt`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          setExported('downloaded');
+          setTimeout(() => setExported(null), 2500);
+        };
+        const copy = async () => {
+          try { await navigator.clipboard.writeText(text); setExported('copied'); } catch { setExported('failed'); }
+          setTimeout(() => setExported(null), 2500);
+        };
+        return (
+          <div className="mt-4 flex flex-col gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-medium">Export the {deck ? 'deck' : 'list'}</span>
+              {deck && (
+                <label className="flex items-center gap-2 text-[var(--muted)]">
+                  <input type="checkbox" checked={exportTags} onChange={(e) => setExportTags(e.target.checked)} />
+                  Include tags (#Ramp)
+                  <Tip label="About tags in the export">Moxfield reads tags written after a card, like “1 Sol Ring #Ramp”. Other sites may not: leave this off for them.</Tip>
+                </label>
+              )}
+              <span className="flex-1" />
+              <button type="button" onClick={copy} className="rounded-lg border border-[var(--border)] px-3 py-1.5">Copy</button>
+              <button type="button" onClick={download} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08]">Download .txt</button>
+            </div>
+            <textarea readOnly value={text} rows={6} aria-label="The exported list" onFocus={(e) => e.currentTarget.select()}
+              className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-xs" />
+            {sections.some((x) => !x.builtIn) && <p className="text-xs text-[var(--muted)]">Your own sections are written under “// Section: Name”: importing here puts them back; other sites read them as comments.</p>}
+          </div>
+        );
+      })()}
+      {importing && preview && (
+        <div role="region" aria-label="What saving changes" className="mt-3 flex flex-col gap-2 rounded-xl border border-[var(--accent)]/50 bg-[var(--surface)] p-3 text-sm">
+          <p><b>Saving changes the {deck ? 'deck' : 'list'}: {preview.summary}.</b> <span className="text-[var(--muted)]">Tags, sections, the plan and notes stay on every card that stays. A snapshot is taken first, so you can go back.</span></p>
+          <DiffList diff={preview.diff} names={new Map(sections.map((x) => [x.id, x.name]))} />
+          <div className="flex gap-2">
+            <button type="button" disabled={importBusy || countLine(preview.diff) === 'no changes'} onClick={() => saveText(undefined, decklist, true)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 font-medium text-[#221c08] disabled:opacity-60">{importBusy ? 'Saving…' : 'Save these changes'}</button>
+            <button type="button" onClick={() => setPreview(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5">Back to the list</button>
+          </div>
+        </div>
+      )}
       {imported && rejected && (
         <p className="mt-3 text-sm text-amber-400">Nothing was changed — fix the lines below and save again.</p>
       )}
+      {imported && !rejected && !!imported.tagged && (
+        <p role="status" className="mt-3 text-sm text-[var(--muted)]">Kept the tags on {imported.tagged} card{imported.tagged === 1 ? '' : 's'}{imported.newTags?.length ? ` (new tags: ${imported.newTags.join(', ')})` : ''}.</p>
+      )}
       {exported && (
         <p role="status" className="mt-3 text-sm text-[var(--muted)]">
-          {exported === 'failed'
-            ? 'Your browser blocked the clipboard: use Import to see the list and copy it from there.'
-            : `Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.${exported === 'copied-own'
-              ? ` Your own sections (${sections.filter((x) => !x.builtIn).map((x) => x.name).join(', ')}) aren't in it: other sites only know a sideboard and a maybeboard. Importing a list keeps them.`
-              : ''}`}
+          {exported === 'downloaded' ? 'Downloaded the list as a text file, with your tags and sections.' : exported === 'failed'
+            ? 'Your browser blocked the clipboard: use Download list instead, or Import to see the list and copy it from there.'
+            : 'Decklist copied - paste it into Moxfield, Archidekt or anywhere that takes a list.'}
         </p>
       )}
       {imported && (rejected || imported.commander) && (
@@ -723,6 +813,20 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         )}
       />
 
+      {historyOpen && (
+        <DeckHistory listId={id} sectionNames={new Map(sections.map((x) => [x.id, x.name]))}
+          onChanged={() => { void load(); void api.deckTags(id).then(setTags).catch(() => {}); }}
+          onClose={() => setHistoryOpen(false)} />
+      )}
+      {lastChange && (
+        <div role="status" className="fixed inset-x-0 bottom-[calc(var(--nav-h,0px)+5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 lg:bottom-6">
+          <div className="flex max-w-full items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-4 pr-1.5 text-sm shadow-xl">
+            <span className="min-w-0 truncate">{lastChange.label}</span>
+            <button onClick={() => { setLastChange(null); void undo(); }} disabled={undoing} className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[#221c08] disabled:opacity-60">Undo</button>
+            <button onClick={() => setLastChange(null)} aria-label="Dismiss" className="px-1 text-[var(--muted)]">✕</button>
+          </div>
+        </div>
+      )}
       {addOpen && (
         <AddCardsPanel
           listId={id}

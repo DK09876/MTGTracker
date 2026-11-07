@@ -27,7 +27,7 @@
 import type { Finish, ScryfallCard } from './scryfall';
 
 /** Where a card goes: the commander, one of a deck's boards, its companion, or nowhere (tokens). */
-export type Section = 'commander' | 'main' | 'side' | 'maybe' | 'companion' | 'skip';
+export type Section = 'commander' | 'main' | 'side' | 'maybe' | 'companion' | 'skip' | 'own';
 
 /**
  * A deck's sections. Main is the deck, and only main (plus the commander)
@@ -48,6 +48,8 @@ export interface Entry {
   section: Section;
   /** The card's tags or categories as the list gave them, e.g. Moxfield's "#Ramp". */
   tags: string[];
+  /** For section 'own': the name of the deck's own section the card was listed under ("// Wishlist"). */
+  own?: string;
   /** The line as written, for reporting a card that could not be found. */
   line: string;
 }
@@ -83,6 +85,7 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
   const entries: Entry[] = [];
   const unreadable: string[] = [];
   let section: Section = 'main';
+  let own: string | undefined;
 
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -91,8 +94,11 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
     // "// Commander", "Commander:", "SIDEBOARD" - a heading, not a card.
     const heading = line.replace(/^\/\/\s*/, '').replace(/:$/, '').replace(/\s*\(\d+\)$/, '').trim().toLowerCase();
     const match = HEADINGS.find(([pattern]) => pattern.test(heading));
-    if (match) { section = match[1]; continue; }
+    if (match) { section = match[1]; own = undefined; continue; }
     if (TYPE_HEADING.test(heading)) { if (section === 'commander') section = 'main'; continue; }
+    // "// Wishlist" - one of the deck's own sections, as this app exports them.
+    const ownHeading = line.match(/^\/\/\s*Section:\s*(.+)$/i);
+    if (ownHeading) { section = 'own'; own = ownHeading[1].trim(); continue; }
     if (line.startsWith('//')) continue;
 
     // MTGO marks sideboard lines one by one; Archidekt adds [categories] and ^labels^.
@@ -120,6 +126,7 @@ export function parseDecklist(text: string): { entries: Entry[]; unreadable: str
       finish: /\*E\*/i.test(parts[5] ?? '') ? 'etched' : /\*F\*/i.test(parts[5] ?? '') ? 'foil' : 'nonfoil',
       ...(/\*P\*/i.test(parts[5] ?? '') ? { proxy: true } : {}),
       section: board ?? section,
+      ...(section === 'own' && !board && own ? { own } : {}),
       tags: [...new Set([...categories, ...written].filter((t) => !NOT_A_TAG.test(t)))],
       line,
     });
@@ -146,15 +153,35 @@ export function formatDecklist(
   commander: ScryfallCard | null,
   cards: Array<{ card: ScryfallCard; quantity: number; finish?: Finish; board?: Board; proxies?: number }>,
   commanderFinish: Finish = 'nonfoil',
+  opts: {
+    /** The deck's tags: each card's are written after it, "#Ramp", as Moxfield does. */
+    tags?: { tags: Array<{ id: string; name: string; status?: string }>; cardTags: Array<{ key: string; tagId: string; on: boolean }> };
+    /** The deck's own sections, written after the rest under "// Section: Name". */
+    sections?: Array<{ id: string; name: string }>;
+  } = {},
 ): string {
+  const tagName = new Map((opts.tags?.tags ?? []).filter((t) => (t.status ?? 'accepted') === 'accepted').map((t) => [t.id, t.name]));
+  const tagsOf = new Map<string, string[]>();
+  for (const ct of opts.tags?.cardTags ?? []) {
+    const name = ct.on ? tagName.get(ct.tagId) : undefined;
+    if (name) tagsOf.set(ct.key, [...(tagsOf.get(ct.key) ?? []), name]);
+  }
+  const withTags = (card: ScryfallCard, text: string) => {
+    const t = tagsOf.get(card.oracle_id ?? card.id) ?? [];
+    return t.length ? `${text} ${t.map((x) => `#${x}`).join(' ')}` : text;
+  };
   const lines = (board: Board) => cards
     .filter((c) => (c.board ?? 'main') === board)
     .sort((a, b) => a.card.name.localeCompare(b.card.name))
-    .map(({ card, quantity, finish, proxies }) => lineFor(card, quantity, finish, !!proxies));
-  const out = [...(commander ? [lineFor(commander, 1, commanderFinish)] : []), ...lines('main')];
+    .map(({ card, quantity, finish, proxies }) => withTags(card, lineFor(card, quantity, finish, !!proxies)));
+  const out = [...(commander ? [withTags(commander, lineFor(commander, 1, commanderFinish))] : []), ...lines('main')];
   for (const [board, heading] of [['side', 'SIDEBOARD:'], ['maybe', 'MAYBEBOARD:']] as const) {
     const rows = lines(board);
     if (rows.length) out.push('', heading, ...rows);
+  }
+  for (const own of (opts.sections ?? []).filter((x) => x.id.startsWith('s-'))) {
+    const rows = lines(own.id as Board);
+    if (rows.length) out.push('', `// Section: ${own.name}`, ...rows);
   }
   return out.join('\n');
 }

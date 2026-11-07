@@ -177,4 +177,20 @@ describe('companions', () => {
     const { entries } = parseDecklist('1x Kroxa, Titan of Death\'s Hunger *CMDR*\n1x Lurrus of the Dream-Den *CMPN*\n1x Sol Ring');
     expect(entries.map((e) => [e.name, e.section])).toEqual([['Kroxa, Titan of Death\'s Hunger', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Sol Ring', 'main']]);
   });
+
+  it('writes tags and the deck\'s own sections, and reads them back', () => {
+    const c = (name: string, id: string) => ({ id, oracle_id: `o-${id}`, name, set: 'tst', collector_number: id } as never);
+    const text = formatDecklist(c('Kratos, God of War', 'k'), [
+      { card: c('Sol Ring', 'r'), quantity: 1, board: 'main' },
+      { card: c('Lightning Greaves', 'g'), quantity: 1, board: 's-want' },
+    ], 'nonfoil', {
+      tags: { tags: [{ id: 't1', name: 'Ramp' }], cardTags: [{ key: 'o-r', tagId: 't1', on: true }] },
+      sections: [{ id: 's-want', name: 'Wishlist' }],
+    });
+    expect(text).toBe('1x Kratos, God of War (tst) k\n1x Sol Ring (tst) r #Ramp\n\n// Section: Wishlist\n1x Lightning Greaves (tst) g');
+    const { entries } = parseDecklist(text);
+    expect(entries.map((e) => [e.name, e.section, e.own ?? null, e.tags])).toEqual([
+      ['Kratos, God of War', 'main', null, []], ['Sol Ring', 'main', null, ['Ramp']], ['Lightning Greaves', 'own', 'Wishlist', []],
+    ]);
+  });
 });

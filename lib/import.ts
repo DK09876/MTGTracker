@@ -67,8 +67,10 @@ export function canLead(card: ScryfallCard): boolean {
 }
 
 export async function resolveDecklist(
-  text: string, collection: Collection, { commanderPicked, keepPicked = false, local }: {
+  text: string, collection: Collection, { commanderPicked, keepPicked = false, local, ownSections }: {
     commanderPicked: string | null;
+    /** The deck's own sections by name, so "// Section: Wishlist" lands back in Wishlist; unknown ones go to the maybeboard. */
+    ownSections?: Array<{ id: Board; name: string }>;
     /** The picked commander stays even when the list names another; that one joins the deck. */
     keepPicked?: boolean;
     local?: Local;
@@ -126,7 +128,10 @@ export async function resolveDecklist(
     }
     // A second card under Commander stays in the deck, named as a commander;
     // a companion waits on the sideboard, named as the companion (commanders.ts).
-    const board: Board = entry.section === 'side' || entry.section === 'maybe' ? entry.section : entry.section === 'companion' ? 'side' : 'main';
+    const ownBoard = entry.section === 'own'
+      ? ownSections?.find((x) => x.name.trim().toLowerCase() === (entry.own ?? '').trim().toLowerCase())?.id ?? 'maybe'
+      : null;
+    const board: Board = ownBoard ?? (entry.section === 'side' || entry.section === 'maybe' ? entry.section : entry.section === 'companion' ? 'side' : 'main');
     const named = entry.section === 'commander' ? 'commander' as const : entry.section === 'companion' ? 'companion' as const : undefined;
     const existing = cards.find((c) => c.card.id === card.id);
     const tags = entry.tags ?? [];

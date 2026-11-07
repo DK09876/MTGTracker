@@ -27,7 +27,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'cardKey, tagId and on required' }, { status: 400 });
   }
   const cardKey = b.cardKey, tagId = b.tagId, on = b.on;
-  const { result: ok } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'tag', '', () => setCardTag(id, cardKey, tagId, on));
+  const { result: ok, change } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'tag', '', () => setCardTag(id, cardKey, tagId, on));
   if (!ok) return NextResponse.json({ error: 'No such tag' }, { status: 404 });
-  return NextResponse.json(deckTags(id));
+  return NextResponse.json({ ...deckTags(id), change });
 }

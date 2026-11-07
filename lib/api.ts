@@ -310,12 +310,69 @@ export const fetchList = async (id: string) => {
   return now;
 };
 
+// --- a deck's history: every change recorded, undo, snapshots -----------------
+
+/** One change to a deck, as its history records it (lib/deck-history.ts). */
+export interface DeckChange {
+  id: string;
+  at: string;
+  profileId: string | null;
+  who?: string | null;
+  batch: string | null;
+  kind: string;
+  label: string;
+  diff: HistoryDiff;
+  undone: boolean;
+  restorable: boolean;
+}
+export interface HistoryCardChange { cardId: string; name: string; from: string | null; to: string | null }
+export interface HistoryDiff {
+  added: HistoryCardChange[]; removed: HistoryCardChange[]; moved: HistoryCardChange[]; changed: HistoryCardChange[]; tagged: HistoryCardChange[];
+  commander: HistoryCardChange | null;
+}
+export interface DeckSnapshot { id: string; at: string; name: string; auto: boolean; profileId: string | null; size: number }
+
+/** Told when a change to a deck was recorded, so the page can offer Undo. */
+export const DECK_CHANGED = 'mtg-deck-changed';
+function deckChanged(listId: string, change: DeckChange | null | undefined) {
+  if (change && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(DECK_CHANGED, { detail: { listId, change } }));
+}
+
+// Changes made inside one bulk action share a batch id, so they undo as one.
+let batch: string | null = null;
+export async function inBatch<T>(work: () => Promise<T>): Promise<T> {
+  const mine = `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  batch = mine;
+  try { return await work(); } finally { if (batch === mine) batch = null; }
+}
+const editHeaders = (): Record<string, string> => ({ 'Content-Type': 'application/json', ...(batch ? { 'x-change-batch': batch } : {}) });
+
+export const deckHistory = (listId: string) =>
+  fetch(url(`lists/${listId}/history`)).then(json<{ changes: DeckChange[]; snapshots: DeckSnapshot[] }>);
+export const compareSnapshot = (listId: string, id: string) =>
+  fetch(url(`lists/${listId}/history?compare=${encodeURIComponent(id)}`)).then(json<{ diff: HistoryDiff; summary: string }>);
+const history = (listId: string, body: object) =>
+  fetch(url(`lists/${listId}/history`), { method: 'POST', headers: editHeaders(), body: JSON.stringify(body) })
+    .then(json<{ change?: DeckChange | null; snapshot?: DeckSnapshot; ok?: boolean }>)
+    .then((r) => { deckChanged(listId, r.change); return r; });
+export const undoLast = (listId: string) => history(listId, { action: 'undo' });
+export const restoreBefore = (listId: string, changeId: string) => history(listId, { action: 'restore-before', changeId });
+export const takeSnapshot = (listId: string, name: string) => history(listId, { action: 'snapshot', name });
+export const restoreSnapshot = (listId: string, id: string) => history(listId, { action: 'restore-snapshot', id });
+export const renameSnapshot = (listId: string, id: string, name: string) => history(listId, { action: 'rename-snapshot', id, name });
+export const deleteSnapshot = (listId: string, id: string) => history(listId, { action: 'delete-snapshot', id });
+
+/** What saving this text over the deck would change, without saving. */
+export const previewDecklist = (listId: string, decklist: string, linked = '') =>
+  fetch(url(`lists/${listId}/import`), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decklist, preview: true, ...(linked ? { linked } : {}) }) })
+    .then(json<{ preview: { diff: HistoryDiff; summary: string; missing: string[]; unreadable: string[] } }>).then((b) => b.preview);
+
 export const addCard = (listId: string, cardId: string, quantity = 1, board: Board = 'main') =>
   fetch(url(`lists/${listId}/cards`), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: editHeaders(),
     body: JSON.stringify({ cardId, quantity, board }),
-  }).then(json<{ ok: true; before: CardBefore }>);
+  }).then(json<{ ok: true; before: CardBefore; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 /** Put a card back as it was before an add: gone, or its old count and board. */
 export const undoAdd = (listId: string, cardId: string, before: CardBefore) =>
@@ -331,9 +388,9 @@ export const undoAdd = (listId: string, cardId: string, before: CardBefore) =>
 export const updateCard = (listId: string, cardId: string, change: { board?: Board; finish?: Finish; printingId?: string }) =>
   fetch(url(`lists/${listId}/cards`), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: editHeaders(),
     body: JSON.stringify({ cardId, ...change }),
-  }).then(json<{ ok: true }>);
+  }).then(json<{ ok: true; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 // --- a deck's sections, second commander and companion ---------------------------
 
@@ -367,13 +424,13 @@ export const printings = (oracleId: string) =>
 export const setQuantity = (listId: string, cardId: string, quantity: number) =>
   fetch(url(`lists/${listId}/cards`), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: editHeaders(),
     body: JSON.stringify({ cardId, quantity }),
-  }).then(json<{ ok: true }>);
+  }).then(json<{ ok: true; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 export const removeCard = (listId: string, cardId: string) =>
-  fetch(url(`lists/${listId}/cards?cardId=${encodeURIComponent(cardId)}`), { method: 'DELETE' })
-    .then(json<{ ok: true }>);
+  fetch(url(`lists/${listId}/cards?cardId=${encodeURIComponent(cardId)}`), { method: 'DELETE', headers: editHeaders() })
+    .then(json<{ ok: true; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 export const fetchProfiles = () =>
   fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
@@ -575,7 +632,8 @@ export const deleteTag = (listId: string, tagId: string) =>
   fetch(url(`lists/${listId}/tags?tagId=${encodeURIComponent(tagId)}`), { method: 'DELETE' }).then(json<DeckTags>);
 
 export const setCardTag = (listId: string, cardKey: string, tagId: string, on: boolean) =>
-  send(`lists/${listId}/tags/cards`, 'PATCH', { cardKey, tagId, on }).then(json<DeckTags>);
+  fetch(url(`lists/${listId}/tags/cards`), { method: 'PATCH', headers: editHeaders(), body: JSON.stringify({ cardKey, tagId, on }) })
+    .then(json<DeckTags & { change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 export interface TagJobState { job: TagJob | null; tags: DeckTags; budget: Budget }
 
