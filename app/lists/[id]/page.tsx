@@ -820,8 +820,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onClose={() => setHistoryOpen(false)} />
       )}
       {lastChange && (
-        <div role="status" className="fixed inset-x-0 bottom-[calc(var(--nav-h,0px)+5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 lg:bottom-6">
-          <div className="flex max-w-full items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-4 pr-1.5 text-sm shadow-xl">
+        <div role="status" data-undo-toast className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--nav-h,0px)+5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 lg:bottom-6">
+          <div className="pointer-events-auto flex max-w-full items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface)] py-1.5 pl-4 pr-1.5 text-sm shadow-xl">
             <span className="min-w-0 truncate">{lastChange.label}</span>
             <button onClick={() => { setLastChange(null); void undo(); }} disabled={undoing} className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[#221c08] disabled:opacity-60">Undo</button>
             <button onClick={() => setLastChange(null)} aria-label="Dismiss" className="px-1 text-[var(--muted)]">✕</button>
