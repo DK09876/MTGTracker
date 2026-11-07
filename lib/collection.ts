@@ -317,6 +317,8 @@ export interface Holding {
 
 export interface Ownership {
   cards: Holding[];
+  /** Sideboard and maybeboard cards the deck holds no copy of: not part of the deck's count, but each still has a mark. */
+  extras: Holding[];
   summary: {
     need: number;
     /** Real copies in the deck. */
@@ -352,26 +354,22 @@ interface Wants {
 
 const isBasic = (card: ScryfallCard) => /\bBasic\b/.test(card.type_line ?? '') && /\bLand\b/.test(card.type_line ?? '');
 
-/** What a deck wants, by card. Plain lists want nothing. */
-function wants(listId: string): Wants {
-  const db = database();
-  const list = db.get('SELECT kind, commanderId, commanderFinish FROM lists WHERE id = ?', [listId]) as
-    { kind: string; commanderId: string | null; commanderFinish: Finish } | null;
-  const out: Wants = { main: new Map(), extra: new Map() };
-  if (!list || list.kind !== 'deck') return out;
-  const rows = db.all(
-    `SELECT c.data, lc.quantity, lc.finish, lc.proxies, lc.board, lc.slot FROM list_cards lc JOIN cards c ON c.id = lc.cardId
-     WHERE lc.listId = ? AND lc.board IN ('main', 'side', 'maybe')`, [listId],
-  ) as Array<{ data: string; quantity: number; finish: Finish; proxies: number; board: string; slot: string | null }>;
-  const commander = list.commanderId
-    ? db.get('SELECT data FROM cards WHERE id = ?', [list.commanderId]) as { data: string } | null
-    : null;
-  const entries = rows.map((r) => ({
-    card: JSON.parse(r.data) as ScryfallCard, quantity: r.quantity, finish: r.finish, proxies: r.proxies, commander: false,
-    board: (r.board === 'main' || r.slot === 'companion' ? 'main' : r.board) as 'main' | 'side' | 'maybe',
-  }));
-  if (commander) entries.push({ card: JSON.parse(commander.data) as ScryfallCard, quantity: 1, finish: list.commanderFinish, proxies: 0, commander: true, board: 'main' });
+interface WantRow { listId: string; data: string; quantity: number; finish: Finish; proxies: number; board: string; slot: string | null }
+interface CommanderRow { listId: string; data: string; finish: Finish }
+
+/** What decks want, by card, from their rows. Plain lists want nothing (they have no rows here). */
+function wantsFrom(rows: WantRow[], commanders: CommanderRow[]): Map<string, Wants> {
+  const byList = new Map<string, Wants>();
+  const entries = [
+    ...rows.map((r) => ({
+      listId: r.listId, card: JSON.parse(r.data) as ScryfallCard, quantity: r.quantity, finish: r.finish, proxies: r.proxies, commander: false,
+      board: (r.board === 'main' || r.slot === 'companion' ? 'main' : r.board) as 'main' | 'side' | 'maybe',
+    })),
+    ...commanders.map((c) => ({ listId: c.listId, card: JSON.parse(c.data) as ScryfallCard, quantity: 1, finish: c.finish, proxies: 0, commander: true, board: 'main' as const })),
+  ];
   for (const e of entries) {
+    const out = byList.get(e.listId) ?? { main: new Map(), extra: new Map() };
+    byList.set(e.listId, out);
     const key = tagKey(e.card);
     const into = (e.board === 'main' ? out.main : out.extra) as Map<string, Want & { board: 'side' | 'maybe' }>;
     const w = into.get(key) ?? { key, name: e.card.name, need: 0, proxies: 0, listed: [], board: e.board as 'side' };
@@ -380,40 +378,90 @@ function wants(listId: string): Wants {
     w.listed.push({ card: e.card, finish: e.finish, commander: e.commander });
     into.set(key, w);
   }
-  return out;
+  return byList;
 }
 
-interface PullRow { cardId: string; finish: Finish; fromLocation: string; variant: string; quantity: number; kept: number; data: string }
+const WANT_ROWS = `SELECT lc.listId, c.data, lc.quantity, lc.finish, lc.proxies, lc.board, lc.slot FROM list_cards lc
+  JOIN cards c ON c.id = lc.cardId JOIN lists l ON l.id = lc.listId
+  WHERE l.kind = 'deck' AND lc.board IN ('main', 'side', 'maybe')`;
+const COMMANDER_ROWS = `SELECT l.id AS listId, c.data, l.commanderFinish AS finish FROM lists l JOIN cards c ON c.id = l.commanderId WHERE l.kind = 'deck'`;
 
-function pullsOf(listId: string): Array<PullRow & { key: string; card: ScryfallCard }> {
-  return (database().all(
-    `SELECT dp.cardId, dp.finish, dp.fromLocation, dp.variant, dp.quantity, dp.kept, c.data FROM deck_pulls dp
-     JOIN cards c ON c.id = dp.cardId WHERE dp.listId = ?`, [listId],
-  ) as unknown as PullRow[]).map((r) => {
-    const card = JSON.parse(r.data) as ScryfallCard;
-    return { ...r, card, key: tagKey(card) };
-  });
+/** What a deck wants, by card. Plain lists want nothing. */
+function wants(listId: string): Wants {
+  const db = database();
+  return wantsFrom(
+    db.all(`${WANT_ROWS} AND lc.listId = ?`, [listId]) as unknown as WantRow[],
+    db.all(`${COMMANDER_ROWS} AND l.id = ?`, [listId]) as unknown as CommanderRow[],
+  ).get(listId) ?? { main: new Map(), extra: new Map() };
+}
+
+interface PullRow { listId: string; cardId: string; finish: Finish; fromLocation: string; variant: string; quantity: number; kept: number; data: string }
+type Pull = PullRow & { key: string; card: ScryfallCard };
+
+const PULL_ROWS = `SELECT dp.listId, dp.cardId, dp.finish, dp.fromLocation, dp.variant, dp.quantity, dp.kept, c.data FROM deck_pulls dp
+  JOIN cards c ON c.id = dp.cardId`;
+const toPull = (r: PullRow): Pull => {
+  const card = JSON.parse(r.data) as ScryfallCard;
+  return { ...r, card, key: tagKey(card) };
+};
+
+function pullsOf(listId: string): Pull[] {
+  return (database().all(`${PULL_ROWS} WHERE dp.listId = ?`, [listId]) as unknown as PullRow[]).map(toPull);
 }
 
 function profileOfList(listId: string): string | null {
   return (database().get('SELECT profileId FROM lists WHERE id = ?', [listId]) as { profileId: string } | null)?.profileId ?? null;
 }
 
+function byKey<T extends { card: ScryfallCard }>(rows: T[]): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const key = tagKey(r.card);
+    const list = out.get(key);
+    if (list) list.push(r); else out.set(key, [r]);
+  }
+  return out;
+}
+
 /** Where every card a deck wants is: in it, in a box, in another deck, or nowhere. */
 export function ownership(list: Pick<List, 'id'>): Ownership {
   const profileId = profileOfList(list.id);
-  const want = wants(list.id);
-  const pulls = pullsOf(list.id);
-  const boxes = profileId ? boxCopies(profileId) : [];
-  const others = profileId ? deckCopies(profileId).filter((d) => d.listId !== list.id) : [];
+  return ownershipFrom(list.id, wants(list.id), pullsOf(list.id),
+    byKey(profileId ? boxCopies(profileId) : []), byKey(profileId ? deckCopies(profileId) : []));
+}
+
+/** The summary of every deck a profile has, worked out from one read of each table: for the decks page. */
+export function deckSummaries(profileId: string): Record<string, Ownership['summary']> {
+  const db = database();
+  const lists = db.all(`SELECT id FROM lists WHERE profileId = ? AND kind = 'deck'`, [profileId]) as Array<{ id: string }>;
+  if (!lists.length) return {};
+  const want = wantsFrom(
+    db.all(`${WANT_ROWS} AND l.profileId = ?`, [profileId]) as unknown as WantRow[],
+    db.all(`${COMMANDER_ROWS} AND l.profileId = ?`, [profileId]) as unknown as CommanderRow[],
+  );
+  const pulls = (db.all(`${PULL_ROWS} JOIN lists l ON l.id = dp.listId WHERE l.profileId = ?`, [profileId]) as unknown as PullRow[]).map(toPull);
+  const pullsByList = new Map<string, Pull[]>();
+  for (const p of pulls) pullsByList.set(p.listId, [...(pullsByList.get(p.listId) ?? []), p]);
+  const boxes = byKey(boxCopies(profileId));
+  const decks = byKey(deckCopies(profileId));
+  const out: Record<string, Ownership['summary']> = {};
+  for (const { id } of lists) {
+    out[id] = ownershipFrom(id, want.get(id) ?? { main: new Map(), extra: new Map() }, pullsByList.get(id) ?? [], boxes, decks).summary;
+  }
+  return out;
+}
+
+function ownershipFrom(listId: string, want: Wants, pulls: Pull[], boxes: Map<string, BoxCopies[]>, decks: Map<string, DeckCopies[]>): Ownership {
+  const pullsByKey = new Map<string, Pull[]>();
+  for (const p of pulls) pullsByKey.set(p.key, [...(pullsByKey.get(p.key) ?? []), p]);
 
   const holding = (w: Want, board: Holding['board']): Holding => {
-    const mine = pulls.filter((p) => p.key === w.key);
+    const mine = pullsByKey.get(w.key) ?? [];
     const pulled = mine.reduce((n, p) => n + p.quantity, 0);
     const proxyPulls = mine.filter((p) => isProxy(p.variant)).reduce((n, p) => n + p.quantity, 0);
     const short = Math.max(0, w.need - pulled - w.proxies);
     const listedIds = new Set(w.listed.map((l) => l.card.id));
-    const inBoxes = boxes.filter((b) => tagKey(b.card) === w.key)
+    const inBoxes = (boxes.get(w.key) ?? [])
       .map((b) => ({
         cardId: b.card.id, set: b.card.set ?? '', number: b.card.collector_number ?? '', finish: b.finish,
         location: b.location, variant: b.variant, quantity: b.quantity, exact: listedIds.has(b.card.id),
@@ -421,7 +469,7 @@ export function ownership(list: Pick<List, 'id'>): Ownership {
       // A real copy before a proxy, the deck's printing first, then the biggest pile.
       .sort((a, b) => Number(isProxy(a.variant)) - Number(isProxy(b.variant)) || Number(b.exact) - Number(a.exact) || b.quantity - a.quantity);
     const byDeck = new Map<string, { listId: string; listName: string; quantity: number }>();
-    for (const d of others.filter((o) => tagKey(o.card) === w.key)) {
+    for (const d of (decks.get(w.key) ?? []).filter((o) => o.listId !== listId)) {
       const e = byDeck.get(d.listId) ?? { listId: d.listId, listName: d.listName, quantity: 0 };
       e.quantity += d.quantity;
       byDeck.set(d.listId, e);
@@ -450,11 +498,13 @@ export function ownership(list: Pick<List, 'id'>): Ownership {
   };
 
   const cards: Holding[] = [...want.main.values()].map((w) => holding(w, 'main'));
-  // Sideboard and maybeboard cards show only for the copies the deck holds.
+  // Sideboard and maybeboard cards show only for the copies the deck holds; the rest are extras, for their marks.
+  const extras: Holding[] = [];
   for (const w of want.extra.values()) {
     if (want.main.has(w.key)) continue;
-    const held = pulls.filter((p) => p.key === w.key).reduce((n, p) => n + p.quantity, 0);
+    const held = (pullsByKey.get(w.key) ?? []).reduce((n, p) => n + p.quantity, 0);
     if (held > 0) cards.push(holding({ ...w, need: Math.min(held, w.need), proxies: 0 }, w.board));
+    else extras.push(holding(w, w.board));
   }
   cards.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -476,7 +526,13 @@ export function ownership(list: Pick<List, 'id'>): Ownership {
     }
   }
   summary.missingCost = Math.round(summary.missingCost * 100) / 100;
-  return { cards, summary };
+  return { cards, extras, summary };
+}
+
+/** A card the deck wants, from any board: the 100 first, then the sideboard and maybeboard. */
+function holdingOf(listId: string, key: string): Holding | undefined {
+  const o = ownership({ id: listId });
+  return o.cards.find((h) => h.key === key) ?? o.extras.find((h) => h.key === key);
 }
 
 function recordPull(listId: string, cardId: string, finish: Finish, fromLocation: string, quantity: number, variant = '', kept = false): void {
@@ -508,10 +564,12 @@ export function pull(listId: string, key: string, quantity?: number, from?: Copy
   const profileId = profileOfList(listId);
   if (!profileId) return 0;
   return tx(() => {
-    const holding = ownership({ id: listId }).cards.find((h) => h.key === key);
+    const holding = holdingOf(listId, key);
     if (!holding) return 0;
     let left = Math.min(quantity ?? holding.short, holding.short);
     let taken = 0;
+    // A sideboard or maybeboard card's copy is one the deck keeps on purpose.
+    const kept = holding.board !== 'main';
     const sources = from
       ? holding.inBoxes.filter((b) => b.cardId === from.cardId && b.finish === from.finish && b.location === from.location
         && (from.variant === undefined || b.variant === from.variant))
@@ -520,7 +578,7 @@ export function pull(listId: string, key: string, quantity?: number, from?: Copy
       if (left <= 0) break;
       const n = Math.min(left, b.quantity);
       changeCount(profileId, b.cardId, b.finish, b.location, -n, b.variant);
-      recordPull(listId, b.cardId, b.finish, b.location, n, b.variant);
+      recordPull(listId, b.cardId, b.finish, b.location, n, b.variant, kept);
       left -= n;
       taken += n;
     }
@@ -560,7 +618,7 @@ export function pullAll(listId: string): number {
 export function takeFromDeck(listId: string, fromListId: string, key: string, quantity?: number): number {
   if (profileOfList(listId) !== profileOfList(fromListId)) return 0;
   return tx(() => {
-    const holding = ownership({ id: listId }).cards.find((h) => h.key === key);
+    const holding = holdingOf(listId, key);
     if (!holding) return 0;
     let left = Math.min(quantity ?? holding.short, holding.short);
     let taken = 0;
@@ -568,7 +626,7 @@ export function takeFromDeck(listId: string, fromListId: string, key: string, qu
       if (left <= 0) break;
       const n = Math.min(left, p.quantity);
       dropPull(fromListId, p.cardId, p.finish, p.fromLocation, n, p.variant);
-      recordPull(listId, p.cardId, p.finish, p.fromLocation, n, p.variant, false);
+      recordPull(listId, p.cardId, p.finish, p.fromLocation, n, p.variant, holding.board !== 'main');
       left -= n;
       taken += n;
     }

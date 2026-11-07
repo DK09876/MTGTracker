@@ -18,6 +18,8 @@ import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
+import Tip from '@/components/Tip';
+import { useDeckCopies } from '@/components/useDeckCopies';
 import DeckHealth from '@/components/DeckHealth';
 import DeckTune from '@/components/DeckTune';
 import DeckTags from '@/components/DeckTags';
@@ -41,6 +43,7 @@ import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-link
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { LinkReport } from '@/lib/mythic';
+import { summaryLine } from '@/lib/copy-status';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { DeckTags as Tags } from '@/lib/tags';
 import { imageOf, priceOf } from '@/lib/scryfall';
@@ -55,6 +58,8 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [loading, setLoading] = useState(!seen);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
+  // The card modal's printings: all of them, or only the copies you own.
+  const [mineOnly, setMineOnly] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(seen?.list.name ?? '');
   const [addOpen, setAddOpen] = useState(false);
@@ -62,13 +67,16 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   // Check is Health and Playtest; Cards can show which cards you own and where (it was the Collection tab).
   const [checkPart, setCheckPart] = useState<'health' | 'playtest'>('health');
   const [owner, setOwner] = useState<'all' | 'mine' | 'missing'>('all');
-  const [ownership, setOwnership] = useState<api.DeckOwnership | null>(null);
-  useEffect(() => {
-    if (owner === 'all') return;
-    let stop = false;
-    api.deckOwnership(id).then((o) => { if (!stop) setOwnership(o); }).catch(() => {});
-    return () => { stop = true; };
-  }, [owner, id, cards]);
+  // Read once per deck and again when its cards change: the marks, the chip and "Where your copies are" share it.
+  const deckCopies = useDeckCopies(id, list?.kind === 'deck', cards);
+  const ownership = deckCopies.data;
+  // "Where your copies are" shows with Mine or Missing, or once the chip or one of its filters asks for it.
+  const [copiesShown, setCopiesShown] = useState(false);
+  const [filterTo, setFilterTo] = useState<{ text: string; n: number } | undefined>(undefined);
+  const showCopies = () => {
+    setCopiesShown(true);
+    setTimeout(() => document.getElementById('your-copies')?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }), 80);
+  };
   // Any tab name, old or new: Tags lands on Plan's tags, Health and Playtest on Check, Collection on Cards with your copies.
   const setSection = useCallback((tab: DeckTab | string) => {
     const place = placeOf(tab);
@@ -609,7 +617,18 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
                   className={`rounded-full px-3 py-1 ${owner === v ? 'bg-[var(--surface-hover)] font-semibold' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{label}</button>
               ))}
             </div>
-            <span className="text-xs text-[var(--muted)]">{owner === 'all' ? 'Mine: cards you have a copy of. Missing: cards still to get.' : ownership ? `${ownership.summary.need - ownership.summary.missing} of ${ownership.summary.need} owned · where each copy is, below` : 'Reading your collection…'}</span>
+            {ownership ? (
+              <span className="flex min-w-0 items-center gap-1">
+                <button data-testid="owned-chip" onClick={showCopies} title="Where your copies are"
+                  className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-left text-xs tabular-nums hover:bg-[var(--surface-hover)]">
+                  {summaryLine(ownership.summary)}
+                </button>
+                <Tip label="What these numbers mean">
+                  <p><b>Yours</b>: real copies in this deck. <b>Proxies</b>: stand-ins. <b>In your boxes</b>: owned and free to pull. <b>In other decks</b>: every copy you own is in another deck. <b>To buy</b>: not in your collection.</p>
+                  <p className="mt-1.5">Each card has a mark saying which; tap it to pull, take, return or proxy it. Mine shows the cards you have a copy of, Missing the ones still to get.</p>
+                </Tip>
+              </span>
+            ) : <span className="text-xs text-[var(--muted)]">Reading your collection…</span>}
           </div>
         )}
         <DeckCards
@@ -633,11 +652,15 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onSections={deck ? setSections : undefined}
           commander={deck ? list.commander : null}
           onSlot={deck ? changeSlot : undefined}
+          mark={deck ? deckCopies.mark : undefined}
+          isWord={deck ? deckCopies.isWord : undefined}
+          filterTo={filterTo}
         />
-        {deck && owner !== 'all' && (
+        {deck && (owner !== 'all' || copiesShown) && (
           <section id="your-copies" data-section="Your copies" className="mt-10 scroll-mt-24 border-t border-[var(--border)] pt-6">
             <h2 className="font-display text-2xl font-semibold">Where your copies are</h2>
-            <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
+            <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} data={ownership} onData={deckCopies.setData}
+              onFilter={(text) => { setOwner('all'); setCopiesShown(true); setFilterTo({ text, n: Date.now() }); }} />
           </section>
         )}
         </>
@@ -648,28 +671,51 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <CardModal
         card={selected}
         onClose={() => setSelected(null)}
-        actions={(selectedEntry || (deck && selectedInDeck && tags)) && (
+        actions={(selectedEntry || (deck && selectedInDeck && tags) || (deck && !!list.commander && selected?.id === list.commander.id)) && (
           <>
             {deck && selectedInDeck && tags && selected && (
               <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
             )}
             {deck && selectedInDeck && selected && (
-              <CardRoles key={selected.id} listId={id} card={selected} />
+              <CardRoles key={`roles-${selected.id}`} listId={id} card={selected} />
             )}
             {selectedEntry && (
               <CardEditor
-                key={selectedEntry.card.id}
+                key={`editor-${selectedEntry.card.id}`}
                 listId={id}
                 card={selectedEntry.card}
                 finish={selectedEntry.finish}
                 board={selectedEntry.board}
                 sections={sections}
                 isDeck={deck}
+                holding={deck ? deckCopies.holdingOf(selectedEntry) : undefined}
+                mine={mineOnly}
+                onMine={setMineOnly}
                 onChanged={async (printingId) => {
                   const data = await api.fetchList(id);
                   setList(data.list);
                   setCards(data.cards);
                   setSelected(data.cards.find((c) => c.card.id === printingId)?.card ?? null);
+                }}
+              />
+            )}
+            {deck && list.commander && selected?.id === list.commander.id && (
+              <CardEditor
+                key={`commander-${list.commander.id}`}
+                listId={id}
+                card={list.commander}
+                finish={list.commanderFinish}
+                board="main"
+                isDeck
+                commander
+                holding={deckCopies.holdingOf({ card: list.commander, board: 'main' })}
+                mine={mineOnly}
+                onMine={setMineOnly}
+                onChanged={async () => {
+                  const data = await api.fetchList(id);
+                  setList(data.list);
+                  setCards(data.cards);
+                  setSelected(data.list.commander ?? null);
                 }}
               />
             )}
@@ -686,6 +732,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onClose={() => setAddOpen(false)}
         />
       )}
+      {deckCopies.toastView}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCo
 import { planConfirmed, planProgress } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
 import { isPublic, setPublic } from '@/lib/profile-style';
-import { getCard, ScryfallError } from '@/lib/scryfall';
+import { type Finish, getCard, ScryfallError } from '@/lib/scryfall';
 import { dropSections, sectionsOf } from '@/lib/sections';
 import { dropTune } from '@/lib/tune-store';
 
@@ -37,7 +37,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let body: { name?: string; note?: string; commanderId?: string | null; fromList?: boolean; public?: boolean };
+  let body: { name?: string; note?: string; commanderId?: string | null; commanderFinish?: string; fromList?: boolean; public?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -56,8 +56,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!promoteToCommander(id, body.commanderId)) {
         return NextResponse.json({ error: 'That card is not in this deck' }, { status: 400 });
       }
-    } else if (body.commanderId !== undefined) {
-      setCommander(id, body.commanderId ? await getCard(body.commanderId) : null);
+    } else if (body.commanderId !== undefined || body.commanderFinish !== undefined) {
+      // A new printing or finish of the commander; the finish alone keeps
+      // the printing, and an id alone keeps the finish.
+      const current = getList(id, owned.profile);
+      const commanderId = body.commanderId === undefined ? current?.commander?.id ?? null : body.commanderId;
+      const finish = (['nonfoil', 'foil', 'etched'] as const).includes(body.commanderFinish as Finish)
+        ? body.commanderFinish as Finish
+        : current?.commanderFinish ?? 'nonfoil';
+      setCommander(id, commanderId ? await getCard(commanderId) : null, finish);
     }
     return NextResponse.json({ list: getList(id, owned.profile), public: isPublic(id) });
   } catch (error) {

@@ -20,6 +20,8 @@ import MoreMenu from '@/components/MoreMenu';
 import PasteFormats from '@/components/PasteFormats';
 import StickyBar from '@/components/StickyBar';
 import * as api from '@/lib/api';
+import type { Ownership } from '@/lib/collection';
+import { summaryLine, tileLine } from '@/lib/copy-status';
 import type { List } from '@/lib/db';
 import { MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-links';
 import { parseDecklist } from '@/lib/decklist';
@@ -29,6 +31,7 @@ import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
 import { useNavBottom } from '@/lib/use-nav-bottom';
 
+type OwnedSummary = Ownership['summary'];
 type Sort = 'recent' | 'name' | 'commander' | 'price' | 'created';
 const SORTS: Array<[Sort, string]> = [['recent', 'Recently edited'], ['name', 'Name'], ['commander', 'Commander'], ['price', 'Price'], ['created', 'Newest']];
 const COLOURS = ['W', 'U', 'B', 'R', 'G', 'C'] as const;
@@ -87,6 +90,9 @@ export default function DecksPage() {
   // Each deck's record from game nights, for its tile.
   const [records, setRecords] = useState<Record<string, { games: number; wins: number }>>({});
   useEffect(() => { api.deckRecords().then((r) => setRecords(r.records)).catch(() => {}); }, []);
+  // How much of each deck is in the collection: every deck at once, in one request.
+  const [owned, setOwned] = useState<Record<string, OwnedSummary>>(() => api.peek<{ decks: Record<string, OwnedSummary> }>(api.paths.deckSummaries)?.decks ?? {});
+  useEffect(() => { api.deckSummaries().then((r) => setOwned(r.decks)).catch(() => {}); }, []);
 
   const [creating, setCreating] = useState(false);
   // "/decks?new" (the ⌘K palette's New deck) opens the form.
@@ -479,6 +485,14 @@ export default function DecksPage() {
                 <div className="mt-1 flex flex-wrap gap-1 text-[11px] font-bold tabular-nums sm:mt-1.5 sm:gap-1.5 sm:text-xs">
                   <span className={`rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 ${total === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{total} / 100</span>
                   {deck.totalValue > 0 && <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1">${deck.totalValue.toFixed(2)}</span>}
+                  {owned[deck.id]?.need > 0 && (() => {
+                    const line = tileLine(owned[deck.id]);
+                    return (
+                      <span data-testid="deck-owned" className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${summaryLine(owned[deck.id])} - from your collection`}>
+                        {line.owned} yours{line.extra.length ? ` · ${line.extra.join(' · ')}` : ''}
+                      </span>
+                    );
+                  })()}
                   {records[deck.id] && (
                     <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${records[deck.id].wins} won of ${records[deck.id].games} games played`}>
                       {records[deck.id].wins}–{records[deck.id].games - records[deck.id].wins} · {Math.round((records[deck.id].wins / records[deck.id].games) * 100)}%

@@ -26,7 +26,7 @@ import type { Board } from '@/lib/decklist';
 import { boardName, DEFAULT_SECTIONS, PURPOSES, type DeckSection, type Purpose } from '@/lib/sections-shared';
 import * as api from '@/lib/api';
 import { groupCards, primaryType, type Categories, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
-import { filterCards } from '@/lib/filter';
+import { filterCards, type IsWord } from '@/lib/filter';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
@@ -58,6 +58,12 @@ interface Props {
   commander?: ScryfallCard | null;
   /** Make a card the second commander or the companion, or neither. */
   onSlot?: (cardId: string, slot: Slot | null) => void;
+  /** A card's collection mark (CopyMark), drawn on it in every view. */
+  mark?: (entry: Entry) => React.ReactNode;
+  /** Filter words about a card beyond the card itself: is:held, is:tobuy… */
+  isWord?: IsWord<Entry>;
+  /** Sets the filter from outside - a count under "Where your copies are" - and brings the cards into view. */
+  filterTo?: { text: string; n: number };
 }
 
 type View = 'grid' | 'stacks' | 'text';
@@ -97,7 +103,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Esc', 'Close a menu · clear the selection · stop selecting'], ['N', 'Add cards'], ['1 – 8', 'Switch the deck\'s tabs'],
 ];
 
-export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot }: Props) {
+export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot, mark, isWord, filterTo }: Props) {
   const [boardPicked, setBoard] = useState<Board>('main');
   // A section deleted elsewhere falls back to Main.
   const board: Board = boardPicked === 'main' || sections.some((x) => x.id === boardPicked) ? boardPicked : 'main';
@@ -112,6 +118,13 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   const [menu, setMenu] = useState<{ entry: Entry; x: number; y: number; up: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const filterBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!filterTo) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a filter asked for from outside
+    setFilter(filterTo.text);
+    setBoard('main');
+    filterBox.current?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }, [filterTo]);
 
   useEffect(() => {
     try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch { /* not remembered, still works */ }
@@ -158,10 +171,10 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   }, [groupBy, tags, roles, onCard]);
 
   const onBoard = isDeck ? entries.filter((e) => e.board === board) : entries;
-  const { results: shown, unsupported } = filterCards(onBoard, filter);
+  const { results: shown, unsupported } = filterCards(onBoard, filter, isWord);
   const groups = groupCards(shown, groupBy, prefs.sortBy, categories);
   // In Stacks, the maybeboard sits beside the main deck as one more column.
-  const maybe = isDeck && board === 'main' && prefs.view === 'stacks' ? filterCards(entries.filter((e) => e.board === 'maybe'), filter).results : [];
+  const maybe = isDeck && board === 'main' && prefs.view === 'stacks' ? filterCards(entries.filter((e) => e.board === 'maybe'), filter, isWord).results : [];
   const columns = maybe.length ? [...groups, { key: '__maybe', label: nameOf('maybe'), count: maybe.reduce((n, e) => n + e.quantity, 0), items: maybe, color: undefined }] : groups;
   const order = columns.flatMap((g) => (folded.has(g.key) ? [] : g.items.map((e) => e.card.id)));
   const waiting = groupBy === 'tag' && (!tags || !roles);
@@ -359,7 +372,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
                 {!shut && (
                   <div>
                     {group.items.map((entry, i) => (
-                      <StackCard key={entry.card.id} entry={entry} first={i === 0} picked={picked.has(entry.card.id)} selecting={selecting}
+                      <StackCard key={entry.card.id} entry={entry} first={i === 0} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
                         onActivate={(shift) => activate(entry, shift)} />
                     ))}
                   </div>
@@ -385,14 +398,14 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             {!shut && (prefs.view === 'grid' ? (
               <div data-tour="card-grid" className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(var(--card), calc(50% - 6px)), 1fr))' }}>
                 {group.items.map((entry) => (
-                  <GridCard key={entry.card.id} entry={entry} isDeck={isDeck} picked={picked.has(entry.card.id)} selecting={selecting}
+                  <GridCard key={entry.card.id} entry={entry} isDeck={isDeck} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
                     onActivate={(shift) => activate(entry, shift)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
                 ))}
               </div>
             ) : (
               <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
                 {group.items.map((entry) => (
-                  <TextRow key={entry.card.id} entry={entry} isDeck={isDeck} size={size} picked={picked.has(entry.card.id)} selecting={selecting}
+                  <TextRow key={entry.card.id} entry={entry} isDeck={isDeck} size={size} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
                     tagDots={isDeck ? (onCard.get(tagKey(entry.card)) ?? []).map(({ tag }) => tag) : []}
                     onActivate={(shift) => activate(entry, shift)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
                 ))}
@@ -469,8 +482,8 @@ const Check = ({ on, left = false }: { on: boolean; left?: boolean }) => (
   <span aria-hidden className={`pointer-events-none absolute ${left ? 'left-1.5' : 'right-1.5'} top-1.5 z-[3] flex h-5 w-5 items-center justify-center rounded-md border-2 text-xs font-extrabold ${on ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-white bg-black/50'}`}>{on ? '✓' : ''}</span>
 );
 
-function GridCard({ entry, isDeck, picked, selecting, onActivate, onQuantity, onMenu }: {
-  entry: Entry; isDeck: boolean; picked: boolean; selecting: boolean;
+function GridCard({ entry, isDeck, picked, selecting, mark, onActivate, onQuantity, onMenu }: {
+  entry: Entry; isDeck: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode;
   onActivate: (shift: boolean) => void; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
 }) {
   const { card, quantity } = entry;
@@ -497,34 +510,39 @@ function GridCard({ entry, isDeck, picked, selecting, onActivate, onQuantity, on
         </div>
       )}
       <div className="flex items-center justify-between gap-2 px-0.5 text-xs text-[var(--muted)]">
-        <span className="truncate">{entry.finish !== 'nonfoil' ? <span className="uppercase">{entry.finish}</span> : isDeck ? '' : card.set?.toUpperCase()}</span>
+        {mark}
+        <span className="mr-auto truncate">{entry.finish !== 'nonfoil' ? <span className="uppercase">{entry.finish}</span> : isDeck ? '' : card.set?.toUpperCase()}</span>
         <span className="tabular-nums">{money(entry)}</span>
       </div>
     </div>
   );
 }
 
-function StackCard({ entry, first, picked, selecting, onActivate }: {
-  entry: Entry; first: boolean; picked: boolean; selecting: boolean; onActivate: (shift: boolean) => void;
+function StackCard({ entry, first, picked, selecting, mark, onActivate }: {
+  entry: Entry; first: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode; onActivate: (shift: boolean) => void;
 }) {
+  // The mark sits in the name bar's right end, left of the copies badge and the Game Changer badge.
+  const right = (entry.card.game_changer ? (entry.quantity > 1 ? 48 : 4) + 42 : 0) || (entry.quantity > 1 ? 34 : 4);
   // Each card shows its name bar - about 13.5% of the card - until the last, shown whole.
   return (
-    <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
-      aria-label={selecting ? `Pick ${entry.card.name}` : `Show details for ${entry.card.name}`}
-      // A percentage margin is of the column's width, which is the card's: it works at any size.
-      style={{ marginTop: first ? 0 : '-120.5%' }}
-      // Hovered (or focused), it opens up: the cards under it slide down so the whole card shows (globals.css .stack-card).
-      className={`stack-card relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] hover:z-10 focus-visible:z-10 ${selecting ? 'cursor-copy' : ''}`}>
-      <Picture card={entry.card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
-      <Badge n={entry.quantity} right />
-      {entry.card.game_changer && <GameChanger className={`absolute top-1 ${entry.quantity > 1 ? 'right-12' : 'right-1'}`} />}
-      {selecting && <Check on={picked} left />}
-    </button>
+    // A percentage margin is of the column's width, which is the card's: it works at any size.
+    // Hovered (or focused), it opens up: the cards under it slide down so the whole card shows (globals.css .stack-card).
+    <div style={{ marginTop: first ? 0 : '-120.5%' }} className="stack-card relative hover:z-10 focus-within:z-10">
+      <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
+        aria-label={selecting ? `Pick ${entry.card.name}` : `Show details for ${entry.card.name}`}
+        className={`relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] ${selecting ? 'cursor-copy' : ''}`}>
+        <Picture card={entry.card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
+        <Badge n={entry.quantity} right />
+        {entry.card.game_changer && <GameChanger className={`absolute top-1 ${entry.quantity > 1 ? 'right-12' : 'right-1'}`} />}
+        {selecting && <Check on={picked} left />}
+      </button>
+      {mark && !selecting && <span className="absolute top-1 z-[3]" style={{ right }}>{mark}</span>}
+    </div>
   );
 }
 
-function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, onQuantity, onMenu }: {
-  entry: Entry; isDeck: boolean; size: number; picked: boolean; selecting: boolean; tagDots: Array<{ id: string; name: string; color: string }>;
+function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActivate, onQuantity, onMenu }: {
+  entry: Entry; isDeck: boolean; size: number; picked: boolean; selecting: boolean; mark?: React.ReactNode; tagDots: Array<{ id: string; name: string; color: string }>;
   onActivate: (shift: boolean) => void; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
 }) {
   const [preview, setPreview] = useState<{ x: number; y: number } | null>(null);
@@ -549,6 +567,8 @@ function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, 
         {entry.finish !== 'nonfoil' && <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">{entry.finish}</span>}
         {entry.slot === 'companion' && <span className="ml-2 text-[10px] font-bold uppercase text-[var(--accent)]">Companion</span>}
       </button>
+      {/* Kept small in a row, even on a phone, so the name keeps its room. */}
+      {mark && <span className="flex shrink-0 [&_button]:!h-5 [&_button]:!w-5 [&_button]:!text-[11px]">{mark}</span>}
       {entry.card.game_changer && <GameChanger />}
       {tagDots.length > 0 && (
         <span className="hidden items-center gap-1 sm:flex" title={tagDots.map((t) => t.name).join(', ')}>

@@ -158,3 +158,16 @@ describe('robustness', () => {
     expect(names('name:/^z/')).toEqual(['Zuran Orb']);
   });
 });
+
+describe('words the caller adds', () => {
+  const items = [{ card: { name: 'Opt', type_line: 'Instant' } as ScryfallCard, held: true }, { card: { name: 'Sol Ring', type_line: 'Artifact' } as ScryfallCard, held: false }];
+  const is = (item: { held: boolean }, word: string) => (word === 'held' ? item.held : undefined);
+  it('answers its own is: words, and leaves the rest to the card', () => {
+    expect(filterCards(items, 'is:held', is).results.map((i) => i.card.name)).toEqual(['Opt']);
+    expect(filterCards(items, '-is:held', is).results.map((i) => i.card.name)).toEqual(['Sol Ring']);
+    expect(filterCards(items, 'is:held t:artifact', is).results).toEqual([]);
+    expect(filterCards(items, 'is:creature', is).results).toEqual([]);
+    // Without the caller's words, is:held matches nothing, as before.
+    expect(filterCards(items, 'is:held').results).toEqual([]);
+  });
+});

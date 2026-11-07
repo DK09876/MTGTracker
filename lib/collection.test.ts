@@ -129,6 +129,17 @@ describe('decks taking copies', () => {
     expect(col.boxCopies('dk').map((c) => c.card.id)).toEqual(['hh-1']);
   });
 
+  it('keeps the commander\'s pulled copy when its printing or finish changes', async () => {
+    const { db, col, deck } = await setup();
+    col.addToCollection('dk', hearthhull, 1);
+    col.pull(deck.id, 'hh');
+    const promo = printing('hh-2', 'hh', 'Hearthhull, the Worldseed', 'peoc', '9.00');
+    db.setCommander(deck.id, promo, 'foil');
+    expect(db.getList(deck.id, 'dk')).toMatchObject({ commander: { id: 'hh-2' }, commanderFinish: 'foil' });
+    expect(col.boxCopies('dk')).toEqual([]);
+    expect(holding(col, deck.id, 'hh').pulledCopies.map((c) => c.cardId)).toEqual(['hh-1']);
+  });
+
   it('lets proxies fill a slot, returning a real copy the deck then has spare', async () => {
     const { db, col, deck } = await setup();
     db.addCardToList(deck.id, opt);
@@ -186,5 +197,41 @@ describe('a database from before copy variants', () => {
     expect(d.all('SELECT listId, cardId, fromLocation, variant, quantity, kept FROM deck_pulls')).toEqual([
       { listId: 'deck-1', cardId: 'opt-1', fromLocation: 'Binder', variant: '', quantity: 1, kept: 0 },
     ]);
+  });
+});
+
+describe('collection status for every card and every deck', () => {
+  it('gives a sideboard card the deck holds no copy of a status, and pulls it as a copy kept with the deck', async () => {
+    const { db, col, deck } = await setup();
+    db.addCardToList(deck.id, opt);
+    db.updateListCard(deck.id, 'opt-1', { board: 'side' });
+    col.addToCollection('dk', opt, 1, 'nonfoil', 'Blue box');
+    const o = col.ownership({ id: deck.id });
+    expect(o.cards.find((h) => h.key === 'opt')).toBeUndefined();
+    expect(o.extras).toEqual([expect.objectContaining({ key: 'opt', board: 'side', status: 'in-box' })]);
+    // Not part of the deck's count.
+    expect(o.summary.need).toBe(1);
+
+    expect(col.pull(deck.id, 'opt')).toBe(1);
+    expect(holding(col, deck.id, 'opt')).toMatchObject({ board: 'side', status: 'in-deck' });
+    // Kept on purpose: settling leaves it in the deck.
+    expect(col.settle(deck.id)).toBe(0);
+  });
+
+  it('works out every deck\'s summary in one go, the same as each deck on its own', async () => {
+    const { db, col, deck, other } = await setup();
+    db.addCardToList(deck.id, solRingC21);
+    db.addCardToList(deck.id, opt, 2);
+    db.addCardToList(other.id, solRingSld);
+    col.addToCollection('dk', solRingC21, 1);
+    col.addToCollection('dk', opt, 1, 'nonfoil', 'Blue box');
+    col.pull(other.id, 'sol');
+    col.setProxies(deck.id, 'opt-1', 1);
+    const all = col.deckSummaries('dk');
+    expect(Object.keys(all).sort()).toEqual([deck.id, other.id].sort());
+    expect(all[deck.id]).toEqual(col.ownership({ id: deck.id }).summary);
+    expect(all[other.id]).toEqual(col.ownership({ id: other.id }).summary);
+    expect(all[deck.id]).toMatchObject({ need: 4, inDeck: 0, proxies: 1, inBoxes: 1, inOtherDecks: 1, missing: 1 });
+    expect(col.deckSummaries('nobody')).toEqual({});
   });
 });

@@ -97,6 +97,8 @@ export const paths = {
   list: (id: string) => `lists/${id}`,
   lists: (kind?: ListKind) => (kind ? `lists?kind=${kind}` : 'lists'),
   plan: (id: string) => `lists/${id}/plan`,
+  ownership: (id: string) => `lists/${id}/collection`,
+  deckSummaries: 'collection/decks',
   build: (id: string) => `lists/${id}/build`,
   cuts: (id: string) => `lists/${id}/cuts`,
   review: (id: string) => `lists/${id}/cuts/review`,
@@ -230,6 +232,14 @@ export const setCommander = (listId: string, commanderId: string | null, fromLis
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commanderId, fromList }),
+  }).then(json<{ list: List }>);
+
+/** Change the commander's printing or finish, keeping the other. */
+export const setCommanderPrinting = (listId: string, change: { commanderId?: string; commanderFinish?: Finish }) =>
+  fetch(url(`lists/${listId}`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
   }).then(json<{ list: List }>);
 
 /**
@@ -660,7 +670,11 @@ export const deleteLocation = (name: string) =>
 
 export type DeckOwnership = Ownership & { fetch: string; buy: string; moved?: number };
 
-export const deckOwnership = (listId: string) => fetch(url(`lists/${listId}/collection`)).then(json<DeckOwnership>);
+export const deckOwnership = (listId: string) => get<DeckOwnership>(paths.ownership(listId));
+export const peekOwnership = (listId: string) => peek<DeckOwnership>(paths.ownership(listId));
+
+/** How much of each of the profile's decks it owns, for the decks page. */
+export const deckSummaries = () => get<{ decks: Record<string, Ownership['summary']> }>(paths.deckSummaries);
 
 export type DeckCollectionAction =
   | { action: 'pull'; key: string; quantity?: number; from?: { cardId: string; finish: Finish; location: string; variant?: string } }
@@ -670,7 +684,13 @@ export type DeckCollectionAction =
   | { action: 'proxies'; cardId: string; proxies: number };
 
 export const deckCollection = (listId: string, act: DeckCollectionAction) =>
-  send(`lists/${listId}/collection`, 'POST', act).then(json<DeckOwnership>);
+  send(`lists/${listId}/collection`, 'POST', act).then(json<DeckOwnership>).then((v) => {
+    // Copies moved: this deck's answer is the new one, and another deck it took from, and the totals, are stale.
+    memo.set(url(paths.ownership(listId)), v);
+    if (act.action === 'take') forgetDeck(act.fromListId);
+    memo.delete(url(paths.deckSummaries));
+    return v;
+  });
 
 // --- scanning ----------------------------------------------------------------
 
