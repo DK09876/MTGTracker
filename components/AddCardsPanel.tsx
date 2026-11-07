@@ -119,16 +119,22 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
     const q = text.trim();
     if (!q) return;
     let list = quick?.q === q ? quick.cards : null;
-    if (!list) {
-      try { list = (await api.quickCards(listId, q)).cards; } catch { list = []; }
-    }
-    const card = list[Math.min(index, list.length - 1)];
-    if (!card) { runSearch(); return; }
-    const board: Board = toMaybe ? 'maybe' : target;
+    // Empty the box at once, so the next name can be typed while this one is looked up.
     setText('');
     setQuick(null);
     setPick(0);
     input.current?.focus();
+    if (!list) {
+      try { list = (await api.quickCards(listId, q)).cards; } catch { list = []; }
+    }
+    const card = list[Math.min(index, list.length - 1)];
+    if (!card) {
+      // Nothing by that name: put the words back (unless more was typed) and search with them.
+      setText((now) => now || q);
+      runSearch();
+      return;
+    }
+    const board: Board = toMaybe ? 'maybe' : target;
     setAdded((prev) => new Map(prev).set(front(card.name), board));
     try {
       await api.addCard(listId, card.id, 1, board);
