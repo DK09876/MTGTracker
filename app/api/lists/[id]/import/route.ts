@@ -4,14 +4,19 @@
  *   POST {decklist}   add these cards to what is there
  *   PUT  {decklist}   make the list exactly this - "Edit as text", saved.
  *                     Refused with 422, changing nothing, if any line
- *                     cannot be found.
+ *                     cannot be found. With {preview: true} nothing is
+ *                     saved: the answer says what would change.
+ *
+ * Both are recorded in the deck's history, and over a deck that already
+ * has cards a snapshot is taken first.
  */
 
 import { NextResponse } from 'next/server';
 
-import { getList } from '@/lib/db';
+import { cardsInList, getList } from '@/lib/db';
 import { deckText, DeckLinkError } from '@/lib/deck-links';
-import { importInto, replaceWith } from '@/lib/import-into';
+import { batchOf, countLine, recorded, takeSnapshot } from '@/lib/deck-history';
+import { importInto, previewReplace, replaceWith } from '@/lib/import-into';
 import { requireList } from '@/lib/profile-route';
 import { warmRoles } from '@/lib/role-warmup';
 import { ScryfallError } from '@/lib/scryfall';
@@ -33,7 +38,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const { text } = await deckText(body.decklist);
-    const imported = await importInto(owned.list, text, owned.profile);
+    if (cardsInList(id).length) takeSnapshot(id, 'Before an import', { profile: owned.profile }, true);
+    const { result: imported } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'import', 'Imported a list', () => importInto(owned.list, text, owned.profile));
     warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported });
   } catch (error) {
@@ -48,7 +54,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let body: { decklist?: string };
+  let body: { decklist?: string; preview?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -57,7 +63,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { text } = await deckText(body.decklist ?? '');
-    const result = await replaceWith(owned.list, text);
+    if (body.preview) {
+      const preview = await previewReplace(owned.list, text);
+      return NextResponse.json({ preview: { ...preview, summary: countLine(preview.diff) } });
+    }
+    if (cardsInList(id).length) takeSnapshot(id, 'Before saving the list as text', { profile: owned.profile }, true);
+    const { result } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'import', 'Saved the list as text', () => replaceWith(owned.list, text));
     if (!result.applied) {
       return NextResponse.json({ error: 'Some lines could not be found, so nothing was changed', imported: result }, { status: 422 });
     }

@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 
 import { requireList } from '@/lib/profile-route';
 import { addSection, changeSection, deleteSection, sectionsOf } from '@/lib/sections';
+import { batchOf, recorded } from '@/lib/deck-history';
 import { isPurpose } from '@/lib/sections-shared';
 
 export const runtime = 'nodejs';
@@ -57,7 +58,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
   const section = new URL(request.url).searchParams.get('id') ?? '';
-  const moved = deleteSection(id, section);
+  const { result: moved } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'section', 'Deleted a section', () => deleteSection(id, section));
   if (moved === null) return NextResponse.json({ error: 'Only your own sections can be deleted' }, { status: 400 });
   return NextResponse.json({ moved, sections: sectionsOf(id) });
 }

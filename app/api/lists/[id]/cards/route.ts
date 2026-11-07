@@ -11,6 +11,7 @@
 import { NextResponse } from 'next/server';
 
 import { addCardToList, removeCardFromList, setQuantity, updateListCard } from '@/lib/db';
+import { batchOf, recorded } from '@/lib/deck-history';
 import { requireList } from '@/lib/profile-route';
 import { getCard, ScryfallError, type Finish } from '@/lib/scryfall';
 import { hasBoard } from '@/lib/sections';
@@ -37,9 +38,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const card = await getCard(body.cardId);
-    const before = addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(listId, body.board));
+    const { result: before, change } = await recorded(listId, { profile: owned.profile, batch: batchOf(request) }, 'add', '',
+      () => addCardToList(listId, card, Math.max(1, Math.trunc(body.quantity ?? 1)), finishOf(body.finish), boardOf(listId, body.board)));
     // What was there before, so the page can offer to undo the add.
-    return NextResponse.json({ ok: true, card, before });
+    return NextResponse.json({ ok: true, card, before, change });
   } catch (error) {
     if (error instanceof ScryfallError) {
       return NextResponse.json({ error: error.message }, { status: 502 });
@@ -61,17 +63,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   if (!body.cardId) return NextResponse.json({ error: 'cardId required' }, { status: 400 });
   try {
-    if (typeof body.quantity === 'number') setQuantity(listId, body.cardId, Math.trunc(body.quantity));
     const board = boardOf(listId, body.board);
     const finish = finishOf(body.finish);
     // A new printing comes from Scryfall by id, like any card added.
     const printing = body.printingId ? await getCard(body.printingId) : undefined;
-    if (board || finish || printing) {
-      if (!updateListCard(listId, body.cardId, { board, finish, printing })) {
-        return NextResponse.json({ error: 'That card is not in this list' }, { status: 404 });
-      }
-    }
-    return NextResponse.json({ ok: true });
+    const cardId = body.cardId;
+    const { result: found, change } = await recorded(listId, { profile: owned.profile, batch: batchOf(request) }, 'edit', '', () => {
+      if (typeof body.quantity === 'number') setQuantity(listId, cardId, Math.trunc(body.quantity));
+      if (board || finish || printing) return updateListCard(listId, cardId, { board, finish, printing });
+      return true;
+    });
+    if (!found) return NextResponse.json({ error: 'That card is not in this list' }, { status: 404 });
+    return NextResponse.json({ ok: true, change });
   } catch (error) {
     if (error instanceof ScryfallError) return NextResponse.json({ error: error.message }, { status: 502 });
     console.error('[cards] quantity failed', error);
@@ -86,8 +89,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const cardId = new URL(request.url).searchParams.get('cardId');
   if (!cardId) return NextResponse.json({ error: 'cardId required' }, { status: 400 });
   try {
-    removeCardFromList(listId, cardId);
-    return NextResponse.json({ ok: true });
+    const { change } = await recorded(listId, { profile: owned.profile, batch: batchOf(request) }, 'remove', '', () => removeCardFromList(listId, cardId));
+    return NextResponse.json({ ok: true, change });
   } catch (error) {
     console.error('[cards] remove failed', error);
     return NextResponse.json({ error: 'Could not remove that card' }, { status: 500 });
