@@ -7,7 +7,8 @@
  */
 
 import { localCards } from './card-store';
-import { addCardToList, createTag, database, deckTags, replaceListCards, setCardTag, setCommander, updateListCard, type List } from './db';
+import { addCardToList, createTag, database, deckTags, replaceListCards, setCardTag, setCommander, storeCard, updateListCard, type List } from './db';
+import { captureState, diffStates, type DeckState, type Diff } from './deck-history';
 import { resolveDecklist, type Resolved } from './import';
 import { startJob } from './jobs';
 import { collection } from './scryfall';
@@ -175,4 +176,35 @@ export async function replaceWith(
   const tagging = list.kind === 'deck' ? applyListTags(list.id, resolved) : { tagged: 0, made: [] };
   if (list.kind === 'deck') settleSlots(list.id, namedIn(resolved));
   return { ...summary, tagged: tagging.tagged, newTags: tagging.made, applied: true };
+}
+
+/**
+ * What saving this text over the deck would change, without changing
+ * anything: "+4 −3, 2 moved", card by card. The owner's own sections keep
+ * cards the text doesn't name, as saving does.
+ */
+export async function previewReplace(
+  list: Pick<List, 'id' | 'kind' | 'commander' | 'commanderFinish'>, text: string,
+): Promise<{ diff: Diff; missing: string[]; unreadable: string[] }> {
+  const resolved = await resolveDecklist(text, collection, {
+    commanderPicked: list.commander?.name ?? null,
+    local: { byName: localCards, printingsLater: true },
+  });
+  const before = captureState(list.id);
+  const named = new Set(resolved.cards.map((c) => c.card.id));
+  const rows: DeckState['cards'] = before.cards.filter((r) => String(r.board ?? 'main').startsWith('s-') && !named.has(String(r.cardId)));
+  for (const c of resolved.cards) {
+    storeCard(c.card);
+    rows.push({ listId: list.id, cardId: c.card.id, quantity: c.quantity, finish: c.finish, board: c.board, slot: null });
+  }
+  if (resolved.commander) storeCard(resolved.commander);
+  const after: DeckState = {
+    ...before,
+    cards: rows,
+    commander: list.kind === 'deck' && resolved.commander
+      ? { id: resolved.commander.id, finish: resolved.commanderFinish ?? list.commanderFinish ?? 'nonfoil' }
+      : before.commander,
+  };
+  // Tags aren't compared here: saving keeps the deck's tags on every card that stays.
+  return { diff: { ...diffStates({ ...before, cardTags: [] }, { ...after, cardTags: [] }), tagged: [] }, missing: resolved.missing, unreadable: resolved.unreadable };
 }
