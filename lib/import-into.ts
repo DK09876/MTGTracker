@@ -7,11 +7,12 @@
  */
 
 import { localCards } from './card-store';
-import { addCardToList, database, replaceListCards, setCommander, updateListCard, type List } from './db';
+import { addCardToList, createTag, database, deckTags, replaceListCards, setCardTag, setCommander, updateListCard, type List } from './db';
 import { resolveDecklist, type Resolved } from './import';
 import { startJob } from './jobs';
 import { collection } from './scryfall';
 import { settleSlots } from './slots';
+import { nextColor } from './tags';
 
 const key = (set: string, number: string) => `${set.toLowerCase()}/${number.toLowerCase()}`;
 
@@ -32,6 +33,42 @@ function fixPrintings(listId: string, profileId: string | null, later: Resolved[
     });
 }
 
+/**
+ * The tags a list gave its cards (Moxfield's "#Ramp", Archidekt's
+ * categories) put on them as this deck's own tags: a tag the deck already
+ * has, matched by name, or a new one. Cards are tagged by oracle id, like
+ * any tag. Returns the cards tagged and the tags made.
+ */
+export function applyListTags(listId: string, resolved: Pick<Resolved, 'cards' | 'commander' | 'commanderTags'>): { tagged: number; made: string[] } {
+  const wanted = [
+    ...resolved.cards.map((c) => ({ card: c.card, tags: c.tags ?? [] })),
+    ...(resolved.commander && resolved.commanderTags?.length ? [{ card: resolved.commander, tags: resolved.commanderTags }] : []),
+  ].filter((w) => w.tags.length);
+  if (!wanted.length) return { tagged: 0, made: [] };
+  const have = deckTags(listId).tags;
+  const byName = new Map(have.map((t) => [t.name.trim().toLowerCase(), t.id]));
+  const made: string[] = [];
+  const used = have.map((t) => t.color);
+  const idFor = (name: string) => {
+    const key = name.trim().toLowerCase();
+    const known = byName.get(key);
+    if (known) return known;
+    const color = nextColor(used);
+    used.push(color);
+    const tag = createTag(listId, { name: name.trim().slice(0, 60), color, status: 'accepted', origin: 'manual' });
+    byName.set(key, tag.id);
+    made.push(tag.name);
+    return tag.id;
+  };
+  let tagged = 0;
+  for (const { card, tags } of wanted) {
+    const key = card.oracle_id ?? card.id;
+    for (const t of tags) setCardTag(listId, key, idFor(t), true);
+    tagged += 1;
+  }
+  return { tagged, made };
+}
+
 /** Cards the list itself put under Commander or Companion, by id. */
 const namedIn = (resolved: Resolved) => new Map(resolved.cards.flatMap((c) => (c.named ? [[c.card.id, c.named] as const] : [])));
 
@@ -46,6 +83,9 @@ export interface ImportSummary {
   missing: string[];
   unreadable: string[];
   skipped: number;
+  /** Cards that came with tags or categories, and the tags that had to be made for them. */
+  tagged?: number;
+  newTags?: string[];
 }
 
 export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, text: string, profileId: string | null = null): Promise<ImportSummary> {
@@ -76,9 +116,12 @@ export async function importInto(list: Pick<List, 'id' | 'kind' | 'commander'>, 
     addCardToList(list.id, resolved.commander, 1, resolved.commanderFinish ?? 'nonfoil');
   }
   fixPrintings(list.id, profileId, resolved.later);
+  const tagging = list.kind === 'deck' ? applyListTags(list.id, resolved) : { tagged: 0, made: [] };
   if (list.kind === 'deck') settleSlots(list.id, namedIn(resolved));
 
   return {
+    tagged: tagging.tagged,
+    newTags: tagging.made,
     added: resolved.cards.length,
     copies: resolved.cards.reduce((n, c) => n + c.quantity, 0),
     commander: takeCommander ? resolved.commander!.name : null,
@@ -129,6 +172,7 @@ export async function replaceWith(
     setCommander(list.id, list.commander, resolved.commanderFinish);
   }
   replaceListCards(list.id, cards);
+  const tagging = list.kind === 'deck' ? applyListTags(list.id, resolved) : { tagged: 0, made: [] };
   if (list.kind === 'deck') settleSlots(list.id, namedIn(resolved));
-  return { ...summary, applied: true };
+  return { ...summary, tagged: tagging.tagged, newTags: tagging.made, applied: true };
 }

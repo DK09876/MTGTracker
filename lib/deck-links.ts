@@ -99,7 +99,10 @@ export function fromArchidekt(data: { name?: string; categories?: Array<{ name: 
         : /\bside/.test(first) ? 'side'
           : inDeck.get(first) === false ? 'maybe' : 'main';
     const mod = (c.modifier ?? '').toLowerCase();
-    groups[where].push(line(c.quantity, c.card.oracleCard.name, c.card.edition?.editioncode, c.card.collectorNumber, finishMark(mod === 'foil', mod === 'etched')));
+    // The rest of a card's categories are its tags here, written as Archidekt does: [Ramp,Draw].
+    const cats = (c.categories ?? []).filter((x) => x && !/^(commander|maybeboard|sideboard)$/i.test(x));
+    groups[where].push(line(c.quantity, c.card.oracleCard.name, c.card.edition?.editioncode, c.card.collectorNumber, finishMark(mod === 'foil', mod === 'etched'))
+      + (cats.length ? ` [${cats.map((x) => x.replace(/[[\],]/g, ' ').trim()).join(',')}]` : ''));
   }
   return {
     site: 'archidekt',

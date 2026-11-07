@@ -137,4 +137,44 @@ describe('companions', () => {
     const { entries } = parseDecklist('Commander\n1 Tymna the Weaver\nCompanion\n1 Lurrus of the Dream-Den\nSideboard\n1 Pyroblast');
     expect(entries.map((e) => [e.name, e.section])).toEqual([['Tymna the Weaver', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Pyroblast', 'side']]);
   });
+
+  it('reads Moxfield tags after a card without losing the card', () => {
+    const { entries, unreadable } = parseDecklist([
+      '1 Fire Lord Azula (TLA) 196 *F*',
+      '1 Brainstorm #Cantrip',
+      '1 Sol Ring (C21) 263 #Ramp',
+      '1 Reiterate #Combo #!Wincon',
+      '1 Lightning Greaves *A* #Protection #Card Draw',
+    ].join('\n'));
+    expect(unreadable).toEqual([]);
+    expect(entries.map((e) => [e.name, e.tags])).toEqual([
+      ['Fire Lord Azula', []],
+      ['Brainstorm', ['Cantrip']],
+      ['Sol Ring', ['Ramp']],
+      ['Reiterate', ['Combo', 'Wincon']],
+      ['Lightning Greaves', ['Protection', 'Card Draw']],
+    ]);
+    expect(entries[2]).toMatchObject({ set: 'c21', collectorNumber: '263' });
+    expect(entries[0].finish).toBe('foil');
+  });
+
+  it("turns Archidekt categories into tags, but not boards or card types", () => {
+    const { entries } = parseDecklist([
+      '1x Heliod, Sun-Crowned (thb) 18 [Commander{top}]',
+      '1x Walking Ballista (rna) 4 [Combo,Wincon]',
+      '1x Swords to Plowshares (sta) 10 [Removal,Instant]',
+      '1x Lotus Petal (tmp) 294 [Maybeboard{noDeck}{noPrice},Ramp] ^Have,#37d67a^',
+    ].join('\n'));
+    expect(entries.map((e) => [e.name, e.section, e.tags])).toEqual([
+      ['Heliod, Sun-Crowned', 'commander', []],
+      ['Walking Ballista', 'main', ['Combo', 'Wincon']],
+      ['Swords to Plowshares', 'main', ['Removal']],
+      ['Lotus Petal', 'maybe', ['Ramp']],
+    ]);
+  });
+
+  it('reads TappedOut commander and companion markers', () => {
+    const { entries } = parseDecklist('1x Kroxa, Titan of Death\'s Hunger *CMDR*\n1x Lurrus of the Dream-Den *CMPN*\n1x Sol Ring');
+    expect(entries.map((e) => [e.name, e.section])).toEqual([['Kroxa, Titan of Death\'s Hunger', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Sol Ring', 'main']]);
+  });
 });
