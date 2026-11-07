@@ -28,9 +28,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ? [...new Set([...(list.commander.color_identity ?? []), ...(partner?.color_identity ?? [])])]
     : null;
   const where = new Map(cards.map((c) => [front(c.card.name), c.board]));
+  // A card already in the deck is added as the printing it already has, so it counts up rather than making a second row.
+  const printing = new Map(cards.map((c) => [front(c.card.name), c.card.id]));
   if (list.commander) where.set(front(list.commander.name), 'commander' as never);
   const hits = quickCards(q, colors, 8).map((c) => ({
-    id: c.id, oracleId: c.oracle_id ?? c.id, name: c.name, cost: manaCostOf(c), type: typeLineOf(c), image: imageOf(c, 'small'),
+    id: printing.get(front(c.name)) ?? c.id, oracleId: c.oracle_id ?? c.id, name: c.name, cost: manaCostOf(c), type: typeLineOf(c), image: imageOf(c, 'small'),
     gameChanger: c.game_changer === true, inDeck: where.get(front(c.name)) ?? null,
   }));
   return NextResponse.json({ q, cards: hits });
