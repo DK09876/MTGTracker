@@ -74,16 +74,17 @@ const SIZES = { S: 150, M: 210, L: 270 } as const;
 const MIN_SIZE = 140;
 const MAX_SIZE = 300;
 
-interface Prefs { view: View; groupBy: GroupBy; sortBy: SortBy; size: number }
-const DEFAULT_PREFS: Prefs = { view: 'grid', groupBy: 'type', sortBy: 'name', size: SIZES.M };
+interface Prefs { view: View; groupBy: GroupBy; sortBy: SortBy; size: number; v?: number }
+// The compact list fits about forty cards on a screen; pictures are a click away (G, S).
+const DEFAULT_PREFS: Prefs = { view: 'text', groupBy: 'type', sortBy: 'name', size: SIZES.M, v: 2 };
 
 function loadPrefs(): Prefs {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS) ?? '{}') as Partial<Prefs> & { view?: string };
-    // 'visual' was the grid's old name.
-    const view: View = saved.view === 'stacks' || saved.view === 'text' ? saved.view : 'grid';
+    // 'visual' was the grid's old name. Before v2 the grid was the default, so a saved grid wasn't a choice: the list takes over once.
+    const view: View = !saved.v ? 'text' : saved.view === 'stacks' || saved.view === 'text' ? saved.view : 'grid';
     const size = typeof saved.size === 'number' && saved.size >= MIN_SIZE && saved.size <= MAX_SIZE ? saved.size : SIZES.M;
-    return { ...DEFAULT_PREFS, ...saved, view, size };
+    return { ...DEFAULT_PREFS, ...saved, view, size, v: 2 };
   } catch {
     return DEFAULT_PREFS;
   }
@@ -555,7 +556,7 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
   };
   const src = imageOf(entry.card, 'normal');
   return (
-    <li className={`flex items-center gap-3 px-3 py-1.5 text-sm ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
+    <li className={`flex items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
       {selecting && (
         <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
@@ -575,8 +576,9 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
           {tagDots.map((t) => <span key={t.id} className="h-2 w-2 rounded-full" style={{ background: t.color }} />)}
         </span>
       )}
+      <span className="hidden w-32 truncate text-xs text-[var(--muted)] lg:inline">{(entry.card.type_line ?? entry.card.card_faces?.[0]?.type_line ?? '').split(' // ')[0].split(' — ')[0]}</span>
       <ManaCost cost={manaCostOf(entry.card)} size={13} />
-      <span className="w-16 text-right tabular-nums text-[var(--muted)]">{money(entry)}</span>
+      <span className="hidden w-14 text-right tabular-nums text-[var(--muted)] sm:inline">{money(entry)}</span>
       {!selecting && (
         <span className="flex items-center gap-1">
           {!entry.commander && <>
