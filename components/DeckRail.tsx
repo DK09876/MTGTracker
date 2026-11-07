@@ -104,11 +104,12 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
                 data-tour-tab={value}
                 aria-selected={on}
                 onClick={() => go(value)}
-                className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 py-1.5 text-left lg:gap-2.5 transition-colors lg:rounded-lg lg:px-2.5 ${on
+                className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-2 py-1.5 text-left min-[430px]:px-2.5 lg:gap-2.5 transition-colors lg:rounded-lg lg:px-2.5 ${on
                   ? 'bg-[var(--surface-hover)] font-semibold text-[var(--foreground)] max-lg:bg-[color-mix(in_srgb,var(--c1)_22%,var(--surface))] lg:before:absolute lg:before:inset-y-1.5 lg:before:-left-2 lg:before:w-[3px] lg:before:rounded-full lg:before:bg-[linear-gradient(var(--c1),var(--c2),var(--c3))]'
                   : 'text-[var(--muted)] hover:bg-[var(--surface-hover)]/60 hover:text-[var(--foreground)]'}`}
               >
-                <span className={on ? 'text-[var(--c1)]' : ''}><Icon tab={value} /></span>
+                {/* Narrow phones: words only, so all five tabs fit without scrolling. */}
+                <span className={`max-[429px]:hidden ${on ? 'text-[var(--c1)]' : ''}`}><Icon tab={value} /></span>
                 <span className="flex-1">{label}</span>
                 {(value === 'chat' || value === 'tune') && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
                 {value === 'plan' && !planConfirmed && !on && (<>

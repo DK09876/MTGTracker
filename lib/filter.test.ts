@@ -158,3 +158,21 @@ describe('robustness', () => {
     expect(names('name:/^z/')).toEqual(['Zuran Orb']);
   });
 });
+
+describe('is:', () => {
+  const gc = card({ name: 'Rhystic Study', type_line: 'Enchantment', game_changer: true });
+  const kratos = card({ name: 'Kratos, God of War', type_line: 'Legendary Creature — God' });
+  const pool = [...all, { card: gc }, { card: kratos }];
+  const hit = (q: string) => filterCards(pool, q);
+  it('finds Game Changers', () => {
+    expect(hit('is:gamechanger').results.map((r) => r.card.name)).toEqual(['Rhystic Study']);
+    expect(hit('is:gc').results.map((r) => r.card.name)).toEqual(['Rhystic Study']);
+    expect(hit('-is:gamechanger').results).toHaveLength(pool.length - 1);
+  });
+  it('finds legendary creatures with is:commander', () => {
+    expect(hit('is:commander').results.map((r) => r.card.name)).toEqual(['Kratos, God of War']);
+  });
+  it('reports an is: it does not know instead of showing nothing', () => {
+    expect(hit('is:spell').unsupported).toEqual(['is:spell']);
+  });
+});

@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 
+import { forgetHistory, recorded } from '@/lib/deck-history';
 import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander, slotQuestions } from '@/lib/db';
 import { planConfirmed, planProgress } from '@/lib/deck-plan';
 import { requireList } from '@/lib/profile-route';
@@ -53,11 +54,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // A deck's commander, by Scryfall id; null clears it. `fromList` takes
     // a card already in the deck, moving it out of the 99.
     if (body.commanderId && body.fromList) {
-      if (!promoteToCommander(id, body.commanderId)) {
-        return NextResponse.json({ error: 'That card is not in this deck' }, { status: 400 });
-      }
+      const fromId = body.commanderId;
+      const { result: ok } = await recorded(id, { profile: owned.profile }, 'commander', '', () => promoteToCommander(id, fromId));
+      if (!ok) return NextResponse.json({ error: 'That card is not in this deck' }, { status: 400 });
     } else if (body.commanderId !== undefined) {
-      setCommander(id, body.commanderId ? await getCard(body.commanderId) : null);
+      const next = body.commanderId ? await getCard(body.commanderId) : null;
+      await recorded(id, { profile: owned.profile }, 'commander', '', () => setCommander(id, next));
     }
     return NextResponse.json({ list: getList(id, owned.profile), public: isPublic(id) });
   } catch (error) {
@@ -73,6 +75,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (owned instanceof NextResponse) return owned;
   try {
     deleteList(id);
+    forgetHistory(id);
     // The deck's own sections and Tune state go with it.
     dropSections(id);
     dropTune(id);
