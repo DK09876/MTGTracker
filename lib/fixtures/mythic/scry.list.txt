@@ -1,0 +1,95 @@
+1 Denzilore Fatehold (FRA) 408 *F*
+1 Artificer's Assistant (DOM) 44
+1 Chasm Skulker (CLB) 714
+1 Cryptic Annelid (FUT) 34 *F*
+1 Crystalline Crawler (EOC) 133
+1 Elrond, Lord of Rivendell (LTR) 49 *F*
+1 Enduring Curiosity (DSK) 371 *F*
+1 Esper Sentinel (SLD) 2123 *F*
+1 Falcon and Redwing (MSC) 14
+1 Gandalf, White Rider (LTR) 389
+1 Glen Elendra Archmage (WOC) 94
+1 Grateful Apparition (FIC) 244
+1 Guiding Hydra (FRA) 360
+1 H.E.R.B.I.E., Lovable Robot (MSC) 106
+1 Hermes, Overseer of Elpis (FIC) 36
+1 Hopeful Initiate (VOW) 20 *F*
+1 Jacked Rabbit (BLC) 45
+1 Kid Loki (MSH) 63
+1 Matoya, Archon Elder (FIN) 62
+1 Myr Convert (ONE) 479 *F*
+1 Nightveil Sprite (GRN) 48
+1 Patrolling Peacemaker (EOC) 5
+1 Pensive Professor (SOS) 63
+1 Pollywog Prodigy (BLC) 15
+1 Proctor of Potential (FRA) 145 *F*
+1 Ray Fillet, Wave Warrior (TMC) 14
+1 Rikku, Resourceful Guardian (FIC) 145
+1 Rumor Gatherer (SNC) 29
+1 Sage of Hours (SLD) 2868 *F*
+1 Saheeli, Consul of Oversight (FRA) 203
+1 Sigiled Starfish (ORI) 73
+1 Spellbook Vendor (WOE) 31
+1 Thrummingbird (EOC) 80
+1 Yoshimaru, Beloved Companion (FRA) 209 *F*
+1 Chandra, Chill of Compliance (FRA) 297 *F*
+1 An Offer You Can't Refuse (FDN) 160
+1 Bilbo's Gambit (HOB) 5
+1 Clever Concealment (MSC) 125
+1 Consider (MID) 44
+1 Dawn's Truce (SLD) 2803
+1 Dissolve (IMA) 51
+1 Flawless Maneuver (CMM) 459 *E*
+1 Grand Crescendo (TDC) 118
+1 Razorgrass Ambush (MH3) 238
+1 Swords to Plowshares (SLD) 2125 *F*
+1 Wash Away (VOW) 87
+1 Akroma's Will (SOA) 66
+1 Opt (STA) 19
+1 Damning Verdict (FIC) 239
+1 Suppression Ray (MH3) 260
+1 Temporal Mastery (INR) 90
+1 Wave Goodbye (TMC) 46
+1 Arcane Signet (SOC) 127
+1 Mind Stone (DMR) 232
+1 Pearl Medallion (MH3) 294
+1 Planetarium of Wan Shi Tong (TLA) 385 *F*
+1 Royal Talon Fighter Jet (MSC) 24
+1 Sol Ring (MOC) 381
+1 Talisman of Progress (WHO) 253
+1 Champions from Beyond (FIC) 11
+1 Gossip's Talent (BLB) 51
+1 Legion's Landing (XLN) 22
+1 Political Triumph (MSH) 31
+1 Search for Azcanta (XLN) 74
+1 Skrelv's Hive (ONE) 34
+1 The Legend of Kuruk (TLA) 355 *F*
+1 Abandoned Air Temple (TLA) 263
+1 Azorius Chancery (C16) 282
+1 Command Tower (SLD) 2812
+1 Crystal Grotto (DMU) 246
+1 Exotic Orchard (TDC) 360
+1 Fabled Passage (SOC) 130
+1 Glacial Fortress (PIP) 266
+1 Halimar Depths (PLST) DDM-36
+6 Island (HOB) 190
+1 Lake-town (HOB) 186
+1 Minas Tirith (LTR) 420
+1 Path of Ancestry (SOC) 393
+5 Plains (HOB) 189
+1 Port Town (NCC) 420
+1 Prairie Stream (PIP) 280
+1 Reliquary Tower (C19) 268
+1 Rumble Arena (TLA) 277 *F*
+1 Scavenger Grounds (PIP) 287
+1 Skycloud Expanse (NEC) 177
+1 Temple of Enlightenment (VOC) 185
+1 The Grey Havens (LTR) 443
+1 Tocasia's Dig Site (BRO) 266
+1 Turbulent Shore (FRC) 102
+1 University Campus (SPM) 186
+1 Windbrisk Heights (CLB) 930
+
+Sideboard:
+1 Will of the Mardu (TDC) 17
+1 Rivendell (LTR) 710

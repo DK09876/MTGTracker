@@ -188,3 +188,39 @@ describe('a database from before copy variants', () => {
     ]);
   });
 });
+
+describe('collection status for every card and every deck', () => {
+  it('gives a sideboard card the deck holds no copy of a status, and pulls it as a copy kept with the deck', async () => {
+    const { db, col, deck } = await setup();
+    db.addCardToList(deck.id, opt);
+    db.updateListCard(deck.id, 'opt-1', { board: 'side' });
+    col.addToCollection('dk', opt, 1, 'nonfoil', 'Blue box');
+    const o = col.ownership({ id: deck.id });
+    expect(o.cards.find((h) => h.key === 'opt')).toBeUndefined();
+    expect(o.extras).toEqual([expect.objectContaining({ key: 'opt', board: 'side', status: 'in-box' })]);
+    // Not part of the deck's count.
+    expect(o.summary.need).toBe(1);
+
+    expect(col.pull(deck.id, 'opt')).toBe(1);
+    expect(holding(col, deck.id, 'opt')).toMatchObject({ board: 'side', status: 'in-deck' });
+    // Kept on purpose: settling leaves it in the deck.
+    expect(col.settle(deck.id)).toBe(0);
+  });
+
+  it('works out every deck\'s summary in one go, the same as each deck on its own', async () => {
+    const { db, col, deck, other } = await setup();
+    db.addCardToList(deck.id, solRingC21);
+    db.addCardToList(deck.id, opt, 2);
+    db.addCardToList(other.id, solRingSld);
+    col.addToCollection('dk', solRingC21, 1);
+    col.addToCollection('dk', opt, 1, 'nonfoil', 'Blue box');
+    col.pull(other.id, 'sol');
+    col.setProxies(deck.id, 'opt-1', 1);
+    const all = col.deckSummaries('dk');
+    expect(Object.keys(all).sort()).toEqual([deck.id, other.id].sort());
+    expect(all[deck.id]).toEqual(col.ownership({ id: deck.id }).summary);
+    expect(all[other.id]).toEqual(col.ownership({ id: other.id }).summary);
+    expect(all[deck.id]).toMatchObject({ need: 4, inDeck: 0, proxies: 1, inBoxes: 1, inOtherDecks: 1, missing: 1 });
+    expect(col.deckSummaries('nobody')).toEqual({});
+  });
+});

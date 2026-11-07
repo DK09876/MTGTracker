@@ -51,6 +51,12 @@ export default function CollectionPage() {
   const [selected, setSelected] = useState<Row | null>(null);
   const [toast, setToast] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
 
+  // A deck card's mark links here with ?q="Name": every copy of that card.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('q');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the address on arrival
+    if (q) setFilter(q);
+  }, []);
   const load = useCallback(() => api.collection().then(setState).catch((e) => setError(e instanceof Error ? e.message : 'Could not load')), []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {

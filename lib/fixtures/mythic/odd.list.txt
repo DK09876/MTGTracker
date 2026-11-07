@@ -1,0 +1,91 @@
+1 Yennett, Cryptic Sovereign (SLD) 2121 *F*
+1 Aboleth Spawn (CLB) 662
+1 Aerial Extortionist (MKC) 54
+1 Breena, the Demagogue (SOC) 298
+1 Claim Jumper (SOC) 140
+1 Dazzling Sphinx (OTC) 93
+1 Doom Whisperer (GRN) 69
+1 Enigma Sphinx (PCA) 89
+1 Esper Sentinel (SLD) 2123 *F*
+1 Ethersworn Sphinx (MH2) 195
+1 Fatespinner (MRD) 36
+1 Inniaz, the Gale Force (JMP) 12
+1 Jeskai Infiltrator (FRF) 36
+1 Loran of the Third Path (MKC) 71
+1 Marvo, Deep Operative (MKC) 315
+1 Master of Predicaments (M15) 67
+1 Nadir Kraken (MOC) 228
+1 Shadrix Silverquill (SLD) 2130 *F*
+1 Skyclave Apparition (BLC) 154
+1 Thief of Sanity (CLU) 212
+1 Toxrill, the Corrosive (VOW) 321
+1 Vega, the Watcher (KHM) 233
+1 Vesuvan Drifter (MAT) 10
+1 Void Winnower (SLD) 2122 *F*
+1 Weathered Wayfarer (SLD) 2126 *F*
+1 Aminatou, the Fateshifter (PLST) 2X2-169
+1 Space Beleren (UNF) 178
+1 Brainstorm (EMA) 40
+1 Leadership Vacuum (C19) 9
+1 Rapid Hybridization (TDC) 162
+1 Swords to Plowshares (SLD) 2125 *F*
+1 Time Stop (FDN) 166
+1 Approach of the Second Sun (PLST) AKH-4
+1 Breach the Multiverse (SLD) 2128 *F*
+1 Extinction Event (PIKO) 88p
+1 Fractured Identity (WHO) 236
+1 Ponder (C21) 125
+1 Profane Transfusion (CMR) 145
+1 Promise of Loyalty (C21) 21
+1 Aeon Engine (C19) 52
+1 Arcane Signet (CMR) 297
+1 Chaos Wand (M19) 228
+1 Coalition Relic (TSR) 266
+1 Commander's Sphere (C19) 212
+1 Mirage Mirror (MSC) 206
+1 Misleading Signpost (SLD) 2127 *F*
+1 Sensei's Divining Top (SLD) 2131 *F*
+1 Skyclave Relic (ZNR) 252
+1 Sol Ring (SLD) 2132 *F*
+1 Talisman of Progress (WHO) 253
+1 Venser's Journal (C21) 273
+1 Wayfarer's Bauble (NCC) 384
+1 Exchange of Words (UNF) 45
+1 Imprisoned in the Moon (INR) 69
+1 Oubliette (PLST) 2XM-100
+1 Planeswalker's Mischief (PLS) 29
+1 Psychic Battle (INV) 68
+1 Reconnaissance (SLD) 2124 *F*
+1 Shared Fate (PLST) MRD-49
+1 Smuggler's Share (NCC) 21
+1 Soothsaying (PLST) MMQ-104
+1 Swift Reconfiguration (NEC) 10
+1 Virtue of Persistence (SLD) 2129 *F*
+1 Adarkar Wastes (DSC) 258
+1 Arcane Sanctum (PLST) C18-232
+1 Caves of Koilos (FRC) 66
+1 Command Beacon (CMR) 349
+1 Command Tower (ELD) 333
+1 Contaminated Landscape (MH3) 218
+1 Drowned Catacomb (FRC) 69
+1 Evolving Wilds (PLST) C18-245
+1 Exotic Orchard (C19) 242
+1 Fabled Passage (FRC) 71
+1 Glacial Fortress (FRC) 73
+4 Island (SLD) 2117
+1 Isolated Chapel (LCC) 337
+1 Myriad Landscape (ZNC) 135
+1 Mystic Gate (FRC) 76
+1 Path of Ancestry (CMR) 353
+4 Plains (SLD) 2116
+1 Prairie Stream (C19) 265
+1 Reliquary Tower (PLST) M19-254
+1 Silent Clearing (MH1) 246
+1 Sunken Hollow (MIC) 182
+4 Swamp (SLD) 2118
+1 Temple of Deceit (SCD) 324
+1 Temple of Enlightenment (PTHB) 246p
+1 Temple of Silence (M21) 255
+1 Terramorphic Expanse (CM2) 273
+1 Underground River (DRC) 181
+1 Yavimaya, Cradle of Growth (M3C) 409

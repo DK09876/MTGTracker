@@ -163,6 +163,8 @@ export interface LinkReport {
   notLinked: string[];
   /** Proxies marked on the deck, having no proxy copy in a box. */
   proxiesMarked: number;
+  /** Proxy lines that left the real copy for a deck still to come whose line is not a proxy: marked as proxies instead. */
+  yielded: string[];
   /** Copies given back because the deck did not want them. Should be 0. */
   returned: number;
   /** What the linked list said: for checking against the deck's Collection view. */
@@ -217,6 +219,34 @@ function anyPrinting(index: CopyIndex, l: LinkedLine, location: string | null): 
 }
 
 const printing = (l: { set: string; number: string }) => `${l.set.toLowerCase()}|${l.number}`;
+const nameKey = (name: string) => name.split(' // ')[0].trim().toLowerCase();
+
+/** A deck's proxy lines, by printing: from the linked list's Proxies and from "*P*" in the deck list. */
+function proxyLinesOf(list: string, parsed: LinkedList) {
+  return [
+    ...parsed.proxies,
+    ...parseDecklist(list).entries.filter((e) => e.proxy && e.set && e.collectorNumber)
+      .map((e) => ({ set: e.set!, number: e.collectorNumber!, name: e.name, quantity: e.quantity })),
+  ];
+}
+
+/**
+ * The real copies a deck's linked list claims, by card name: its "From" lines
+ * less those that are proxies. For importing several decks: a proxy line
+ * leaves a real copy to a later deck that claims it for real.
+ */
+export function realClaims(list: string, linked: string): Map<string, number> {
+  const parsed = parseLinkedList(linked);
+  const proxy = new Map<string, number>();
+  for (const p of proxyLinesOf(list, parsed)) proxy.set(printing(p), Math.max(proxy.get(printing(p)) ?? 0, p.quantity));
+  const claims = new Map<string, number>();
+  for (const l of parsed.fromBoxes) {
+    const asProxy = Math.min(l.quantity, proxy.get(printing(l)) ?? 0);
+    proxy.set(printing(l), (proxy.get(printing(l)) ?? 0) - asProxy);
+    if (l.quantity > asProxy) claims.set(nameKey(l.name), (claims.get(nameKey(l.name)) ?? 0) + l.quantity - asProxy);
+  }
+  return claims;
+}
 
 /** Mark proxies on the deck row for this printing, or for the same card by name. */
 function markProxy(listId: string, l: { set: string; number: string; name: string }, quantity: number): boolean {
@@ -235,12 +265,14 @@ function markProxy(listId: string, l: { set: string; number: string; name: strin
 /**
  * Link a deck to the copies the linked list names. The deck's cards must
  * be in already. What the deck held before goes back first, so linking
- * again gives the same answer.
+ * again gives the same answer. `reserved`: real copies, by card name, that
+ * decks still to be linked claim with lines that are not proxies - a proxy
+ * line here does not take those (realClaims).
  */
-export function linkMythic(listId: string, profileId: string, list: string, linked: string): LinkReport {
+export function linkMythic(listId: string, profileId: string, list: string, linked: string, reserved?: Map<string, number>): LinkReport {
   const parsed = parseLinkedList(linked);
   const report: LinkReport = {
-    linked: 0, proxiesLinked: 0, otherBox: [], notLinked: [], proxiesMarked: 0, returned: 0,
+    linked: 0, proxiesLinked: 0, otherBox: [], notLinked: [], proxiesMarked: 0, yielded: [], returned: 0,
     available: parsed.available.reduce((n, l) => n + l.quantity, 0), buy: parsed.buy.reduce((n, l) => n + l.quantity, 0),
     unreadable: parsed.unreadable,
   };
@@ -251,11 +283,7 @@ export function linkMythic(listId: string, profileId: string, list: string, link
     giveBack(listId);
     // Lines that are proxies, by printing: from the linked list and from "*P*" in the deck list.
     const proxyLeft = new Map<string, number>();
-    const proxyLines = [
-      ...parsed.proxies,
-      ...parseDecklist(list).entries.filter((e) => e.proxy && e.set && e.collectorNumber)
-        .map((e) => ({ set: e.set!, number: e.collectorNumber!, name: e.name, quantity: e.quantity })),
-    ];
+    const proxyLines = proxyLinesOf(list, parsed);
     for (const p of proxyLines) proxyLeft.set(printing(p), Math.max(proxyLeft.get(printing(p)) ?? 0, p.quantity));
     const proxyTotal = new Map(proxyLeft);
     // Read after giving back, so copies this deck held before can be taken again.
@@ -273,11 +301,20 @@ export function linkMythic(listId: string, profileId: string, list: string, link
         [anyPrinting(index, l, null), true],
       ];
       let elsewhere = false;
+      let yielded = false;
+      // Real copies of this card still in a box beyond what later decks claim for real: all a proxy line may take.
+      const spare = () => (index.byName.get(nameKey(l.name)) ?? []).filter((r) => !isProxy(r.variant)).reduce((n, r) => n + r.quantity, 0)
+        - (reserved?.get(nameKey(l.name)) ?? 0);
       for (const [rows, other] of sources) {
         for (const r of rows) {
           if (left <= 0) break;
-          const n = pullExact(listId, { cardId: r.cardId, finish: r.finish, location: r.location, variant: r.variant }, left, l.board !== 'main');
+          const cap = wantProxy && !isProxy(r.variant) && reserved ? Math.max(0, Math.min(left, spare())) : left;
+          if (cap < left && !isProxy(r.variant)) yielded = true;
+          if (cap <= 0) continue;
+          const n = pullExact(listId, { cardId: r.cardId, finish: r.finish, location: r.location, variant: r.variant }, cap, l.board !== 'main');
           if (!n) continue;
+          // The index is read once: keep it true to what is left in the boxes.
+          r.quantity -= n;
           left -= n;
           report.linked += n;
           if (other) elsewhere = true;
@@ -292,7 +329,8 @@ export function linkMythic(listId: string, profileId: string, list: string, link
         if (left <= 0) break;
       }
       if (elsewhere) report.otherBox.push(l.line);
-      if (left > 0) report.notLinked.push(left === l.quantity ? l.line : `${l.line} (${left} of ${l.quantity} not found)`);
+      if (left > 0 && yielded) report.yielded.push(l.line);
+      else if (left > 0) report.notLinked.push(left === l.quantity ? l.line : `${l.line} (${left} of ${l.quantity} not found)`);
     }
 
     // Proxies with no copy in a box are marked on the deck.
@@ -336,6 +374,29 @@ export function markListProxies(listId: string, list: string): number {
   return marked;
 }
 
+export interface MythicDeck { name: string; list: string; linked?: string; commanders?: number }
+
+/**
+ * Several Mythic Tools decks, in order, safe in any order: when two decks'
+ * exports claim the same single copy, the one whose line is not a proxy
+ * gets it - a proxy line leaves it for a later deck that claims it for real,
+ * and is marked as a proxy. Two real claims: the first deck keeps it.
+ * `run` imports one deck (the script wraps it to wait out Scryfall and print).
+ */
+export async function importMythicDecks(
+  profileId: string, decks: MythicDeck[],
+  run: (deck: MythicDeck, reserved: Map<string, number>) => Promise<MythicDeckResult> = (deck, reserved) => importMythicDeck(profileId, deck, reserved),
+): Promise<MythicDeckResult[]> {
+  const claims = decks.map((d) => (d.linked?.trim() ? realClaims(d.list, d.linked) : new Map<string, number>()));
+  const out: MythicDeckResult[] = [];
+  for (let i = 0; i < decks.length; i++) {
+    const reserved = new Map<string, number>();
+    for (const later of claims.slice(i + 1)) for (const [name, n] of later) reserved.set(name, (reserved.get(name) ?? 0) + n);
+    out.push(await run(decks[i], reserved));
+  }
+  return out;
+}
+
 export interface MythicDeckResult {
   list: List;
   created: boolean;
@@ -350,7 +411,7 @@ export interface MythicDeckResult {
  * deck is made. Nothing changes if a line of the list cannot be found.
  */
 export async function importMythicDeck(
-  profileId: string, deck: { name: string; list: string; linked?: string; commanders?: number },
+  profileId: string, deck: MythicDeck, reserved?: Map<string, number>,
 ): Promise<MythicDeckResult> {
   const name = deck.name.trim();
   const existing = listLists(profileId, 'deck').find((l) => l.name.trim().toLowerCase() === name.toLowerCase()) ?? null;
@@ -363,7 +424,7 @@ export async function importMythicDeck(
     return { list, created: false, imported, link: null, proxiesMarked: 0 };
   }
   database().run('UPDATE list_cards SET proxies = 0 WHERE listId = ?', [list.id]);
-  const link = deck.linked?.trim() ? linkMythic(list.id, profileId, deck.list, deck.linked) : null;
+  const link = deck.linked?.trim() ? linkMythic(list.id, profileId, deck.list, deck.linked, reserved) : null;
   const proxiesMarked = link ? link.proxiesMarked : markListProxies(list.id, deck.list);
   return { list: getList(list.id, profileId) ?? list, created: !existing, imported, link, proxiesMarked };
 }

@@ -175,16 +175,23 @@ function matchesTerm(card: ScryfallCard, term: Term): boolean {
   }
 }
 
-export function matchesQuery(card: ScryfallCard, parsed: ParsedQuery): boolean {
+/**
+ * Extra `is:` words the caller knows about an item beyond its card - a deck's
+ * is:held, is:tobuy (lib/copy-status.ts). Answers undefined for a word it does
+ * not know, so the card's own words get their turn.
+ */
+export type IsWord<T> = (item: T, word: string) => boolean | undefined;
+
+export function matchesQuery(card: ScryfallCard, parsed: ParsedQuery, is?: (word: string) => boolean | undefined): boolean {
   // Every term must hold: Scryfall's default is AND, and so is what people
   // expect when they keep adding words to narrow something down.
   return parsed.terms.every((term) => {
-    const hit = matchesTerm(card, term);
+    const hit = (term.key === 'is' && is ? is(term.value.toLowerCase()) : undefined) ?? matchesTerm(card, term);
     return term.negated ? !hit : hit;
   });
 }
 
-export function filterCards<T extends { card: ScryfallCard }>(items: T[], query: string): {
+export function filterCards<T extends { card: ScryfallCard }>(items: T[], query: string, is?: IsWord<T>): {
   results: T[];
   unsupported: string[];
 } {
@@ -192,7 +199,7 @@ export function filterCards<T extends { card: ScryfallCard }>(items: T[], query:
   if (!trimmed) return { results: items, unsupported: [] };
   const parsed = parseQuery(trimmed);
   return {
-    results: items.filter((item) => matchesQuery(item.card, parsed)),
+    results: items.filter((item) => matchesQuery(item.card, parsed, is && ((word) => is(item, word)))),
     unsupported: parsed.unsupported,
   };
 }
