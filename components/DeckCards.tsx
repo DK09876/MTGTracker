@@ -420,14 +420,17 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
             );
           })}
         </div>
-      ) : columns.map((group) => {
+      ) : (
+      // The list runs in two columns on a wide screen, so about 50 cards fit at once; a group stays in one column.
+      <div className={prefs.view === 'text' ? 'xl:columns-2 xl:gap-5' : undefined}>
+      {columns.map((group) => {
         const shut = folded.has(group.key);
         const heading = groupBy !== 'none' || group.key === 'commander';
         return (
-          <section key={group.key} className="mt-6">
+          <section key={group.key} className={prefs.view === 'text' ? 'break-inside-avoid pt-6' : 'mt-6'}>
             {heading && (
               <button onClick={() => fold(group.key)} aria-expanded={!shut} data-section={group.label} data-section-count={group.count}
-                className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)] hover:text-[var(--foreground)]">
+                className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)] [break-after:avoid] hover:text-[var(--foreground)]">
                 <span aria-hidden className={`inline-block transition-transform ${shut ? '-rotate-90' : ''}`}>▾</span>
                 {group.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: group.color }} aria-hidden="true" />}
                 <span style={group.color ? { color: group.color } : undefined}>{group.label}</span>
@@ -453,6 +456,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           </section>
         );
       })}
+      </div>
+      )}
 
       {selecting && (
         <div data-tour="selection-bar" className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 mt-6 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:whitespace-normal rounded-2xl border border-[var(--accent)]/60 bg-[var(--surface-hover)] p-3 text-sm shadow-xl lg:bottom-4">
@@ -621,7 +626,7 @@ function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, 
   };
   const src = imageOf(entry.card, 'normal');
   return (
-    <li data-card-id={entry.card.id} className={`flex items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
+    <li data-card-id={entry.card.id} className={`flex break-inside-avoid items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 sm:py-0.5 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
       {selecting && (
         <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
@@ -639,16 +644,16 @@ function TextRow({ entry, isDeck, size, picked, selecting, tagDots, onActivate, 
           {tagDots.map((t) => <span key={t.id} className="h-2 w-2 rounded-full" style={{ background: t.color }} />)}
         </span>
       )}
-      <span className="hidden w-32 truncate text-xs text-[var(--muted)] lg:inline">{(entry.card.type_line ?? entry.card.card_faces?.[0]?.type_line ?? '').split(' // ')[0].split(' — ')[0]}</span>
+      <span className="hidden w-32 truncate text-xs text-[var(--muted)] lg:inline xl:hidden 2xl:inline">{(entry.card.type_line ?? entry.card.card_faces?.[0]?.type_line ?? '').split(' // ')[0].split(' — ')[0]}</span>
       <ManaCost cost={manaCostOf(entry.card)} size={13} />
       <span className="hidden w-14 text-right tabular-nums text-[var(--muted)] sm:inline">{money(entry)}</span>
       {!selecting && (
         <span className="flex items-center gap-1">
           {!entry.commander && <>
-            <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">−</button>
-            <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">+</button>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">−</button>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">+</button>
           </>}
-          {isDeck && <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${entry.card.name}`} aria-haspopup="menu" className="h-6 w-6 rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">⋯</button>}
+          {isDeck && <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${entry.card.name}`} aria-haspopup="menu" className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">⋯</button>}
         </span>
       )}
       {preview && src && createPortal(
@@ -789,8 +794,10 @@ function QuickMenu({ entry, x, y, up, isDeck, tags, moveTo, slotOptions, onSlot,
   const item = 'block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--surface)] focus-visible:bg-[var(--surface)] outline-none';
   return createPortal(
     <div ref={ref} role="menu" aria-label={`${entry.card.name}: quick actions`} data-tour="card-menu"
-      style={{ left: x, top: up ? undefined : y, bottom: up ? window.innerHeight - y + 40 : undefined }}
-      className="fixed z-[85] w-56 rounded-xl border border-[var(--border)] bg-[var(--surface-hover)] p-1 shadow-xl">
+      // Never taller than the room it has: above the phone's bottom bar, below the top of the screen.
+      style={{ left: x, top: up ? undefined : y, bottom: up ? window.innerHeight - y + 40 : undefined,
+        maxHeight: up ? y - 48 : window.innerHeight - y - (window.innerWidth < 1024 ? 96 : 8) }}
+      className="fixed z-[85] w-56 overflow-y-auto overscroll-contain rounded-xl border border-[var(--border)] bg-[var(--surface-hover)] p-1 shadow-xl">
       <button role="menuitem" className={item} onClick={act(onOpen)}>Open {entry.card.name.split(' // ')[0]}</button>
       <hr className="my-1 border-[var(--border)]" />
       {isDeck && !entry.commander && moveTo.map((t) => (
