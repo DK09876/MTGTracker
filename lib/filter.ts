@@ -20,6 +20,8 @@ interface Term {
   op: Comparator;
   value: string;
   negated: boolean;
+  /** An is: word the card itself doesn't answer: left for the caller's words (is:held), reported if none answer it. */
+  callerIs?: boolean;
 }
 
 export interface ParsedQuery {
@@ -73,12 +75,14 @@ export function parseQuery(input: string): ParsedQuery {
 
     const [, key, op, value] = match;
     const lower = key.toLowerCase();
-    // An is: this filter doesn't know is reported too, never a quiet empty list.
-    if (!KNOWN.has(lower) || (lower === 'is' && !IS_VALUES.has(strip(value).toLowerCase()))) {
+    if (!KNOWN.has(lower)) {
       unsupported.push(`${key}${op}${value}`);
       continue;
     }
-    terms.push({ key: lower, op: op as Comparator, value: strip(value), negated });
+    // An is: word the card doesn't answer may be the caller's (is:held); if nobody
+    // answers it, filterCards reports it, never a quiet empty list.
+    const callerIs = lower === 'is' && !IS_VALUES.has(strip(value).toLowerCase());
+    terms.push({ key: lower, op: op as Comparator, value: strip(value), negated, ...(callerIs ? { callerIs } : {}) });
   }
 
   return { terms, unsupported };
@@ -203,8 +207,9 @@ export function filterCards<T extends { card: ScryfallCard }>(items: T[], query:
   const trimmed = query.trim();
   if (!trimmed) return { results: items, unsupported: [] };
   const parsed = parseQuery(trimmed);
+  const unknown = parsed.terms.filter((t) => t.callerIs && !(is && items.some((item) => is(item, t.value.toLowerCase()) !== undefined)));
   return {
     results: items.filter((item) => matchesQuery(item.card, parsed, is && ((word) => is(item, word)))),
-    unsupported: parsed.unsupported,
+    unsupported: [...parsed.unsupported, ...unknown.map((t) => `${t.negated ? '-' : ''}is:${t.value}`)],
   };
 }

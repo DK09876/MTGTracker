@@ -16,7 +16,6 @@ import DeckGlance from '@/components/DeckGlance';
 import DeckPlan from '@/components/DeckPlan';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
 import DeckRail from '@/components/DeckRail';
-import Tip from '@/components/Tip';
 import DeckPlaytest from '@/components/DeckPlaytest';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
