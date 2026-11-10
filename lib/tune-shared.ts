@@ -74,6 +74,9 @@ export interface SuggestionGroup {
   filter?: CutFilter;
   /** A group that picks one of its items (a card's possible replacements). */
   pickOne?: boolean;
+  /** Claude's groups: the model that answered and the prompt's version (lib/prompt-versions.ts), for the suggestion log. */
+  model?: string | null;
+  promptVersion?: string;
 }
 
 export type CutFilter = 'flagged' | 'curve' | 'bracket' | 'interaction' | 'rampdraw' | 'offplan' | 'other';

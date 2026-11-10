@@ -29,6 +29,7 @@ import { cutBoard, type DeckSection } from './sections-shared';
 import { sectionsOf } from './sections';
 import { starterList } from './starter';
 import { sameJob, type DeckCard } from './swaps';
+import { PROMPT_VERSIONS } from './prompt-versions';
 import { tuneStore, updateTune, newKey, type TuneStore } from './tune-store';
 import {
   cutsLeft, suggestedIntent, type CardRef, type Changes, type CutFilter, type How, type Impact, type Intent, type Staged, type Suggestion, type SuggestionGroup, type Symptom,
@@ -591,7 +592,7 @@ async function cutGroups(ctx: Context, landCut: string | null): Promise<{ groups
       ? { key: `cuts:claude:${i.name}`, keep: true, cut: { ...ref(inMain.get(i.name)!, { from: 'main' }), quantity: 1 }, why: `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}` }
       : { ...cutItem(inMain.get(i.name)!, `cuts:claude:${i.name}`, `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}`), ...(i.past ? { warn: `Claude marked it a cut, past the ${over} the deck is over` } : i.verdict === 'unsure' ? { warn: 'Claude is unsure' } : {}) }))
       .sort((a, b) => Number(!!a.keep) - Number(!!b.keep));
-    if (items.length) groups.push({ key: 'cuts:claude', title: `Claude’s review · ${items.length}`, why: `From ${new Date(review.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${review.instructions ? `, with your instructions: “${review.instructions}”` : ''}. Keep means ★ keep: never offered as a cut again.`, source: 'claude', items });
+    if (items.length) groups.push({ key: 'cuts:claude', title: `Claude’s review · ${items.length}`, why: `From ${new Date(review.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${review.instructions ? `, with your instructions: “${review.instructions}”` : ''}. Keep means ★ keep: never offered as a cut again.`, source: 'claude', items, model: review.model, promptVersion: PROMPT_VERSIONS.cutReview });
   }
   const counts: Record<string, number> = {};
   for (const g of groups) if (g.filter) counts[g.filter] = (counts[g.filter] ?? 0) + g.items.length;

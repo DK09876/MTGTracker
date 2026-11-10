@@ -86,6 +86,8 @@ export interface PlanState {
   rules: RuleLine[];
   changes: ChangeLine[];
   proposals: ProposalLine[];
+  /** The model of the read the proposals came from, for the suggestion log. */
+  proposalsModel: string | null;
   notes: Plan['notes'];
   styles: Array<{ id: string; label: string; note: string; cards: number }>;
   goals: readonly string[];
@@ -339,7 +341,7 @@ export async function planState(list: List): Promise<PlanState> {
   return {
     confirmed: plan.confirmed,
     progress: { done: PARTS.filter((id) => ok[id]).length, total },
-    parts, lookFirst: lookFirst.slice(0, 4), rules, changes, proposals, notes: plan.notes,
+    parts, lookFirst: lookFirst.slice(0, 4), rules, changes, proposals, proposalsModel: latest?.model ?? null, notes: plan.notes,
     styles: [...STYLES, VALUE].map((x) => ({ id: x.id, label: x.label, note: x.note, cards: plan.detected.support[x.id] ?? 0 })),
     goals: GOALS, roles: COMMANDER_ROLES,
     small: mainCount < 10, pile,

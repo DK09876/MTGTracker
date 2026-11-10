@@ -26,6 +26,7 @@ import { capToHundred, CUT_FILTERS, INTENTS, SYMPTOMS, type CutFilter, type Inte
 import type { DeckSection } from '@/lib/sections-shared';
 import type { DeckTab } from '@/lib/deck-tabs';
 import type { Job } from '@/lib/jobs';
+import { REASON_CHIPS, REASON_LABELS, type ReasonChip } from '@/lib/suggestion-shared';
 
 interface Props {
   listId: string;
@@ -57,6 +58,8 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
+  // The suggestion just dismissed, asking (optionally) why.
+  const [asking, setAsking] = useState<string | null>(null);
   const [filter, setFilter] = useState<CutFilter | 'all'>('all');
   const [showDismissed, setShowDismissed] = useState(false);
   const [rules, setRules] = useState(false);
@@ -143,13 +146,21 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
     if (r.capped || r.blocked) setNote({ text: [`${r.staged} staged.`, r.capped ? `${r.capped} more would take the deck under 100: a cut now needs an add.` : '', r.blocked ? `${r.blocked} left out: a card that is never cut, or a land that would take the deck under its land range.` : ''].filter(Boolean).join(' ') });
   });
   const unstage = (keys: string[]) => act(() => api.tuneAct(listId, { action: 'unstage', keys }));
-  const dismiss = (keys: string[], on = true) => act(() => api.tuneAct(listId, { action: on ? 'dismiss' : 'undismiss', keys }));
+  const dismiss = (keys: string[], on = true) => act(async () => {
+    await api.tuneAct(listId, { action: on ? 'dismiss' : 'undismiss', keys });
+    // One dismissed suggestion stays in view, asking (optionally) why.
+    setAsking(on && keys.length === 1 ? keys[0] : null);
+  });
+  const reason = (key: string, chip: ReasonChip | null, text?: string) => {
+    setAsking(null);
+    if (chip || text?.trim()) void api.tuneAct(listId, { action: 'reason', key, ...(chip ? { chip } : {}), ...(text?.trim() ? { text: text.trim() } : {}) }).catch(() => {});
+  };
   const save = (section: string, items: Suggestion[]) => act(async () => {
     const r = await api.tuneAct<{ saved: number }>(listId, { action: 'save', section, items });
     await onChanged();
     setNote({ text: `${r.saved} saved to ${sections.find((s) => s.id === section)?.name ?? 'the section'}.` });
   });
-  const keep = (cardId: string) => act(async () => { await api.tuneAct(listId, { action: 'keep', cardId, keep: true }); await onChanged(); }, '★ Kept: never offered as a cut again.');
+  const keep = (cardId: string, key?: string) => act(async () => { await api.tuneAct(listId, { action: 'keep', cardId, keep: true, key }); await onChanged(); }, '★ Kept: never offered as a cut again.');
   const apply = () => act(async () => {
     const r = await api.tuneAct<{ added: number; cut: number; undo: unknown }>(listId, { action: 'apply', cutsTo: cutsTo ?? undefined });
     await onChanged();
@@ -168,7 +179,7 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   // Cuts on their own stop at 100; a cut paired with an add doesn't move the size.
   const cutRoom = Math.max(0, sizeAfter - 100);
   const groups = state.groups.filter((g) => current !== 'cuts' || filter === 'all' || g.filter === filter);
-  const visible = (g: SuggestionGroup) => (showDismissed ? g.items : g.items.filter((i) => !dismissed.has(i.key)));
+  const visible = (g: SuggestionGroup) => (showDismissed ? g.items : g.items.filter((i) => !dismissed.has(i.key) || i.key === asking));
   const hiddenCount = state.groups.reduce((n, g) => n + g.items.filter((i) => dismissed.has(i.key)).length, 0);
 
   return (
@@ -234,7 +245,7 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
         <div className="flex flex-col gap-3" data-tour="tune-groups">
           {groups.map((g) => (
             <Group key={g.key} group={g} items={visible(g)} staged={staged} dismissed={dismissed} busy={busy} cutRoom={cutRoom}
-              sections={sections} onStage={stage} onUnstage={unstage} onDismiss={dismiss} onSave={save} onKeep={keep} />
+              sections={sections} onStage={stage} onUnstage={unstage} onDismiss={dismiss} onSave={save} onKeep={keep} asking={asking} onReason={reason} />
           ))}
         </div>
         {hiddenCount > 0 && (
@@ -531,10 +542,11 @@ function CardLine({ card, tone }: { card: NonNullable<Suggestion['add']>; tone: 
   );
 }
 
-function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onStage, onUnstage, onDismiss, onSave, onKeep }: {
+function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onStage, onUnstage, onDismiss, onSave, onKeep, asking, onReason }: {
   group: SuggestionGroup; items: Suggestion[]; staged: Set<string>; dismissed: Set<string>; busy: boolean; cutRoom: number; sections: DeckSection[];
+  asking: string | null; onReason: (key: string, chip: ReasonChip | null, text?: string) => void;
   onStage: (items: Suggestion[]) => void; onUnstage: (keys: string[]) => void; onDismiss: (keys: string[], on?: boolean) => void;
-  onSave: (section: string, items: Suggestion[]) => void; onKeep: (cardId: string) => void;
+  onSave: (section: string, items: Suggestion[]) => void; onKeep: (cardId: string, key?: string) => void;
 }) {
   const [how, setHow] = useState<string | null>(null);
   const open = items.filter((i) => !staged.has(i.key) && !dismissed.has(i.key) && !i.keep);
@@ -593,7 +605,7 @@ function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onSta
                   {i.how && <button className={GHOST} onClick={() => setHow(how === i.key ? null : i.key)} aria-expanded={how === i.key}>How?</button>}
                   {isStaged ? (<><span className="text-xs text-emerald-300">In your changes</span><button className={GHOST} disabled={busy} onClick={() => onUnstage([i.key])}>Undo</button></>)
                     : isDismissed ? <button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key], false)}>Bring back</button>
-                      : i.keep ? (<><button className={BUTTON} disabled={busy} onClick={() => onKeep(i.cut!.id)}>★ Keep</button><button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key])} aria-label="Dismiss">✕</button></>)
+                      : i.keep ? (<><button className={BUTTON} disabled={busy} onClick={() => onKeep(i.cut!.id, i.key)}>★ Keep</button><button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key])} aria-label="Dismiss">✕</button></>)
                         : (<>
                           <button className={BUTTON} disabled={busy || blocked || (group.pickOne && pickedOne)} onClick={() => onStage([i])} title={blocked ? 'At 100: a cut on its own would take the deck under. Pair it with an add.' : undefined}>
                             {group.pickOne ? 'Swap' : i.add && i.cut ? 'Stage swap' : 'Accept'}
@@ -603,10 +615,36 @@ function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onSta
                 </span>
               </div>
               {how === i.key && i.how && <HowBox how={i.how} />}
+              {asking === i.key && isDismissed && <WhyNot onDone={(chip, text) => onReason(i.key, chip, text)} />}
             </li>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** Why a suggestion was turned down: one optional tap, or a line in your words. Kept on the Pi; the words are never exported. */
+function WhyNot({ onDone }: { onDone: (chip: ReasonChip | null, text?: string) => void }) {
+  const [other, setOther] = useState<string | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs" role="group" aria-label="Why not? (optional)">
+      <span className="flex items-center gap-1 text-[var(--muted)]">Why not?<Tip label="About this question">Optional. Your answer helps tell which suggestions are worth showing. It stays in this app; typed reasons are never shared.</Tip></span>
+      {other === null ? (
+        <>
+          {REASON_CHIPS.map((c) => (
+            <button key={c} className="rounded-full border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]" onClick={() => (c === 'other' ? setOther('') : onDone(c))}>{REASON_LABELS[c]}</button>
+          ))}
+          <button className="px-1 text-[var(--muted)] underline hover:text-[var(--foreground)]" onClick={() => onDone(null)}>Skip</button>
+        </>
+      ) : (
+        <form className="flex min-w-0 flex-1 items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); onDone('other', other); }}>
+          <input autoFocus value={other} onChange={(e) => setOther(e.target.value)} maxLength={300} placeholder="In a few words" aria-label="Why not, in your words"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-transparent px-2 py-0.5" />
+          <button type="submit" className="rounded-full border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]">Save</button>
+          <button type="button" className="px-1 text-[var(--muted)] underline" onClick={() => onDone(null)}>Skip</button>
+        </form>
+      )}
     </div>
   );
 }

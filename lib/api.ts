@@ -462,6 +462,19 @@ export const signIn = (profile: string, password: string) =>
 export const signOut = () => fetch(`${BASE}/api/auth/logout`, { method: 'POST' }).then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
 export const changePassword = (current: string, next: string) =>
   send('auth/password', 'POST', { current, next }).then(json<{ access: Me }>).then((r) => { meChanged(); return r; });
+export interface SuggestionRate { value: string; shown: number; accepted: number; refused: number; ignored: number; open: number; regretted: number; acceptRate: number | null }
+export interface SuggestionLog {
+  share: boolean;
+  admin?: {
+    totals: { events: number; batches: number; conversations: number; sharing: Array<{ id: string; name: string; on: boolean }> };
+    rates: Record<'task' | 'method' | 'model' | 'promptVersion' | 'rank', SuggestionRate[]>;
+    reasons: Array<{ chip: string; count: number; typed: number }>;
+  };
+}
+/** Your sharing setting; for an admin, the suggestion log's rates too. */
+export const suggestionLog = () => fetch(url('suggestions')).then(json<SuggestionLog>);
+export const setSuggestionShare = (share: boolean) => send('suggestions', 'POST', { share }).then(json<{ share: boolean }>);
+export const suggestionExportUrl = () => url('suggestions?export=1');
 export interface Person { id: string; name: string; isAdmin: boolean; hasPassword: boolean; lists: number }
 export const people = () => fetch(url('admin/people')).then(json<{ people: Person[] }>);
 export const changePerson = (id: string, action: 'admin' | 'unadmin' | 'reset' | 'remove') =>
@@ -854,7 +867,8 @@ type TuneAction =
   | { action: 'clear' }
   | { action: 'apply'; cutsTo?: string }
   | { action: 'undo'; undo: unknown }
-  | { action: 'keep'; cardId: string; keep: boolean }
+  | { action: 'keep'; cardId: string; keep: boolean; key?: string }
+  | { action: 'reason'; key: string; chip?: import('./suggestion-shared').ReasonChip; text?: string }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
   | { action: 'finishPicks'; choice?: 'rules' | 'claude'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
