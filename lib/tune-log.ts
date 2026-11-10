@@ -29,7 +29,8 @@ export function tuneBatches(intent: Intent, groups: SuggestionGroup[], hash: str
     }
   }
   return groups.map((g) => ({
-    key: `tune:${intent}:${g.key}`,
+    // A Claude round is its own list: a new review or new ideas replace the last.
+    key: `tune:${intent}:${g.key}${g.round ? `@${g.round}` : ''}`,
     task: TASK_OF[intent],
     method: g.source === 'claude' ? 'ai' : 'code',
     model: g.source === 'claude' ? g.model ?? null : null,

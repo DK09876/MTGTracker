@@ -77,6 +77,8 @@ export interface SuggestionGroup {
   /** Claude's groups: the model that answered and the prompt's version (lib/prompt-versions.ts), for the suggestion log. */
   model?: string | null;
   promptVersion?: string;
+  /** Claude's groups: which call made them. A new round replaces the last in the suggestion log. */
+  round?: string;
 }
 
 export type CutFilter = 'flagged' | 'curve' | 'bracket' | 'interaction' | 'rampdraw' | 'offplan' | 'other';

@@ -3,7 +3,7 @@
  *
  * GET: your own sharing setting. For an admin, also the log's totals, accept
  *   rates by task, method, model, prompt version and rank, and the reasons
- *   given. ?export=1 (admin only) downloads every event as JSON with
+ *   given; ?method=ai|code for one kind only. ?export=1 (admin only) downloads every event as JSON with
  *   profiles and decks as opaque ids and no typed reasons.
  * POST {share}: turn logging of your own suggestions and choices on or off.
  */
@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireAdmin, requireProfile } from '@/lib/profile-route';
-import { exportLog, rates, reasons, setShare, shareOn, totals } from '@/lib/suggestion-log';
+import { exportLog, rates, reasons, rows, setShare, shareOn, totals } from '@/lib/suggestion-log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,10 @@ export async function GET(request: Request) {
   }
   const admin = requireAdmin(request);
   if (admin instanceof NextResponse) return NextResponse.json({ share });
-  return NextResponse.json({ share, admin: { totals: totals(), rates: rates(), reasons: reasons() } });
+  const m = new URL(request.url).searchParams.get('method');
+  const method = m === 'ai' || m === 'code' ? m : undefined;
+  const events = rows(method);
+  return NextResponse.json({ share, admin: { method: method ?? 'all', totals: totals(), rates: rates(events), reasons: reasons(events) } });
 }
 
 export async function POST(request: Request) {

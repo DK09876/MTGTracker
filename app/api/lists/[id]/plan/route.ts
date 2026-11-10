@@ -33,7 +33,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   quietly(() => {
     const main = cardsInList(id).filter((c) => c.board === 'main');
     logShown(owned.profile, id, 'plan:', [{
-      key: 'plan:proposals', task: 'plan', method: 'ai', model: state.proposalsModel, promptVersion: PROMPT_VERSIONS.planRead, deckHash: deckHash(owned.list.commander, main),
+      // Proposal keys are "<read id>:<n>": each read's proposals are their own list.
+      key: `plan:proposals@${state.proposals[0]?.key.split(':')[0] ?? 'none'}`, task: 'plan', method: 'ai', model: state.proposalsModel, promptVersion: PROMPT_VERSIONS.planRead, deckHash: deckHash(owned.list.commander, main),
       items: state.proposals.map((p) => ({ key: p.key, reasonShown: `${p.label}: ${p.value}${p.why ? ` · ${p.why}` : ''}` })),
     }]);
   });

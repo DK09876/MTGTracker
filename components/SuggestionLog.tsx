@@ -49,7 +49,9 @@ export function ShareSwitch() {
 export function SuggestionStats() {
   const [log, setLog] = useState<api.SuggestionLog | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.suggestionLog().then(setLog).catch(() => setError('Could not load the log')); }, []);
+  // AI suggestions first: the rules' lists are long and would bury them.
+  const [method, setMethod] = useState<'ai' | 'code' | 'all'>('ai');
+  useEffect(() => { api.suggestionLog(method === 'all' ? undefined : method).then(setLog).catch(() => setError('Could not load the log')); }, [method]);
   if (error) return <p className="text-sm text-red-400">{error}</p>;
   if (!log?.admin) return <p className="text-sm text-[var(--muted)]">Loading…</p>;
   const { totals, rates, reasons } = log.admin;
@@ -65,8 +67,18 @@ export function SuggestionStats() {
         <p className="text-xs text-[var(--muted)]">Recording: {totals.sharing.map((p) => `${p.name} ${p.on ? 'on' : 'off'}`).join(' · ')}</p>
         <a href={api.suggestionExportUrl()} className="self-start text-sm text-[var(--accent)] underline">Export for evaluation (no names, no typed reasons)</a>
       </div>
+      <div role="radiogroup" aria-label="Which suggestions" className="flex items-center gap-1 text-sm">
+        {(['ai', 'code', 'all'] as const).map((m) => (
+          <button key={m} role="radio" aria-checked={method === m} onClick={() => setMethod(m)}
+            className={`rounded-full border px-3 py-0.5 ${method === m ? 'border-[var(--accent)] text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--muted)]'}`}>
+            {m === 'ai' ? 'AI' : m === 'code' ? 'Rules' : 'All'}
+          </button>
+        ))}
+        <Tip label="About this filter">AI: suggestions a model wrote. Rules: the app’s own lists, such as the rules’ cut list and the same-job lookup. They are long and are shown on every visit, so they are kept apart.</Tip>
+      </div>
+      {rates.task.length === 0 && totals.events > 0 && <p className="text-sm text-[var(--muted)]">None of this kind yet.</p>}
       {totals.events === 0 && <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">Nothing logged yet. Suggestions are logged as people open Tune and Plan.</p>}
-      {totals.events > 0 && DIMS.map(([dim, title, tip]) => (
+      {rates.task.length > 0 && DIMS.map(([dim, title, tip]) => (
         <div key={dim} className="flex flex-col gap-1.5">
           <h3 className="flex items-center gap-1 text-sm font-medium">{title}<Tip label={`About ${title.toLowerCase()}`}>{tip}</Tip></h3>
           <div className="overflow-x-auto rounded-xl border border-[var(--border)]">

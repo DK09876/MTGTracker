@@ -592,7 +592,7 @@ async function cutGroups(ctx: Context, landCut: string | null): Promise<{ groups
       ? { key: `cuts:claude:${i.name}`, keep: true, cut: { ...ref(inMain.get(i.name)!, { from: 'main' }), quantity: 1 }, why: `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}` }
       : { ...cutItem(inMain.get(i.name)!, `cuts:claude:${i.name}`, `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}`), ...(i.past ? { warn: `Claude marked it a cut, past the ${over} the deck is over` } : i.verdict === 'unsure' ? { warn: 'Claude is unsure' } : {}) }))
       .sort((a, b) => Number(!!a.keep) - Number(!!b.keep));
-    if (items.length) groups.push({ key: 'cuts:claude', title: `Claude’s review · ${items.length}`, why: `From ${new Date(review.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${review.instructions ? `, with your instructions: “${review.instructions}”` : ''}. Keep means ★ keep: never offered as a cut again.`, source: 'claude', items, model: review.model, promptVersion: PROMPT_VERSIONS.cutReview });
+    if (items.length) groups.push({ key: 'cuts:claude', title: `Claude’s review · ${items.length}`, why: `From ${new Date(review.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${review.instructions ? `, with your instructions: “${review.instructions}”` : ''}. Keep means ★ keep: never offered as a cut again.`, source: 'claude', items, model: review.model, promptVersion: PROMPT_VERSIONS.cutReview, round: review.at });
   }
   const counts: Record<string, number> = {};
   for (const g of groups) if (g.filter) counts[g.filter] = (counts[g.filter] ?? 0) + g.items.length;

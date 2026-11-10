@@ -466,13 +466,14 @@ export interface SuggestionRate { value: string; shown: number; accepted: number
 export interface SuggestionLog {
   share: boolean;
   admin?: {
+    method: 'all' | 'ai' | 'code';
     totals: { events: number; batches: number; conversations: number; sharing: Array<{ id: string; name: string; on: boolean }> };
     rates: Record<'task' | 'method' | 'model' | 'promptVersion' | 'rank', SuggestionRate[]>;
     reasons: Array<{ chip: string; count: number; typed: number }>;
   };
 }
 /** Your sharing setting; for an admin, the suggestion log's rates too. */
-export const suggestionLog = () => fetch(url('suggestions')).then(json<SuggestionLog>);
+export const suggestionLog = (method?: 'ai' | 'code') => fetch(url(`suggestions${method ? `?method=${method}` : ''}`)).then(json<SuggestionLog>);
 export const setSuggestionShare = (share: boolean) => send('suggestions', 'POST', { share }).then(json<{ share: boolean }>);
 export const suggestionExportUrl = () => url('suggestions?export=1');
 export interface Person { id: string; name: string; isAdmin: boolean; hasPassword: boolean; lists: number }

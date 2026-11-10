@@ -12,10 +12,10 @@
  *   conversation_events  questions asked, answered or skipped; approaches
  *                        shown and corrected
  *
- * A batch is logged once per distinct content: showing the same group again
- * writes nothing. When a group is replaced, or the owner applies their
- * changes, its open batch closes and every suggestion left untouched is
- * marked ignored. Regret (a cut card back in the main board, or an added
+ * A batch stays open while its list is on screen: showing it again writes
+ * rows only for suggestions new to it. Untouched suggestions are marked
+ * ignored only when the owner applies their changes or a new AI round
+ * replaces the list; a rules list that goes away leaves them undecided. Regret (a cut card back in the main board, or an added
  * card gone, within 14 days) is worked out on read from the deck's history.
  *
  * Privacy: everything stays in the app's database on the Pi. Nothing is
@@ -46,7 +46,7 @@ function db() {
   if (!ready) {
     d.run(`CREATE TABLE IF NOT EXISTS suggestion_batches (
       id TEXT PRIMARY KEY, listId TEXT NOT NULL, profileId TEXT NOT NULL, key TEXT NOT NULL, signature TEXT NOT NULL,
-      openedAt TEXT NOT NULL, closedAt TEXT)`);
+      method TEXT NOT NULL DEFAULT 'code', openedAt TEXT NOT NULL, closedAt TEXT)`);
     d.run('CREATE INDEX IF NOT EXISTS idx_suggestion_batches_open ON suggestion_batches (listId, key, closedAt)');
     d.run(`CREATE TABLE IF NOT EXISTS suggestion_events (
       id TEXT PRIMARY KEY, at TEXT NOT NULL, profileId TEXT NOT NULL, listId TEXT NOT NULL,
@@ -111,46 +111,61 @@ export interface ShownBatch {
   items: ShownItem[];
 }
 
-const signatureOf = (b: ShownBatch) => createHash('sha1').update(JSON.stringify([b.method, b.model ?? null, b.promptVersion ?? null, b.planVersion ?? null,
-  b.items.map((i) => [i.key, i.cardOut?.name ?? null, i.cardIn?.name ?? null, i.reasonShown, !!i.preselected])])).digest('hex');
-
-/** Close a batch: whatever in it was left untouched was ignored. */
-function closeBatch(id: string, at = now()): void {
+/**
+ * Close a batch. `ignore`: whatever in it was left untouched was ignored (the
+ * changes were applied, or a new AI round replaced this one). Otherwise the
+ * untouched suggestions stay undecided: a rules list that changed with the
+ * deck says nothing about what the owner thought of it.
+ */
+function closeBatch(id: string, ignore: boolean, at = now()): void {
   const d = db();
   d.run('UPDATE suggestion_batches SET closedAt = ? WHERE id = ? AND closedAt IS NULL', [at, id]);
+  if (!ignore) return;
   d.run(`INSERT INTO suggestion_outcomes (eventId, at, outcome)
     SELECT e.id, ?, 'ignored' FROM suggestion_events e LEFT JOIN suggestion_outcomes o ON o.eventId = e.id
     WHERE e.batchId = ? AND o.eventId IS NULL`, [at, id]);
 }
 
+const signatureOf = (b: ShownBatch) => createHash('sha1').update(JSON.stringify(b.items.map((i) => i.key))).digest('hex');
+
 /**
  * Log what one place on a page showed. Several batches can be shown at once
- * (Tune's groups): pass them together with the place's prefix, and any open
- * batch under that prefix that is no longer shown closes. Showing the same
- * content again writes nothing. Returns the batch ids, by key.
+ * (Tune's groups): pass them together with the place's prefix.
+ *
+ * A batch stays open while its list is on screen. Showing it again adds rows
+ * only for suggestions new to it; the rest keep their row and the rank they
+ * were first shown at, and a suggestion that drops out (kept, or edited out
+ * of the deck) stays open. An open batch under the prefix that is no longer
+ * shown closes: an AI round replaced by a new one leaves its untouched
+ * suggestions ignored; a rules list that went away leaves them undecided.
+ * Returns the batch ids, by key.
  */
 export function logShown(profileId: string, listId: string, prefix: string, batches: ShownBatch[]): Record<string, string> {
   if (!shareOn(profileId)) return {};
   const d = db();
   const at = now();
   const ids: Record<string, string> = {};
-  const open = d.all('SELECT id, key, signature FROM suggestion_batches WHERE listId = ? AND closedAt IS NULL AND key LIKE ?', [listId, `${prefix}%`]) as Array<{ id: string; key: string; signature: string }>;
+  const open = d.all('SELECT id, key, signature, method FROM suggestion_batches WHERE listId = ? AND closedAt IS NULL AND key LIKE ?', [listId, `${prefix}%`]) as Array<{ id: string; key: string; signature: string; method: string }>;
   const shown = new Set(batches.filter((b) => b.items.length).map((b) => b.key));
-  for (const o of open) if (!shown.has(o.key)) closeBatch(o.id, at);
+  for (const o of open) if (!shown.has(o.key)) closeBatch(o.id, o.method === 'ai', at);
   for (const b of batches) {
     if (!b.items.length) continue;
     const signature = signatureOf(b);
     const same = open.find((o) => o.key === b.key);
     if (same?.signature === signature) { ids[b.key] = same.id; continue; }
-    if (same) closeBatch(same.id, at);
-    const id = randomUUID();
+    const id = same?.id ?? randomUUID();
+    const have = new Set(same ? (d.all('SELECT itemKey FROM suggestion_events WHERE batchId = ?', [id]) as Array<{ itemKey: string }>).map((r) => r.itemKey) : []);
     d.run('BEGIN');
     try {
-      d.run('INSERT INTO suggestion_batches (id, listId, profileId, key, signature, openedAt) VALUES (?, ?, ?, ?, ?, ?)', [id, listId, profileId, b.key, signature, at]);
-      b.items.forEach((i, n) => d.run(`INSERT INTO suggestion_events (id, at, profileId, listId, task, method, model, promptVersion, planVersion, batchId, rank, preselected,
-        cardOut, cardIn, cardOutName, cardInName, reasonShown, deckHash, itemKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [randomUUID(), at, profileId, listId, b.task, b.method, b.model ?? null, b.promptVersion ?? null, b.planVersion ?? null, id, n + 1, i.preselected ? 1 : 0,
-        i.cardOut?.oracleId ?? null, i.cardIn?.oracleId ?? null, i.cardOut?.name ?? null, i.cardIn?.name ?? null, i.reasonShown.slice(0, 600), b.deckHash, i.key]));
+      if (same) d.run('UPDATE suggestion_batches SET signature = ? WHERE id = ?', [signature, id]);
+      else d.run('INSERT INTO suggestion_batches (id, listId, profileId, key, signature, method, openedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, listId, profileId, b.key, signature, b.method, at]);
+      b.items.forEach((i, n) => {
+        if (have.has(i.key)) return;
+        d.run(`INSERT INTO suggestion_events (id, at, profileId, listId, task, method, model, promptVersion, planVersion, batchId, rank, preselected,
+          cardOut, cardIn, cardOutName, cardInName, reasonShown, deckHash, itemKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [randomUUID(), at, profileId, listId, b.task, b.method, b.model ?? null, b.promptVersion ?? null, b.planVersion ?? null, id, n + 1, i.preselected ? 1 : 0,
+          i.cardOut?.oracleId ?? null, i.cardIn?.oracleId ?? null, i.cardOut?.name ?? null, i.cardIn?.name ?? null, i.reasonShown.slice(0, 600), b.deckHash, i.key]);
+      });
       d.run('COMMIT');
     } catch (e) {
       d.run('ROLLBACK');
@@ -163,7 +178,7 @@ export function logShown(profileId: string, listId: string, prefix: string, batc
 
 /** Close every open batch for a deck (its changes were applied): untouched suggestions were ignored. */
 export function closeAll(listId: string, prefix = ''): void {
-  for (const o of db().all('SELECT id FROM suggestion_batches WHERE listId = ? AND closedAt IS NULL AND key LIKE ?', [listId, `${prefix}%`]) as Array<{ id: string }>) closeBatch(o.id);
+  for (const o of db().all('SELECT id FROM suggestion_batches WHERE listId = ? AND closedAt IS NULL AND key LIKE ?', [listId, `${prefix}%`]) as Array<{ id: string }>) closeBatch(o.id, true);
 }
 
 /** The latest event shown for a suggestion key on a deck. */
@@ -223,9 +238,10 @@ export interface EventRow {
   outcome: Outcome | null; outcomeAt: string | null; reasonChip: ReasonChip | null; reasonText: string | null;
 }
 
-function rows(): EventRow[] {
+/** Every event with its outcome; `method` keeps AI or code suggestions only (code lists are long and would bury the AI ones). */
+export function rows(method?: Method): EventRow[] {
   return db().all(`SELECT e.*, o.outcome, o.at AS outcomeAt, o.reasonChip, o.reasonText
-    FROM suggestion_events e LEFT JOIN suggestion_outcomes o ON o.eventId = e.id ORDER BY e.at, e.rank`) as unknown as EventRow[];
+    FROM suggestion_events e LEFT JOIN suggestion_outcomes o ON o.eventId = e.id ${method ? 'WHERE e.method = ?' : ''} ORDER BY e.at, e.rank`, method ? [method] : []) as unknown as EventRow[];
 }
 
 const front = (n: string) => n.split(' // ')[0].toLowerCase();

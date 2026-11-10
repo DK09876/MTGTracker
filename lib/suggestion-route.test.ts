@@ -73,4 +73,40 @@ describe('logging through the Tune route', { timeout: 60_000 }, () => {
     expect(log.rates().promptVersion.find((r) => r.value === 'cut-review-1')).toBeTruthy();
     expect(log.reasons()).toEqual([{ chip: 'part_of_plan', count: 1, typed: 0 }]);
   });
+
+  it('keeps a group open while the owner works through it: show 10, dismiss 1, accept 1, reload', async () => {
+    const db = await import('./db');
+    db.addProfile('dk', 'DK');
+    db.addProfile('kevin', 'Kevin');
+    const plan = await import('./deck-plan');
+    const list = db.createList('kevin', 'Prosper', '', { kind: 'deck', commander });
+    db.addCardToList(list.id, card('Swamp', { type_line: 'Basic Land — Swamp', cmc: 0 }), 37);
+    for (let i = 0; i < 72; i++) db.addCardToList(list.id, card(`Spell ${i}`, { cmc: i % 7 }));
+    plan.changePlan(list.id, { confirm: true });
+    const names = Array.from({ length: 10 }, (_, i) => `Spell ${i}`);
+    (await import('./cut-review')).saveReview(list.id, { at: new Date().toISOString(), model: 'claude-opus-5-5', instructions: '', over: 10, mode: 'top',
+      items: names.map((name) => ({ name, verdict: 'cut' as const, why: 'test' })) });
+    const route = await import('../app/api/lists/[id]/tune/route');
+    const params = { params: Promise.resolve({ id: list.id }) };
+    const get = async () => (await route.GET(new Request(`http://x/api/lists/${list.id}/tune?intent=cuts&profile=kevin`), params)).json() as Promise<TuneState>;
+    const post = (body: object) => route.POST(new Request(`http://x/api/lists/${list.id}/tune?profile=kevin`, { method: 'POST', body: JSON.stringify(body) }), params);
+
+    const first = (await get()).groups.find((g) => g.key === 'cuts:claude')!;
+    expect(first.items).toHaveLength(10);
+    await post({ action: 'dismiss', keys: [first.items[0].key] });
+    await get();
+    await post({ action: 'stage', items: [first.items[1]] });
+    await get();
+    // A ★ keep elsewhere takes one card out of the group (the cut guards): the rest must stay open, not become "ignored".
+    await post({ action: 'keep', cardId: first.items[9].cut!.id, keep: true });
+    const after = (await get()).groups.find((g) => g.key === 'cuts:claude')!;
+    expect(after.items).toHaveLength(9);
+    await get();
+
+    const log = await import('./suggestion-log');
+    const ai = log.rates().method.find((r) => r.value === 'ai')!;
+    expect(ai).toMatchObject({ shown: 10, refused: 1, accepted: 1, open: 8, ignored: 0 });
+    // Ranks stay as first shown.
+    expect(log.rates().rank.filter((r) => ['1', '2'].includes(r.value)).map((r) => r.shown)).toEqual([expect.any(Number), expect.any(Number)]);
+  });
 });

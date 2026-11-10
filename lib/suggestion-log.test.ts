@@ -53,16 +53,34 @@ describe('the suggestion log', { timeout: 30_000 }, () => {
     expect(log.shareOn('dk')).toBe(false);
   });
 
-  it('logs a group once, and logs it again only when its content changes', async () => {
+  it('keeps a group open while it is shown, adding only suggestions new to it', async () => {
     const { log, list } = await setup();
     log.logShown('dk', list.id, 'tune:cuts:', [batch('tune:cuts:a', ['A', 'B'])]);
     log.logShown('dk', list.id, 'tune:cuts:', [batch('tune:cuts:a', ['A', 'B'])]);
     expect(await count('SELECT COUNT(*) AS n FROM suggestion_events')).toBe(2);
-    expect(await count('SELECT COUNT(*) AS n FROM suggestion_batches')).toBe(1);
-    // A changed group: the old batch closes, its untouched suggestions ignored.
+    // B drops out, C comes in: one new row, nothing closed, nothing ignored.
     log.logShown('dk', list.id, 'tune:cuts:', [batch('tune:cuts:a', ['A', 'C'])]);
+    expect(await count('SELECT COUNT(*) AS n FROM suggestion_events')).toBe(3);
+    expect(await count('SELECT COUNT(*) AS n FROM suggestion_batches')).toBe(1);
+    expect(await count(`SELECT COUNT(*) AS n FROM suggestion_outcomes`)).toBe(0);
+    expect(await count(`SELECT rank AS n FROM suggestion_events WHERE cardOutName = 'C'`)).toBe(2);
+  });
+
+  it('ignores an AI round’s untouched suggestions when a new round replaces it', async () => {
+    const { log, list } = await setup();
+    const ai = (key: string, names: string[]) => batch(key, names, { method: 'ai', model: 'claude-opus-5-5' });
+    log.logShown('dk', list.id, 'tune:cuts:', [ai('tune:cuts:claude@1', ['A', 'B'])]);
+    log.logOutcome(list.id, ['k:A'], 'accepted');
+    log.logShown('dk', list.id, 'tune:cuts:', [ai('tune:cuts:claude@2', ['C'])]);
+    expect(log.rates().method[0]).toMatchObject({ shown: 3, accepted: 1, ignored: 1, open: 1 });
+  });
+
+  it('leaves a rules list’s untouched suggestions undecided when the list goes away', async () => {
+    const { log, list } = await setup();
+    log.logShown('dk', list.id, 'tune:cuts:', [batch('tune:cuts:curve', ['A', 'B'])]);
+    log.logShown('dk', list.id, 'tune:cuts:', []);
     expect(await count('SELECT COUNT(*) AS n FROM suggestion_batches WHERE closedAt IS NOT NULL')).toBe(1);
-    expect(await count(`SELECT COUNT(*) AS n FROM suggestion_outcomes WHERE outcome = 'ignored'`)).toBe(2);
+    expect(log.rates().method[0]).toMatchObject({ shown: 2, ignored: 0, open: 2 });
   });
 
   it('records ranks in the order shown', async () => {

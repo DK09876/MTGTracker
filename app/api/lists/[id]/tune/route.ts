@@ -185,7 +185,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const items = itemsOf(b.items).map((i) => ({ ...i, key: `chat:${i.key}`, add: full(i.add), cut: full(i.cut) })).filter((i) => i.add || i.cut);
       if (!items.length) return NextResponse.json({ error: 'Nothing to send' }, { status: 400 });
       updateTune(id, (s) => {
-        const group = { key: newKey('chat'), title: typeof b.title === 'string' ? b.title.slice(0, 120) : `From Chat · ${items.length}`, why: typeof b.why === 'string' ? b.why.slice(0, 300) : 'Claude proposed these in Chat.', source: 'claude' as const, items, model: null, promptVersion: PROMPT_VERSIONS.chat };
+        const group = { key: newKey('chat'), title: typeof b.title === 'string' ? b.title.slice(0, 120) : `From Chat · ${items.length}`, why: typeof b.why === 'string' ? b.why.slice(0, 300) : 'Claude proposed these in Chat.', source: 'claude' as const, items, model: null, promptVersion: PROMPT_VERSIONS.chat, round: new Date().toISOString() };
         // Chat's groups stack up to three; the latest Tune ideas stay first.
         s.proposals[intent] = [...(s.proposals[intent] ?? []).filter((g) => !g.key.startsWith('chat-')).slice(0, 1), group, ...(s.proposals[intent] ?? []).filter((g) => g.key.startsWith('chat-')).slice(0, 2)];
       });
