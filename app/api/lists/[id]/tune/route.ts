@@ -25,6 +25,7 @@ import { setKeep } from '@/lib/deck-roles';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { getCard } from '@/lib/scryfall';
 import { hasBoard } from '@/lib/sections';
+import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { applyChanges, ref, stage, tuneState, undoApply, unstage, type UndoMoves } from '@/lib/tune';
 import { INTENTS, SYMPTOMS, type Intent, type Suggestion, type Symptom } from '@/lib/tune-shared';
 import { newKey, updateTune } from '@/lib/tune-store';
@@ -90,12 +91,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ ok: true });
     case 'apply': {
       const cutsTo = typeof b.cutsTo === 'string' && b.cutsTo !== 'main' && hasBoard(id, b.cutsTo) ? b.cutsTo : undefined;
-      return NextResponse.json(await applyChanges(list, cutsTo as Parameters<typeof applyChanges>[1]));
+      // A snapshot first: applying Tune's changes is a bulk change.
+      takeSnapshot(id, 'Before applying Tune changes', { profile: owned.profile }, true);
+      const { result } = await recorded(id, { profile: owned.profile }, 'tune', 'Applied Tune changes', () => applyChanges(list, cutsTo as Parameters<typeof applyChanges>[1]));
+      return NextResponse.json(result);
     }
     case 'undo': {
       const undo = b.undo as UndoMoves | undefined;
       if (!undo || !Array.isArray(undo.moves)) return NextResponse.json({ error: 'Nothing to undo' }, { status: 400 });
-      return NextResponse.json(undoApply(list, { moves: undo.moves.slice(0, 400) }));
+      const { result } = await recorded(id, { profile: owned.profile }, 'undo', 'Undid Tune changes', () => undoApply(list, { moves: undo.moves.slice(0, 400) }));
+      return NextResponse.json(result);
     }
     case 'keep': {
       const card = cardsInList(id).find((c) => c.card.id === b.cardId)?.card;

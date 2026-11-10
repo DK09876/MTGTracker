@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 
 import { canPair, isCompanion, type Slot } from '@/lib/commanders';
 import { cardsInList, setSlot, setSlotQuestions, slotQuestions } from '@/lib/db';
+import { batchOf, recorded } from '@/lib/deck-history';
 import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -38,7 +39,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (b.slot === 'companion' && !isCompanion(entry.card)) {
       return NextResponse.json({ error: `${entry.card.name} isn't a companion` }, { status: 400 });
     }
-    setSlot(id, b.cardId, b.slot);
+    const cardId = b.cardId, slot = b.slot;
+    await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'slot', slot ? `${entry.card.name} is the ${slot === 'partner' ? 'second commander' : 'companion'}` : `${entry.card.name} is a card again`, () => setSlot(id, cardId, slot));
     settle(b.slot ?? entry.slot ?? 'partner');
   } else {
     return NextResponse.json({ error: 'cardId and slot, or dismiss, required' }, { status: 400 });

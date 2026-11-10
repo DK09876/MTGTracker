@@ -29,6 +29,7 @@ import { database, getSetting, saveRoles, setSetting, storeCard } from './db';
 import { recordError } from './errors';
 import { recentJobs, startJob, type Job } from './jobs';
 import { canLead } from './import';
+import { rankNames } from './quick-names';
 import { ROLES, ROLES_VERSION, tagSets } from './roles';
 import { collection, type ScryfallCard } from './scryfall';
 
@@ -409,4 +410,24 @@ export function searchLocalText(test: RegExp): ScryfallCard[] {
 /** Every kept card - for building a starter list. A few seconds; call rarely. */
 export function allLocalCards(): ScryfallCard[] {
   return (table().all('SELECT data FROM oracle_cards') as Array<{ data: string }>).map((r) => JSON.parse(r.data) as ScryfallCard);
+}
+
+/**
+ * Cards whose name matches what was typed, for adding by name: from the
+ * copy on the Pi, so every keystroke answers at once. Only cards a
+ * Commander deck can play, inside the colours given (none: any colours).
+ */
+export function quickCards(typed: string, colors: string[] | null, max = 8): ScryfallCard[] {
+  const t = typed.trim().toLowerCase().replace(/[%_]/g, '');
+  if (t.length < 2) return [];
+  const words = t.split(/\s+/).filter(Boolean);
+  // A rough cut in SQL on the longest word, then the real order.
+  const longest = [...words].sort((a, b) => b.length - a.length)[0];
+  const rows = table().all('SELECT data FROM oracle_cards WHERE nameKey LIKE ? OR name LIKE ? LIMIT 1500', [`%${longest}%`, `%${longest}%`]) as Array<{ data: string }>;
+  const allowed = colors ? new Set(colors) : null;
+  const cards = rows.map((r) => JSON.parse(r.data) as ScryfallCard)
+    .filter((c) => !NOT_PLAYABLE.has((c as { layout?: string }).layout ?? ''))
+    .filter((c) => c.legalities?.commander !== 'not_legal')
+    .filter((c) => !allowed || (c.color_identity ?? []).every((x) => allowed.has(x)));
+  return rankNames(cards, typed, max);
 }

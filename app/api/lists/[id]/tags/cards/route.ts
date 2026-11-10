@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 
 import { deckTags, setCardTag } from '@/lib/db';
+import { batchOf, recorded } from '@/lib/deck-history';
 import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -25,6 +26,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (typeof b.cardKey !== 'string' || typeof b.tagId !== 'string' || typeof b.on !== 'boolean') {
     return NextResponse.json({ error: 'cardKey, tagId and on required' }, { status: 400 });
   }
-  if (!setCardTag(id, b.cardKey, b.tagId, b.on)) return NextResponse.json({ error: 'No such tag' }, { status: 404 });
-  return NextResponse.json(deckTags(id));
+  const cardKey = b.cardKey, tagId = b.tagId, on = b.on;
+  const { result: ok, change } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'tag', '', () => setCardTag(id, cardKey, tagId, on));
+  if (!ok) return NextResponse.json({ error: 'No such tag' }, { status: 404 });
+  return NextResponse.json({ ...deckTags(id), change });
 }

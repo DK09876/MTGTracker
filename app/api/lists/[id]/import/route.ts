@@ -6,16 +6,19 @@
  *                     Refused with 422, changing nothing, if any line
  *                     cannot be found. `linked` is Mythic Tools'
  *                     collection-linked list: the deck then holds the
- *                     copies it names (mythic.ts).
+ *                     copies it names (mythic.ts). With {preview: true}
+ *                     nothing is saved: the answer says what would change.
  *
- * "*P*" lines are marked as proxies.
+ * "*P*" lines are marked as proxies. Both are recorded in the deck's
+ * history, and over a deck that already has cards a snapshot is taken first.
  */
 
 import { NextResponse } from 'next/server';
 
-import { getList } from '@/lib/db';
+import { cardsInList, getList } from '@/lib/db';
 import { deckText, DeckLinkError } from '@/lib/deck-links';
-import { importInto, replaceWith } from '@/lib/import-into';
+import { batchOf, countLine, recorded, takeSnapshot } from '@/lib/deck-history';
+import { importInto, previewReplace, replaceWith } from '@/lib/import-into';
 import { linkMythic, markListProxies, mythicDeckText } from '@/lib/mythic';
 import { requireList } from '@/lib/profile-route';
 import { warmRoles } from '@/lib/role-warmup';
@@ -38,8 +41,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const { text } = await deckText(body.decklist);
-    const imported = await importInto(owned.list, text, owned.profile);
-    markListProxies(id, text);
+    if (cardsInList(id).length) takeSnapshot(id, 'Before an import', { profile: owned.profile }, true);
+    const { result: imported } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'import', 'Imported a list', async () => {
+      const r = await importInto(owned.list, text, owned.profile);
+      markListProxies(id, text);
+      return r;
+    });
     warmRoles(owned.list, owned.profile);
     return NextResponse.json({ list: getList(id, owned.profile), imported });
   } catch (error) {
@@ -54,7 +61,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  let body: { decklist?: string; linked?: string };
+  let body: { decklist?: string; linked?: string; preview?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -64,7 +71,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { text } = await deckText(body.decklist ?? '');
-    const result = await replaceWith(owned.list, linked ? mythicDeckText(text, linked) : text);
+    const source = linked ? mythicDeckText(text, linked) : text;
+    if (body.preview) {
+      const preview = await previewReplace(owned.list, source);
+      return NextResponse.json({ preview: { ...preview, summary: countLine(preview.diff) } });
+    }
+    if (cardsInList(id).length) takeSnapshot(id, 'Before saving the list as text', { profile: owned.profile }, true);
+    const { result } = await recorded(id, { profile: owned.profile, batch: batchOf(request) }, 'import', 'Saved the list as text', () => replaceWith(owned.list, source));
     if (!result.applied) {
       return NextResponse.json({ error: 'Some lines could not be found, so nothing was changed', imported: result }, { status: 422 });
     }

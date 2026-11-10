@@ -20,6 +20,8 @@ interface Term {
   op: Comparator;
   value: string;
   negated: boolean;
+  /** An is: word the card itself doesn't answer: left for the caller's words (is:held), reported if none answer it. */
+  callerIs?: boolean;
 }
 
 export interface ParsedQuery {
@@ -52,6 +54,8 @@ function patternOf(value: string): RegExp | null {
   }
 }
 
+const IS_VALUES = new Set(['creature', 'land', 'dfc', 'transform', 'gamechanger', 'gc', 'commander']);
+
 export function parseQuery(input: string): ParsedQuery {
   const terms: Term[] = [];
   const unsupported: string[] = [];
@@ -75,7 +79,10 @@ export function parseQuery(input: string): ParsedQuery {
       unsupported.push(`${key}${op}${value}`);
       continue;
     }
-    terms.push({ key: lower, op: op as Comparator, value: strip(value), negated });
+    // An is: word the card doesn't answer may be the caller's (is:held); if nobody
+    // answers it, filterCards reports it, never a quiet empty list.
+    const callerIs = lower === 'is' && !IS_VALUES.has(strip(value).toLowerCase());
+    terms.push({ key: lower, op: op as Comparator, value: strip(value), negated, ...(callerIs ? { callerIs } : {}) });
   }
 
   return { terms, unsupported };
@@ -169,6 +176,8 @@ function matchesTerm(card: ScryfallCard, term: Term): boolean {
       if (value === 'creature') return typeLineOf(card).toLowerCase().includes('creature');
       if (value === 'land') return typeLineOf(card).toLowerCase().includes('land');
       if (value === 'dfc' || value === 'transform') return (card.card_faces?.length ?? 0) > 1;
+      if (value === 'gamechanger' || value === 'gc') return card.game_changer === true;
+      if (value === 'commander') return /legendary/i.test(typeLineOf(card)) && /creature/i.test(typeLineOf(card));
       return false;
     default:
       return false;
@@ -198,8 +207,9 @@ export function filterCards<T extends { card: ScryfallCard }>(items: T[], query:
   const trimmed = query.trim();
   if (!trimmed) return { results: items, unsupported: [] };
   const parsed = parseQuery(trimmed);
+  const unknown = parsed.terms.filter((t) => t.callerIs && !(is && items.some((item) => is(item, t.value.toLowerCase()) !== undefined)));
   return {
     results: items.filter((item) => matchesQuery(item.card, parsed, is && ((word) => is(item, word)))),
-    unsupported: parsed.unsupported,
+    unsupported: [...parsed.unsupported, ...unknown.map((t) => `${t.negated ? '-' : ''}is:${t.value}`)],
   };
 }

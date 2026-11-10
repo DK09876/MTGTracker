@@ -137,4 +137,60 @@ describe('companions', () => {
     const { entries } = parseDecklist('Commander\n1 Tymna the Weaver\nCompanion\n1 Lurrus of the Dream-Den\nSideboard\n1 Pyroblast');
     expect(entries.map((e) => [e.name, e.section])).toEqual([['Tymna the Weaver', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Pyroblast', 'side']]);
   });
+
+  it('reads Moxfield tags after a card without losing the card', () => {
+    const { entries, unreadable } = parseDecklist([
+      '1 Fire Lord Azula (TLA) 196 *F*',
+      '1 Brainstorm #Cantrip',
+      '1 Sol Ring (C21) 263 #Ramp',
+      '1 Reiterate #Combo #!Wincon',
+      '1 Lightning Greaves *A* #Protection #Card Draw',
+    ].join('\n'));
+    expect(unreadable).toEqual([]);
+    expect(entries.map((e) => [e.name, e.tags])).toEqual([
+      ['Fire Lord Azula', []],
+      ['Brainstorm', ['Cantrip']],
+      ['Sol Ring', ['Ramp']],
+      ['Reiterate', ['Combo', 'Wincon']],
+      ['Lightning Greaves', ['Protection', 'Card Draw']],
+    ]);
+    expect(entries[2]).toMatchObject({ set: 'c21', collectorNumber: '263' });
+    expect(entries[0].finish).toBe('foil');
+  });
+
+  it("turns Archidekt categories into tags, but not boards or card types", () => {
+    const { entries } = parseDecklist([
+      '1x Heliod, Sun-Crowned (thb) 18 [Commander{top}]',
+      '1x Walking Ballista (rna) 4 [Combo,Wincon]',
+      '1x Swords to Plowshares (sta) 10 [Removal,Instant]',
+      '1x Lotus Petal (tmp) 294 [Maybeboard{noDeck}{noPrice},Ramp] ^Have,#37d67a^',
+    ].join('\n'));
+    expect(entries.map((e) => [e.name, e.section, e.tags])).toEqual([
+      ['Heliod, Sun-Crowned', 'commander', []],
+      ['Walking Ballista', 'main', ['Combo', 'Wincon']],
+      ['Swords to Plowshares', 'main', ['Removal']],
+      ['Lotus Petal', 'maybe', ['Ramp']],
+    ]);
+  });
+
+  it('reads TappedOut commander and companion markers', () => {
+    const { entries } = parseDecklist('1x Kroxa, Titan of Death\'s Hunger *CMDR*\n1x Lurrus of the Dream-Den *CMPN*\n1x Sol Ring');
+    expect(entries.map((e) => [e.name, e.section])).toEqual([['Kroxa, Titan of Death\'s Hunger', 'commander'], ['Lurrus of the Dream-Den', 'companion'], ['Sol Ring', 'main']]);
+  });
+
+  it('writes tags and the deck\'s own sections, and reads them back', () => {
+    const c = (name: string, id: string) => ({ id, oracle_id: `o-${id}`, name, set: 'tst', collector_number: id } as never);
+    const text = formatDecklist(c('Kratos, God of War', 'k'), [
+      { card: c('Sol Ring', 'r'), quantity: 1, board: 'main' },
+      { card: c('Lightning Greaves', 'g'), quantity: 1, board: 's-want' },
+    ], 'nonfoil', {
+      tags: { tags: [{ id: 't1', name: 'Ramp' }], cardTags: [{ key: 'o-r', tagId: 't1', on: true }] },
+      sections: [{ id: 's-want', name: 'Wishlist' }],
+    });
+    expect(text).toBe('1x Kratos, God of War (tst) k\n1x Sol Ring (tst) r #Ramp\n\n// Section: Wishlist\n1x Lightning Greaves (tst) g');
+    const { entries } = parseDecklist(text);
+    expect(entries.map((e) => [e.name, e.section, e.own ?? null, e.tags])).toEqual([
+      ['Kratos, God of War', 'main', null, []], ['Sol Ring', 'main', null, ['Ramp']], ['Lightning Greaves', 'own', 'Wishlist', []],
+    ]);
+  });
 });
