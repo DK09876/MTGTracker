@@ -19,7 +19,7 @@ import { filterCards } from './filter';
 import { fitOf, fitProfile, quality, THEMES } from './fit';
 import { gapCards, holdings } from './gap-cards';
 import { goldfish, simCard, simDeck } from './goldfish';
-import { LANDS_FAR_UNDER, landsFarUnder } from './hard-checks';
+import { farUnderLine, landsFarUnder } from './hard-checks';
 import { analyse, deckFlags } from './health';
 import { deckFacts } from './plan-server';
 import { countRoles, fixRoles, ROLES, ROLES_VERSION, type RoleCount } from './roles';
@@ -498,7 +498,7 @@ function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[]
  * (hard-checks.ts): a deliberate 34-land deck can still cut a land.
  */
 export function landFloor(ctx: Pick<Context, 'plan'>): number {
-  return ctx.plan.landNumber.mine ? ctx.plan.lands[0] : ctx.plan.lands[0] - LANDS_FAR_UNDER;
+  return ctx.plan.landNumber.mine ? ctx.plan.lands[0] : farUnderLine(ctx.plan.lands);
 }
 
 /** The guards for this deck: the never-cut cards, its lands against the floor, and a count. */

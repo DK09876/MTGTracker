@@ -426,7 +426,7 @@ function Warnings({ warnings }: { warnings: Warning[] }) {
         <span aria-hidden className="font-bold" style={{ color: STATUS.good }}>✓</span>
         <span className="font-medium">No problems</span>
         <span className="text-[var(--muted)]">— every card legal and in the commander&apos;s colours, no extra copies, card draw in the deck, lands not far under range.</span>
-        <Tip label="What counts as a problem">Only hard failures are warnings here: cards that make the deck not legal, no card draw at all, or lands {LANDS_FAR_UNDER} or more under the low end of the range. Everything else is a number with its range below: being a little outside a range is often on purpose.</Tip>
+        <Tip label="What counts as a problem">Only hard failures are warnings here: cards that make the deck not legal, no card draw at all, or lands {LANDS_FAR_UNDER} or more under the low end of the range (or under 37, if the range starts higher). Everything else is a number with its range below: being a little outside a range is often on purpose.</Tip>
       </p>
     );
   }

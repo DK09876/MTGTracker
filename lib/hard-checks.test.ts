@@ -16,6 +16,16 @@ describe('hard warnings', () => {
     expect(hardWarnings({ lands: { have: 32, range: [37, 38] }, draw: 9, nearlyBuilt: true }).map((w) => w.title)).toEqual(['32 lands, far under 37–38']);
   });
 
+  it('measures from 37 when the range starts higher', () => {
+    // A high-curve deck: the formula wants 41–42, but 37 lands is not far under.
+    expect(landsFarUnder(37, [41, 42])).toBe(false);
+    expect(landsFarUnder(34, [41, 42])).toBe(false);
+    expect(landsFarUnder(33, [41, 42])).toBe(true);
+    // An owner's lower range is still measured from its own low end.
+    expect(landsFarUnder(30, [34, 35])).toBe(true);
+    expect(landsFarUnder(31, [34, 35])).toBe(false);
+  });
+
   it('warns on no card draw at all, not on a little', () => {
     expect(hardWarnings({ lands: null, draw: 0, nearlyBuilt: true }).map((w) => w.title)).toEqual(['No card draw']);
     expect(hardWarnings({ lands: null, draw: 2, nearlyBuilt: true })).toEqual([]);
