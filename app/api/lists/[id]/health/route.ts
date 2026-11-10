@@ -6,7 +6,8 @@
  * page does not wait on them. Main board only.
  */
 
-import { deckRoles } from '@/lib/deck-roles';
+import { deckRoles, deckRolesKnown } from '@/lib/deck-roles';
+import { hardWarnings } from '@/lib/hard-checks';
 import { NextResponse } from 'next/server';
 
 import { cardsInList } from '@/lib/db';
@@ -26,7 +27,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (new URL(request.url).searchParams.get('roles') !== '1') {
     // Lands against the plan's range: the same number Plan and Tune show.
     const plan = planFor(id, '', owned.list.commander, main);
-    return NextResponse.json({ health: analyse({ commander: owned.list.commander, cards: main }), landTarget: plan.lands, landCount: plan.landNumber.have });
+    const health = analyse({ commander: owned.list.commander, cards: main });
+    // Hard failures past legality: no draw (from roles already known, no lookup), lands far under.
+    const draw = await deckRolesKnown(id, main).then((r) => r.find((x) => x.id === 'draw')?.count ?? null).catch(() => null);
+    health.warnings.push(...hardWarnings({ lands: { have: plan.landNumber.have, range: plan.lands }, draw, nearlyBuilt: health.size >= 90 }));
+    return NextResponse.json({ health, landTarget: plan.lands, landCount: plan.landNumber.have });
   }
   try {
     const roles = await deckRoles(id, main);

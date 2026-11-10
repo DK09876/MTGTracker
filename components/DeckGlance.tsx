@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
+import { landsFarUnder } from '@/lib/hard-checks';
 import type { RoleCount } from '@/lib/roles';
 
 type WidgetId = 'curve' | 'lands' | 'ramp' | 'draw' | 'removal' | 'wipe' | 'colours' | 'bracket' | 'good' | 'avgmv' | 'price' | 'combos' | 'gamechangers';
@@ -85,11 +86,10 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
   const save = (next: WidgetId[]) => { setShown(next); try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* fine */ } };
   const h = health?.health;
   const role = (id: string) => roles?.find((r) => r.id === id);
-  // The aim beside the count, the count in amber when it is outside it:
-  // "34 short" read as "34 missing".
-  const off = (have: number, range: [number, number] | null | undefined) => !!range && (have < range[0] || have > range[1]);
-  const status = (have: number, range: [number, number] | null | undefined) =>
-    !range ? null : <span className="text-xs font-normal text-[var(--muted)]">{have < range[0] ? 'low · ' : have > range[1] ? 'high · ' : ''}aim {range[0]}–{range[1]}</span>;
+  // The aim beside the count. Amber only for a hard failure (lib/hard-checks.ts):
+  // lands far under, or no draw at all. A little outside a range is often on purpose.
+  const status = (range: [number, number] | null | undefined) =>
+    !range ? null : <span className="text-xs font-normal text-[var(--muted)]">aim {range[0]}–{range[1]}</span>;
   const stat = (label: string, value: React.ReactNode, note?: React.ReactNode, warn = false) => (
     <span className="flex flex-col whitespace-nowrap text-xs text-[var(--muted)]">{label}<b className={`text-base font-semibold tabular-nums ${warn ? 'text-amber-300' : 'text-[var(--foreground)]'}`}>{value} {note}</b></span>
   );
@@ -109,17 +109,17 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
           </span>
         );
       }
-      case 'lands': return h ? stat('Lands', h.lands, status(h.lands, plan?.lands), off(h.lands, plan?.lands)) : null;
+      case 'lands': return h ? stat('Lands', h.lands, status(plan?.lands), !!plan?.lands && h.size >= 90 && landsFarUnder(health?.landCount ?? h.lands, plan.lands)) : null;
       case 'ramp': case 'draw': case 'removal': case 'wipe': {
         const r = role(id);
-        return r ? stat(r.label, r.count, status(r.count, r.target), off(r.count, r.target)) : null;
+        return r ? stat(r.label, r.count, status(r.target), id === 'draw' && r.count === 0 && (h?.size ?? 0) >= 90) : null;
       }
       case 'colours': {
         if (!h) return null;
         // No coloured spells yet: nothing to judge.
         if (!h.colors.some((c) => c.needed !== null)) return stat('Colours', <span className="text-[var(--muted)]">—</span>);
-        const short = h.colors.filter((c) => c.needed !== null && c.sources < c.needed - 1);
-        return stat('Colours', short.length ? <span className="flex items-center gap-1 text-amber-300">{short.map((c) => <ManaCost key={c.color} cost={`{${c.color}}`} size={14} />)}<span className="text-xs font-normal">needs sources</span></span> : <span className="text-emerald-400">✓ enough</span>);
+        // Sources against what each colour's hungriest spell wants: numbers, not a verdict.
+        return stat('Colours', <span className="flex items-center gap-2 text-sm">{h.colors.filter((c) => c.needed !== null).map((c) => <span key={c.color} className="flex items-center gap-0.5"><ManaCost cost={`{${c.color}}`} size={14} />{Math.round(c.sources)}/{c.needed}</span>)}</span>);
       }
       case 'bracket': return insights?.bracket ? stat('Bracket', insights.bracket.floor === 1 ? '1–2' : insights.bracket.floor) : null;
       case 'good': return good === null ? stat('Good start', <span className="text-xs font-normal text-[var(--muted)]">not tested yet</span>) : stat('Good start', `${Math.round(good * 100)}%`);

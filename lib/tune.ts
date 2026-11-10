@@ -19,14 +19,16 @@ import { filterCards } from './filter';
 import { fitOf, fitProfile, quality, THEMES } from './fit';
 import { gapCards, holdings } from './gap-cards';
 import { goldfish, simCard, simDeck } from './goldfish';
+import { LANDS_FAR_UNDER, landsFarUnder } from './hard-checks';
 import { analyse, deckFlags } from './health';
 import { deckFacts } from './plan-server';
-import { countRoles, ROLES, ROLES_VERSION, type RoleCount } from './roles';
+import { countRoles, fixRoles, ROLES, ROLES_VERSION, type RoleCount } from './roles';
 import { getCard, imageOf, manaCostOf, type ScryfallCard } from './scryfall';
+import { guardCuts, type GuardRules } from './cut-guard';
 import { cutBoard, type DeckSection } from './sections-shared';
 import { sectionsOf } from './sections';
 import { starterList } from './starter';
-import { replacements, upgrades, type DeckCard } from './swaps';
+import { sameJob, type DeckCard } from './swaps';
 import { tuneStore, updateTune, newKey, type TuneStore } from './tune-store';
 import {
   cutsLeft, suggestedIntent, type CardRef, type Changes, type CutFilter, type How, type Impact, type Intent, type Staged, type Suggestion, type SuggestionGroup, type Symptom,
@@ -101,7 +103,7 @@ function knownRoles(cards: ScryfallCard[]): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const c of cards) {
     const text = [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
-    out.set(c.oracle_id ?? c.id, [...new Set([...(roles.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(text)).map((r) => r.id)])]);
+    out.set(c.oracle_id ?? c.id, [...new Set([...fixRoles(c, roles.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(text)).map((r) => r.id)])]);
   }
   return out;
 }
@@ -203,7 +205,7 @@ export async function impactOf(ctx: Context, changes: Changes): Promise<Impact> 
 // --- shared pieces for the suggestions ------------------------------------------------
 
 /** The deck's cards as the swap engine reads them. */
-function deckCards(ctx: Context, scores: Map<string, number> = new Map()): DeckCard[] {
+function deckCards(ctx: Context): DeckCard[] {
   const themes = ctx.plan.snapshot.themes ?? [];
   const routeCards = new Set(ctx.plan.snapshot.routeCards ?? []);
   return ctx.main.filter((c) => c.slot !== 'partner').map((c) => {
@@ -215,7 +217,6 @@ function deckCards(ctx: Context, scores: Map<string, number> = new Map()): DeckC
       plan: [...ctx.styles.filter((s) => s.test.test(text)).map((s) => s.label), ...themes.filter((t) => t.cards.includes(c.card.name)).map((t) => t.name)],
       protected: ctx.protectedWhy.get(c.card.name) ?? null,
       route: routeCards.has(c.card.name),
-      cutScore: scores.get(c.card.name),
     };
   });
 }
@@ -412,7 +413,7 @@ async function findGroups(ctx: Context): Promise<{ groups: SuggestionGroup[]; pi
     const lp = landPlan(ctx);
     const landsShort = Math.max(0, Math.ceil(lp.range[0] - lp.have));
     if (landsShort) groups.push({ key: 'find:pile:lands', title: `Lands · ${landsShort}`, why: `Whatever else changes, the plan wants ${lp.range[0]}–${lp.range[1]} lands.`, source: 'rules', items: landPlanFor(ctx, landsShort) });
-    groups.push(...poolSwaps(ctx, 'find:best', 'Maybeboard cards that beat cards in the deck', 12, 1));
+    groups.push(...poolSwaps(ctx, 'find:best', 12));
     return { groups, pile };
   }
   // Jobs under their range.
@@ -457,20 +458,26 @@ function shortJobBonus(ctx: Context, card: ScryfallCard): number {
   }, 0);
 }
 
-// --- Swaps and upgrades -------------------------------------------------------------
+// --- Same job (the Swaps tab) -------------------------------------------------------
 
-function poolSwaps(ctx: Context, prefix: string, title: string, max: number, minScore = -Infinity, scores: Map<string, number> = new Map()): SuggestionGroup[] {
-  const cards = deckCards(ctx, scores);
+/**
+ * For each card waiting in a "Might go in" section, the deck cards doing the
+ * same job at about the same cost. A lookup to help the owner choose, not a
+ * recommendation: rules-ranked swaps made decks worse three times in four.
+ * The section's cards are in the order they sit there, by name.
+ */
+function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[] {
+  const cards = deckCards(ctx);
   const jobs = ctx.jobs.map((j) => ({ id: j.id, label: j.label, count: j.count, range: j.range }));
-  const pool = ctx.pool.filter((p) => !isLand(p.card)).map((p) => ({ p, s: rank(ctx, p.card).score })).sort((a, b) => b.s - a.s).slice(0, max);
+  const pool = ctx.pool.filter((p) => !isLand(p.card)).sort((a, b) => a.card.name.localeCompare(b.card.name)).slice(0, max);
   const groups: SuggestionGroup[] = [];
-  for (const { p } of pool) {
+  for (const p of pool) {
     const roles = ctx.rolesOf(p.card);
-    const options = replacements({ card: p.card, roles, jobs: cardJobs(p.card, roles), plan: planOf(ctx, p.card) }, cards, jobs, 3).filter((o) => o.score >= minScore);
+    const options = sameJob({ card: p.card, roles, jobs: cardJobs(p.card, roles), plan: planOf(ctx, p.card) }, cards, jobs, 3);
     if (!options.length) continue;
     const section = ctx.sections.find((s) => s.id === p.board)?.name ?? 'Maybeboard';
     groups.push({
-      key: `${prefix}:${p.card.name}`, title: `${p.card.name} could replace…`, why: `In your ${section}. ${reasonText(ctx, p.card)}.`, source: 'rules', pickOne: true,
+      key: `${prefix}:${p.card.name}`, title: `${p.card.name}: same job in the deck`, why: `In your ${section}. Deck cards doing the same job at about the same cost, closest cost first. Not ranked: whether a swap helps is your call.`, source: 'rules', pickOne: true,
       items: options.map((o) => ({
         key: `${prefix}:${p.card.name}:${o.out.card.name}`,
         add: { ...ref(p.card, { from: p.board, where: `in your ${section}` }), quantity: 1 },
@@ -479,28 +486,40 @@ function poolSwaps(ctx: Context, prefix: string, title: string, max: number, min
       })),
     });
   }
-  if (groups.length && title) groups[0] = { ...groups[0] };
   return groups;
 }
 
-function upgradeGroups(ctx: Context): SuggestionGroup[] {
-  const room = gcRoomOf(ctx);
-  // Candidates: cards in the deck's colours doing a job, from the card data.
-  const jobRoles = ['ramp', 'draw', 'removal', 'counter', 'wipe', 'protection'];
-  const all = allLocalCards().filter((c) => !isLand(c));
-  const known = knownRoles(all.filter((c) => (c.color_identity ?? []).every((x) => ctx.identity.has(x))));
-  const candidates = addable(ctx, all.filter((c) => (known.get(c.oracle_id ?? c.id) ?? []).some((r) => jobRoles.includes(r))), room)
-    .map((card) => { const roles = known.get(card.oracle_id ?? card.id) ?? []; return { card, roles, jobs: cardJobs(card, roles), where: whereOf(ctx, card), plan: planOf(ctx, card) }; });
-  const found = upgrades(deckCards(ctx), candidates, ['ramp', 'draw', 'interaction', 'protection'], 3).slice(0, 10);
-  if (!found.length) return [];
-  return [{
-    key: 'swaps:upgrades', title: `Upgrades · ${found.length}`, why: `Better cards for jobs the deck already does${ctx.plan.own ? ', from cards you own' : ', your own copies first'}.`, source: 'rules',
-    items: found.map((u) => ({
-      key: `swaps:up:${u.add.card.name}:${u.out.card.name}`,
-      add: { ...ref(u.add.card, { where: u.add.where }), quantity: 1 }, cut: { ...ref(u.out.card, { from: 'main' }), quantity: 1 },
-      why: u.why, how: u.how,
-    })),
-  }];
+// --- Guards on every cut list ----------------------------------------------------------
+
+/**
+ * The fewest lands a cut may leave. The owner's own range (or a change to the
+ * usual rules they set) is theirs to keep to. Otherwise the formula's range
+ * is only a guide, so the floor is where the deck counts as far under
+ * (hard-checks.ts): a deliberate 34-land deck can still cut a land.
+ */
+export function landFloor(ctx: Pick<Context, 'plan'>): number {
+  return ctx.plan.landNumber.mine ? ctx.plan.lands[0] : ctx.plan.lands[0] - LANDS_FAR_UNDER;
+}
+
+/** The guards for this deck: the never-cut cards, its lands against the floor, and a count. */
+function guardRules(ctx: Context, count: number | null): GuardRules {
+  return { count, lands: { have: ctx.plan.landNumber.have, floor: landFloor(ctx) }, never: ctx.protectedWhy };
+}
+
+/** Claude's Tune proposals through the guards: cut-only items lose never-cut cards and lands under the floor, and Cuts keeps no more than the deck is over. */
+function guardProposals(ctx: Context, intent: Intent, groups: SuggestionGroup[]): SuggestionGroup[] {
+  const byName = new Map(ctx.main.map((c) => [c.card.name, c.card]));
+  return groups.map((g) => {
+    const cuts = g.items.filter((i) => i.cut && !i.add && !i.keep);
+    if (!cuts.length) return g;
+    const { kept, dropped } = guardCuts(cuts.map((i) => ({ name: i.cut!.name, land: !!byName.get(i.cut!.name) && isLand(byName.get(i.cut!.name)!), quantity: i.cut!.quantity, item: i })),
+      guardRules(ctx, intent === 'cuts' ? Math.max(0, ctx.size - 100) : null));
+    const keep = new Set(kept.map((k) => k.item.key));
+    const items = g.items.filter((i) => !(i.cut && !i.add && !i.keep) || keep.has(i.key))
+      // A swap never takes a never-cut card either.
+      .filter((i) => !(i.cut && i.add && ctx.protectedWhy.has(i.cut.name)));
+    return dropped.length ? { ...g, items, why: `${g.why} Left out by the app's guards: ${dropped.map((d) => `${d.item.name} (${d.why})`).join('; ')}.` } : { ...g, items };
+  });
 }
 
 // --- Cuts -------------------------------------------------------------------------------
@@ -534,9 +553,11 @@ async function cutGroups(ctx: Context, landCut: string | null): Promise<{ groups
   if (bracketCards.length) groups.push({ key: 'cuts:bracket', title: `Over your bracket · ${bracketCards.length}`, why: `Bracket ${ctx.plan.bracket} allows ${ctx.gcLimit} Game Changer${ctx.gcLimit === 1 ? '' : 's'}; the deck has ${ctx.gcLimit! + gcOver}.`, source: 'rules', filter: 'bracket', items: bracketCards.map((c) => cutItem(c, `cuts:gc:${c.name}`, 'A Game Changer past what your bracket allows')) });
   // The rules' list, each card in the filter of its strongest reason.
   const filtered: Record<string, Suggestion[]> = {};
+  // The rules' list goes through the same guards as Claude's: no never-cut cards, no lands under the floor.
+  const allowed = new Set(guardCuts(cut.candidates.map((c) => ({ name: c.name, land: !!byId.get(c.cardId) && isLand(byId.get(c.cardId)!) })), guardRules(ctx, null)).kept.map((c) => c.name));
   for (const c of cut.candidates) {
     const card = byId.get(c.cardId);
-    if (!card) continue;
+    if (!card || !allowed.has(c.name)) continue;
     const strongest = [...c.why].filter((r) => r.delta > 0).sort((a, b) => b.delta - a.delta);
     let filter: CutFilter = 'other';
     for (const r of strongest) {
@@ -559,16 +580,19 @@ async function cutGroups(ctx: Context, landCut: string | null): Promise<{ groups
   const review = lastReview(ctx.list.id);
   if (review?.items.length) {
     const inMain = new Map(ctx.main.map((c) => [c.card.name, c.card]));
-    const items = review.items.filter((i) => inMain.has(i.name)).map((i): Suggestion => (i.verdict === 'keep'
+    // Guards: never-cut cards and lands under the floor drop out; past the count, a "cut" is only a maybe.
+    const over = Math.max(0, ctx.size - 100);
+    const asked = review.items.filter((i) => inMain.has(i.name) && i.verdict !== 'keep');
+    const sure = guardCuts(asked.filter((i) => i.verdict === 'cut').map((i) => ({ ...i, land: isLand(inMain.get(i.name)!) })), guardRules(ctx, over));
+    const maybe = guardCuts(asked.filter((i) => i.verdict !== 'cut').map((i) => ({ ...i, land: isLand(inMain.get(i.name)!) })), guardRules(ctx, null));
+    const out = new Set([...sure.dropped.filter((d) => !d.why.startsWith('past')), ...maybe.dropped].map((d) => d.item.name));
+    const extra = new Set(sure.dropped.filter((d) => d.why.startsWith('past')).map((d) => d.item.name));
+    const items = review.items.filter((i) => inMain.has(i.name) && !out.has(i.name)).map((i) => (extra.has(i.name) ? { ...i, verdict: 'unsure' as const, past: true } : { ...i, past: false })).map((i): Suggestion => (i.verdict === 'keep'
       ? { key: `cuts:claude:${i.name}`, keep: true, cut: { ...ref(inMain.get(i.name)!, { from: 'main' }), quantity: 1 }, why: `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}` }
-      : { ...cutItem(inMain.get(i.name)!, `cuts:claude:${i.name}`, `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}`), ...(i.verdict === 'unsure' ? { warn: 'Claude is unsure' } : {}) }))
+      : { ...cutItem(inMain.get(i.name)!, `cuts:claude:${i.name}`, `${i.tier ? `Tier ${i.tier}. ` : ''}${i.why}`), ...(i.past ? { warn: `Claude marked it a cut, past the ${over} the deck is over` } : i.verdict === 'unsure' ? { warn: 'Claude is unsure' } : {}) }))
       .sort((a, b) => Number(!!a.keep) - Number(!!b.keep));
     if (items.length) groups.push({ key: 'cuts:claude', title: `Claude’s review · ${items.length}`, why: `From ${new Date(review.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${review.instructions ? `, with your instructions: “${review.instructions}”` : ''}. Keep means ★ keep: never offered as a cut again.`, source: 'claude', items });
   }
-  // Challengers: cards you might add that beat a card in the deck.
-  const scores = new Map(cut.candidates.map((c) => [c.name, c.score]));
-  const challengers = poolSwaps(ctx, 'cuts:swap', '', 4, 0.5, scores);
-  for (const g of challengers) groups.push({ ...g, key: g.key, title: g.title, filter: undefined });
   const counts: Record<string, number> = {};
   for (const g of groups) if (g.filter) counts[g.filter] = (counts[g.filter] ?? 0) + g.items.length;
   counts.all = cut.candidates.length + flags.length;
@@ -693,7 +717,8 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
   const badges: Partial<Record<Intent, string>> = {};
   if (after > 100) badges.cuts = String(after - 100);
   const landsShort = Math.ceil(lp.range[0] - lp.have);
-  if (landsShort > 0) badges.lands = `${landsShort} short`;
+  // A badge only for a hard failure: lands far under (lib/hard-checks.ts).
+  if (ctx.size >= 90 && landsFarUnder(lp.have, lp.range)) badges.lands = `${landsShort} under`;
   if (poolCount && ctx.size >= 95) badges.swaps = String(ctx.pool.filter((p) => !isLand(p.card)).length);
   const flags = deckFlags({ commander: list.commander, cards: ctx.main }).filter((f) => !f.commander).length;
   if (flags && !badges.cuts) badges.cuts = `${flags} flagged`;
@@ -710,13 +735,13 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
     out.finish = { picks, showRules: !!ctx.store.finishShowRules, claudeReady: claude.length > 0, claudeEmpty: !claude.length && !!ctx.store.finishEmpty };
   }
   else if (intent === 'find') { const f = await findGroups(ctx); groups = f.groups; out.pile = f.pile; }
-  else if (intent === 'swaps') groups = [...poolSwaps(ctx, 'swaps', '', 12), ...upgradeGroups(ctx)];
+  else if (intent === 'swaps') groups = poolSwaps(ctx, 'swaps', 12);
   else if (intent === 'cuts') { const c = await cutGroups(ctx, lp.landCut); groups = [...c.groups]; if (lp.have > lp.range[1]) groups.splice(flags ? 1 : 0, 0, ...lp.groups.map((g) => ({ ...g, filter: 'other' as CutFilter }))); out.cuts = { counts: c.counts, type: c.type, curve: c.curve, settings: c.settings, overridden: c.overridden }; }
   else if (intent === 'fix') { const symptom = opts.symptom ?? 'gas'; const f = await fixGroups(ctx, symptom); groups = f.groups; out.fix = { symptom, evidence: f.evidence }; }
   else if (intent === 'lands') groups = lp.groups;
   if (intent === 'lands') out.lands = { have: lp.have, range: lp.range, want: lp.want, how: lp.how, mine: lp.mine, colors: lp.colors };
   // Claude's proposals for this intent join the rules' groups.
-  if (intent !== 'finish') groups = [...(ctx.store.proposals[intent] ?? []), ...groups];
+  if (intent !== 'finish') groups = [...guardProposals(ctx, intent, ctx.store.proposals[intent] ?? []), ...groups];
   const cutsTo = cutBoard(ctx.sections);
   return {
     intent, suggested, size: ctx.size, pool: poolCount, badges,
@@ -736,11 +761,12 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
  * Cuts on their own stop where the deck would drop under 100: the rest are
  * left, and the answer says how many were.
  */
-export async function stage(list: List, profileId: string, items: Suggestion[]): Promise<{ staged: number; capped: number }> {
+export async function stage(list: List, profileId: string, items: Suggestion[]): Promise<{ staged: number; capped: number; blocked: number }> {
   const ctx = await tuneContext(list, profileId);
   let { changes } = ctx.store;
   let staged = 0;
   let capped = 0;
+  let blocked = 0;
   const known = new Map(ctx.all.map((c) => [c.card.id, c.card]));
   const valid = (r: CardRef | undefined, mustBeIn: boolean) => {
     if (!r) return null;
@@ -755,6 +781,12 @@ export async function stage(list: List, profileId: string, items: Suggestion[]):
     if (item.add && !addCard) continue;
     if (item.cut && !cutCard) continue;
     if (cutCard && ctx.protectedWhy.get(cutCard.name) === 'commander') continue;
+    // The guards, whatever offered the cut: never a never-cut card; never a land under the floor unless a land comes in.
+    if (cutCard && !item.keep && ctx.protectedWhy.has(cutCard.name)) { blocked += 1; continue; }
+    if (cutCard && isLand(cutCard) && !(addCard && isLand(addCard))) {
+      const landsCut = changes.cut.filter((c) => { const k = known.get(c.card.id); return k && isLand(k); }).reduce((n, c) => n + c.quantity, 0);
+      if (ctx.plan.landNumber.have - landsCut - (item.cut?.quantity ?? 1) < landFloor(ctx)) { blocked += 1; continue; }
+    }
     const sizeAfter = (await impactOf(ctx, changes)).size.after;
     if (cutCard && !addCard && cutsLeft(sizeAfter) < (item.cut?.quantity ?? 1)) { capped += 1; continue; }
     const pairKey = addCard && cutCard ? newKey('pair') : undefined;
@@ -765,7 +797,7 @@ export async function stage(list: List, profileId: string, items: Suggestion[]):
     staged += 1;
   }
   updateTune(list.id, (s) => { s.changes = changes; });
-  return { staged, capped };
+  return { staged, capped, blocked };
 }
 
 /** Take staged cards back out of your changes: by staged key or by the suggestion they came from. A swap goes as a pair. */

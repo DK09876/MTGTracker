@@ -24,7 +24,7 @@ import { Database } from 'node-sqlite3-wasm';
 import { giveBack, settle } from './collection';
 import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
-import type { Finish, ScryfallCard } from './scryfall';
+import { normalizeCard, type Finish, type ScryfallCard } from './scryfall';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Turn } from './rules/answer';
 import type { TagJob } from './tag-jobs';
@@ -337,6 +337,7 @@ function open(): Database {
   if (!columns.some((c) => c.name === 'tagOverview')) {
     db.run(`ALTER TABLE lists ADD COLUMN tagOverview TEXT NOT NULL DEFAULT ''`);
   }
+  normalizeStoredCards(db);
   return db;
 }
 
@@ -430,7 +431,7 @@ export function listLists(profileId: string, kind?: ListKind): List[] {
   `, [profileId, kind ?? null, kind ?? null]) as unknown as Array<Omit<List, 'commander'> & { commanderData: string | null }>;
   return rows.map(({ commanderData, ...row }) => ({
     ...row,
-    commander: commanderData ? (JSON.parse(commanderData) as ScryfallCard) : null,
+    commander: commanderData ? normalizeCard(JSON.parse(commanderData) as ScryfallCard) : null,
   }));
 }
 
@@ -592,7 +593,19 @@ export interface ListedCard {
 export const database = (): Database => open();
 
 /** Store (or refresh) a card's whole Scryfall record. */
-export function storeCard(card: ScryfallCard): void {
+/**
+ * Cards stored before normalizeCard existed: reversible printings with no
+ * type line of their own. Reversible printings are few (a handful of lands
+ * and Secret Lair cards), so finding them by text on each start is cheap.
+ */
+function normalizeStoredCards(database: Database): void {
+  const rows = database.all(`SELECT id, data FROM cards WHERE data LIKE '%"reversible_card"%'`) as Array<{ id: string; data: string }>;
+  const fixable = rows.map((r) => ({ id: r.id, card: JSON.parse(r.data) as ScryfallCard })).filter((r) => !r.card.type_line && r.card.card_faces?.[0]?.type_line);
+  for (const r of fixable) database.run('UPDATE cards SET data = ? WHERE id = ?', [JSON.stringify(normalizeCard(r.card)), r.id]);
+}
+
+export function storeCard(given: ScryfallCard): void {
+  const card = normalizeCard(given);
   const usd = card.prices?.usd ?? card.prices?.usd_foil ?? null;
   open().run(
     `INSERT INTO cards (id, name, setCode, rarity, usd, data, fetchedAt)
@@ -803,21 +816,27 @@ export function listsHolding(cardIds: string[], profileId: string | null): Recor
 // --- card roles ----------------------------------------------------------
 
 /** Roles already known for these cards, and which were looked up since `since` under this `version` of the roles. */
+/** How many ids go in one `IN (...)`: well under SQLite's limit on variables. */
+export const IN_CHUNK = 500;
+
 export function cachedRoles(oracleIds: string[], since: string, version: number): { roles: Map<string, string[]>; checked: Set<string> } {
   const roles = new Map<string, string[]>();
   const checked = new Set<string>();
   if (!oracleIds.length) return { roles, checked };
   const database = open();
-  const marks = oracleIds.map(() => '?').join(',');
-  const current = database.all(
-    `SELECT oracleId FROM card_roles_checked WHERE checkedAt >= ? AND version = ? AND oracleId IN (${marks})`,
-    [since, version, ...oracleIds],
-  ) as Array<{ oracleId: string }>;
-  for (const row of current) {
-    checked.add(row.oracleId);
-  }
-  for (const row of database.all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${marks})`, oracleIds) as Array<{ oracleId: string; role: string }>) {
-    roles.set(row.oracleId, [...(roles.get(row.oracleId) ?? []), row.role]);
+  // In parts: every card in five colours is tens of thousands of ids, past
+  // what one SQLite statement takes ("too many SQL variables").
+  for (let i = 0; i < oracleIds.length; i += IN_CHUNK) {
+    const part = oracleIds.slice(i, i + IN_CHUNK);
+    const marks = part.map(() => '?').join(',');
+    const current = database.all(
+      `SELECT oracleId FROM card_roles_checked WHERE checkedAt >= ? AND version = ? AND oracleId IN (${marks})`,
+      [since, version, ...part],
+    ) as Array<{ oracleId: string }>;
+    for (const row of current) checked.add(row.oracleId);
+    for (const row of database.all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${marks})`, part) as Array<{ oracleId: string; role: string }>) {
+      roles.set(row.oracleId, [...(roles.get(row.oracleId) ?? []), row.role]);
+    }
   }
   return { roles, checked };
 }

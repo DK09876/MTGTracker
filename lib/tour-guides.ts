@@ -50,7 +50,7 @@ const DECK_STEPS: TourStep[] = [
 
   { target: 'basic-roles', title: 'Your tags', body: 'Under the plan: the built-in tags from Scryfall, for free, and your own. Theme tags become the plan\'s themes; a tag named for a job (Ramp, Draw) stays a tag. Have Claude suggest tags and put them on the cards, or make your own.' },
 
-  { click: [tab('tune')], target: 'tune-intents', title: 'Tune: what do you want to do?', body: 'Finish the deck, find cards, swaps and upgrades, cuts, fix a problem, or lands. The deck\'s size picks one for you - marked "suggested" - and you can switch any time.' },
+  { click: [tab('tune')], target: 'tune-intents', title: 'Tune: what do you want to do?', body: 'Finish the deck, find cards, swaps, cuts, fix a problem, or lands. The deck\'s size picks one for you - marked "suggested" - and you can switch any time.' },
   { target: 'tune-changes', title: 'Your changes', body: 'Everything you accept lands here: cards to add, cards to cut, swaps paired up, and what they would do to the deck\'s numbers. Nothing touches the deck until you press Apply; cuts go to the section for cards that came out, with their reason.' },
   { target: 'tune-groups', title: 'Suggestions wait for you', body: 'Each group says why it is there. Accept a whole group or single cards, save a group to a section for later, or dismiss it. How? on a card shows what went in and which rules moved it.' },
   { click: [tab('tune'), '[data-intent="cuts"]'], target: 'tune-groups', title: 'Cuts', body: 'Where to find room, in the order to look: flagged cards, a heavy curve, your bracket, jobs over their range, cards off the plan. Cuts on their own stop at 100; past that, a cut needs an add.' },
@@ -134,7 +134,7 @@ export const GUIDES: Guide[] = [
     title: 'A deck',
     help: [
       'Start with Plan: what the deck does, its style, flip turn and guidelines. Everything else reads it. Cards: the list, grouped by type or tags.',
-      'Tune: pick what you want to do - finish the deck, find cards, swaps and upgrades, cuts, fix a problem, lands. Suggestions wait until you accept them into Your changes, which you apply. Check: Health and Playtest, the deck\'s numbers. Your tags live under the plan; Cards shows which cards you own.',
+      'Tune: pick what you want to do - finish the deck, find cards, swaps, cuts, fix a problem, lands. Suggestions wait until you accept them into Your changes, which you apply. Check: Health and Playtest, the deck\'s numbers. Your tags live under the plan; Cards shows which cards you own.',
       'The ⋯ menu imports a list or a link, exports, sets the card size, renames, duplicates, changes the commander, and shows the deck on your profile.',
     ],
     steps: DECK_STEPS,

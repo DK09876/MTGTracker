@@ -108,6 +108,40 @@ export const ROLES: Role[] = [
   { id: 'sac-outlet', label: 'Sac outlets', group: 'plan', tag: 'otag:sac-outlet', target: null },
 ];
 
+const REPEAT = /\b(whenever|at the beginning of)\b/i;
+// Ramp some other way than a Treasure: a mana ability, mana added, a land fetched or put in, cheaper spells.
+const OTHER_RAMP = /\{T\}(,[^:]*)?: add\b|\badd (\{|one mana|two mana|three mana|an amount|X mana|mana)|search your library for [^.]*\bland|put [^.]*\bland cards? [^.]*onto the battlefield|play an additional land|spells? you cast cost/i;
+
+/**
+ * Makes a Treasure once - Big Score, Deadly Dispute, an enters trigger -
+ * and ramps no other way. Scryfall tags these ramp, so a Signet looked
+ * replaceable by any one-shot Treasure spell; one Treasure is a burst, not
+ * ramp. Repeatable makers (a "whenever" or "at the beginning of" trigger,
+ * an activated ability that can be used again) stay ramp. A mode line
+ * ("• Create a Treasure token") belongs to the trigger above it.
+ */
+export function oneShotTreasure(card: ScryfallCard): boolean {
+  const text = [card.oracle_text, ...(card.oracle_text ? [] : (card.card_faces ?? []).map((f) => f.oracle_text))].filter(Boolean).join('\n').replace(/\([^)]*\)/g, '');
+  const lines = text.split('\n');
+  let lead = '';
+  const creating: string[] = [];
+  for (const line of lines) {
+    if (!/^\s*•/.test(line)) lead = line;
+    if (/\btreasure/i.test(line) && /\bcreates?\b/i.test(line)) creating.push(/^\s*•/.test(line) ? `${lead}\n${line}` : line);
+  }
+  if (!creating.length || OTHER_RAMP.test(text)) return false;
+  const activated = (l: string) => {
+    const cost = l.match(/^([^:"“\n]*):\s/)?.[1];
+    return cost !== undefined && !/\b(discard|sacrifice|exile|return) (this|it)\b/i.test(cost);
+  };
+  return !creating.some((l) => REPEAT.test(l) || activated(l));
+}
+
+/** A card's roles with the one fix the tags need: a one-shot Treasure maker is not ramp. */
+export function fixRoles(card: ScryfallCard, roles: string[]): string[] {
+  return roles.includes('ramp') && oneShotTreasure(card) ? roles.filter((r) => r !== 'ramp') : roles;
+}
+
 /**
  * Bumped whenever a role's search changes, so saved answers from the old
  * definition are looked up again rather than trusted.
@@ -194,7 +228,7 @@ export async function countRoles(cards: Array<{ card: ScryfallCard; quantity: nu
 
   return ROLES.map((role) => {
     // Lands are counted as lands, whatever else they do.
-    const members = withIds.filter((c) => ((known.get(c.card.oracle_id!) ?? []).includes(role.id)
+    const members = withIds.filter((c) => (fixRoles(c.card, known.get(c.card.oracle_id!) ?? []).includes(role.id)
       || (role.text?.test(oracleTextOf(c.card)) ?? false))
       && primaryType(c.card) !== 'Lands');
     return {

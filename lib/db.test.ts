@@ -309,3 +309,38 @@ describe('duplicating a deck', () => {
     expect(db.deckTags(deck.id).tags).toHaveLength(1);
   });
 });
+
+describe('reversible cards and long id lists', () => {
+  // Steam Vents // Steam Vents as Scryfall sends it: type line, text and oracle id only on the faces.
+  const face = { name: 'Steam Vents', oracle_id: 'o-vents', cmc: 0, type_line: 'Land — Island Mountain', oracle_text: '({T}: Add {U} or {R}.)' };
+  const vents = { id: 'vents', name: 'Steam Vents // Steam Vents', layout: 'reversible_card', produced_mana: ['U', 'R'], card_faces: [face, face] } as unknown as ScryfallCard;
+
+  it('stores a reversible card with its front face copied up', async () => {
+    const db = await load();
+    const list = db.createList('dk', 'Deck');
+    db.addCardToList(list.id, vents);
+    const stored = db.cardsInList(list.id)[0].card;
+    expect(stored).toMatchObject({ type_line: 'Land — Island Mountain', oracle_id: 'o-vents', cmc: 0 });
+  });
+
+  it('fixes reversible cards stored before, on the next start', async () => {
+    const raw = new Database(path);
+    raw.run('CREATE TABLE cards (id TEXT PRIMARY KEY, name TEXT NOT NULL, setCode TEXT, rarity TEXT, usd REAL, data TEXT NOT NULL, fetchedAt TEXT NOT NULL)');
+    raw.run('INSERT INTO cards (id, name, data, fetchedAt) VALUES (?, ?, ?, ?)', ['vents', vents.name, JSON.stringify(vents), 'x']);
+    raw.close();
+    await load().then((db) => db.listLists('dk'));
+    const check = new Database(path);
+    const row = check.get('SELECT data FROM cards WHERE id = ?', ['vents']) as { data: string };
+    check.close();
+    expect(JSON.parse(row.data)).toMatchObject({ type_line: 'Land — Island Mountain', oracle_id: 'o-vents' });
+  });
+
+  it('looks up roles for more cards than one SQLite statement takes', async () => {
+    const db = await load();
+    // Every card in five colours: past SQLite's limit of 32,766 variables in one statement.
+    const ids = Array.from({ length: 40_000 }, (_, i) => `o-${i}`);
+    db.saveRoles(new Map([['o-39999', ['ramp']]]), 1);
+    const { roles } = db.cachedRoles(ids, '1970-01-01', 1);
+    expect(roles.get('o-39999')).toEqual(['ramp']);
+  });
+});

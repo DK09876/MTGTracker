@@ -9,10 +9,10 @@
 
 import { localCardsByOracle, localCards, searchLocalText } from './card-store';
 import { deckIdentity } from './commanders';
-import { cardsInList, database, type List } from './db';
+import { cardsInList, database, IN_CHUNK, type List } from './db';
 import { fitOf, fitProfile, quality } from './fit';
 import { JOB_LABELS, JOB_ROLES, type JobId } from './deck-numbers';
-import { ROLES } from './roles';
+import { fixRoles, ROLES } from './roles';
 import { imageOf, type ScryfallCard } from './scryfall';
 
 export interface GapCard {
@@ -65,9 +65,16 @@ export async function gapCards(list: List, profileId: string, roleId: string, op
     : localCardsByOracle((database().all('SELECT oracleId FROM card_roles WHERE role = ?', [role.id]) as Array<{ oracleId: string }>).map((r) => r.oracleId))))
     .filter((c) => !seen.has(c.oracle_id ?? c.id) && seen.add(c.oracle_id ?? c.id));
   const rolesOfCard = new Map<string, string[]>();
-  for (const r of database().all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${candidates.map(() => '?').join(',') || "''"})`, candidates.map((c) => c.oracle_id ?? '')) as Array<{ oracleId: string; role: string }>) {
-    rolesOfCard.set(r.oracleId, [...(rolesOfCard.get(r.oracleId) ?? []), r.role]);
+  const ids = candidates.map((c) => c.oracle_id ?? '');
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const part = ids.slice(i, i + IN_CHUNK);
+    for (const r of database().all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${part.map(() => '?').join(',')})`, part) as Array<{ oracleId: string; role: string }>) {
+      rolesOfCard.set(r.oracleId, [...(rolesOfCard.get(r.oracleId) ?? []), r.role]);
+    }
   }
+  for (const c of candidates) rolesOfCard.set(c.oracle_id ?? '', fixRoles(c, rolesOfCard.get(c.oracle_id ?? '') ?? []));
+  // A one-shot Treasure maker is tagged ramp but is not: it drops out unless it is in the job some other way.
+  const inJob = (c: ScryfallCard) => roles.some((r) => (r.text && !r.tag ? r.text.test(c.oracle_text ?? '') : (rolesOfCard.get(c.oracle_id ?? '') ?? []).includes(r.id)));
   const label = job ? JOB_LABELS[job] : roles[0].label;
 
   const listed = cardsInList(list.id);
@@ -77,7 +84,7 @@ export async function gapCards(list: List, profileId: string, roleId: string, op
   if (list.commander) inDeck.add(front(list.commander.name));
   const where = holdings(profileId, list.id);
 
-  const fits = candidates.filter((c) => (c.color_identity ?? []).every((x) => identity.has(x))
+  const fits = candidates.filter((c) => inJob(c) && (c.color_identity ?? []).every((x) => identity.has(x))
     && c.legalities?.commander === 'legal'
     && !/\bLand\b/.test(c.type_line ?? '')
     && !inDeck.has(front(c.name))

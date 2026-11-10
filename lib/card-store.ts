@@ -31,7 +31,7 @@ import { recentJobs, startJob, type Job } from './jobs';
 import { canLead } from './import';
 import { rankNames } from './quick-names';
 import { ROLES, ROLES_VERSION, tagSets } from './roles';
-import { collection, type ScryfallCard } from './scryfall';
+import { collection, normalizeCard, type ScryfallCard } from './scryfall';
 
 const HEADERS = { 'User-Agent': 'MTGTracker/0.1 (https://github.com/DK09876/MTGTracker)', Accept: 'application/json' };
 
@@ -116,8 +116,14 @@ export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>
   return found;
 }
 
-/** The parts of a card the app reads, so the copy of every card stays small. */
-function slim(c: Record<string, unknown>): Partial<ScryfallCard> {
+/**
+ * The parts of a card the app reads, so the copy of every card stays small.
+ * Normalized like every other card (normalizeCard): today's oracle file gives
+ * reversible cards a normal record, but if it ever sends the faces only, the
+ * copy still has a type line.
+ */
+export function slim(raw: Record<string, unknown>): Partial<ScryfallCard> {
+  const c = normalizeCard(raw as unknown as ScryfallCard) as unknown as Record<string, unknown>;
   const keep = ['id', 'oracle_id', 'name', 'mana_cost', 'cmc', 'type_line', 'oracle_text', 'colors', 'color_identity',
     'keywords', 'power', 'toughness', 'loyalty', 'rarity', 'set', 'set_name', 'collector_number', 'image_uris', 'card_faces',
     'prices', 'game_changer', 'scryfall_uri', 'layout', 'produced_mana'] as const;

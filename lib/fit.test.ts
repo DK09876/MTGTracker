@@ -34,3 +34,19 @@ describe('fit', () => {
     expect(dual.score).toBeGreaterThan(tapland.score);
   });
 });
+
+describe('creature types a commander cares about', () => {
+  it('reads them from its rules text, not its own type line', () => {
+    // Azula is a Human Noble; nothing in her text is about Humans.
+    expect(fitProfile(azula)!.types).toEqual([]);
+    expect(fitOf(card('Random Human', 'Creature — Human Soldier', 'Vigilance'), fitProfile(azula)).matches).toEqual([]);
+    // A commander whose text names a type does care about it.
+    const naming = card('Wizard Lord', 'Legendary Creature — Human Wizard', 'Wizards you control get +1/+1.');
+    expect(fitProfile(naming)!.types).toEqual(['Wizard']);
+  });
+
+  it('does not take a type from the commander’s own name in its text', () => {
+    const named = card('Gorm the Dragon', 'Legendary Creature — Human Warrior', 'Whenever Gorm the Dragon attacks, draw a card.');
+    expect(fitProfile(named)!.types).toEqual([]);
+  });
+});

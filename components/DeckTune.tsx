@@ -2,7 +2,7 @@
 
 /**
  * The Tune tab: change the deck toward its plan. Pick what you want to do -
- * finish the deck, find cards, swaps and upgrades, cuts, fix a problem,
+ * finish the deck, find cards, swaps, cuts, fix a problem,
  * lands; the deck's state picks one for you. Suggestions wait in groups
  * until you accept a group or a single card, save it to a section, or
  * dismiss it. Accepted cards go to Your changes, which shows what they
@@ -139,8 +139,8 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   const current = intent ?? state.intent;
   const sizeAfter = state.impact.size.after;
   const stage = (items: Suggestion[]) => act(async () => {
-    const r = await api.tuneAct<{ staged: number; capped: number }>(listId, { action: 'stage', items });
-    if (r.capped) setNote({ text: `${r.staged} staged. ${r.capped} more would take the deck under 100: a cut now needs an add.` });
+    const r = await api.tuneAct<{ staged: number; capped: number; blocked?: number }>(listId, { action: 'stage', items });
+    if (r.capped || r.blocked) setNote({ text: [`${r.staged} staged.`, r.capped ? `${r.capped} more would take the deck under 100: a cut now needs an add.` : '', r.blocked ? `${r.blocked} left out: a card that is never cut, or a land that would take the deck under its land range.` : ''].filter(Boolean).join(' ') });
   });
   const unstage = (keys: string[]) => act(() => api.tuneAct(listId, { action: 'unstage', keys }));
   const dismiss = (keys: string[], on = true) => act(() => api.tuneAct(listId, { action: on ? 'dismiss' : 'undismiss', keys }));
@@ -226,8 +226,8 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
 
         {groups.length === 0 && !(current === 'find' && state.pile && !state.pile.choice) && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">
-            {current === 'cuts' && state.impact.size.before <= 100 ? 'The deck is at 100 or under: nothing needs to come out. Swaps & upgrades pairs a cut with an add.'
-              : current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”, and no upgrade beats what the deck has. Find cards can save some to your Maybeboard.'
+            {current === 'cuts' && state.impact.size.before <= 100 ? 'The deck is at 100 or under: nothing needs to come out. Swaps pairs a cut with an add.'
+              : current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”. Find cards can save some to your Maybeboard, or ask Claude for swaps.'
                 : 'Nothing to suggest here right now.'}
           </p>
         )}
@@ -303,11 +303,10 @@ function Impact({ impact }: { impact: api.TuneState['impact'] }) {
   return (
     <div className="flex flex-wrap gap-1.5" aria-label="What your changes do to the deck">
       {impact.rows.map((r) => {
-        const inRange = r.range ? r.after >= r.range[0] && r.after <= r.range[1] : true;
         const moved = r.after !== r.before;
         return (
-          <span key={r.id} className={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-xs tabular-nums ${r.range ? (inRange ? 'border-emerald-500/40' : 'border-[#ffb4a8]/60') : 'border-[var(--border)]'}`}>
-            {r.label} {moved ? <><span className="text-[var(--muted)]">{n(r.before)} →</span> <b className={r.range ? (inRange ? 'text-emerald-300' : 'text-[#ffb4a8]') : 'text-amber-300'}>{n(r.after)}</b></> : <b>{n(r.after)}</b>}
+          <span key={r.id} className={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-xs tabular-nums border-[var(--border)]`} title={r.range ? `Range ${r.range[0]}–${r.range[1]}` : undefined}>
+            {r.label} {moved ? <><span className="text-[var(--muted)]">{n(r.before)} →</span> <b>{n(r.after)}</b></> : <b>{n(r.after)}</b>}
             {r.range && <span className="text-[10px] text-[var(--faint)]">{r.range[0]}–{r.range[1]}</span>}
             {r.id === 'impulse' && <Tip label="About impulse draw">Exile-and-play cards. They dig but don’t refill your hand, so they are counted apart from card draw everywhere.</Tip>}
           </span>

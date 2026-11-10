@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { countRoles, ROLES, type Deps } from './roles';
+import { countRoles, fixRoles, oneShotTreasure, ROLES, type Deps } from './roles';
 import type { ScryfallCard } from './scryfall';
 
 const card = (name: string, type_line = 'Sorcery') => ({ id: name, oracle_id: `o-${name}`, name, type_line }) as ScryfallCard;
@@ -84,5 +84,41 @@ describe('countRoles', () => {
     const by = Object.fromEntries(roles.map((r) => [r.id, r.cards]));
     expect(by.protection).toEqual(['Redirect Lightning']);
     expect(by.finisher).toEqual(['Insurrection', 'Syr Konrad, the Grim']);
+  });
+});
+
+describe('one-shot Treasure makers are not ramp', () => {
+  // Real rules text (reminder text included, as Scryfall sends it).
+  const c = (name: string, oracle_text: string, type_line = 'Instant') => ({ id: name, oracle_id: `o-${name}`, name, type_line, oracle_text }) as ScryfallCard;
+  const REMINDER = ' (It\'s an artifact with "{T}, Sacrifice this token: Add one mana of any color.")';
+  const oneShot = [
+    c('Big Score', 'As an additional cost to cast this spell, discard a card.\nDraw two cards and create two Treasure tokens.' + REMINDER),
+    c('Deadly Dispute', 'As an additional cost to cast this spell, sacrifice an artifact or creature.\nDraw two cards and create a Treasure token.' + REMINDER),
+    c('Dockside Extortionist', 'When this creature enters, create X Treasure tokens, where X is the number of artifacts and enchantments your opponents control.' + REMINDER, 'Creature — Goblin Pirate'),
+    c('Creative Outburst', 'Creative Outburst deals 5 damage to any target. Look at the top five cards of your library. Put one of them into your hand and the rest on the bottom of your library in a random order.\n{U/R}{U/R}, Discard this card: Create a Treasure token.'),
+  ];
+  const repeatable = [
+    c('Smothering Tithe', 'Whenever an opponent draws a card, that player may pay {2}. If the player doesn\'t, you create a Treasure token.' + REMINDER, 'Enchantment'),
+    c('Pitiless Plunderer', 'Whenever another creature you control dies, create a Treasure token.' + REMINDER, 'Creature — Human Pirate'),
+    c('Black Market Connections', 'At the beginning of your first main phase, choose one or more —\n• Sell Contraband — Create a Treasure token. You lose 1 life.\n• Buy Information — Draw a card. You lose 2 life.', 'Enchantment'),
+    c('Deadeye Plunderers', 'This creature gets +1/+1 for each artifact you control.\n{2}{U}{B}: Create a Treasure token.' + REMINDER, 'Creature — Human Pirate'),
+  ];
+
+  it('tells a one-shot Treasure maker from a repeatable one', () => {
+    expect(oneShot.filter((x) => !oneShotTreasure(x)).map((x) => x.name)).toEqual([]);
+    expect(repeatable.filter((x) => oneShotTreasure(x)).map((x) => x.name)).toEqual([]);
+    expect(oneShotTreasure(c('Arcane Signet', '{T}: Add one mana of any color in your commander\'s color identity.', 'Artifact'))).toBe(false);
+  });
+
+  it('takes ramp off a one-shot maker and leaves its other roles', () => {
+    expect(fixRoles(oneShot[1], ['ramp', 'draw'])).toEqual(['draw']);
+    expect(fixRoles(repeatable[0], ['ramp'])).toEqual(['ramp']);
+  });
+
+  it('does not count one-shot Treasure as ramp in a deck', async () => {
+    const deck = [...oneShot, ...repeatable].map((card) => ({ card, quantity: 1 }));
+    const tagged = new Map(deck.map((d) => [d.card.oracle_id!, ['ramp']]));
+    const counted = await countRoles(deck, { search: async () => ({ cards: [], totalCards: 0, hasMore: false }), cached: () => ({ roles: tagged, checked: new Set(tagged.keys()) }), save: () => {} });
+    expect(counted.find((r) => r.id === 'ramp')?.cards).toEqual(repeatable.map((x) => x.name).sort());
   });
 });

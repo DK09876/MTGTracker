@@ -28,7 +28,7 @@ import { cachedRoles, database } from './db';
 import { BASE_RANGES, JOB_LABELS, landNumber, rampRange, type JobId, type LandNumber } from './deck-numbers';
 import { cleanGoldfishSettings, DEFAULT_SETTINGS, startingChecks, type GoldfishSettings } from './goldfish';
 import { COMMANDER_ROLES, PROTECTION_BY_LEAN, type CommanderRole, type DeckBuild, type Lean, type Stages } from './plan-detect';
-import { ROLES_VERSION } from './roles';
+import { fixRoles, ROLES_VERSION } from './roles';
 import type { ScryfallCard } from './scryfall';
 import { detectStyles, styleById, styleTargets, type Detected, type Style } from './styles';
 
@@ -123,7 +123,17 @@ export interface Override {
   at: string;
 }
 
-export interface Note { id: string; text: string; at: string }
+/**
+ * A note kept with the plan. `by` says whose words it is: the owner's, or
+ * Claude's from an earlier read. Notes from before `by` existed all came
+ * from Claude's reads. Only the owner's notes go to later AI calls: an AI
+ * note ("the easiest cuts are...") read back as the owner's view steered
+ * later answers.
+ */
+export interface Note { id: string; text: string; at: string; by?: 'owner' | 'ai' }
+
+/** Whose words a note is; notes saved before `by` existed are Claude's. */
+export const noteBy = (n: Note): 'owner' | 'ai' => n.by ?? 'ai';
 
 /** The last detection, kept so pages that do not detect still read it. */
 export interface DetectedSnapshot {
@@ -189,7 +199,7 @@ export interface Plan {
 function knownRoles(cards: Array<{ card: ScryfallCard; quantity: number }>): (card: ScryfallCard) => string[] {
   const ids = [...new Set(cards.map((c) => c.card.oracle_id).filter((x): x is string => !!x))];
   const { roles } = cachedRoles(ids, '1970-01-01', ROLES_VERSION);
-  return (card) => roles.get(card.oracle_id ?? '') ?? [];
+  return (card) => fixRoles(card, roles.get(card.oracle_id ?? '') ?? []);
 }
 
 /** The owner's own style: a name and the ranges they want. */
@@ -322,7 +332,7 @@ export interface PlanChange {
   /** Who made this change: the owner, or Claude with the owner accepting it. */
   by?: 'yours' | 'claude';
   overrides?: { add?: Omit<Override, 'id' | 'at' | 'on'>; toggle?: { id: string; on: boolean }; remove?: string };
-  notes?: { add?: string[]; remove?: string };
+  notes?: { add?: string[]; remove?: string; by?: 'owner' | 'ai'; edit?: { id: string; text: string } };
   proposal?: { key: string; status: 'accepted' | 'skipped' };
 }
 
@@ -449,9 +459,14 @@ export function changePlan(listId: string, change: PlanChange): void {
   if (change.notes) {
     let notes = parse<Note[]>(r?.notes, []);
     for (const n of (change.notes.add ?? []).map((x) => text(x, 600)).filter(Boolean)) {
-      if (!notes.some((x) => x.text === n)) notes.push({ id: randomUUID(), text: n, at: new Date().toISOString() });
+      if (!notes.some((x) => x.text === n)) notes.push({ id: randomUUID(), text: n, at: new Date().toISOString(), by: change.notes.by ?? 'ai' });
     }
     if (change.notes.remove) notes = notes.filter((x) => x.id !== change.notes!.remove);
+    const edited = change.notes.edit;
+    if (edited) {
+      const t = text(edited.text, 600);
+      notes = t ? notes.map((x) => (x.id === edited.id ? { ...x, text: t, at: new Date().toISOString() } : x)) : notes.filter((x) => x.id !== edited.id);
+    }
     patch.notes = JSON.stringify(notes.slice(-30));
   }
   if (change.proposal) {

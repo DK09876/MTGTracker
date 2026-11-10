@@ -9,7 +9,7 @@
  */
 
 import { cardsInList, deckTags, type List } from './db';
-import { planFor, type Plan } from './deck-plan';
+import { noteBy, planFor, type Plan } from './deck-plan';
 import { deckRolesKnown } from './deck-roles';
 import type { RoleCount } from './roles';
 
@@ -64,7 +64,10 @@ export function planText(plan: Plan, roles: RoleCount[] | null): string {
   }
   const on = plan.overrides.filter((o) => o.on);
   if (on.length) lines.push('', 'Changes to the usual rules for this deck:', ...on.map((o) => `- ${o.what}: ${o.why} [${by(o.by)}]`));
-  if (plan.notes.length) lines.push('', 'Notes kept from earlier reads:', ...plan.notes.map((n) => `- ${n.text}`));
+  // Only the owner's notes, in their words. Notes Claude wrote in earlier reads are left out: read back as
+  // the owner's view, "the easiest cuts are..." steered later answers (deck flow evaluation, 2026-11-10).
+  const owners = plan.notes.filter((n) => noteBy(n) === 'owner');
+  if (owners.length) lines.push('', "The owner's notes on this deck, in their words:", ...owners.map((n) => `- ${n.text}`));
   lines.push('', AI_RULES);
   return lines.join('\n');
 }

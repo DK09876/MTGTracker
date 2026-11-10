@@ -14,10 +14,12 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import KeepRule from './KeepRule';
+import Tip from './Tip';
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
 import type { ListedCard } from '@/lib/db';
 import { geek, seenBy } from '@/lib/geek';
+import { LANDS_FAR_UNDER } from '@/lib/hard-checks';
 import type { Warning } from '@/lib/health';
 import type { KeepRule as KeepRuleType } from '@/lib/keep';
 import { atLeast } from '@/lib/odds';
@@ -113,9 +115,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
                   {c.otherSources > 0 && <> · {c.otherSources} other source{c.otherSources === 1 ? '' : 's'}</>}
                   {c.needed !== null && (
                     <span className="block" title={`${c.neededFor} sets it: the sources to cast it on curve about 90% of the time. Lands count in full, rocks and dorks at three quarters.`}>
-                      <span className={c.sources < c.needed - 1 ? 'font-semibold text-amber-300' : 'text-emerald-400'}>
-                        {c.sources < c.needed - 1 ? '▲' : '✓'} {c.sources} of {c.needed} sources
-                      </span>{' '}
+                      <span className="text-[var(--foreground)]">{c.sources} of {c.needed} sources</span>{' '}
                       <span>for {c.neededFor}</span>
                     </span>
                   )}
@@ -424,8 +424,9 @@ function Warnings({ warnings }: { warnings: Warning[] }) {
     return (
       <p className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
         <span aria-hidden className="font-bold" style={{ color: STATUS.good }}>✓</span>
-        <span className="font-medium">Legal and complete</span>
-        <span className="text-[var(--muted)]">— 100 cards, all in the commander&apos;s colours, no duplicates or bans.</span>
+        <span className="font-medium">No problems</span>
+        <span className="text-[var(--muted)]">— every card legal and in the commander&apos;s colours, no extra copies, card draw in the deck, lands not far under range.</span>
+        <Tip label="What counts as a problem">Only hard failures are warnings here: cards that make the deck not legal, no card draw at all, or lands {LANDS_FAR_UNDER} or more under the low end of the range. Everything else is a number with its range below: being a little outside a range is often on purpose.</Tip>
       </p>
     );
   }
@@ -463,10 +464,12 @@ function Meter({ share, label }: { share: number; label: string }) {
 function RoleRow({ label, count, target, cards }: { label: string; count: number; target: [number, number] | null; cards?: string[] }) {
   const [open, setOpen] = useState(false);
   const status = !target ? null : count < target[0] ? 'low' : count > target[1] ? 'high' : 'ok';
-  const chip = status === 'ok'
-    ? { icon: '✓', text: 'In range', color: STATUS.good }
-    : status === 'low' ? { icon: '▲', text: `${target![0] - count} short`, color: STATUS.warning }
-    : status === 'high' ? { icon: '●', text: `${count - target![1]} over`, color: 'var(--muted)' }
+  // A number with its range, not a warning: under or over is often on purpose (lib/hard-checks.ts).
+  // Lands can be fractional (a land on the back of a double-faced card counts as part of one).
+  const by = (x: number) => Math.round(x * 10) / 10;
+  const chip = status === 'ok' ? { text: 'in range' }
+    : status === 'low' ? { text: `${by(target![0] - count)} under` }
+    : status === 'high' ? { text: `${by(count - target![1])} over` }
     : null;
   // The scale runs a little past the top of the range, so both under and
   // over read. A role with no target gets a fixed scale, so one card does
@@ -492,10 +495,7 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
         </div>
         <span className="min-w-16 text-sm text-[var(--muted)]">{target ? `${target[0]}–${target[1]}` : 'no target'}</span>
         {chip && (
-          <span className="flex min-w-24 items-center gap-1.5 whitespace-nowrap text-xs">
-            <span aria-hidden className="font-bold" style={{ color: chip.color }}>{chip.icon}</span>
-            {chip.text}
-          </span>
+          <span className="min-w-24 whitespace-nowrap text-xs text-[var(--muted)]">{chip.text}</span>
         )}
       </div>
       {open && cards && <p className="mt-2 text-sm text-[var(--muted)]">{cards.join(', ')}</p>}

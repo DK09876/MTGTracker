@@ -453,7 +453,7 @@ function Ranges({ rows, busy, change }: { rows: RangeRow[]; busy: boolean; chang
         <li key={r.job} className="flex flex-col gap-1.5 border-t border-dashed border-[var(--border)] py-2 first:border-t-0">
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="min-w-0 flex-[1_1_9rem]">{r.label}</span>
-            <span className={`tabular-nums ${r.range && r.count !== null && (r.count < r.range[0] || r.count > r.range[1]) ? 'text-amber-300' : 'text-[var(--muted)]'}`}>{r.count ?? '–'}</span>
+            <span className="tabular-nums text-[var(--muted)]">{r.count ?? '–'}</span>
             {r.range ? <RangeEdit range={r.range} label={r.label} disabled={busy} onSave={(x) => change({ targets: { [r.job]: x } })} /> : <span className="text-xs text-[var(--muted)]">no range</span>}
             {r.source === 'yours' && <button onClick={() => change({ targets: { [r.job]: null } })} disabled={busy} className="text-xs text-[var(--accent)] hover:underline">Back</button>}
             {r.how && <button onClick={() => setOpen(open === r.job ? null : r.job)} aria-expanded={open === r.job} className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{open === r.job ? 'Hide' : 'How?'}</button>}
@@ -560,7 +560,7 @@ function BriefPart({ listId, tags, onTags, plan, busy, change, kick, reload }: {
           ))}
           {plan.notes.length > 0 && (
             <div className="flex flex-col gap-1 border-t border-dashed border-[var(--border)] pt-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--faint)]">Notes that fit no part · kept with the plan, read by later steps</span>
+              <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--faint)]">Claude&apos;s notes from earlier reads · not sent to later AI steps<Tip label="Why these are not sent">Only your own notes go to later AI steps. Claude&apos;s notes read back as if they were yours steered later answers, so they stay here for you to read.</Tip></span>
               {plan.notes.map((n) => <span key={n.id} className="flex items-start justify-between gap-2 text-sm"><span>{n.text}</span><button onClick={() => change({ notes: { remove: n.id } })} disabled={busy} aria-label="Remove this note" className="text-[var(--muted)] hover:text-red-300">×</button></span>)}
             </div>
           )}
