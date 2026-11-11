@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import GameChangerLine from './GameChangerLine';
-import { CommanderRoles, costOf, OwnerNotes, PlanRead, useHidden, usePlanView } from './PlanPass';
+import { CommanderRoles, costOf, OwnerNotes, PlanRead, usePlanView } from './PlanPass';
 import type { PlanView } from '@/lib/plan-shared';
 import Tip from './Tip';
 import { BRACKETS } from '@/lib/brackets';
@@ -243,7 +243,23 @@ function Body({ id, part, plan, busy, change, cardNames, onTab, view, act }: { i
       const c = v as { commander: string | null; partner: string | null; companion: string | null };
       return <p className="text-sm"><b>{c.commander ?? 'No commander set'}</b>{c.partner && <> + <b>{c.partner}</b></>}<span className="text-[var(--muted)]"> · {c.partner ? 'two commanders' : 'no second commander'} · {c.companion ? `companion ${c.companion}` : 'no companion'}</span></p>;
     }
-    case 'bracket': return <BracketBody b={v as { value: number | null; looksLike: number }} plan={plan} busy={busy} change={change} view={view} act={act} />;
+    case 'bracket': {
+      const b = v as { value: number | null; looksLike: number };
+      const suggested = view?.pass?.bracket ?? null;
+      return (
+        <div className="flex flex-col gap-1.5">
+          <Seg<number | 'unsure'> label="Bracket" options={[...[1, 2, 3, 4, 5].map((n) => [n, String(n)] as [number, string]), ['unsure', 'Unsure']]} value={b.value ?? 'unsure'} disabled={busy} onPick={(n) => change({ bracket: n === 'unsure' ? null : n })} />
+          <span className="text-xs text-[var(--muted)]">{b.value ? BRACKETS[b.value] : suggested ? 'Unsure: nothing is held to a bracket yet.' : 'Unsure: when Claude reads your plan it suggests one, once you confirm the plan. Nothing is held to a bracket until then.'}</span>
+          {!b.value && suggested && (
+            <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm">
+              <span><span className="text-violet-200">✦ The plan suggests</span> <b>bracket {suggested.level}</b> <span className="text-[var(--muted)]">({BRACKETS[suggested.level]}). {suggested.why}</span></span>
+              <button onClick={() => void act({ action: 'acceptBracket' })} disabled={busy} className={`${OK} w-fit`}>Use bracket {suggested.level}</button>
+            </div>
+          )}
+          <GameChangerLine names={plan.gameChangers} bracket={b.value} />
+        </div>
+      );
+    }
     case 'budget':
       return <Seg label="Budget per card" options={[[0, 'Any'], [1, '$1'], [5, '$5'], [20, '$20'], [50, '$50']]} value={(v as number | null) ?? 0} disabled={busy} onPick={(n) => change({ budget: n || null })} />;
     case 'own':
@@ -411,35 +427,6 @@ function Body({ id, part, plan, busy, change, cardNames, onTab, view, act }: { i
     case 'archetype': return <p className="text-sm"><b>{v as string}</b> <span className="text-[var(--muted)]">· a reading, updates with the deck</span></p>;
     default: return null;
   }
-}
-
-/** The bracket you aim for: Unsure until you say, the plan's suggestion while it is, and a line when the list as built reads as another. */
-function BracketBody({ b, plan, busy, change, view, act }: { b: { value: number | null; looksLike: number }; plan: api.DeckPlanState; busy: boolean; change: Change; view: PlanView | null; act: (a: api.PlanPassAction) => Promise<unknown> }) {
-  const suggested = view?.pass?.bracket ?? null;
-  const differs = view?.pass?.differs.bracket ?? null;
-  const [hidden, hide] = useHidden(`mtg-plan-differs:${view?.pass?.id}:bracket`);
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Seg<number | 'unsure'> label="Bracket" options={[...[1, 2, 3, 4, 5].map((n) => [n, String(n)] as [number, string]), ['unsure', 'Unsure']]} value={b.value ?? 'unsure'} disabled={busy} onPick={(n) => change({ bracket: n === 'unsure' ? null : n })} />
-      <span className="text-xs text-[var(--muted)]">{b.value ? BRACKETS[b.value] : suggested ? 'Unsure: nothing is held to a bracket yet.' : 'Unsure: when Claude reads your plan it suggests one, once you confirm the plan. Nothing is held to a bracket until then.'}</span>
-      {!b.value && suggested && (
-        <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm">
-          <span><span className="text-violet-200">✦ The plan suggests</span> <b>bracket {suggested.level}</b> <span className="text-[var(--muted)]">({BRACKETS[suggested.level]}). {suggested.why}</span></span>
-          <button onClick={() => void act({ action: 'acceptBracket' })} disabled={busy} className={`${OK} w-fit`}>Use bracket {suggested.level}</button>
-        </div>
-      )}
-      {b.value && differs && !hidden && (
-        <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm" data-tour="plan-bracket-differs">
-          <span><span className="text-violet-200">✦ The plan reads the list as built as</span> <b>bracket {differs.level}</b><span className="text-[var(--muted)]">, not {b.value}. {differs.why} Suggestions still keep to your {b.value}.</span></span>
-          <span className="flex flex-wrap items-center gap-3">
-            <button onClick={() => void act({ action: 'acceptBracket' })} disabled={busy} className={`${OK} w-fit`}>Aim for {differs.level} instead</button>
-            <button onClick={hide} className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]">Keep {b.value}</button>
-          </span>
-        </div>
-      )}
-      <GameChangerLine names={plan.gameChangers} bracket={b.value} />
-    </div>
-  );
 }
 
 type RangeRow = { job: string; label: string; range: [number, number] | null; source: string; from: string; count: number | null; how: { inputs: string[]; steps: string[] } | null };

@@ -477,7 +477,7 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
     const ownOnly = o.ownPlan && o.edits.plan ? {
       id: 'own', at: '', model: '', state: 'focused' as DeckState, plan: o.edits.plan, winRoutes: o.edits.winRoutes ?? [], keyCards: o.edits.keyCards ?? [], themes: o.edits.themes ?? [],
       cards: {}, summary: '', yours: { plan: true, routes: (o.edits.winRoutes ?? []).map((r) => r.name), routeCards: [], keyCards: o.edits.keyCards ?? [], themes: (o.edits.themes ?? []).map((t) => t.name) },
-      questions: [], oneAway: [], commander: null, bracket: null, differs: { commander: null, bracket: null }, neverCut: [], ownPlan: true, commanderRolesRead: o.commanderRoles,
+      questions: [], oneAway: [], commander: null, bracket: null, neverCut: [], ownPlan: true, commanderRolesRead: o.commanderRoles,
     } : null;
     return { commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), drafts: null, job: running, pass: ownOnly, edits, confirmed: o.confirmedAt ? { at: o.confirmedAt } : null, stale: null, reads: { notes, commanderRoles: o.commanderRoles.length } };
   }
@@ -489,8 +489,6 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
   const routeCards = new Set(shown.winRoutes.flatMap((r) => r.cards).map(front));
   const confirmed = o.confirmedAt ? { at: o.confirmedAt } : null;
   const starred = keeps(list.id);
-  // What the owner picked for the commander, Unsure aside.
-  const mine = o.commanderRoles.filter((r) => r !== 'unsure');
   return {
     commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), job: running, edits, confirmed, stale,
     drafts: o.drafts && o.drafts.passId === latest.id ? { answers: o.drafts.answers, skipped: o.drafts.skipped, note: o.drafts.note } : null,
@@ -510,10 +508,6 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
       oneAway: (latest.input.oneAway ?? []).filter((c) => c.missing.length === 1 && c.cards.some((n) => routeCards.has(front(n)))).slice(0, 4).map((c) => ({ cards: c.cards, missing: c.missing[0] })),
       commander: o.commanderRoles.includes('unsure') && confirmed && nonland >= SUGGEST_COMMANDER_AT && out.commander.roles.length ? out.commander : null,
       bracket: plan.bracket === null && confirmed && !stale && out.bracket ? out.bracket : null,
-      differs: {
-        commander: !stale && !o.ownPlan && mine.length && out.commander.roles.length && !out.commander.roles.some((r) => (mine as CommanderRole[]).includes(r)) ? out.commander : null,
-        bracket: !stale && !o.ownPlan && plan.bracket !== null && out.bracket && out.bracket.level !== plan.bracket ? out.bracket : null,
-      },
       neverCut: confirmed && !stale ? shown.keyCards.filter((k) => { const c = main.find((m) => m.card.name === k); return !!c && !starred.has(c.card.oracle_id ?? c.card.id); }) : [],
       ownPlan: o.ownPlan,
       commanderRolesRead: latest.input.commanderRoles ?? [],
