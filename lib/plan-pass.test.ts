@@ -288,6 +288,17 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(v.pass!.bracket).toBeNull();
     pp.setNeverCut(list, { remove: ['Spell 1'] });
     expect(pp.planView(list).pass!.neverCut).toContain('Spell 1');
+    // The owner aims for 3 and picked Voltron; the read sees bracket 4 and a multiplier: both are said, neither is taken.
+    await pp.runPass(fakeModel(() => ({ ...ANSWER, bracket: { level: 4, why: 'Two fast combos.' } })).model, list, 'dk');
+    pp.setCommanderRoles(list.id, ['voltron']);
+    v = pp.planView(list);
+    expect(v.pass!.differs).toEqual({ commander: { roles: ['multiplier'], why: 'Copies spells.' }, bracket: { level: 4, why: 'Two fast combos.' } });
+    expect(planFor(list.id, '', list.commander, []).bracket).toBe(3);
+    // A pick the read shares is no disagreement.
+    pp.setCommanderRoles(list.id, ['voltron', 'multiplier']);
+    expect(pp.planView(list).pass!.differs.commander).toBeNull();
+    pp.acceptBracketSuggestion(list.id);
+    expect(pp.planView(list).pass!.differs.bracket).toBeNull();
     // A read that gives no usable bracket still stands, with nothing to suggest.
     await pp.runPass(fakeModel(() => ({ ...ANSWER, bracket: { level: 9, why: '' } })).model, list, 'dk');
     expect(pp.latestPass(list.id)!.output.bracket).toBeNull();

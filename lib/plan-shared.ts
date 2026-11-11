@@ -103,6 +103,12 @@ export interface PlanView {
     commander: { roles: CommanderRole[]; why: string } | null;
     /** Shown when the owner's bracket is Unsure and the plan is confirmed. */
     bracket: { level: number; why: string } | null;
+    /**
+     * Where the read's own view differs from what the owner set: the plan was still written for the
+     * owner's setting, and this says so. The commander's roles when none of the read's match the
+     * owner's; the bracket when the list as built reads as another one.
+     */
+    differs: { commander: { roles: CommanderRole[]; why: string } | null; bracket: { level: number; why: string } | null };
     /** Key cards not yet marked ★ never cut, offered once the plan is confirmed. */
     neverCut: string[];
     /** The plan was written by the owner, not read. */

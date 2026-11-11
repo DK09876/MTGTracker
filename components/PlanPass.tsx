@@ -43,6 +43,13 @@ export function usePlanView(listId: string, version: string) {
   return { view, error, act, reload: load };
 }
 
+/** A line the owner can put away for one read: remembered in this browser, back again with the next read. */
+export function useHidden(key: string): [boolean, () => void] {
+  const [, redraw] = useState(0);
+  const read = () => { try { return typeof window !== 'undefined' && localStorage.getItem(key) === '1'; } catch { return false; } };
+  return [read(), () => { try { localStorage.setItem(key, '1'); } catch { /* shown again next visit */ } redraw((n) => n + 1); }];
+}
+
 // --- 1. What the commander does --------------------------------------------------------------
 
 export function CommanderRoles({ view, act, commander, readRoles, plural = false }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<unknown>; commander: string; readRoles: CommanderRole[] | null; plural?: boolean }) {
@@ -55,6 +62,8 @@ export function CommanderRoles({ view, act, commander, readRoles, plural = false
     void act({ action: 'commanderRoles', roles: [...next] });
   };
   const changed = readRoles !== null && [...readRoles].sort().join() !== [...picked].sort().join();
+  const differs = view.pass?.differs.commander ?? null;
+  const [hidden, hide] = useHidden(`mtg-plan-differs:${view.pass?.id}:commander`);
   return (
     <section data-tour="plan-commander" data-section="1 · The commander" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -73,6 +82,15 @@ export function CommanderRoles({ view, act, commander, readRoles, plural = false
           </span>
         ))}
       </div>
+      {differs && !hidden && (
+        <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm" data-tour="plan-commander-differs">
+          <span><span className="text-violet-200">✦ The plan reads this differently:</span> <b>{differs.roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)?.label).join(' and ')}</b>. <span className="text-[var(--muted)]">{differs.why} The plan was still written for your pick.</span></span>
+          <span className="flex flex-wrap items-center gap-3">
+            <button onClick={() => void act({ action: 'acceptCommander' })} className="w-fit rounded-full border border-emerald-400/50 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-400/10">Use {differs.roles.length === 1 ? 'that' : 'those'} instead</button>
+            <button onClick={hide} className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]">Keep mine</button>
+          </span>
+        </div>
+      )}
     </section>
   );
 }
