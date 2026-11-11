@@ -253,6 +253,8 @@ How to judge:
 - Judge from the rules text and this deck's plan, not from how popular a card is.
 - The numbers are facts the code worked out, not judgements; many good decks sit outside the usual ranges on purpose.
 - What the owner told the app outranks your own reading. Where the owner fixed a part of the plan, copy it exactly as given and build the rest around it.
+- The owner's settings are given, not suggestions: write the plan for the deck they describe. Where they said what the commander does, read the deck with the commander in that role. Where they set a bracket, judge the plan, the key cards and the questions for a deck aimed at that bracket. Where they said what they want from the deck, let it decide what counts as on plan. Only a setting marked "not sure yet" is yours to work out.
+- The "commander" and "bracket" fields are still your own reading of the list as built, even where the owner has set theirs: they are shown only when the owner is unsure.
 - Use card names exactly as they appear in the list.
 - Think it through privately; the answer holds only the fields asked for.`;
 
@@ -291,8 +293,8 @@ export function ownerText(i: PassInput): string {
   const L: string[] = ['## What the owner told the app'];
   const roles = i.commanderRoles.filter((r) => r !== 'unsure');
   L.push(`- What the commander does for the deck: ${roles.length ? roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)!.label).join(', ') : 'not sure yet (suggest it)'}`);
-  if (i.goal.chips.length || i.goal.text) L.push(`- Optimizing for: ${[...i.goal.chips, ...(i.goal.text ? [`"${i.goal.text}"`] : [])].join(', ')}`);
-  L.push(`- Bracket aimed for: ${i.bracket ?? 'not set'}. Budget per card: ${i.budget ? `$${i.budget}` : 'any'}. Only cards they own: ${i.own ? 'yes' : 'no'}.`);
+  if (i.goal.chips.length || i.goal.text) L.push(`- What they want from the deck: ${[...i.goal.chips, ...(i.goal.text ? [`"${i.goal.text}"`] : [])].join(', ')}`);
+  L.push(`- Bracket aimed for: ${i.bracket ?? 'not sure yet (suggest one)'}. Budget per card: ${i.budget ? `$${i.budget}` : 'any'}. Only cards they own: ${i.own ? 'yes' : 'no'}.`);
   if (i.rule) L.push(`- Deck rule: ${i.rule}`);
   if (i.neverCut.length) L.push(`- Never cut: ${i.neverCut.join(', ')}`);
   if (i.notes.length) L.push('', "The owner's notes, in their words:", ...i.notes.map((n) => `- ${n}`));
