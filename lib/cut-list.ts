@@ -24,10 +24,8 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>, opts: { 
   const styles = planStyles(list.id, list.commander, main);
   const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
-  // Never cut: the ★ keeps, the plan's key cards and the cards of the ways it wins.
+  // Never cut: the owner's ★ never-cut list (the commander is never in the list).
   const keep = keeps(list.id);
-  const protectedNames = new Set([...(plan.stored.key?.v ?? plan.snapshot.keyCards ?? []), ...(plan.snapshot.routeCards ?? [])]);
-  for (const c of main) if (protectedNames.has(c.card.name)) keep.add(c.card.oracle_id ?? c.card.id);
   const result = cutCandidates({
     // A second commander leads the deck with the first: never a cut.
     cards: main.filter((c) => c.slot !== 'partner'), roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,

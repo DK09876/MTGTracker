@@ -10,6 +10,7 @@
 
 import { cardsInList, deckTags, type List } from './db';
 import { noteBy, planFor, type Plan } from './deck-plan';
+import { owner, planForAi } from './plan-pass';
 import { deckRolesKnown } from './deck-roles';
 import type { RoleCount } from './roles';
 
@@ -78,5 +79,11 @@ export async function planContext(list: Pick<List, 'id' | 'commander'>): Promise
   const tags = deckTags(list.id);
   const plan = planFor(list.id, tags.brief, list.commander, main);
   const roles = await deckRolesKnown(list.id, main).catch(() => null);
-  return planText(plan, roles);
+  // The plan read, with the owner's edits, when it matches the deck (or the owner said to use it anyway).
+  const read = planForAi(list);
+  const commander = owner(list.id).commanderRoles.filter((r) => r !== 'unsure');
+  return [
+    ...(read ? [read.text, ''] : commander.length ? [`What the commander does for the deck (the owner's pick): ${commander.join(', ')}`, ''] : []),
+    planText(plan, roles),
+  ].join('\n');
 }

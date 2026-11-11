@@ -53,6 +53,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   // Claude can't set anything itself: only an accepted proposal is Claude's.
   delete change.by;
   delete change.proposal;
+  // Notes written on the page are the owner's, whatever the request says.
+  if (change.notes) change.notes = { ...change.notes, by: 'owner' };
 
   if (typeof brief === 'string') {
     setTagBrief(id, brief.slice(0, 4000));

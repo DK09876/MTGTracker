@@ -836,6 +836,18 @@ export type PlanChange = PlanChangeCore & {
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 
+/** The plan read (lib/plan-pass.ts): the Plan tab's view, and what the owner does with it. */
+export const planPath = (listId: string) => `lists/${listId}/plan/pass`;
+export const planPass = (listId: string) => fetch(url(planPath(listId))).then(json<import('./plan-shared').PlanView>);
+export type PlanPassAction =
+  | { action: 'generate' | 'confirm'; answers?: Array<{ question: string; answer: string }>; skipped?: string[]; note?: string }
+  | { action: 'commanderRoles'; roles: string[] }
+  | { action: 'edits'; edits: { plan?: string | null; winRoutes?: Array<{ name: string; cards: string[] }> | null; keyCards?: string[] | null; themes?: Array<{ name: string; cards: string[] }> | null; roles?: Record<string, string> | null } }
+  | { action: 'undoEdits' | 'useStale' | 'acceptCommander' }
+  | { action: 'ownPlan'; text: string; fill?: boolean };
+export const planPassAct = (listId: string, act: PlanPassAction) =>
+  spending(send(planPath(listId), 'POST', act).then(json<import('./plan-shared').PlanView>));
+
 /** Claude's last review of the cut list, what the owner has done about it since, and the job if one is running. */
 export interface CutReviewState { review: CutReview | null; settled?: { cut: string[]; kept: string[] }; job: Job | null }
 export const cutReview = (listId: string) => get<CutReviewState>(paths.review(listId));

@@ -31,7 +31,7 @@ describe('cuts stop at 100', () => {
 
 describe('old tabs', () => {
   it('lead to where they live now', () => {
-    expect(placeOf('tags')).toEqual({ tab: 'plan', anchor: 'plan-tags' });
+    expect(placeOf('tags')).toEqual({ tab: 'tags' });
     expect(placeOf('health')).toEqual({ tab: 'check', check: 'health' });
     expect(placeOf('playtest')).toEqual({ tab: 'check', check: 'playtest' });
     expect(placeOf('collection')).toMatchObject({ tab: 'cards', copies: true });

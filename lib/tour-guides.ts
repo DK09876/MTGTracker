@@ -41,14 +41,12 @@ const DECK_STEPS: TourStep[] = [
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
   { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Import a list (from Moxfield, Arena or MTGO) or an Archidekt link over the deck, export it, rename, duplicate, change the commander, show it on your profile (decks are private until you do), or delete it.' },
 
-  { click: [tab('plan')], target: 'brief', title: 'Plan: what the deck does', body: 'The first thing to settle. A sentence or two on how the deck wins - drafted for you from the cards, or by Claude with your instructions. Everything else reads it: what to add and cut, how cards are tagged, what Chat knows.' },
-  { target: 'plan-style', title: 'Its style', body: 'Read from the commander and the deck\'s own cards - this one is a spells deck. Change the main or second style if it reads the deck wrong; it moves the usual counts and the cut list keeps cards that fit it.' },
-  { target: 'plan-flip', title: 'The flip turn', body: 'The mana the deck needs before it starts doing its thing - the commander\'s mana value unless you say otherwise. The ramp count follows it, and Playtest starts with a goal from it.' },
-  { target: 'plan-guidelines', title: 'Job ranges', body: 'How many of each job the deck should run: ramp, card draw, interaction, protection, ways to finish. Each says where its range came from, and How? shows the working; change a range and it is yours.' },
-  { target: 'plan-packages', title: 'Themes', body: 'Packages of cards doing one thing, found from the cards without AI - 8 by default, 16 for the main theme. Keep one and it becomes one of your tags; the cut list trims packages over their size first.' },
-  { target: 'plan-confirm', title: 'Confirm it', body: 'Confirm each part as you go, or the whole plan at once. Tune, Chat, the tagger and Claude\'s reviews wait for a confirmed plan, because they read it. Change it any time.' },
+  { click: [tab('plan')], target: 'plan-commander', title: 'Plan: what the commander does', body: 'Start here. Pick what the commander does for the deck - hover an option for what it means - or Unsure, and the plan will suggest it. Everything that reads the plan reads this too.' },
+  { target: 'plan-settings', title: 'Your settings', body: 'The bracket, budget, only cards you own, a deck rule, and the cards never to cut. Every suggestion keeps to them, AI or rules.' },
+  { target: 'plan-notes', title: 'Your notes', body: 'Anything you want the plan and every AI step to know, in your words. Your answers to the plan\'s questions land here too.' },
+  { target: 'plan-read', title: 'The plan', body: 'Have Claude read the deck - it reads your commander choice, settings, notes and every card - or write the plan yourself. Edit anything it says, read it again with your changes kept, and confirm it. Nothing is locked: Tune and Chat read it once there is one.' },
 
-  { target: 'basic-roles', title: 'Your tags', body: 'Under the plan: the built-in tags from Scryfall, for free, and your own. Theme tags become the plan\'s themes; a tag named for a job (Ramp, Draw) stays a tag. Have Claude suggest tags and put them on the cards, or make your own.' },
+  { click: [tab('tags')], target: 'basic-roles', title: 'Tags', body: 'Every card\'s role from the plan, which you can correct, then the built-in tags from Scryfall and your own. Have Claude suggest tags and put them on the cards, or make your own.' },
 
   { click: [tab('tune')], target: 'tune-intents', title: 'Tune: what do you want to do?', body: 'Finish the deck, find cards, swaps, cuts, fix a problem, or lands. The deck\'s size picks one for you - marked "suggested" - and you can switch any time.' },
   { target: 'tune-changes', title: 'Your changes', body: 'Everything you accept lands here: cards to add, cards to cut, swaps paired up, and what they would do to the deck\'s numbers. Nothing touches the deck until you press Apply; cuts go to the section for cards that came out, with their reason.' },
@@ -134,7 +132,7 @@ export const GUIDES: Guide[] = [
     title: 'A deck',
     help: [
       'Start with Plan: what the deck does, its style, flip turn and guidelines. Everything else reads it. Cards: the list, grouped by type or tags.',
-      'Tune: pick what you want to do - finish the deck, find cards, swaps, cuts, fix a problem, lands. Suggestions wait until you accept them into Your changes, which you apply. Check: Health and Playtest, the deck\'s numbers. Your tags live under the plan; Cards shows which cards you own.',
+      'Tune: pick what you want to do - finish the deck, find cards, swaps, cuts, fix a problem, lands. Suggestions wait until you accept them into Your changes, which you apply. Check: Health and Playtest, the deck\'s numbers. Tags: every card\'s role from the plan, and your tags; Cards shows which cards you own.',
       'The ⋯ menu imports a list or a link, exports, sets the card size, renames, duplicates, changes the commander, and shows the deck on your profile.',
     ],
     steps: DECK_STEPS,

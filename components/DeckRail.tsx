@@ -28,6 +28,8 @@ const ICON: Partial<Record<DeckTab, string>> = {
   plan: 'M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z',
   tune: 'M3 4.5h6M12 4.5h1M3 8h1M7 8h6M3 11.5h5M11 11.5h2M10.5 3v3M5.5 6.5v3M9.5 10v3',
   check: 'M2 8.5h2.5l1.5-4 3 7 1.5-3H14',
+  // A tag: a label with a hole.
+  tags: 'M2.5 2.5h5l6 6-5 5-6-6v-5ZM5.5 5.5h.01',
   chat: 'M3 3.5h10v7H7l-3 2.5v-2.5H3z',
 };
 const Icon = ({ tab }: { tab: DeckTab }) => (
@@ -111,7 +113,6 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
                 {/* Narrow phones: words only, so all five tabs fit without scrolling. */}
                 <span className={`max-[429px]:hidden ${on ? 'text-[var(--c1)]' : ''}`}><Icon tab={value} /></span>
                 <span className="flex-1">{label}</span>
-                {(value === 'chat' || value === 'tune') && !planConfirmed && <span aria-label="locked until the plan is confirmed" className="text-[11px] opacity-60">🔒</span>}
                 {value === 'plan' && !planConfirmed && !on && (<>
                   <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300 max-lg:hidden">start here</span>
                   {/* Phones: a dot, so all five tabs still fit the bar. */}

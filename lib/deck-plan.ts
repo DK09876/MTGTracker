@@ -529,11 +529,15 @@ export function draftFromCards(commander: ScryfallCard | null, style: Style, sty
 }
 
 /** Whether Tune, Chat and the paid Claude steps may run for this deck: its plan is confirmed. */
+/**
+ * Whether the owner has confirmed the deck's plan (lib/plan-pass.ts). Only
+ * the deck page's "start here" hint reads it now: nothing is locked behind it.
+ */
 export function planConfirmed(listId: string): boolean {
-  const r = row(listId);
-  if (r) return !!r.confirmedAt;
-  const b = database().get('SELECT tagBrief FROM lists WHERE id = ?', [listId]) as { tagBrief: string } | null;
-  return !!b?.tagBrief.trim();
+  const has = database().get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_owner'`);
+  if (!has) return false;
+  const r = database().get('SELECT confirmedAt FROM plan_owner WHERE listId = ?', [listId]) as { confirmedAt: string | null } | null;
+  return !!r?.confirmedAt;
 }
 
 /** How many parts are confirmed, from the stored plan alone (for a lock screen). */

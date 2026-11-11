@@ -7,6 +7,7 @@
 import { localCards } from './card-store';
 import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
+import { planForAi } from './plan-pass';
 import { logShown, type CardSide, type ShownBatch, type Task } from './suggestion-log';
 import type { CardRef, Intent, SuggestionGroup } from './tune-shared';
 
@@ -19,7 +20,7 @@ function side(ref: CardRef | undefined, oracleOf: Map<string, string>): CardSide
   return { oracleId: oracleOf.get(ref.id) ?? localCards([ref.name])[0]?.oracle_id ?? null, name: ref.name };
 }
 
-export function tuneBatches(intent: Intent, groups: SuggestionGroup[], hash: string): ShownBatch[] {
+export function tuneBatches(intent: Intent, groups: SuggestionGroup[], hash: string, planVersion: string | null = null): ShownBatch[] {
   const ids = [...new Set(groups.flatMap((g) => g.items.flatMap((i) => [i.add?.id, i.cut?.id]).filter((x): x is string => !!x)))];
   const oracleOf = new Map<string, string>();
   for (let n = 0; n < ids.length; n += 500) {
@@ -35,7 +36,7 @@ export function tuneBatches(intent: Intent, groups: SuggestionGroup[], hash: str
     method: g.source === 'claude' ? 'ai' : 'code',
     model: g.source === 'claude' ? g.model ?? null : null,
     promptVersion: g.source === 'claude' ? g.promptVersion ?? null : null,
-    planVersion: null,
+    planVersion,
     deckHash: hash,
     items: g.items.map((i) => ({
       key: i.key,
@@ -51,7 +52,8 @@ export function tuneBatches(intent: Intent, groups: SuggestionGroup[], hash: str
 export function logTuneView(list: List, profileId: string, intent: Intent, groups: SuggestionGroup[]): void {
   try {
     const main = cardsInList(list.id).filter((c) => c.board === 'main');
-    logShown(profileId, list.id, `tune:${intent}:`, tuneBatches(intent, groups, deckHash(list.commander, main)));
+    // The plan read in force when these were shown, if any.
+    logShown(profileId, list.id, `tune:${intent}:`, tuneBatches(intent, groups, deckHash(list.commander, main), planForAi(list)?.passId ?? null));
   } catch (e) {
     console.error('[suggestion-log] tune view not logged', e);
   }

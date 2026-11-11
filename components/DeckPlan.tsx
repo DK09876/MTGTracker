@@ -1,20 +1,20 @@
 'use client';
 
 /**
- * The Plan tab: what the deck is built to do, first. Every part - what
- * you're optimizing for, the bracket and budget, the brief and style, what
- * the commander does, themes, how it wins, the flip turn, lands and ranges,
- * the cards never cut - shows its value, who set it (detected, Claude,
- * yours), how sure the app is, and How? it was worked out. Each part is
- * confirmed on its own, or the whole plan at once; confirming the whole
- * plan unlocks Tune, Chat and the paid Claude steps, which all read it.
+ * The Plan tab, in the order the owner fills it: (1) what the commander does
+ * for the deck, (2) their settings, (3) their notes, then (4) the plan: a
+ * Claude read of the deck that takes all of that in, or one they write -
+ * edited in place, read again with their changes kept, and confirmed
+ * (components/PlanPass.tsx, lib/plan-pass.ts). The numbers the app works
+ * out (flip turn, lands, job ranges) sit folded at the end. Nothing is
+ * locked behind confirming: Tune, Chat and Check read the plan when there is
+ * one. Card roles and tags are on the Tags tab.
  */
 
 import { useCallback, useEffect, useId, useState } from 'react';
 
-import AiModelPicker from './AiModelPicker';
-import DeckBrief from './DeckBrief';
 import GameChangerLine from './GameChangerLine';
+import { CommanderRoles, OwnerNotes, PlanRead, usePlanView } from './PlanPass';
 import Tip from './Tip';
 import { BRACKETS } from '@/lib/brackets';
 import * as api from '@/lib/api';
@@ -35,22 +35,12 @@ interface Props {
 
 type Part = api.PlanPart;
 
-const GROUPS: Array<[string, string[]]> = [
-  ['What you’re optimizing for', ['goal']],
-  ['Who’s in it', ['commanders']],
-  ['The table', ['bracket', 'budget', 'own', 'rule']],
-  ['What it does', ['brief', 'style', 'role', 'build', 'key', 'themes']],
-  ['How it wins', ['stages', 'routes', 'lean']],
-  ['Pace and numbers', ['flip', 'lands', 'ranges', 'archetype']],
-  ['Never cut', ['protected']],
-];
-const WIDE = new Set(['goal', 'brief', 'themes', 'routes', 'ranges', 'stages']);
 
 const TITLE: Record<string, string> = {
   goal: 'What you’re optimizing for', commanders: 'Commander', bracket: 'Bracket you’re aiming for', budget: 'Budget per card', own: 'Only cards I own',
   rule: 'Deck rule', brief: 'What this deck does', style: 'Style', role: 'What the commander does for the deck', build: 'How the deck is built',
   key: 'Key cards', themes: 'Themes', stages: 'Game plan by stage', routes: 'Ways to win', lean: 'Leans on the commander', flip: 'Flip turn',
-  lands: 'Lands', ranges: 'Job ranges', protected: 'Protected cards', archetype: 'Archetype',
+  lands: 'Lands', ranges: 'Job ranges', protected: 'Never cut (★)', archetype: 'Archetype',
 };
 const TIPS: Record<string, string> = {
   goal: 'Pick any mix. The rules read the chips; Claude reads all of it, your words too, and can propose changes to the usual rules that serve it.',
@@ -70,9 +60,13 @@ const TIPS: Record<string, string> = {
   flip: 'The mana the deck needs before it stops setting up and starts doing its thing. Sets the ramp range and Playtest’s first goal.',
   lands: 'The one land number Plan, Tune and Check all use.',
   ranges: 'How many of each job the deck should run. Your own range wins over everything else.',
-  protected: 'Never offered as a cut, anywhere.',
+  protected: 'Never offered as a cut, anywhere: the commanders and the cards you mark ★ never cut (from a card’s menu).',
   archetype: 'A reading from the numbers, not something you set.',
 };
+const ROLE_NOTE: Record<string, string> = {
+  Engine: 'The deck runs on it.', Payoff: 'It rewards what the 99 does.', Enabler: 'It makes the 99’s plan happen.', 'Covers a weakness': 'It fills a gap the 99 has.', Multiplier: 'It doubles what the 99 does.',
+};
+// Where the guided tour points on this page.
 const SOURCE: Record<string, [string, string]> = {
   detected: ['detected', 'bg-emerald-500/10 text-emerald-300'],
   claude: ['Claude', 'bg-violet-400/15 text-violet-200'],
@@ -82,10 +76,9 @@ const SOURCE: Record<string, [string, string]> = {
 const STRENGTH: Record<string, [string, string]> = {
   clear: ['Clear', 'text-emerald-300'], likely: ['Likely', 'text-[var(--foreground)]'], guess: ['A guess', 'text-amber-300 border-amber-300/50'],
 };
-const ROLE_NOTE: Record<string, string> = {
-  Engine: 'The deck runs on it.', Payoff: 'It rewards what the 99 does.', Enabler: 'It makes the 99’s plan happen.', 'Covers a weakness': 'It fills a gap the 99 has.', Multiplier: 'It doubles what the 99 does.',
-};
-// Where the guided tour points on this page.
+// The owner's settings, and the numbers the app works out (folded away).
+const SETTINGS = ['goal', 'bracket', 'budget', 'own', 'rule', 'protected'];
+const NUMBERS = ['flip', 'lands', 'ranges'];
 const TOUR: Record<string, string> = { style: 'plan-style', flip: 'plan-flip', ranges: 'plan-guidelines', themes: 'plan-packages', goal: 'plan-goal' };
 const BUTTON = 'rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50';
 const OK = 'rounded-full border border-emerald-400/50 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-400/10 disabled:opacity-50';
@@ -127,17 +120,22 @@ function How({ how, changedBy }: { how: Part['how'] | { inputs: string[]; steps:
   );
 }
 
+
 export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab, cardNames = [] }: Props) {
   const [plan, setPlan] = useState<api.DeckPlanState | 'loading' | 'failed'>(() => api.peek<api.DeckPlanState>(api.paths.plan(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [lit, setLit] = useState<string | null>(null);
   const [rules, setRules] = useState(false);
-  const [kick, setKick] = useState(0);
+  const { view, act: planAct, error: viewError } = usePlanView(listId, version);
 
   const reload = useCallback(() => api.deckPlan(listId).then((p) => { setPlan(p); onPlan(p); }).catch(() => setPlan((x) => (x === 'loading' ? 'failed' : x))), [listId, onPlan]);
   useEffect(() => { void reload(); }, [reload, version, tags.brief]);
+  // Reading again or confirming saves the owner's answers and note to their notes: show them.
+  const act = async (a: api.PlanPassAction) => {
+    const v = await planAct(a);
+    if (a.action === 'generate' || a.action === 'confirm') await reload();
+    return v;
+  };
 
   if (plan === 'loading') return <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>;
   if (plan === 'failed') return <p className="mt-8 text-center text-red-400">Couldn&apos;t read the deck just now.</p>;
@@ -156,112 +154,51 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
       setBusy(false);
     }
   };
-  const show = (id: string) => {
-    setOpen((o) => ({ ...o, [id]: true }));
-    setLit(id);
-    document.getElementById(`plan-${id}`)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
-    setTimeout(() => setLit(null), 2000);
-  };
   const p = plan.parts;
-  const left = plan.progress.total - plan.progress.done;
+  const commander = ((p.commanders?.value as { commander: string | null } | undefined)?.commander ?? 'The commander').split(',')[0];
 
   return (
     <div className="mt-5 flex flex-col gap-6">
-      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border px-4 py-3 ${plan.confirmed ? 'border-emerald-400/40 bg-emerald-400/[0.05]' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
-        <span className="text-sm"><b className="tabular-nums">{plan.progress.done} of {plan.progress.total}</b> parts confirmed</span>
-        <span className="h-2 min-w-[8rem] flex-[1_1_10rem] overflow-hidden rounded-full bg-[var(--surface-hover)]" aria-hidden>
-          <i className="block h-full rounded-full id-grad" style={{ width: `${(plan.progress.done / plan.progress.total) * 100}%` }} />
-        </span>
-        {plan.confirmed
-          ? <span className="text-sm font-semibold text-emerald-300">✓ Plan confirmed · Tune and Chat are open</span>
-          : null}
-        <AiModelPicker area="deck" align="right" />
-      </div>
-      {!plan.confirmed && <p className="-mt-4 max-w-3xl text-xs text-[var(--muted)]">Tune, Chat and Claude&apos;s reviews open when the whole plan is confirmed. Confirming the whole plan accepts what&apos;s shown for the {left} part{left === 1 ? '' : 's'} left.</p>}
-      {plan.pile && <p className="-mt-3 max-w-3xl text-sm text-[var(--muted)]">Read from Main ({plan.pile.main}) and the sections marked &ldquo;Might go in&rdquo; ({plan.pile.pool}) together: the pile shows what you&apos;re going for.</p>}
+      {view && <CommanderRoles view={view} act={act} commander={commander} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => setRules((r) => !r)} aria-expanded={rules} className={BUTTON}>{rules ? 'Hide how the plan is worked out' : 'How the plan is worked out'}</button>
-        <span className="text-xs text-[var(--muted)]">Every rule the app uses, with this deck&apos;s setting</span>
-      </div>
-      {rules && <RulesPage rules={plan.rules} />}
+      <section data-tour="plan-settings" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">2</span>Your settings
+          <Tip label="About your settings">Limits every suggestion keeps to, AI or rules. Set by you; nothing here is guessed.</Tip></h3>
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+          {SETTINGS.map((id) => p[id] && (
+            <div key={id} id={`plan-${id}`} data-tour={TOUR[id]} className={`flex min-w-0 flex-col gap-2 rounded-xl bg-[var(--surface-hover)]/40 p-3 ${id === 'goal' ? 'lg:col-span-2' : ''}`}>
+              <h4 className="flex items-center gap-1.5 text-sm font-semibold">{TITLE[id]} {TIPS[id] && <Tip label={`About: ${TITLE[id]}`}>{TIPS[id]}</Tip>}</h4>
+              <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} />
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {plan.small && <Quick plan={plan} busy={busy} change={change} onDraft={async (text) => {
-        if (text.trim()) onTags(await api.setTagBrief(listId, text));
-        await api.startRead(listId, 'scratch', '').catch((e) => setError(e instanceof Error ? e.message : 'Could not start it'));
-        setKick((k) => k + 1);
-        show('brief');
-      }} />}
+      <OwnerNotes notes={plan.notes} busy={busy} change={change} />
 
-      {plan.lookFirst.length > 0 && (
-        <section className="flex max-w-3xl flex-col gap-2 rounded-2xl border border-amber-300/40 bg-amber-300/[0.04] px-4 py-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-200/80">Look at these first · the app is least sure about them</span>
-          <ul className="flex flex-col gap-1.5">
-            {plan.lookFirst.map((x) => (
-              <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{x.text}</span><button onClick={() => show(x.id)} className={BUTTON}>Show me</button></li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {view ? <PlanRead key={view.pass?.id ?? 'none'} view={view} act={act} cardNames={cardNames} /> : <p className="text-sm text-[var(--muted)]">{viewError ?? 'Loading the plan…'}</p>}
+      {viewError && view && <p role="alert" className="text-sm text-red-400">{viewError}</p>}
 
-      {GROUPS.map(([group, ids]) => (
-        <section key={group} className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--border)] pb-1.5">
-            <h3 data-section={group} className="font-display text-lg font-semibold">{group}</h3>
-            <span className="text-xs text-[var(--muted)]">{ids.filter((id) => id !== 'archetype' && p[id]?.confirmed).length} of {ids.filter((id) => id !== 'archetype').length} confirmed</span>
-          </div>
+      <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+        <summary className="cursor-pointer px-4 py-3"><b>Numbers the app uses</b> <span className="text-sm text-[var(--muted)]">· flip turn, lands, job ranges · worked out from the cards, change any</span></summary>
+        <div className="flex flex-col gap-3 px-4 pb-4">
           <div className="grid items-start gap-3 lg:grid-cols-2">
-            {ids.map((id) => p[id] && (
-              <PartCard key={id} part={p[id]} wide={WIDE.has(id)} lit={lit === id} open={!!open[id]} busy={busy}
-                onHow={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}
-                onConfirm={() => change({ confirmPart: id as never })} onUnconfirm={() => change({ unconfirmPart: id as never })}>
-                {id === 'brief'
-                  ? <BriefPart listId={listId} tags={tags} onTags={onTags} plan={plan} busy={busy} change={change} kick={kick} reload={reload} />
-                  : <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} />}
-              </PartCard>
+            {NUMBERS.map((id) => p[id] && (
+              <div key={id} id={`plan-${id}`} data-tour={TOUR[id]} className={`flex min-w-0 flex-col gap-2 rounded-xl bg-[var(--surface-hover)]/40 p-3 ${id === 'ranges' ? 'lg:col-span-2' : ''}`}>
+                <h4 className="flex items-center gap-1.5 text-sm font-semibold">{TITLE[id]} {TIPS[id] && <Tip label={`About: ${TITLE[id]}`}>{TIPS[id]}</Tip>}</h4>
+                <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} />
+              </div>
             ))}
           </div>
-        </section>
-      ))}
-
-      <Changes plan={plan} busy={busy} change={change} />
+          <Changes plan={plan} busy={busy} change={change} />
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setRules((r) => !r)} aria-expanded={rules} className={BUTTON}>{rules ? 'Hide how the numbers are worked out' : 'How the numbers are worked out'}</button>
+          </div>
+          {rules && <RulesPage rules={plan.rules} />}
+        </div>
+      </details>
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-      {!plan.confirmed && (
-        <div className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/95 p-2 shadow-xl backdrop-blur sm:p-3 lg:bottom-4">
-          <button data-tour="plan-confirm" onClick={() => change({ confirm: true })} disabled={busy} className="btn-go rounded-full px-5 py-2 text-sm font-semibold disabled:opacity-60">Confirm the whole plan</button>
-          <span className="text-sm text-[var(--muted)]">{plan.progress.done} of {plan.progress.total} confirmed<span className="max-sm:hidden">. Opens Tune, Chat and Claude&apos;s reviews</span>.</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PartCard({ part, wide, lit, open, busy, onHow, onConfirm, onUnconfirm, children }: {
-  part: Part; wide: boolean; lit: boolean; open: boolean; busy: boolean; onHow: () => void; onConfirm: () => void; onUnconfirm: () => void; children: React.ReactNode;
-}) {
-  const id = part.id;
-  const [srcText, srcClass] = SOURCE[part.source] ?? SOURCE.detected;
-  const reading = id === 'archetype';
-  return (
-    <div id={`plan-${id}`} data-tour={TOUR[id]} className={`flex scroll-mt-24 flex-col gap-2.5 rounded-2xl border bg-[var(--surface)] p-3.5 ${wide ? 'lg:col-span-2' : ''} ${lit ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/30' : part.confirmed && !reading ? 'border-emerald-400/30' : 'border-[var(--border)]'}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <h4 className="flex items-center gap-1.5 font-semibold">{TITLE[id]} {TIPS[id] && <Tip label={`About: ${TITLE[id]}`}>{TIPS[id]}</Tip>}</h4>
-        <span className="flex flex-wrap gap-1">
-          <span className={`rounded-md px-1.5 text-[11px] leading-5 ${srcClass}`}>{srcText}</span>
-          {part.strength && <span className={`rounded-md border border-[var(--border)] px-1.5 text-[11px] leading-5 ${STRENGTH[part.strength][1]}`}>{STRENGTH[part.strength][0]}</span>}
-        </span>
-      </div>
-      {children}
-      {part.changedBy.length > 0 && <span className="text-xs text-violet-200">Changed by a change to the usual rules: {part.changedBy.join('; ')}</span>}
-      {open && <How how={part.how} changedBy={part.changedBy} />}
-      <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-        <button onClick={onHow} aria-expanded={open} className="text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{open ? 'Hide' : 'How?'}</button>
-        {reading ? <span className="text-xs text-[var(--muted)]">Nothing to confirm</span>
-          : part.confirmed
-            ? <span className="flex items-center gap-2 text-xs"><span className="font-semibold text-emerald-300">✓ Confirmed</span><button onClick={onUnconfirm} disabled={busy} className="text-[var(--muted)] underline hover:text-[var(--foreground)]">Undo</button></span>
-            : <button onClick={onConfirm} disabled={busy} className={OK}>Confirm</button>}
-      </div>
     </div>
   );
 }
@@ -533,63 +470,6 @@ function Routes({ routes, busy, change, cardNames }: { routes: api.RouteView[]; 
         </div>
       ) : <button onClick={() => setAdding(true)} className="w-fit text-xs text-[var(--accent)] hover:underline">+ A way to win</button>}
     </div>
-  );
-}
-
-function BriefPart({ listId, tags, onTags, plan, busy, change, kick, reload }: { listId: string; tags: DeckTags; onTags: (t: DeckTags) => void; plan: api.DeckPlanState; busy: boolean; change: Change; kick: number; reload: () => Promise<unknown> }) {
-  const open = plan.proposals.filter((x) => x.status === 'open');
-  return (
-    <div className="flex flex-col gap-3">
-      <DeckBrief bare listId={listId} tags={tags} onTags={onTags} drafted={plan.draft} kick={kick}
-        onSaved={() => { void change({ confirmPart: 'brief' }); }} onRead={() => { void reload(); }} />
-      {(plan.proposals.length > 0 || plan.notes.length > 0) && (
-        <div className="flex flex-col gap-2 rounded-xl border border-violet-300/40 bg-violet-300/[0.05] p-3">
-          <span className="flex flex-wrap items-baseline justify-between gap-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-violet-200">✦ Claude&apos;s proposals</span><span className="text-xs text-[var(--muted)]">{open.length ? `${open.length} to decide · nothing changes until you accept` : 'All decided'}</span></span>
-          {plan.proposals.map((x) => (
-            <div key={x.key} className={`flex flex-wrap items-start justify-between gap-2 border-t border-dashed border-[var(--border)] pt-2 text-sm first:border-t-0 first:pt-0 ${x.status !== 'open' ? 'opacity-60' : ''}`}>
-              <span className="flex min-w-0 flex-[1_1_18rem] flex-col gap-0.5">
-                <span><b>{x.label}:</b> {x.value}</span>
-                {x.detected && <span className="text-xs text-[var(--muted)]">Detected: {x.detected}</span>}
-                {x.why && <span className="text-xs text-[var(--muted)]">{x.why}</span>}
-                {x.affects && <span className="text-xs text-[var(--faint)]">Affects: {x.affects}</span>}
-              </span>
-              {x.status === 'open'
-                ? <span className="flex gap-1.5">{x.usable && <button onClick={() => change({ settle: { key: x.key, status: 'accepted' } })} disabled={busy} className={OK}>Accept</button>}<button onClick={() => change({ settle: { key: x.key, status: 'skipped' } })} disabled={busy} className={BUTTON}>Skip</button></span>
-                : <span className="text-xs text-[var(--muted)]">{x.status === 'accepted' ? 'Accepted' : 'Skipped'}</span>}
-            </div>
-          ))}
-          {plan.notes.length > 0 && (
-            <div className="flex flex-col gap-1 border-t border-dashed border-[var(--border)] pt-2">
-              <span className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--faint)]">Claude&apos;s notes from earlier reads · not sent to later AI steps<Tip label="Why these are not sent">Only your own notes go to later AI steps. Claude&apos;s notes read back as if they were yours steered later answers, so they stay here for you to read.</Tip></span>
-              {plan.notes.map((n) => <span key={n.id} className="flex items-start justify-between gap-2 text-sm"><span>{n.text}</span><button onClick={() => change({ notes: { remove: n.id } })} disabled={busy} aria-label="Remove this note" className="text-[var(--muted)] hover:text-red-300">×</button></span>)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Quick({ plan, busy, change, onDraft }: { plan: api.DeckPlanState; busy: boolean; change: Change; onDraft: (text: string) => Promise<void> }) {
-  const [text, setText] = useState(plan.brief);
-  const b = plan.parts.bracket.value as { value: number | null };
-  return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/60 bg-[var(--accent)]/[0.04] p-4">
-      <h3 className="font-display text-lg font-semibold">Four quick things before the rest</h3>
-      <p className="text-sm text-[var(--muted)]">The deck has few cards to read yet, so these steer everything the app suggests.</p>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <label className="flex flex-col gap-1.5 text-sm font-semibold">Bracket you&apos;re aiming for<Seg label="Bracket" options={[1, 2, 3, 4, 5].map((n) => [n, String(n)] as [number, string])} value={b.value} disabled={busy} onPick={(n) => change({ bracket: n })} /></label>
-        <label className="flex flex-col gap-1.5 text-sm font-semibold">Budget per card<Seg label="Budget" options={[[0, 'Any'], [1, '$1'], [5, '$5'], [20, '$20']]} value={(plan.parts.budget.value as number | null) ?? 0} disabled={busy} onPick={(n) => change({ budget: n || null })} /></label>
-        <label className="flex flex-col gap-1.5 text-sm font-semibold">Cards<Seg label="Cards" options={[['any', 'Any card'], ['mine', 'Only mine']]} value={plan.parts.own.value ? 'mine' : 'any'} disabled={busy} onPick={(x) => change({ own: x === 'mine' })} /></label>
-      </div>
-      <label className="flex flex-col gap-1.5 text-sm font-semibold">What should it do?
-        <input aria-label="What should it do?" value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Casual treasure deck, no infinite combos, I love Revel in Riches" className={`${INPUT} w-full font-normal`} />
-      </label>
-      <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => onDraft(text)} disabled={busy} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-60">✦ Draft the rest with Claude</button>
-        <span className="text-xs text-[var(--muted)]">Or fill in the parts below yourself.</span>
-      </div>
-    </section>
   );
 }
 

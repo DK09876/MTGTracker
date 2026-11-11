@@ -123,22 +123,12 @@ export async function tuneContext(list: List, profileId: string): Promise<Contex
   const inBoards = new Set(sections.filter((s) => s.purpose === 'in').map((s) => s.id as string));
   const pool = all.filter((c) => inBoards.has(c.board));
   const known = knownRoles([...all.map((c) => c.card), ...commanders]);
-  // Never cut: the commanders, key cards, ways to win, pets, ★ keeps, cards tagged as a win condition.
+  // Never cut: the commanders and the owner's ★ never-cut list, nothing else (the owner's call, 2026-11-10).
+  // Key cards, ways to win and tags are shown and read by the AI steps, but code no longer protects them.
   const protectedWhy = new Map<string, string>();
   for (const c of commanders) protectedWhy.set(c.name, 'commander');
-  for (const n of plan.stored.key?.v ?? plan.snapshot.keyCards ?? []) if (!protectedWhy.has(n)) protectedWhy.set(n, 'key card');
-  for (const n of plan.snapshot.routeCards ?? []) if (!protectedWhy.has(n)) protectedWhy.set(n, 'way to win');
   const starred = keeps(list.id);
-  const accepted = tags.tags.filter((t) => t.status === 'accepted');
-  const pet = new Set(accepted.filter((t) => /^(pets?|pet cards?|fun|favou?rites?)$/i.test(t.name)).map((t) => t.id));
-  const win = new Set(accepted.filter((t) => t.kind === 'wincon').map((t) => t.id));
-  for (const c of main) {
-    const key = c.card.oracle_id ?? c.card.id;
-    const on = tags.cardTags.filter((ct) => ct.on && ct.key === key);
-    if (on.some((ct) => pet.has(ct.tagId))) protectedWhy.set(c.card.name, 'pet card');
-    else if (on.some((ct) => win.has(ct.tagId)) && !protectedWhy.has(c.card.name)) protectedWhy.set(c.card.name, 'way to win');
-    if (starred.has(key) && !protectedWhy.has(c.card.name)) protectedWhy.set(c.card.name, '★ you kept it');
-  }
+  for (const c of main) if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedWhy.has(c.card.name)) protectedWhy.set(c.card.name, '★ never cut');
   const companion = all.find((c) => c.slot === 'companion')?.card;
   if (companion) protectedWhy.set(companion.name, 'companion');
   const size = count(main) + (list.commander ? 1 : 0);
