@@ -405,7 +405,7 @@ export function CardRoles({ listId, version }: { listId: string; version: string
   return (
     <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">Card roles<Tip label="About card roles">One role per card, from the plan read. Change any if the read got it wrong: your change is kept on every later read and read by the AI steps. It doesn&apos;t unconfirm the plan. While the plan is current, Engine cards are never offered as cuts.</Tip></h2>
+        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">Card roles<Tip label="About card roles">One role per card, from the plan read. Change any if the read got it wrong: your change is kept on every later read and read by the AI steps. It doesn&apos;t unconfirm the plan. While the plan is current, Engine cards show a warning beside a cut and are offered last; they are not blocked.</Tip></h2>
         {view.pass && !view.pass.ownPlan && <span className="text-xs text-[var(--muted)]">from the plan · {when(view.pass.at)}</span>}
       </div>
       {!names.length ? <p className="text-sm text-[var(--muted)]">No roles yet. They come with the plan read on the Plan tab.</p> : (
