@@ -48,6 +48,8 @@ function db() {
       id TEXT PRIMARY KEY, listId TEXT NOT NULL, profileId TEXT NOT NULL, key TEXT NOT NULL, signature TEXT NOT NULL,
       method TEXT NOT NULL DEFAULT 'code', openedAt TEXT NOT NULL, closedAt TEXT)`);
     d.run('CREATE INDEX IF NOT EXISTS idx_suggestion_batches_open ON suggestion_batches (listId, key, closedAt)');
+    // A database made before batches recorded their method has the table without the column.
+    try { d.run("ALTER TABLE suggestion_batches ADD COLUMN method TEXT NOT NULL DEFAULT 'code'"); } catch { /* already there */ }
     d.run(`CREATE TABLE IF NOT EXISTS suggestion_events (
       id TEXT PRIMARY KEY, at TEXT NOT NULL, profileId TEXT NOT NULL, listId TEXT NOT NULL,
       task TEXT NOT NULL, method TEXT NOT NULL, model TEXT, promptVersion TEXT, planVersion TEXT,
