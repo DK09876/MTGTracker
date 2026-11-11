@@ -292,9 +292,6 @@ export function PlanRead({ listId, view, act, cardNames }: { listId: string; vie
                 {r.cards.map((c, j) => <Chip key={c} text={c} yours={youRouteCard.has(c)} editing={editing} onRemove={() => set({ winRoutes: shown.winRoutes.map((x, k) => (k === i ? { ...x, cards: x.cards.filter((_, m) => m !== j) } : x)) })} />)}
                 {editing && <AddBox label={`card for ${r.name}`} cardNames={cardNames} onAdd={(v) => set({ winRoutes: shown.winRoutes.map((x, k) => (k === i ? { ...x, cards: [...x.cards, v] } : x)) })} />}
               </span>
-              {p.oneAway.filter((c) => c.cards.some((n) => r.cards.includes(n))).map((c) => (
-                <span key={c.missing} className="text-xs text-amber-200">▲ One card away: add <b>{c.missing}</b> to complete {c.cards.filter((n) => n !== c.missing).join(' + ')} (from the combo list, not the AI).</span>
-              ))}
             </span>
           </div>
         ))}
