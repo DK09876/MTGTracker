@@ -649,7 +649,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onPlan={onPlan}
             onTab={(tab) => setSection(tab)}
             cardNames={[...new Set([...(list.commander ? [list.commander.name] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card.name)])].sort()}
-            commanders={[list.commander, partner].filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ name: c.name, image: imageOf(c, 'normal') }))}
           />
         ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
       ) : null}

@@ -843,7 +843,8 @@ export type PlanPassAction =
   | { action: 'generate' | 'confirm'; answers?: Array<{ question: string; answer: string }>; skipped?: string[]; note?: string }
   | { action: 'commanderRoles'; roles: string[] }
   | { action: 'edits'; edits: { plan?: string | null; winRoutes?: Array<{ name: string; cards: string[] }> | null; keyCards?: string[] | null; themes?: Array<{ name: string; cards: string[] }> | null; roles?: Record<string, string> | null } }
-  | { action: 'undoEdits' | 'useStale' | 'acceptCommander' }
+  | { action: 'undoEdits' | 'useStale' | 'acceptCommander' | 'acceptBracket' }
+  | { action: 'neverCut'; add?: string[]; remove?: string[] }
   | { action: 'ownPlan'; text: string; fill?: boolean };
 export const planPassAct = (listId: string, act: PlanPassAction) =>
   spending(send(planPath(listId), 'POST', act).then(json<import('./plan-shared').PlanView>));

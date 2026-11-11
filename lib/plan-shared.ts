@@ -51,6 +51,8 @@ export interface PassOutput {
   summary: string;
   /** Always made; shown only when the owner picked Unsure (see SUGGEST_COMMANDER_AT). */
   commander: { roles: CommanderRole[]; why: string };
+  /** The bracket the list fits as built, 1-5; shown only while the owner's bracket is Unsure. Reads from before this was asked have none. */
+  bracket?: { level: number; why: string } | null;
 }
 
 /** The owner's edits: each part given is theirs, kept exactly on every later read. */
@@ -99,6 +101,10 @@ export interface PlanView {
     oneAway: Array<{ cards: string[]; missing: string }>;
     /** Shown when the owner picked Unsure, the plan is confirmed and the deck is big enough. */
     commander: { roles: CommanderRole[]; why: string } | null;
+    /** Shown when the owner's bracket is Unsure and the plan is confirmed. */
+    bracket: { level: number; why: string } | null;
+    /** Key cards not yet marked ★ never cut, offered once the plan is confirmed. */
+    neverCut: string[];
     /** The plan was written by the owner, not read. */
     ownPlan: boolean;
     /** What the owner said the commander does when this was read, to flag a change since. */

@@ -218,8 +218,8 @@ export async function planState(list: List): Promise<PlanState> {
   const parts: Record<string, PlanPart> = {
     goal: part('goal', plan.goal, s.goal ? who(s.goal.by) : 'unset', null, {
       inputs: [`Chips: ${plan.goal.chips.join(', ') || 'none'}`, ...(plan.goal.text ? [`In your words: ${plan.goal.text}`] : [])],
-      steps: ['“Faster” and “Win more often” lower the curve the cut list aims for and favour cheap ramp. “More fun, keep my pets” protects pet and theme cards harder. “Spend less” keeps suggestions inside your budget. “Stay on theme” keeps suggestions inside your themes and deck rule. “Fit my table” keeps suggestions inside your bracket.', 'Claude reads the chips and your words, and may propose changes to the usual rules that serve them.'],
-      idea: 'The usual guidelines fit most decks; what you are optimizing for decides when to step away from them.',
+      steps: ['“Do its thing more often” makes the rules’ cut list offer off-plan cards first and keep theme cards. “Faster” and “Win more often” lower the curve it aims for and favour cheap ramp. “More fun, keep my pets” protects pet and theme cards harder. “Spend less” keeps suggestions inside your budget. “Fit my table” keeps suggestions inside your bracket.', 'Claude reads the chips and your words, and may propose changes to the usual rules that serve them.'],
+      idea: 'The usual guidelines fit most decks; what you want from this one decides when to step away from them.',
     }),
     commanders: part('commanders', { commander: commander?.name ?? null, partner: partner?.name ?? null, companion: companion?.name ?? null }, 'detected', 'clear', {
       inputs: [commander ? `Commander: ${commander.name}` : 'No commander set', partner ? `Second commander: ${partner.name}` : 'No second commander', companion ? `Companion: ${companion.name}` : 'No companion'],

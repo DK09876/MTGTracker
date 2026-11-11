@@ -45,7 +45,7 @@ export function usePlanView(listId: string, version: string) {
 
 // --- 1. What the commander does --------------------------------------------------------------
 
-export function CommanderRoles({ view, act, commander, readRoles, pictures = [] }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<unknown>; commander: string; readRoles: CommanderRole[] | null; pictures?: Array<{ name: string; image: string | null }> }) {
+export function CommanderRoles({ view, act, commander, readRoles, plural = false }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<unknown>; commander: string; readRoles: CommanderRole[] | null; plural?: boolean }) {
   const picked = new Set(view.commanderRoles);
   const toggle = (id: CommanderRole) => {
     const next = new Set(picked);
@@ -58,18 +58,11 @@ export function CommanderRoles({ view, act, commander, readRoles, pictures = [] 
   return (
     <section data-tour="plan-commander" data-section="1 · The commander" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">1</span>What {commander} does for the deck
+        <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">1</span>What {commander} {plural ? 'do' : 'does'} for the deck
           <Tip label="About this">Pick any that fit; the ⓘ by each says what it means. The plan reads this, and so does every AI step after it.</Tip></h3>
         {changed && view.pass && <span className="text-xs text-violet-200">Changed since the plan was read</span>}
       </div>
-      <div className="flex flex-wrap items-start gap-4">
-      {pictures.some((c) => c.image) && (
-        <div className="flex shrink-0 gap-2" data-tour="plan-commander-art">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {pictures.filter((c) => c.image).map((c) => <img key={c.name} src={c.image!} alt={c.name} loading="lazy" className="w-28 rounded-lg sm:w-36" style={{ aspectRatio: '488 / 680' }} />)}
-        </div>
-      )}
-      <div role="group" aria-label={`What ${commander} does for the deck`} className="flex min-w-0 flex-[1_1_18rem] flex-wrap content-start gap-1.5">
+      <div role="group" aria-label={`What ${commander} ${plural ? 'do' : 'does'} for the deck`} className="flex flex-wrap gap-1.5">
         {COMMANDER_ROLES.map((r) => (
           <span key={r.id} className={`inline-flex items-center gap-1 rounded-full border py-1 pl-3 pr-1.5 text-sm focus-within:ring-2 focus-within:ring-[var(--accent)]/50 ${picked.has(r.id) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
             <label className="inline-flex cursor-pointer items-center gap-1.5">
@@ -79,7 +72,6 @@ export function CommanderRoles({ view, act, commander, readRoles, pictures = [] 
             <Tip label={`About ${r.label}`}>{r.tip}</Tip>
           </span>
         ))}
-      </div>
       </div>
     </section>
   );
@@ -330,6 +322,9 @@ export function PlanRead({ listId, view, act, cardNames }: { listId: string; vie
           <p className="text-sm"><b>{p.commander.roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)?.label).join(' and ')}</b>. <span className="text-[var(--muted)]">{p.commander.why}</span></p>
           <span className="flex flex-wrap items-center gap-3"><button onClick={() => run({ action: 'acceptCommander' })} disabled={busy} className={GO}>Use these</button><span className="text-xs text-[var(--muted)]">Or pick yourself in step 1.</span></span>
         </div>
+      )}
+      {(p.bracket || p.neverCut.length > 0) && !editingConfirmed && (
+        <p className="text-sm text-[var(--muted)]">✦ The plan also suggests {[p.bracket ? `bracket ${p.bracket.level}` : '', p.neverCut.length ? `${p.neverCut.length} card${p.neverCut.length === 1 ? '' : 's'} to never cut` : ''].filter(Boolean).join(' and ')}: <a href="#plan-bracket" className="underline">see step 2, Your settings</a>.</p>
       )}
       {view.commanderRoles.includes('unsure') && !p.commander && !confirmed && view.nonland >= SUGGEST_COMMANDER_AT && <p className="text-xs text-[var(--faint)]">What the commander does: suggested once you confirm the plan.</p>}
       {view.commanderRoles.includes('unsure') && view.nonland < SUGGEST_COMMANDER_AT && <p className="text-xs text-[var(--faint)]">What the commander does: suggested once the deck has {SUGGEST_COMMANDER_AT} or more non-land cards ({view.nonland} now).</p>}

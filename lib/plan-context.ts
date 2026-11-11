@@ -50,7 +50,7 @@ export function planText(plan: Plan, roles: RoleCount[] | null, read = false): s
   const snap = plan.snapshot;
   const lines: string[] = [read ? "The owner's settings for the deck (who set each part in brackets):" : "The deck's plan, as the app holds it (who set each part in brackets):"];
   const goal = plan.goal;
-  lines.push(`- Optimizing for: ${goal.chips.join(', ') || 'the usual guidelines'}${goal.text ? `. In their words: "${goal.text}"` : ''} [${by(s.goal?.by, 'not set')}]`);
+  lines.push(`- What the owner wants from the deck: ${goal.chips.join(', ') || (goal.text ? '' : 'nothing in particular said')}${goal.text ? `${goal.chips.length ? '. ' : ''}In their words: "${goal.text}"` : ''} [${by(s.goal?.by, 'not set')}]`);
   lines.push(`- Bracket aimed for: ${plan.bracket ?? `not set${snap.bracketLooks ? `; the list looks like ${snap.bracketLooks}` : ''}`}`);
   lines.push(`- Budget per card: ${plan.budget ? `$${plan.budget}, cards they own always allowed` : 'any'}. Only cards they own: ${plan.own ? 'yes' : 'no'}.`);
   if (plan.rule.text || plan.rule.filter) lines.push(`- Deck rule: ${plan.rule.text}${plan.rule.filter ? ` (cards must match: ${plan.rule.filter})` : ''} [${by(s.rule?.by)}]`);

@@ -267,6 +267,32 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(pp.readFlags(list).size).toBe(0);
   });
 
+  it('suggests a bracket and never-cut cards once the plan is confirmed, and takes them when asked', async () => {
+    const { list } = await deck();
+    const pp = await import('./plan-pass');
+    const { planFor } = await import('./deck-plan');
+    await pp.runPass(fakeModel(() => ({ ...ANSWER, bracket: { level: 3, why: 'One Game Changer and a slow combo.' } })).model, list, 'dk');
+    // Nothing before the owner has looked the plan over.
+    expect(pp.planView(list).pass).toMatchObject({ bracket: null, neverCut: [] });
+    pp.confirmPlan(list.id);
+    let v = pp.planView(list);
+    expect(v.pass!.bracket).toEqual({ level: 3, why: 'One Game Changer and a slow combo.' });
+    expect(v.pass!.neverCut).toEqual(v.pass!.keyCards);
+    pp.setNeverCut(list, { add: ['spell 1', 'Not In Deck'] });
+    pp.acceptBracketSuggestion(list.id);
+    v = pp.planView(list);
+    expect(v.pass!.neverCut).not.toContain('Spell 1');
+    expect((await import('./deck-roles')).keeps(list.id).has('o-Spell 1')).toBe(true);
+    // The owner's bracket is set now, so there is nothing left to suggest.
+    expect(planFor(list.id, '', list.commander, []).bracket).toBe(3);
+    expect(v.pass!.bracket).toBeNull();
+    pp.setNeverCut(list, { remove: ['Spell 1'] });
+    expect(pp.planView(list).pass!.neverCut).toContain('Spell 1');
+    // A read that gives no usable bracket still stands, with nothing to suggest.
+    await pp.runPass(fakeModel(() => ({ ...ANSWER, bracket: { level: 9, why: '' } })).model, list, 'dk');
+    expect(pp.latestPass(list.id)!.output.bracket).toBeNull();
+  });
+
   it('keeps typed answers for the latest read until they are sent', async () => {
     const { list } = await deck();
     const pp = await import('./plan-pass');

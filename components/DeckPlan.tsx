@@ -15,6 +15,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 
 import GameChangerLine from './GameChangerLine';
 import { CommanderRoles, costOf, OwnerNotes, PlanRead, usePlanView } from './PlanPass';
+import type { PlanView } from '@/lib/plan-shared';
 import Tip from './Tip';
 import { BRACKETS } from '@/lib/brackets';
 import * as api from '@/lib/api';
@@ -31,23 +32,21 @@ interface Props {
   onTab: (tab: 'tags' | 'tune') => void;
   /** The deck's card names, for picking key cards and route cards. */
   cardNames?: string[];
-  /** The commander, and its partner if it has one, with their pictures. */
-  commanders?: Array<{ name: string; image: string | null }>;
 }
 
 type Part = api.PlanPart;
 
 
 const TITLE: Record<string, string> = {
-  goal: 'What you’re optimizing for', commanders: 'Commander', bracket: 'Bracket you’re aiming for', budget: 'Budget per card', own: 'Only cards I own',
+  goal: 'What you want from this deck', commanders: 'Commander', bracket: 'Bracket you’re aiming for', budget: 'Budget per card', own: 'Only cards I own',
   rule: 'Deck rule', brief: 'What this deck does', style: 'Style', role: 'What the commander does for the deck', build: 'How the deck is built',
   key: 'Key cards', themes: 'Themes', stages: 'Game plan by stage', routes: 'Ways to win', lean: 'Leans on the commander', flip: 'Flip turn',
   lands: 'Lands', ranges: 'Job ranges', protected: 'Never cut (★)', archetype: 'Archetype',
 };
 const TIPS: Record<string, string> = {
-  goal: 'Pick any mix. The rules read the chips; Claude reads all of it, your words too, and can propose changes to the usual rules that serve it.',
+  goal: 'Optional. Say it in your own words, tap any that fit, or both. Claude reads all of it when it reads the plan, and so does every step after: cuts, swaps and ideas are judged against it.',
   commanders: 'Set when the deck was imported, or from a card’s ⋯ menu. A second commander counts inside the 100; a companion sits outside it.',
-  bracket: 'Suggestions never go past it: no more Game Changers than it allows, no extra turns or mass land destruction below 4, no early two-card combos below 4.',
+  bracket: 'Unsure is fine: when Claude reads the plan it suggests one. Once set, suggestions never go past it: no more Game Changers than it allows, no extra turns or mass land destruction below 4, no early two-card combos below 4.',
   budget: 'Cards over this price aren’t suggested, unless you own them.',
   own: 'Suggestions only come from your collection and your other decks, with where each copy is.',
   rule: 'A restriction you set yourself. Suggestions keep to it, and nothing is cut for being weaker because of it. A card filter in search syntax makes the rules enforce it.',
@@ -62,7 +61,7 @@ const TIPS: Record<string, string> = {
   flip: 'The mana the deck needs before it stops setting up and starts doing its thing. Sets the ramp range and Playtest’s first goal.',
   lands: 'The one land number Plan, Tune and Check all use.',
   ranges: 'How many of each job the deck should run. Your own range wins over everything else.',
-  protected: 'Never offered as a cut, anywhere: the commanders and the cards you mark ★ never cut (from a card’s menu).',
+  protected: 'Never offered as a cut, anywhere: the commanders and the cards you mark ★ never cut, here or from a card’s menu. Once you confirm the plan, its key cards are suggested here.',
   archetype: 'A reading from the numbers, not something you set.',
 };
 const ROLE_NOTE: Record<string, string> = {
@@ -123,7 +122,7 @@ function How({ how, changedBy }: { how: Part['how'] | { inputs: string[]; steps:
 }
 
 
-export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab, cardNames = [], commanders = [] }: Props) {
+export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab, cardNames = [] }: Props) {
   const [plan, setPlan] = useState<api.DeckPlanState | 'loading' | 'failed'>(() => api.peek<api.DeckPlanState>(api.paths.plan(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -135,7 +134,8 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
   // Reading again or confirming saves the owner's answers and note to their notes: show them.
   const act = async (a: api.PlanPassAction) => {
     const v = await planAct(a);
-    if (a.action === 'generate' || a.action === 'confirm') await reload();
+    // These change what the settings show: the owner's notes, the bracket, the never-cut list.
+    if (a.action === 'generate' || a.action === 'confirm' || a.action === 'acceptBracket' || a.action === 'neverCut') await reload();
     return v;
   };
 
@@ -157,7 +157,9 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
     }
   };
   const p = plan.parts;
-  const commander = ((p.commanders?.value as { commander: string | null } | undefined)?.commander ?? 'The commander').split(',')[0];
+  // The whole name, and both for partners: "Kratos" alone could be either half of a pair.
+  const cmd = p.commanders?.value as { commander: string | null; partner: string | null } | undefined;
+  const commander = [cmd?.commander ?? 'The commander', cmd?.partner].filter(Boolean).join(' and ');
 
   // A deck with no plan yet sees how to make one first; 1-3 below are optional.
   const noPlan = view && !view.pass && view.job?.status !== 'running';
@@ -175,16 +177,16 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
           </span>
         </section>
       )}
-      {view && <CommanderRoles view={view} act={act} commander={commander} pictures={commanders} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
+      {view && <CommanderRoles view={view} act={act} commander={commander} plural={!!cmd?.partner} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
 
       <section data-tour="plan-settings" data-section="2 · Your settings" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">2</span>Your settings
-          <Tip label="About your settings">Limits every suggestion keeps to, AI or rules. Set by you; nothing here is guessed.</Tip></h3>
+          <Tip label="About your settings">What you want from the deck and the limits every suggestion keeps to, AI or rules. All of it goes into the plan read, and into cuts, swaps and ideas after it.</Tip></h3>
         <div className="grid items-start gap-3 lg:grid-cols-2">
           {SETTINGS.map((id) => p[id] && (
             <div key={id} id={`plan-${id}`} data-tour={TOUR[id]} className={`flex min-w-0 flex-col gap-2 rounded-xl bg-[var(--surface-hover)]/40 p-3 ${id === 'goal' ? 'lg:col-span-2' : ''}`}>
               <h4 className="flex items-center gap-1.5 text-sm font-semibold">{TITLE[id]} {TIPS[id] && <Tip label={`About: ${TITLE[id]}`}>{TIPS[id]}</Tip>}</h4>
-              <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} />
+              <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} view={view} act={act} />
             </div>
           ))}
         </div>
@@ -202,7 +204,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
             {NUMBERS.map((id) => p[id] && (
               <div key={id} id={`plan-${id}`} data-tour={TOUR[id]} className={`flex min-w-0 flex-col gap-2 rounded-xl bg-[var(--surface-hover)]/40 p-3 ${id === 'ranges' ? 'lg:col-span-2' : ''}`}>
                 <h4 className="flex items-center gap-1.5 text-sm font-semibold">{TITLE[id]} {TIPS[id] && <Tip label={`About: ${TITLE[id]}`}>{TIPS[id]}</Tip>}</h4>
-                <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} />
+                <Body id={id} part={p[id]} plan={plan} busy={busy} change={change} cardNames={cardNames} onTab={onTab} view={view} act={act} />
               </div>
             ))}
           </div>
@@ -221,22 +223,19 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
 type Change = (c: api.PlanChange) => Promise<void>;
 
-function Body({ id, part, plan, busy, change, cardNames, onTab }: { id: string; part: Part; plan: api.DeckPlanState; busy: boolean; change: Change; cardNames: string[]; onTab: (tab: 'tags') => void }) {
+function Body({ id, part, plan, busy, change, cardNames, onTab, view, act }: { id: string; part: Part; plan: api.DeckPlanState; busy: boolean; change: Change; cardNames: string[]; onTab: (tab: 'tags') => void; view: PlanView | null; act: (a: api.PlanPassAction) => Promise<unknown> }) {
   const v = part.value as never;
   switch (id) {
     case 'goal': {
       const g = v as { chips: string[]; text: string };
-      const pick = (chip: string) => {
-        const usual = 'The usual guidelines';
-        const chips = chip === usual ? [usual] : g.chips.filter((c) => c !== usual).includes(chip) ? g.chips.filter((c) => c !== chip && c !== usual) : [...g.chips.filter((c) => c !== usual), chip];
-        return change({ goal: { chips: chips.length ? chips : [usual], text: g.text } });
-      };
+      const pick = (chip: string) => change({ goal: { chips: g.chips.includes(chip) ? g.chips.filter((c) => c !== chip) : [...g.chips, chip], text: g.text } });
       return (
         <div className="flex flex-col gap-2">
-          <div role="group" aria-label="What you’re optimizing for" className="flex flex-wrap gap-1.5">
+          <Field label="What you want from this deck, in your words" value={g.text} disabled={busy} placeholder="In your words, e.g. cut what keeps it from playing a pile of lands and having one big sacrifice-and-reanimate turn" onSave={(text) => change({ goal: { chips: g.chips, text } })} />
+          <div role="group" aria-label="What you want from this deck" className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-[var(--muted)]">Or tap any that fit:</span>
             {plan.goals.map((c) => <button key={c} onClick={() => pick(c)} disabled={busy} aria-pressed={g.chips.includes(c)} className={`rounded-full border px-3 py-1 text-sm ${g.chips.includes(c) ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>{c}</button>)}
           </div>
-          <Field label="What you’re optimizing for, in your words" value={g.text} disabled={busy} placeholder="Or in your words: e.g. win before turn 9 at a bracket 3 table" onSave={(text) => change({ goal: { chips: g.chips, text } })} />
         </div>
       );
     }
@@ -246,10 +245,17 @@ function Body({ id, part, plan, busy, change, cardNames, onTab }: { id: string; 
     }
     case 'bracket': {
       const b = v as { value: number | null; looksLike: number };
+      const suggested = view?.pass?.bracket ?? null;
       return (
         <div className="flex flex-col gap-1.5">
-          <Seg label="Bracket" options={[1, 2, 3, 4, 5].map((n) => [n, String(n)] as [number, string])} value={b.value} disabled={busy} onPick={(n) => change({ bracket: n })} />
-          <span className="text-xs text-[var(--muted)]">{b.value ? BRACKETS[b.value] : `Not set · this list looks like ${b.looksLike} (${BRACKETS[b.looksLike]})`}</span>
+          <Seg<number | 'unsure'> label="Bracket" options={[...[1, 2, 3, 4, 5].map((n) => [n, String(n)] as [number, string]), ['unsure', 'Unsure']]} value={b.value ?? 'unsure'} disabled={busy} onPick={(n) => change({ bracket: n === 'unsure' ? null : n })} />
+          <span className="text-xs text-[var(--muted)]">{b.value ? BRACKETS[b.value] : suggested ? 'Unsure: nothing is held to a bracket yet.' : 'Unsure: when Claude reads your plan it suggests one, once you confirm the plan. Nothing is held to a bracket until then.'}</span>
+          {!b.value && suggested && (
+            <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm">
+              <span><span className="text-violet-200">✦ The plan suggests</span> <b>bracket {suggested.level}</b> <span className="text-[var(--muted)]">({BRACKETS[suggested.level]}). {suggested.why}</span></span>
+              <button onClick={() => void act({ action: 'acceptBracket' })} disabled={busy} className={`${OK} w-fit`}>Use bracket {suggested.level}</button>
+            </div>
+          )}
           <GameChangerLine names={plan.gameChangers} bracket={b.value} />
         </div>
       );
@@ -389,7 +395,34 @@ function Body({ id, part, plan, busy, change, cardNames, onTab }: { id: string; 
     case 'ranges': return <Ranges rows={v as RangeRow[]} busy={busy} change={change} />;
     case 'protected': {
       const list = v as Array<{ name: string; why: string }>;
-      return list.length ? <div className="flex flex-wrap gap-1.5">{list.map((x) => <span key={x.name} className="rounded-full border border-[var(--border)] px-3 py-0.5 text-sm">{x.name} <span className="text-xs text-[var(--muted)]">{x.why}</span></span>)}</div> : <p className="text-sm text-[var(--muted)]">Nothing yet.</p>;
+      const have = new Set(list.map((x) => x.name));
+      const suggested = (view?.pass?.neverCut ?? []).filter((n) => !have.has(n));
+      return (
+        <div className="flex flex-col gap-2">
+          {list.length ? (
+            <div className="flex flex-wrap gap-1.5">
+              {list.map((x) => (
+                <span key={x.name} className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] py-0.5 pl-3 pr-1 text-sm">{x.name} <span className="text-xs text-[var(--muted)]">{x.why}</span>
+                  {x.why.startsWith('★')
+                    ? <button onClick={() => void act({ action: 'neverCut', remove: [x.name] })} disabled={busy} aria-label={`Take ${x.name} off the never-cut list`} className="px-1.5 text-[var(--muted)] hover:text-red-300">×</button>
+                    : <span className="pr-2" />}
+                </span>
+              ))}
+            </div>
+          ) : <p className="text-sm text-[var(--muted)]">Nothing yet.</p>}
+          <CardPick names={cardNames.filter((n) => !have.has(n))} label="Add a card to never cut" disabled={busy} onPick={(n) => void act({ action: 'neverCut', add: [n] })} />
+          {suggested.length > 0 && (
+            <div className="flex flex-col gap-1.5 rounded-lg border border-violet-300/30 bg-[var(--surface-hover)]/50 p-2.5 text-sm">
+              <span className="flex items-center gap-1.5"><span className="text-violet-200">✦ The plan’s key cards</span><Tip label="About these suggestions">The cards the plan says the deck can’t work without. Marking one ★ means it is never offered as a cut; leave it off and it can still be cut, with a warning.</Tip></span>
+              <div className="flex flex-wrap gap-1.5">
+                {suggested.map((n) => <button key={n} onClick={() => void act({ action: 'neverCut', add: [n] })} disabled={busy} className="rounded-full border border-dashed border-[var(--border)] px-3 py-0.5 hover:border-emerald-400/60 hover:text-emerald-300">+ {n}</button>)}
+              </div>
+              {suggested.length > 1 && <button onClick={() => void act({ action: 'neverCut', add: suggested })} disabled={busy} className={`${OK} w-fit`}>Never cut all {suggested.length}</button>}
+            </div>
+          )}
+          {!view?.confirmed && !list.some((x) => x.why.startsWith('★')) && <span className="text-xs text-[var(--faint)]">Once you confirm the plan, its key cards are suggested here.</span>}
+        </div>
+      );
     }
     case 'archetype': return <p className="text-sm"><b>{v as string}</b> <span className="text-[var(--muted)]">· a reading, updates with the deck</span></p>;
     default: return null;

@@ -88,7 +88,7 @@ export function goalWeights(goal: string[] = []): Record<string, number> {
   if (goal.some((g) => /faster|win more/i.test(g))) times(['curve', 'costly', 'highcurve', 'slowramp'], 1.4);
   if (goal.some((g) => /win more/i.test(g))) times(['floor'], 1.3);
   if (goal.some((g) => /more fun|pets/i.test(g))) times(['theme', 'style', 'package-short'], 1.4);
-  if (goal.some((g) => /stay on theme/i.test(g))) { times(['offtheme'], 1.4); times(['theme'], 1.2); }
+  if (goal.some((g) => /stay on theme|do its thing/i.test(g))) { times(['offtheme'], 1.4); times(['theme'], 1.2); }
   return out;
 }
 

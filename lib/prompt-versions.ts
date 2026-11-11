@@ -9,7 +9,7 @@ export const PROMPT_VERSIONS = {
   cutReview: 'cut-review-1',
   chat: 'chat-1',
   planRead: 'plan-read-1',
-  planPass: 'plan-pass-1',
+  planPass: 'plan-pass-2',
   trim: 'trim-1',
   trimApproach: 'trim-approach-1',
 } as const;

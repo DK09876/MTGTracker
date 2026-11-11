@@ -29,7 +29,7 @@ import { ModelError, type JsonModel } from './ai';
 import { cardsInList, database, type List } from './db';
 import { cardsChanged, deckHash, deckKeys } from './deck-hash';
 import { changePlan, noteBy, planFor } from './deck-plan';
-import { keeps } from './deck-roles';
+import { keeps, setKeep } from './deck-roles';
 import { latestJob } from './jobs';
 import { planFacts, type Facts } from './plan-facts';
 import {
@@ -213,6 +213,21 @@ export function keepStalePlan(listId: string): Owner {
 }
 
 /** Take the read's suggestion for what the commander does. */
+/** Take the read's bracket for the deck, while the owner's own is Unsure. */
+export function acceptBracketSuggestion(listId: string): void {
+  const b = latestPass(listId)?.output.bracket;
+  if (b) changePlan(listId, { bracket: b.level, by: 'claude' });
+}
+
+/** Mark cards ★ never cut, or take the mark off, by name: from the Plan tab's list and the read's suggestions. */
+export function setNeverCut(list: Pick<List, 'id'>, change: { add?: unknown; remove?: unknown }): void {
+  const main = cardsInList(list.id).filter((c) => c.board === 'main');
+  const names = (xs: unknown) => (Array.isArray(xs) ? xs.filter((x): x is string => typeof x === 'string').slice(0, 60) : []);
+  for (const [xs, on] of [[names(change.add), true], [names(change.remove), false]] as const) {
+    for (const n of xs) { const c = main.find((m) => front(m.card.name) === front(n))?.card; if (c) setKeep(list.id, c.oracle_id ?? c.id, on); }
+  }
+}
+
 export function acceptCommanderSuggestion(listId: string): Owner {
   const s = latestPass(listId)?.output.commander.roles ?? [];
   return s.length ? setCommanderRoles(listId, s) : owner(listId);
@@ -232,6 +247,7 @@ Decide, for this deck:
 - questions: at most 3, written for THIS deck, only where the cards leave the plan open (competing plans, an unclear way to win, cards whose purpose you cannot tell). Each must be answerable in a sentence or two by someone who knows the deck, and be the kind whose answer would most change what to cut or add. Leave the list empty when the plan is clear. Never ask what the owner has already told the app.
 - summary: 2 sentences in plain words for the owner.
 - commander: what the commander does for this deck, as one or more of: ${COMMANDER_ROLES.filter((r) => r.id !== 'unsure').map((r) => `"${r.id}" (${r.label}: ${r.tip})`).join('; ')}. Give one sentence why.
+- bracket: the Commander bracket the list fits as built, as "level" 1 to 5 (1 Exhibition: themes first, no Game Changers; 2 Core: like a precon, no Game Changers; 3 Upgraded: up to three Game Changers; 4 Optimized: anything goes but cEDH; 5 cEDH: built to win fast), judged from the bracket facts, the combos and how fast the deck can win. Give one sentence why.
 
 How to judge:
 - Judge from the rules text and this deck's plan, not from how popular a card is.
@@ -252,8 +268,9 @@ const SCHEMA = {
     questions: { type: 'ARRAY', items: { type: 'STRING' } },
     summary: { type: 'STRING' },
     commander: { type: 'OBJECT', properties: { roles: { type: 'ARRAY', items: { type: 'STRING' } }, why: { type: 'STRING' } }, required: ['roles', 'why'] },
+    bracket: { type: 'OBJECT', properties: { level: { type: 'INTEGER' }, why: { type: 'STRING' } }, required: ['level', 'why'] },
   },
-  required: ['state', 'plan', 'winRoutes', 'keyCards', 'themes', 'cards', 'questions', 'summary', 'commander'],
+  required: ['state', 'plan', 'winRoutes', 'keyCards', 'themes', 'cards', 'questions', 'summary', 'commander', 'bracket'],
 };
 
 export interface PassInput {
@@ -327,6 +344,7 @@ export function parsePass(data: unknown, deckNames: string[], nonland: string[])
   const wanted = new Set(nonland.map(front)).size;
   if (wanted && Object.keys(cards).length < wanted * MIN_ROLES) throw new BadRead(`it gave roles for only ${Object.keys(cards).length} of ${wanted} cards`);
   const cmd = (d.commander ?? {}) as Record<string, unknown>;
+  const br = (d.bracket ?? {}) as Record<string, unknown>;
   return {
     state,
     plan,
@@ -337,6 +355,8 @@ export function parsePass(data: unknown, deckNames: string[], nonland: string[])
     questions: (Array.isArray(d.questions) ? d.questions : []).filter((q): q is string => typeof q === 'string' && !!q.trim()).map((q) => q.trim().slice(0, 300)).slice(0, 3),
     summary: String(d.summary ?? '').trim().slice(0, 600),
     commander: { roles: (Array.isArray(cmd.roles) ? cmd.roles : []).filter((r): r is CommanderRole => isCommanderRole(r) && r !== 'unsure').slice(0, 4), why: String(cmd.why ?? '').slice(0, 400) },
+    // A bracket outside 1-5 is no suggestion; the read still stands.
+    bracket: [1, 2, 3, 4, 5].includes(Number(br.level)) ? { level: Number(br.level), why: String(br.why ?? '').slice(0, 400) } : null,
   };
 }
 
@@ -444,7 +464,8 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
   const nonland = main.filter((c) => !isLand(c)).reduce((n, c) => n + c.quantity, 0);
   const job = latestJob('planpass', list.id);
   const latest = latestPass(list.id);
-  const notes = planFor(list.id, '', list.commander, main).notes.filter((n) => noteBy(n) === 'owner').length;
+  const plan = planFor(list.id, '', list.commander, main);
+  const notes = plan.notes.filter((n) => noteBy(n) === 'owner').length;
   const running = job && (job.status === 'running' || (job.status === 'failed' && (!latest || job.startedAt > latest.at)))
     ? { id: job.id, status: job.status, progress: job.detail || null, error: job.status === 'failed' ? job.error ?? 'The read failed' : null } : null;
   const edits = Object.keys(o.edits).length;
@@ -454,7 +475,7 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
     const ownOnly = o.ownPlan && o.edits.plan ? {
       id: 'own', at: '', model: '', state: 'focused' as DeckState, plan: o.edits.plan, winRoutes: o.edits.winRoutes ?? [], keyCards: o.edits.keyCards ?? [], themes: o.edits.themes ?? [],
       cards: {}, summary: '', yours: { plan: true, routes: (o.edits.winRoutes ?? []).map((r) => r.name), routeCards: [], keyCards: o.edits.keyCards ?? [], themes: (o.edits.themes ?? []).map((t) => t.name) },
-      questions: [], oneAway: [], commander: null, ownPlan: true, commanderRolesRead: o.commanderRoles,
+      questions: [], oneAway: [], commander: null, bracket: null, neverCut: [], ownPlan: true, commanderRolesRead: o.commanderRoles,
     } : null;
     return { commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), drafts: null, job: running, pass: ownOnly, edits, confirmed: o.confirmedAt ? { at: o.confirmedAt } : null, stale: null, reads: { notes, commanderRoles: o.commanderRoles.length } };
   }
@@ -465,6 +486,7 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
   const readRouteCards = new Set(out.winRoutes.flatMap((r) => r.cards));
   const routeCards = new Set(shown.winRoutes.flatMap((r) => r.cards).map(front));
   const confirmed = o.confirmedAt ? { at: o.confirmedAt } : null;
+  const starred = keeps(list.id);
   return {
     commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), job: running, edits, confirmed, stale,
     drafts: o.drafts && o.drafts.passId === latest.id ? { answers: o.drafts.answers, skipped: o.drafts.skipped, note: o.drafts.note } : null,
@@ -483,6 +505,8 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
       questions: !stale && !confirmed && o.questionsDone !== latest.id ? out.questions : [],
       oneAway: (latest.input.oneAway ?? []).filter((c) => c.missing.length === 1 && c.cards.some((n) => routeCards.has(front(n)))).slice(0, 4).map((c) => ({ cards: c.cards, missing: c.missing[0] })),
       commander: o.commanderRoles.includes('unsure') && confirmed && nonland >= SUGGEST_COMMANDER_AT && out.commander.roles.length ? out.commander : null,
+      bracket: plan.bracket === null && confirmed && !stale && out.bracket ? out.bracket : null,
+      neverCut: confirmed && !stale ? shown.keyCards.filter((k) => { const c = main.find((m) => m.card.name === k); return !!c && !starred.has(c.card.oracle_id ?? c.card.id); }) : [],
       ownPlan: o.ownPlan,
       commanderRolesRead: latest.input.commanderRoles ?? [],
     },

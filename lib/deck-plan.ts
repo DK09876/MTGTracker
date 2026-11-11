@@ -77,8 +77,15 @@ export const PARTS: PartId[] = ['goal', 'commanders', 'bracket', 'budget', 'own'
 
 export type Source = 'detected' | 'claude' | 'yours' | 'unset';
 
-/** What the owner is optimizing for: the chips the rules read, and their own words for Claude. */
-export const GOALS = ['The usual guidelines', 'Win more often', 'Faster', 'More fun, keep my pets', 'Fit my table', 'Stay on theme', 'Spend less'] as const;
+/**
+ * What the owner wants from the deck: their own words first (Claude reads
+ * them, and so does every AI step after the plan), and chips for the common
+ * aims. No chip means no particular aim. "Do its thing more often" is the
+ * usual reason to tune: cut what gets in the way of what the deck is for.
+ */
+export const GOALS = ['Do its thing more often', 'Win more often', 'Faster', 'More fun, keep my pets', 'Fit my table', 'Spend less'] as const;
+/** Chips from before the list changed, as they read now. */
+const goalChips = (chips: string[]) => [...new Set(chips.map((c) => (c === 'Stay on theme' ? 'Do its thing more often' : c)))].filter((c) => (GOALS as readonly string[]).includes(c));
 export interface Goal { chips: string[]; text: string }
 
 export interface DeckRule { text: string; filter: string }
@@ -258,7 +265,7 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     landsSource: mine.lands ? 'yours' : landOverride ? landOverride.by : 'detected',
     packages,
     bracket: extra.bracket ?? null,
-    goal: stored.goal?.v ?? { chips: ['The usual guidelines'], text: '' },
+    goal: stored.goal ? { chips: goalChips(stored.goal.v.chips ?? []), text: stored.goal.v.text ?? '' } : { chips: [], text: '' },
     budget: stored.budget?.v ?? null,
     own: stored.own?.v ?? false,
     rule: stored.rule?.v ?? { text: '', filter: '' },
@@ -395,7 +402,7 @@ export function changePlan(listId: string, change: PlanChange): void {
   }
   // The other parts, kept as JSON with who set them; null goes back to detected or not set.
   const set = <K extends keyof StoredParts>(k: K, v: StoredParts[K] | undefined) => { if (v === undefined) delete stored[k]; else stored[k] = v; };
-  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: (change.goal.chips ?? []).filter((g) => (GOALS as readonly string[]).includes(g)).slice(0, 7), text: text(change.goal.text, 500) }, by } || undefined);
+  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: goalChips(change.goal.chips ?? []).slice(0, 7), text: text(change.goal.text, 500) }, by } || undefined);
   if (change.budget !== undefined) set('budget', change.budget === null ? undefined : Number.isFinite(change.budget) && change.budget > 0 ? { v: Math.round(change.budget * 100) / 100, by } : undefined);
   if (change.own !== undefined) set('own', change.own === null ? undefined : { v: !!change.own, by });
   if (change.rule !== undefined) set('rule', change.rule && (text(change.rule.text, 300) || text(change.rule.filter, 300)) ? { v: { text: text(change.rule.text, 300), filter: text(change.rule.filter, 300) }, by } : undefined);

@@ -16,6 +16,8 @@
  *   ownPlan {text, fill?}    the owner writes the plan; fill: read the rest from it
  *   useStale                 use an out-of-date read anyway
  *   acceptCommander          take the read's suggestion for what the commander does
+ *   acceptBracket            take the read's bracket, while the owner's is Unsure
+ *   neverCut {add?, remove?} mark cards ★ never cut, or take the mark off, by name
  */
 
 import { NextResponse } from 'next/server';
@@ -23,7 +25,7 @@ import { NextResponse } from 'next/server';
 import { modelById, ModelError } from '@/lib/ai';
 import { startJob } from '@/lib/jobs';
 import {
-  acceptCommanderSuggestion, confirmPlan, keepStalePlan, NotInDeck, PASS_MODEL, planView, runPass, saveDrafts, setCommanderRoles, setEdits, takeOwnerInput, undoEdits, writeOwnPlan,
+  acceptBracketSuggestion, acceptCommanderSuggestion, confirmPlan, keepStalePlan, NotInDeck, PASS_MODEL, planView, runPass, saveDrafts, setCommanderRoles, setEdits, setNeverCut, takeOwnerInput, undoEdits, writeOwnPlan,
 } from '@/lib/plan-pass';
 import { requireList } from '@/lib/profile-route';
 
@@ -97,6 +99,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       break;
     case 'acceptCommander':
       acceptCommanderSuggestion(id);
+      break;
+    case 'acceptBracket':
+      acceptBracketSuggestion(id);
+      break;
+    case 'neverCut':
+      setNeverCut(list, { add: b.add, remove: b.remove });
       break;
     default:
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
