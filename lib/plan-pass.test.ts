@@ -327,7 +327,9 @@ describe('the plan read through its route', { timeout: 60_000 }, () => {
     expect(v.pass.keyCards).toEqual(['Spell 5']);
     const typo = await post({ action: 'edits', edits: { keyCards: ['Spel 5'] } });
     expect(typo).toMatchObject({ names: ['Spel 5'] });
-    v = await post({ action: 'confirm', answers: [{ question: 'Is the loop real?', answer: 'Yes.' }] });
+    // A question left open stops the confirm; answered or skipped, it goes through.
+    expect(await post({ action: 'confirm', answers: [{ question: 'Is the loop real?', answer: 'Yes.' }] })).toMatchObject({ open: ['Combat or not?', 'Wizards for type?'] });
+    v = await post({ action: 'confirm', answers: [{ question: 'Is the loop real?', answer: 'Yes.' }], skipped: ['Combat or not?', 'Wizards for type?'] });
     expect(v.confirmed).toBeTruthy();
     expect(v.pass.questions).toEqual([]);
     vi.doUnmock('./ai');

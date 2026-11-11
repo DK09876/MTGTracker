@@ -7,7 +7,8 @@
  * POST {action, ...}:
  *   generate {answers?, skipped?, note?}  save what the owner typed to their
  *       notes, then read the deck again in the background (Opus, never on its own)
- *   confirm {answers?, skipped?, note?}  the same notes, then confirm the plan
+ *   confirm {answers?, skipped?, note?}  the same notes, then confirm the plan; refused
+ *       (400) while a question the read asked is neither answered nor skipped
  *   commanderRoles {roles}   what the commander does (Unsure stands alone)
  *   edits {edits}            the owner's edits; each part given is theirs. Card
  *                            names must be in the deck (400 names the ones that aren't)
@@ -66,10 +67,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (refused) return refused;
       break;
     }
-    case 'confirm':
-      takeOwnerInput(id, profile, inputOf(b));
+    case 'confirm': {
+      // Every question the read asked is answered or skipped first: confirming must not drop one unseen.
+      const input = inputOf(b);
+      const settled = new Set([...(input.answers ?? []).filter((a) => a.answer.trim()).map((a) => a.question), ...(input.skipped ?? [])]);
+      const open = (planView(list).pass?.questions ?? []).filter((q) => !settled.has(q));
+      if (open.length) return NextResponse.json({ error: `Answer or skip ${open.length === 1 ? 'the question' : `the ${open.length} questions`} first`, open }, { status: 400 });
+      takeOwnerInput(id, profile, input);
       confirmPlan(id);
       break;
+    }
     case 'commanderRoles':
       setCommanderRoles(id, Array.isArray(b.roles) ? b.roles : []);
       break;

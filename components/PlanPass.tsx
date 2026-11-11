@@ -238,16 +238,17 @@ export function PlanRead({ listId, view, act, cardNames }: { listId: string; vie
   const dirty = Object.keys(draft).length;
   const edits = dirty + view.edits;
   const given = p.questions.filter((q) => answers[q]?.trim() && !skipped.has(q));
-  // Confirming counts an unanswered question as skipped; reading again only the ones the owner skipped.
-  const input = (confirming: boolean) => ({
+  // A question is settled once it is answered or skipped; the plan can't be confirmed with one left open.
+  const open = p.questions.filter((q) => !skipped.has(q) && !answers[q]?.trim());
+  const input = () => ({
     answers: given.map((q) => ({ question: q, answer: answers[q].trim() })),
-    skipped: p.questions.filter((q) => skipped.has(q) || (confirming && !answers[q]?.trim())),
+    skipped: p.questions.filter((q) => skipped.has(q)),
     note: note.trim(),
   });
   // Edits are saved first; if they're refused (a card not in the deck), nothing else happens.
   const saveDraft = async () => (dirty ? !!(await act({ action: 'edits', edits: draft })) : true);
-  const reread = async () => { setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'generate', ...input(false) }); setNote(''); } finally { setBusy(false); } };
-  const confirm = async () => { setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'confirm', ...input(true) }); setNote(''); setDraft({}); setEditingConfirmed(false); } finally { setBusy(false); } };
+  const reread = async () => { setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'generate', ...input() }); setNote(''); } finally { setBusy(false); } };
+  const confirm = async () => { if (open.length) return; setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'confirm', ...input() }); setNote(''); setDraft({}); setEditingConfirmed(false); } finally { setBusy(false); } };
   const set = (d: Draft) => setDraft((x) => ({ ...x, ...d }));
   const youKey = new Set(p.yours.keyCards);
   const youTheme = new Set(p.yours.themes);
@@ -331,13 +332,13 @@ export function PlanRead({ listId, view, act, cardNames }: { listId: string; vie
           <span className="flex items-center justify-between gap-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-violet-200">✦ {p.questions.length} question{p.questions.length === 1 ? '' : 's'} about this deck</span>
             <button onClick={() => skip(p.questions, true)} className={LINK}>Skip all</button></span>
           {p.questions.map((q, i) => (
-            <div key={q} className={`flex flex-col gap-1.5 ${skipped.has(q) ? 'opacity-50' : ''}`}>
-              <label htmlFor={`q-${i}`} className="text-sm">{q}</label>
+            <div key={q} className={`flex flex-col gap-1.5 ${skipped.has(q) ? 'opacity-60' : ''}`}>
+              <label htmlFor={`q-${i}`} className={`text-sm ${skipped.has(q) ? 'line-through' : ''}`}>{q}{skipped.has(q) && <span className="sr-only"> (skipped)</span>}</label>
               <span className="flex gap-2"><input id={`q-${i}`} value={answers[q] ?? ''} disabled={skipped.has(q)} onChange={(e) => answer(q, e.target.value)} placeholder="A line is plenty" className={`${INPUT} min-w-0 flex-1`} />
                 <button onClick={() => skip([q])} className={LINK}>{skipped.has(q) ? 'Answer' : 'Skip'}</button></span>
             </div>
           ))}
-          <p className="text-xs text-[var(--faint)]">Kept as you type, so you can leave and come back. They go to your notes when you read again or confirm below.</p>
+          <p className="text-xs text-[var(--faint)]">Kept as you type, so you can leave and come back. They go to your notes when you read again or confirm below. Answer or skip each one to confirm the plan.</p>
         </div>
       )}
 
@@ -355,7 +356,8 @@ export function PlanRead({ listId, view, act, cardNames }: { listId: string; vie
           <textarea id="tell-claude" value={note} onChange={(e) => writeNote(e.target.value)} rows={2} maxLength={2000} className={`${INPUT} w-full`} placeholder="e.g. The main loop is a different one, and I want to lean on combat more." />
           <span className="flex flex-wrap items-center gap-3">
             <button onClick={reread} disabled={busy} className={AI_BTN}>✦ Read again with my changes · {costOf(view)}</button>
-            {!confirmed && <button onClick={confirm} disabled={busy} className={GO}>Confirm the plan</button>}
+            {!confirmed && <button onClick={confirm} disabled={busy || open.length > 0} className={GO}>Confirm the plan</button>}
+            {!confirmed && open.length > 0 && <span className="text-xs text-amber-300">Answer or skip {open.length === 1 ? 'the question' : `the ${open.length} questions`} above first.</span>}
             {confirmed && <><button onClick={confirm} disabled={busy} className={GO}>Save and confirm</button><button onClick={() => { setDraft({}); writeNote(''); setEditingConfirmed(false); }} disabled={busy} className={LINK}>Cancel</button></>}
             {view.edits > 0 && <button onClick={() => { setDraft({}); void run({ action: 'undoEdits' }); }} disabled={busy} className={LINK}>Undo my edits</button>}
           </span>
