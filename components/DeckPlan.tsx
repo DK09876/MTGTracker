@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import GameChangerLine from './GameChangerLine';
-import { CommanderRoles, OwnerNotes, PlanRead, usePlanView } from './PlanPass';
+import { CommanderRoles, costOf, OwnerNotes, PlanRead, usePlanView } from './PlanPass';
 import Tip from './Tip';
 import { BRACKETS } from '@/lib/brackets';
 import * as api from '@/lib/api';
@@ -28,7 +28,7 @@ interface Props {
   version: string;
   /** After a confirm or a change, so the page can unlock what waits on it. */
   onPlan: (plan: api.DeckPlanState) => void;
-  onTab: (tab: 'tags') => void;
+  onTab: (tab: 'tags' | 'tune') => void;
   /** The deck's card names, for picking key cards and route cards. */
   cardNames?: string[];
 }
@@ -157,11 +157,26 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
   const p = plan.parts;
   const commander = ((p.commanders?.value as { commander: string | null } | undefined)?.commander ?? 'The commander').split(',')[0];
 
+  // A deck with no plan yet sees how to make one first; 1-3 below are optional.
+  const noPlan = view && !view.pass && view.job?.status !== 'running';
+  const scrollTo = (id: string) => document.querySelector(`[data-tour="${id}"]`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+
   return (
     <div className="mt-5 flex flex-col gap-6">
+      {view && <DeckSize size={view.size} onTune={() => onTab('tune')} />}
+      {noPlan && (
+        <section className="flex flex-col gap-2 rounded-2xl border border-violet-300/40 bg-violet-300/[0.04] p-4">
+          <h3 className="font-display text-lg font-semibold">This deck has no plan yet</h3>
+          <p className="text-sm text-[var(--muted)]">Have Claude read the deck, or write the plan yourself. Fill in 1–3 below first if you like: what the commander does, your settings and your notes all go into the read.</p>
+          <span className="flex flex-wrap items-center gap-3">
+            <button onClick={() => void act({ action: 'generate' })} className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08]">✦ Generate the plan · Opus · {costOf(view)}</button>
+            <button onClick={() => scrollTo('plan-read')} className="text-sm text-[var(--muted)] underline hover:text-[var(--foreground)]">Write it myself</button>
+          </span>
+        </section>
+      )}
       {view && <CommanderRoles view={view} act={act} commander={commander} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
 
-      <section data-tour="plan-settings" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <section data-tour="plan-settings" data-section="2 · Your settings" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">2</span>Your settings
           <Tip label="About your settings">Limits every suggestion keeps to, AI or rules. Set by you; nothing here is guessed.</Tip></h3>
         <div className="grid items-start gap-3 lg:grid-cols-2">
@@ -176,10 +191,10 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
       <OwnerNotes notes={plan.notes} busy={busy} change={change} />
 
-      {view ? <PlanRead key={view.pass?.id ?? 'none'} view={view} act={act} cardNames={cardNames} /> : <p className="text-sm text-[var(--muted)]">{viewError ?? 'Loading the plan…'}</p>}
+      {view ? <PlanRead key={view.pass?.id ?? 'none'} listId={listId} view={view} act={act} cardNames={cardNames} /> : <p className="text-sm text-[var(--muted)]">{viewError ?? 'Loading the plan…'}</p>}
       {viewError && view && <p role="alert" className="text-sm text-red-400">{viewError}</p>}
 
-      <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+      <details data-section="Numbers the app uses" className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
         <summary className="cursor-pointer px-4 py-3"><b>Numbers the app uses</b> <span className="text-sm text-[var(--muted)]">· flip turn, lands, job ranges · worked out from the cards, change any</span></summary>
         <div className="flex flex-col gap-3 px-4 pb-4">
           <div className="grid items-start gap-3 lg:grid-cols-2">
@@ -200,6 +215,19 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
     </div>
+  );
+}
+
+/** Where the deck stands against 100 cards, and what comes next. */
+function DeckSize({ size, onTune }: { size: number; onTune: () => void }) {
+  const over = size - 100;
+  return (
+    <p className="text-sm text-[var(--muted)]">
+      <b className="tabular-nums text-[var(--foreground)]">{size} of 100 cards</b>
+      {over > 0 && <>: {over} over. Trim next, on <button onClick={onTune} className="underline hover:text-[var(--foreground)]">Tune</button>.</>}
+      {over < 0 && <>: {-over} short. Fill next, on <button onClick={onTune} className="underline hover:text-[var(--foreground)]">Tune</button>.</>}
+      {over === 0 && <>. The plan is what Tune, Chat and Check read.</>}
+    </p>
   );
 }
 
@@ -478,7 +506,7 @@ function Changes({ plan, busy, change }: { plan: api.DeckPlanState; busy: boolea
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--border)] pb-1.5">
-        <h3 data-section="Changes to the usual rules" className="flex items-center gap-1.5 font-display text-lg font-semibold">Changes to the usual rules <Tip label="About changes to the usual rules">The usual rules fit most decks. You, or Claude with your say-so, can change any of them for this deck. Yours win, then Claude&apos;s accepted changes, then what was detected. Legality never changes.</Tip></h3>
+        <h3 className="flex items-center gap-1.5 font-display text-lg font-semibold">Changes to the usual rules <Tip label="About changes to the usual rules">The usual rules fit most decks. You, or Claude with your say-so, can change any of them for this deck. Yours win, then Claude&apos;s accepted changes, then what was detected. Legality never changes.</Tip></h3>
         <span className="text-xs text-[var(--muted)]">{on.filter((c) => c.on).length} for this deck</span>
       </div>
       {on.length === 0 ? <p className="text-sm text-[var(--muted)]">None. The usual rules apply everywhere.</p> : (

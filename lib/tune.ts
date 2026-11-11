@@ -13,6 +13,7 @@ import { lastReview } from './cut-review';
 import { addCardToList, cachedRoles, cardsInList, database, deckTags, setQuantity, updateListCard, type List, type ListedCard } from './db';
 import { drawKind, isImpulse, jobs as countJobs, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
 import { planFor, planStyles, type Plan } from './deck-plan';
+import { readProtects } from './plan-pass';
 import { commanderRoles as rolesOfCommander, deckRoles, keeps, overrides as roleOverrides, withOverrides } from './deck-roles';
 import type { Board } from './decklist';
 import { filterCards } from './filter';
@@ -123,12 +124,13 @@ export async function tuneContext(list: List, profileId: string): Promise<Contex
   const inBoards = new Set(sections.filter((s) => s.purpose === 'in').map((s) => s.id as string));
   const pool = all.filter((c) => inBoards.has(c.board));
   const known = knownRoles([...all.map((c) => c.card), ...commanders]);
-  // Never cut: the commanders and the owner's ★ never-cut list, nothing else (the owner's call, 2026-11-10).
-  // Key cards, ways to win and tags are shown and read by the AI steps, but code no longer protects them.
+  // Never cut: the commanders, the owner's ★ never-cut list, and while the plan read is current its
+  // engine cards and the cards in its ways to win (code ranking alone was no better than random).
   const protectedWhy = new Map<string, string>();
   for (const c of commanders) protectedWhy.set(c.name, 'commander');
   const starred = keeps(list.id);
   for (const c of main) if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedWhy.has(c.card.name)) protectedWhy.set(c.card.name, '★ never cut');
+  for (const [name, why] of readProtects(list)) if (!protectedWhy.has(name)) protectedWhy.set(name, why);
   const companion = all.find((c) => c.slot === 'companion')?.card;
   if (companion) protectedWhy.set(companion.name, 'companion');
   const size = count(main) + (list.commander ? 1 : 0);

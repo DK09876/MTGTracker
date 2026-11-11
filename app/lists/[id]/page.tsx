@@ -640,7 +640,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
             onPlan={onPlan}
             onTab={(tab) => setSection(tab)}
-            cardNames={[...new Set(cards.map((c) => c.card.name))].sort()}
+            cardNames={[...new Set([...(list.commander ? [list.commander.name] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card.name)])].sort()}
           />
         ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
       ) : null}

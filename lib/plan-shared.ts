@@ -70,10 +70,19 @@ export interface OwnerEdits {
  */
 export const STALE_CARDS = 10;
 
+/** What a read is expected to cost before any have been made: the flow plan's token estimate for Opus on a 100-card deck (about 8k in, 4-5k out), shown as an estimate. */
+export const READ_COST_GUESS = 0.2;
+
 /** The Plan tab's view of the read. */
 export interface PlanView {
   commanderRoles: CommanderRole[];
   nonland: number;
+  /** Cards in the deck, the commander included (a Commander deck is 100). */
+  size: number;
+  /** What plan reads have cost lately (the AI usage trail), or null when there's nothing to go by. */
+  cost: { usd: number; reads: number } | null;
+  /** Answers and a note typed but not yet sent, for the latest read. */
+  drafts: { answers: Record<string, string>; skipped: string[]; note: string } | null;
   /** The read running now, if any. */
   job: { id: string; status: string; progress?: string | null; error?: string | null } | null;
   /** The last read that finished, and the plan as shown: its answer with the owner's edits on top. */

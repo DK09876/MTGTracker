@@ -9,18 +9,20 @@
  * until the owner presses a button.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import Tip from './Tip';
 import * as api from '@/lib/api';
-import { CARD_ROLES, COMMANDER_ROLES, SUGGEST_COMMANDER_AT, type CardRole, type CommanderRole, type PlanView, type Route, type Theme } from '@/lib/plan-shared';
+import { CARD_ROLES, COMMANDER_ROLES, READ_COST_GUESS, SUGGEST_COMMANDER_AT, type CardRole, type CommanderRole, type PlanView, type Route, type Theme } from '@/lib/plan-shared';
 
 const BTN = 'rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
 const AI_BTN = 'rounded-full border border-violet-300/50 px-3 py-1 text-sm hover:bg-violet-300/10 disabled:opacity-50';
 const GO = 'rounded-full bg-[var(--accent)] px-4 py-1.5 text-sm font-semibold text-[#221c08] disabled:opacity-50';
 const LINK = 'text-sm text-[var(--muted)] underline hover:text-[var(--foreground)] disabled:opacity-50';
 const INPUT = 'rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-sm outline-none focus:border-[var(--accent)]';
-const COST = 'about $0.20';
+/** What a read costs: the average of recent reads when there are any, else the estimate (labelled as one). */
+export const costOf = (view: PlanView) => (view.cost ? `about $${view.cost.usd.toFixed(2)}` : `about $${READ_COST_GUESS.toFixed(2)}, estimated`);
+const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 /** The plan view for a deck, kept fresh while a read runs. */
@@ -54,19 +56,21 @@ export function CommanderRoles({ view, act, commander, readRoles }: { view: Plan
   };
   const changed = readRoles !== null && [...readRoles].sort().join() !== [...picked].sort().join();
   return (
-    <section data-tour="plan-commander" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <section data-tour="plan-commander" data-section="1 · The commander" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">1</span>What {commander} does for the deck
-          <Tip label="About this">Pick any that fit; hover an option for what it means. The plan reads this, and so does every AI step after it.</Tip></h3>
+          <Tip label="About this">Pick any that fit; the ⓘ by each says what it means. The plan reads this, and so does every AI step after it.</Tip></h3>
         {changed && view.pass && <span className="text-xs text-violet-200">Changed since the plan was read</span>}
       </div>
       <div role="group" aria-label={`What ${commander} does for the deck`} className="flex flex-wrap gap-1.5">
         {COMMANDER_ROLES.map((r) => (
-          <label key={r.id} className={`group relative inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm focus-within:ring-2 focus-within:ring-[var(--accent)]/50 ${picked.has(r.id) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
-            <input type="checkbox" className="accent-[var(--accent)]" checked={picked.has(r.id)} onChange={() => toggle(r.id)} />
-            {r.label}
-            <span role="tooltip" className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 max-w-[80vw] rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2.5 text-xs leading-snug text-[var(--foreground)] shadow-xl group-hover:block group-focus-within:block">{r.tip}</span>
-          </label>
+          <span key={r.id} className={`inline-flex items-center gap-1 rounded-full border py-1 pl-3 pr-1.5 text-sm focus-within:ring-2 focus-within:ring-[var(--accent)]/50 ${picked.has(r.id) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input type="checkbox" className="accent-[var(--accent)]" checked={picked.has(r.id)} onChange={() => toggle(r.id)} />
+              {r.label}
+            </label>
+            <Tip label={`About ${r.label}`}>{r.tip}</Tip>
+          </span>
         ))}
       </div>
     </section>
@@ -83,7 +87,7 @@ export function OwnerNotes({ notes, busy, change }: { notes: Note[]; busy: boole
   const [text, setText] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   return (
-    <section data-tour="plan-notes" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+    <section data-tour="plan-notes" data-section="3 · Your notes" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">3</span>Your notes
           <Tip label="About your notes">Anything you want the plan and every later AI step to know, in your words: what the deck is for, what to focus on, cards you love. Your answers to the plan&apos;s questions land here too. Claude&apos;s own notes are never sent back as yours.</Tip></h3>
@@ -142,29 +146,49 @@ function Chip({ text, yours, editing, onRemove, keyCard }: { text: string; yours
   );
 }
 
+/** Adds a name; for cards, only one in the deck, spelled as the deck spells it (a typo would read as a key card gone). */
 function AddBox({ label, cardNames, onAdd }: { label: string; cardNames?: string[]; onAdd: (v: string) => void }) {
   const [v, setV] = useState('');
+  const [bad, setBad] = useState<string | null>(null);
   const id = `add-${label.replace(/\W+/g, '-').toLowerCase()}`;
+  const submit = () => {
+    const t = v.trim();
+    if (!t) return;
+    const name = cardNames ? cardNames.find((n) => front(n) === front(t)) : t;
+    if (!name) { setBad(`“${t}” isn’t in the deck`); return; }
+    onAdd(name); setV(''); setBad(null);
+  };
   return (
-    <form className="inline-flex" onSubmit={(e) => { e.preventDefault(); if (v.trim()) { onAdd(v.trim()); setV(''); } }}>
-      <input aria-label={label} placeholder={`+ ${label}`} value={v} onChange={(e) => setV(e.target.value)} list={cardNames ? `${id}-names` : undefined} className={`${INPUT} w-44`} />
+    <form className="inline-flex flex-col" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <input aria-label={label} aria-invalid={!!bad} aria-describedby={bad ? `${id}-bad` : undefined} placeholder={`+ ${label}`} value={v} onChange={(e) => { setV(e.target.value); setBad(null); }} list={cardNames ? `${id}-names` : undefined} className={`${INPUT} w-44 ${bad ? 'border-red-400' : ''}`} />
       {cardNames && <datalist id={`${id}-names`}>{cardNames.map((n) => <option key={n} value={n} />)}</datalist>}
+      {bad && <span id={`${id}-bad`} role="alert" className="mt-0.5 text-xs text-red-400">{bad}</span>}
     </form>
   );
 }
 
 /** Keyed by the read's id where it is used: a new read starts with a clean draft. */
-export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<PlanView | null>; cardNames: string[] }) {
+export function PlanRead({ listId, view, act, cardNames }: { listId: string; view: PlanView; act: (a: api.PlanPassAction) => Promise<PlanView | null>; cardNames: string[] }) {
   const p = view.pass;
   const [mode, setMode] = useState<'gen' | 'write'>('gen');
   const [own, setOwn] = useState('');
   const [fill, setFill] = useState(true);
   const [editingConfirmed, setEditingConfirmed] = useState(false);
   const [draft, setDraft] = useState<Draft>({});
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [skipped, setSkipped] = useState<Set<string>>(new Set());
-  const [note, setNote] = useState('');
+  // Typed answers and the note start from what was kept last time, and are kept as they're typed.
+  const [answers, setAnswers] = useState<Record<string, string>>(() => view.drafts?.answers ?? {});
+  const [skipped, setSkipped] = useState<Set<string>>(() => new Set(view.drafts?.skipped ?? []));
+  const [note, setNote] = useState(() => view.drafts?.note ?? '');
   const [busy, setBusy] = useState(false);
+  const typed = useRef(false);
+  useEffect(() => {
+    if (!typed.current) return;
+    const t = setTimeout(() => { void api.planDrafts(listId, { answers, skipped: [...skipped], note }).catch(() => {}); }, 600);
+    return () => clearTimeout(t);
+  }, [listId, answers, skipped, note]);
+  const answer = (q: string, v: string) => { typed.current = true; setAnswers((a) => ({ ...a, [q]: v })); };
+  const skip = (qs: string[], on?: boolean) => { typed.current = true; setSkipped((s) => { const n = new Set(s); for (const q of qs) { if (on ?? !n.has(q)) n.add(q); else n.delete(q); } return n; }); };
+  const writeNote = (v: string) => { typed.current = true; setNote(v); };
 
   const run = async (a: api.PlanPassAction) => { setBusy(true); try { return await act(a); } finally { setBusy(false); } };
   const running = view.job?.status === 'running';
@@ -192,7 +216,7 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
           <div className="flex flex-col gap-3">
             <Reads view={view} />
             <div className="flex flex-wrap items-center gap-3">
-              <button onClick={() => run({ action: 'generate' })} disabled={busy} className={GO}>✦ Generate the plan · Opus · {COST}</button>
+              <button onClick={() => run({ action: 'generate' })} disabled={busy} className={GO}>✦ Generate the plan · Opus · {costOf(view)}</button>
               <span className="text-xs text-[var(--muted)]">Takes about a minute; you can keep using the deck meanwhile.</span>
             </div>
           </div>
@@ -200,7 +224,7 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
           <div className="flex flex-col gap-2">
             <label htmlFor="own-plan" className="text-sm text-[var(--muted)]">How does the deck win, and what is it built around? A few sentences is plenty.</label>
             <textarea id="own-plan" value={own} onChange={(e) => setOwn(e.target.value)} rows={3} maxLength={2000} className={`${INPUT} w-full`} placeholder="e.g. Cast cheap spells while the commander attacks so they get copied; win with pingers or the red-mana loop." />
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fill} onChange={(e) => setFill(e.target.checked)} /> Have Claude fill in ways to win, key cards, themes and card roles from my plan ({COST})</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fill} onChange={(e) => setFill(e.target.checked)} /> Have Claude fill in ways to win, key cards, themes and card roles from my plan ({costOf(view)})</label>
             <div><button onClick={() => run({ action: 'ownPlan', text: own, fill })} disabled={busy || !own.trim()} className={GO}>Save my plan</button></div>
           </div>
         )}
@@ -220,9 +244,10 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
     skipped: p.questions.filter((q) => skipped.has(q) || (confirming && !answers[q]?.trim())),
     note: note.trim(),
   });
-  const saveDraft = async () => { if (dirty) await act({ action: 'edits', edits: draft }); };
-  const reread = async () => { setBusy(true); try { await saveDraft(); setNote(''); await act({ action: 'generate', ...input(false) }); } finally { setBusy(false); } };
-  const confirm = async () => { setBusy(true); try { await saveDraft(); setNote(''); await act({ action: 'confirm', ...input(true) }); setDraft({}); setEditingConfirmed(false); } finally { setBusy(false); } };
+  // Edits are saved first; if they're refused (a card not in the deck), nothing else happens.
+  const saveDraft = async () => (dirty ? !!(await act({ action: 'edits', edits: draft })) : true);
+  const reread = async () => { setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'generate', ...input(false) }); setNote(''); } finally { setBusy(false); } };
+  const confirm = async () => { setBusy(true); try { if (!(await saveDraft())) return; typed.current = false; await act({ action: 'confirm', ...input(true) }); setNote(''); setDraft({}); setEditingConfirmed(false); } finally { setBusy(false); } };
   const set = (d: Draft) => setDraft((x) => ({ ...x, ...d }));
   const youKey = new Set(p.yours.keyCards);
   const youTheme = new Set(p.yours.themes);
@@ -234,7 +259,7 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
       {view.stale && !view.stale.usingAnyway && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-300/[0.07] px-3 py-2.5 text-sm">
           <span><b>Out of date.</b> <span className="text-[var(--muted)]">{[view.stale.changed >= 1 ? `${view.stale.changed} cards changed since it was read (${when(p.at)})` : '', view.stale.commander ? 'the commander changed' : '', view.stale.keyCardsGone.length ? `key card${view.stale.keyCardsGone.length === 1 ? '' : 's'} gone: ${view.stale.keyCardsGone.join(', ')}` : ''].filter(Boolean).join('; ')}. AI steps won&apos;t use it until it&apos;s read again.</span></span>
-          <span className="flex flex-wrap items-center gap-3"><button onClick={reread} disabled={busy} className={AI_BTN}>✦ Read again · {COST}</button><button onClick={() => run({ action: 'useStale' })} disabled={busy} className={LINK}>Use it anyway</button></span>
+          <span className="flex flex-wrap items-center gap-3"><button onClick={reread} disabled={busy} className={AI_BTN}>✦ Read again · {costOf(view)}</button><button onClick={() => run({ action: 'useStale' })} disabled={busy} className={LINK}>Use it anyway</button></span>
         </div>
       )}
       {failed && <p role="alert" className="text-sm text-red-400">The last read failed: {failed}. The plan below is from before.</p>}
@@ -304,15 +329,15 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
       {p.questions.length > 0 && editing && (
         <div className="flex flex-col gap-3 rounded-xl border border-violet-300/30 bg-[var(--surface-hover)]/50 p-3">
           <span className="flex items-center justify-between gap-2"><span className="text-[11px] font-semibold uppercase tracking-wide text-violet-200">✦ {p.questions.length} question{p.questions.length === 1 ? '' : 's'} about this deck</span>
-            <button onClick={() => setSkipped(new Set(p.questions))} className={LINK}>Skip all</button></span>
+            <button onClick={() => skip(p.questions, true)} className={LINK}>Skip all</button></span>
           {p.questions.map((q, i) => (
             <div key={q} className={`flex flex-col gap-1.5 ${skipped.has(q) ? 'opacity-50' : ''}`}>
               <label htmlFor={`q-${i}`} className="text-sm">{q}</label>
-              <span className="flex gap-2"><input id={`q-${i}`} value={answers[q] ?? ''} disabled={skipped.has(q)} onChange={(e) => setAnswers((a) => ({ ...a, [q]: e.target.value }))} placeholder="A line is plenty" className={`${INPUT} min-w-0 flex-1`} />
-                <button onClick={() => setSkipped((s) => { const n = new Set(s); if (n.has(q)) n.delete(q); else n.add(q); return n; })} className={LINK}>{skipped.has(q) ? 'Answer' : 'Skip'}</button></span>
+              <span className="flex gap-2"><input id={`q-${i}`} value={answers[q] ?? ''} disabled={skipped.has(q)} onChange={(e) => answer(q, e.target.value)} placeholder="A line is plenty" className={`${INPUT} min-w-0 flex-1`} />
+                <button onClick={() => skip([q])} className={LINK}>{skipped.has(q) ? 'Answer' : 'Skip'}</button></span>
             </div>
           ))}
-          <p className="text-xs text-[var(--faint)]">Answers go to your notes when you read again or confirm below.</p>
+          <p className="text-xs text-[var(--faint)]">Kept as you type, so you can leave and come back. They go to your notes when you read again or confirm below.</p>
         </div>
       )}
 
@@ -327,11 +352,11 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
             <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[var(--muted)]">+ commander, settings, your notes</span>
           </span>
           <label htmlFor="tell-claude" className="text-xs text-[var(--muted)]">Anything else to tell Claude? What&apos;s wrong, what to focus on. Saved to your notes.</label>
-          <textarea id="tell-claude" value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={2000} className={`${INPUT} w-full`} placeholder="e.g. The main loop is a different one, and I want to lean on combat more." />
+          <textarea id="tell-claude" value={note} onChange={(e) => writeNote(e.target.value)} rows={2} maxLength={2000} className={`${INPUT} w-full`} placeholder="e.g. The main loop is a different one, and I want to lean on combat more." />
           <span className="flex flex-wrap items-center gap-3">
-            <button onClick={reread} disabled={busy} className={AI_BTN}>✦ Read again with my changes · {COST}</button>
+            <button onClick={reread} disabled={busy} className={AI_BTN}>✦ Read again with my changes · {costOf(view)}</button>
             {!confirmed && <button onClick={confirm} disabled={busy} className={GO}>Confirm the plan</button>}
-            {confirmed && <><button onClick={confirm} disabled={busy} className={GO}>Save and confirm</button><button onClick={() => { setDraft({}); setNote(''); setEditingConfirmed(false); }} disabled={busy} className={LINK}>Cancel</button></>}
+            {confirmed && <><button onClick={confirm} disabled={busy} className={GO}>Save and confirm</button><button onClick={() => { setDraft({}); writeNote(''); setEditingConfirmed(false); }} disabled={busy} className={LINK}>Cancel</button></>}
             {view.edits > 0 && <button onClick={() => { setDraft({}); void run({ action: 'undoEdits' }); }} disabled={busy} className={LINK}>Undo my edits</button>}
           </span>
         </div>
@@ -343,7 +368,7 @@ export function PlanRead({ view, act, cardNames }: { view: PlanView; act: (a: ap
 
 function PlanFrame({ view, children }: { view: PlanView; children: React.ReactNode }) {
   return (
-    <section data-tour="plan-read" className={`flex flex-col gap-4 rounded-2xl border bg-[var(--surface)] p-4 ${view.stale && !view.stale.usingAnyway ? 'border-amber-300/60' : 'border-violet-300/40'}`}>
+    <section data-tour="plan-read" data-section="4 · The plan" className={`flex flex-col gap-4 rounded-2xl border bg-[var(--surface)] p-4 ${view.stale && !view.stale.usingAnyway ? 'border-amber-300/60' : 'border-violet-300/40'}`}>
       <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">4</span>The plan
         <Tip label="About the plan">How the deck wins, its key cards and themes, and anything worth asking you. Generate it, or write it yourself. Tune, Chat and Check can be used either way; they read the plan once there is one.</Tip></h3>
       {children}
@@ -378,7 +403,7 @@ export function CardRoles({ listId, version }: { listId: string; version: string
   return (
     <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">Card roles<Tip label="About card roles">One role per card, from the plan read. Change any if the read got it wrong: your change is kept on every later read and read by the AI steps.</Tip></h2>
+        <h2 className="flex items-center gap-2 font-display text-lg font-semibold">Card roles<Tip label="About card roles">One role per card, from the plan read. Change any if the read got it wrong: your change is kept on every later read and read by the AI steps. It doesn&apos;t unconfirm the plan. While the plan is current, Engine cards are never offered as cuts.</Tip></h2>
         {view.pass && !view.pass.ownPlan && <span className="text-xs text-[var(--muted)]">from the plan · {when(view.pass.at)}</span>}
       </div>
       {!names.length ? <p className="text-sm text-[var(--muted)]">No roles yet. They come with the plan read on the Plan tab.</p> : (

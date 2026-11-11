@@ -847,6 +847,9 @@ export type PlanPassAction =
   | { action: 'ownPlan'; text: string; fill?: boolean };
 export const planPassAct = (listId: string, act: PlanPassAction) =>
   spending(send(planPath(listId), 'POST', act).then(json<import('./plan-shared').PlanView>));
+/** Keep what's typed into the plan's questions and note, so leaving the tab doesn't lose it. Spends nothing. */
+export const planDrafts = (listId: string, d: { answers: Record<string, string>; skipped: string[]; note: string }) =>
+  send(planPath(listId), 'POST', { action: 'drafts', ...d }).then(json<import('./plan-shared').PlanView>);
 
 /** Claude's last review of the cut list, what the owner has done about it since, and the job if one is running. */
 export interface CutReviewState { review: CutReview | null; settled?: { cut: string[]; kept: string[] }; job: Job | null }

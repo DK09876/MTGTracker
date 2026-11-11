@@ -9,7 +9,9 @@
  *       notes, then read the deck again in the background (Opus, never on its own)
  *   confirm {answers?, skipped?, note?}  the same notes, then confirm the plan
  *   commanderRoles {roles}   what the commander does (Unsure stands alone)
- *   edits {edits}            the owner's edits; each part given is theirs
+ *   edits {edits}            the owner's edits; each part given is theirs. Card
+ *                            names must be in the deck (400 names the ones that aren't)
+ *   drafts {answers, skipped, note}  what's typed but not sent, kept as they type
  *   undoEdits                give every part back to the read
  *   ownPlan {text, fill?}    the owner writes the plan; fill: read the rest from it
  *   useStale                 use an out-of-date read anyway
@@ -21,7 +23,7 @@ import { NextResponse } from 'next/server';
 import { modelById, ModelError } from '@/lib/ai';
 import { startJob } from '@/lib/jobs';
 import {
-  acceptCommanderSuggestion, confirmPlan, keepStalePlan, PASS_MODEL, planView, runPass, setCommanderRoles, setEdits, takeOwnerInput, undoEdits, writeOwnPlan,
+  acceptCommanderSuggestion, confirmPlan, keepStalePlan, NotInDeck, PASS_MODEL, planView, runPass, saveDrafts, setCommanderRoles, setEdits, takeOwnerInput, undoEdits, writeOwnPlan,
 } from '@/lib/plan-pass';
 import { requireList } from '@/lib/profile-route';
 
@@ -70,7 +72,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       setCommanderRoles(id, Array.isArray(b.roles) ? b.roles : []);
       break;
     case 'edits':
-      setEdits(id, (b.edits ?? {}) as Parameters<typeof setEdits>[1]);
+      try {
+        setEdits(id, (b.edits ?? {}) as Parameters<typeof setEdits>[1], list);
+      } catch (e) {
+        if (e instanceof NotInDeck) return NextResponse.json({ error: e.message, names: e.names }, { status: 400 });
+        throw e;
+      }
+      break;
+    case 'drafts':
+      saveDrafts(id, b);
       break;
     case 'undoEdits':
       undoEdits(id);

@@ -25,7 +25,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import type { JsonModel } from './ai';
+import { ModelError, type JsonModel } from './ai';
 import { cardsInList, database, type List } from './db';
 import { cardsChanged, deckHash, deckKeys } from './deck-hash';
 import { changePlan, noteBy, planFor } from './deck-plan';
@@ -54,6 +54,8 @@ function db() {
     d.run(`CREATE TABLE IF NOT EXISTS plan_owner (
       listId TEXT PRIMARY KEY, commanderRoles TEXT NOT NULL DEFAULT '[]', edits TEXT NOT NULL DEFAULT '{}',
       confirmedAt TEXT, confirmedPass TEXT, useStalePass TEXT, questionsDone TEXT, ownPlan INTEGER NOT NULL DEFAULT 0, updatedAt TEXT NOT NULL)`);
+    // Answers typed but not yet sent, so leaving the tab doesn't lose them.
+    try { d.run('ALTER TABLE plan_owner ADD COLUMN drafts TEXT'); } catch { /* already there */ }
     ready = true;
   }
   return d;
@@ -65,8 +67,8 @@ const parse = <T>(s: string | null | undefined, fallback: T): T => { try { retur
 
 // --- the owner's side ------------------------------------------------------------------
 
-interface OwnerRow { listId: string; commanderRoles: string; edits: string; confirmedAt: string | null; confirmedPass: string | null; useStalePass: string | null; questionsDone: string | null; ownPlan: number }
-export interface Owner { commanderRoles: CommanderRole[]; edits: OwnerEdits; confirmedAt: string | null; confirmedPass: string | null; useStalePass: string | null; questionsDone: string | null; ownPlan: boolean }
+interface OwnerRow { listId: string; commanderRoles: string; edits: string; confirmedAt: string | null; confirmedPass: string | null; useStalePass: string | null; questionsDone: string | null; ownPlan: number; drafts: string | null }
+export interface Owner { commanderRoles: CommanderRole[]; edits: OwnerEdits; confirmedAt: string | null; confirmedPass: string | null; useStalePass: string | null; questionsDone: string | null; ownPlan: boolean; drafts: PlanDrafts | null }
 
 export function owner(listId: string): Owner {
   const r = db().get('SELECT * FROM plan_owner WHERE listId = ?', [listId]) as OwnerRow | null;
@@ -76,16 +78,16 @@ export function owner(listId: string): Owner {
     commanderRoles: roles.length ? roles : ['unsure'],
     edits: parse<OwnerEdits>(r?.edits, {}),
     confirmedAt: r?.confirmedAt ?? null, confirmedPass: r?.confirmedPass ?? null, useStalePass: r?.useStalePass ?? null,
-    questionsDone: r?.questionsDone ?? null, ownPlan: !!r?.ownPlan,
+    questionsDone: r?.questionsDone ?? null, ownPlan: !!r?.ownPlan, drafts: parse<PlanDrafts | null>(r?.drafts, null),
   };
 }
 
 function saveOwner(listId: string, o: Owner): void {
-  db().run(`INSERT INTO plan_owner (listId, commanderRoles, edits, confirmedAt, confirmedPass, useStalePass, questionsDone, ownPlan, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(listId) DO UPDATE SET commanderRoles = excluded.commanderRoles, edits = excluded.edits,
+  db().run(`INSERT INTO plan_owner (listId, commanderRoles, edits, confirmedAt, confirmedPass, useStalePass, questionsDone, ownPlan, drafts, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(listId) DO UPDATE SET commanderRoles = excluded.commanderRoles, edits = excluded.edits,
     confirmedAt = excluded.confirmedAt, confirmedPass = excluded.confirmedPass, useStalePass = excluded.useStalePass,
-    questionsDone = excluded.questionsDone, ownPlan = excluded.ownPlan, updatedAt = excluded.updatedAt`,
-  [listId, JSON.stringify(o.commanderRoles), JSON.stringify(o.edits), o.confirmedAt, o.confirmedPass, o.useStalePass, o.questionsDone, o.ownPlan ? 1 : 0, now()]);
+    questionsDone = excluded.questionsDone, ownPlan = excluded.ownPlan, drafts = excluded.drafts, updatedAt = excluded.updatedAt`,
+  [listId, JSON.stringify(o.commanderRoles), JSON.stringify(o.edits), o.confirmedAt, o.confirmedPass, o.useStalePass, o.questionsDone, o.ownPlan ? 1 : 0, o.drafts ? JSON.stringify(o.drafts) : null, now()]);
 }
 
 function updateOwner(listId: string, fn: (o: Owner) => void): Owner {
@@ -107,11 +109,45 @@ const cleanGroups = (xs: unknown): Array<{ name: string; cards: string[] }> => (
   .filter((x): x is { name: unknown; cards: unknown } => !!x && typeof x === 'object')
   .map((x) => ({ name: String(x.name ?? '').trim().slice(0, 80), cards: cleanList(x.cards, 30) })).filter((x) => x.name).slice(0, 12);
 
+/** Card names the owner typed that aren't in the deck. */
+export class NotInDeck extends Error {
+  constructor(readonly names: string[]) {
+    super(`Not in the deck: ${names.join(', ')}. Check the spelling, or add the card to the deck first.`);
+  }
+}
+
+/** The deck's card names (main board and commander), by their front face in lower case. */
+function deckNamesOf(list: Pick<List, 'id' | 'commander'>): Map<string, string> {
+  const main = cardsInList(list.id).filter((c) => c.board === 'main');
+  return new Map([...(list.commander ? [list.commander.name] : []), ...main.map((c) => c.card.name)].map((n) => [front(n), n]));
+}
+
+/**
+ * Key cards and the cards in ways to win must be cards in the deck, spelled
+ * as the deck spells them: a typo would otherwise read as a key card gone and
+ * put the plan out of date. Throws NotInDeck naming the ones that aren't.
+ */
+function inDeck<T extends { keyCards?: unknown; winRoutes?: unknown; roles?: Record<string, unknown> | null }>(list: Pick<List, 'id' | 'commander'>, change: T): T {
+  const names = deckNamesOf(list);
+  const missing: string[] = [];
+  const fix = (xs: string[]) => xs.map((x) => { const n = names.get(front(x)); if (!n) missing.push(x); return n ?? x; });
+  const out = { ...change };
+  if (Array.isArray(change.keyCards)) out.keyCards = fix(cleanList(change.keyCards, 12));
+  if (Array.isArray(change.winRoutes)) out.winRoutes = cleanGroups(change.winRoutes).map((r) => ({ ...r, cards: fix(r.cards) }));
+  if (change.roles) out.roles = Object.fromEntries(Object.entries(change.roles).map(([n, r]) => [fix([n])[0], r]));
+  if (missing.length) throw new NotInDeck([...new Set(missing)]);
+  return out;
+}
+
 /**
  * The owner's edits to the plan: each part given replaces their last edit of
- * it (null clears it, giving it back to the read). Editing unconfirms.
+ * it (null clears it, giving it back to the read). Card names are checked
+ * against the deck. Editing the plan unconfirms it; correcting a card's role
+ * (the Tags tab) does not, since the plan itself hasn't changed.
  */
-export function setEdits(listId: string, change: { plan?: string | null; winRoutes?: unknown; keyCards?: unknown; themes?: unknown; roles?: Record<string, unknown> | null }): Owner {
+export function setEdits(listId: string, change: { plan?: string | null; winRoutes?: unknown; keyCards?: unknown; themes?: unknown; roles?: Record<string, unknown> | null }, list?: Pick<List, 'id' | 'commander'>): Owner {
+  if (list) change = inDeck(list, change);
+  const planChanged = (['plan', 'winRoutes', 'keyCards', 'themes'] as const).some((k) => change[k] !== undefined);
   return updateOwner(listId, (o) => {
     const e = o.edits;
     if (change.plan !== undefined) { if (change.plan === null || !change.plan.trim()) delete e.plan; else e.plan = change.plan.trim().slice(0, 2000); }
@@ -122,8 +158,19 @@ export function setEdits(listId: string, change: { plan?: string | null; winRout
       if (change.roles === null) delete e.roles;
       else e.roles = { ...(e.roles ?? {}), ...Object.fromEntries(Object.entries(change.roles).filter(([, r]) => isCardRole(r)) as Array<[string, CardRole]>) };
     }
-    o.confirmedAt = null;
+    if (planChanged) o.confirmedAt = null;
   });
+}
+
+/** What the owner has typed into the questions and note but not yet sent. */
+export interface PlanDrafts { passId: string | null; answers: Record<string, string>; skipped: string[]; note: string }
+
+export function saveDrafts(listId: string, d: { answers?: unknown; skipped?: unknown; note?: unknown }): Owner {
+  const answers = d.answers && typeof d.answers === 'object' ? Object.fromEntries(Object.entries(d.answers as Record<string, unknown>)
+    .filter((e): e is [string, string] => typeof e[1] === 'string').slice(0, 3).map(([q, a]) => [q.slice(0, 300), a.slice(0, 600)])) : {};
+  const skipped = Array.isArray(d.skipped) ? d.skipped.filter((x): x is string => typeof x === 'string').slice(0, 3) : [];
+  const note = typeof d.note === 'string' ? d.note.slice(0, 2000) : '';
+  return updateOwner(listId, (o) => { o.drafts = { passId: latestPass(listId)?.id ?? null, answers, skipped, note }; });
 }
 
 export function undoEdits(listId: string): Owner {
@@ -150,7 +197,7 @@ export function takeOwnerInput(listId: string, profileId: string, input: { answe
     if (input.note?.trim()) logConversation(profileId, listId, 'plan', 'approach_corrected', input.note.trim(), PROMPT_VERSIONS.planPass);
   });
   const latest = latestPass(listId);
-  if (latest && (answers.length || input.skipped?.length)) updateOwner(listId, (o) => { o.questionsDone = latest.id; });
+  updateOwner(listId, (o) => { o.drafts = null; if (latest && (answers.length || input.skipped?.length)) o.questionsDone = latest.id; });
   return texts.length;
 }
 
@@ -243,7 +290,19 @@ export function ownerText(i: PassInput): string {
   return L.join('\n');
 }
 
-/** The read's answer, kept to cards in the deck and the shapes the app uses. */
+/** A read that came back unusable: the job fails and nothing is stored. */
+export class BadRead extends ModelError {
+  constructor(why: string) { super(`The read came back unusable: ${why}. Nothing was saved; try again.`); }
+}
+
+/** A read must give a role to at least this share of the non-land cards. */
+export const MIN_ROLES = 0.5;
+
+/**
+ * The read's answer, kept to cards in the deck and the shapes the app uses.
+ * Throws BadRead when the deck state is missing, the plan is empty or most
+ * cards have no role.
+ */
 export function parsePass(data: unknown, deckNames: string[], nonland: string[]): PassOutput {
   const d = (data ?? {}) as Record<string, unknown>;
   const byFront = new Map(deckNames.map((n) => [front(n), n]));
@@ -260,11 +319,17 @@ export function parsePass(data: unknown, deckNames: string[], nonland: string[])
     if (!n || !nonlandSet.has(front(n)) || !isCardRole(x.role)) continue;
     cards[n] = { role: x.role, note: String(x.note ?? '').slice(0, 80) };
   }
-  const state: DeckState = d.state === 'unfocused' || d.state === 'no_plan' ? d.state : 'focused';
+  // A garbled answer fails the read rather than being kept as a good one.
+  if (d.state !== 'focused' && d.state !== 'unfocused' && d.state !== 'no_plan') throw new BadRead('it didn’t say whether the deck has a plan');
+  const state: DeckState = d.state;
+  const plan = String(d.plan ?? '').trim().slice(0, 1500);
+  if (!plan) throw new BadRead('the plan came back empty');
+  const wanted = new Set(nonland.map(front)).size;
+  if (wanted && Object.keys(cards).length < wanted * MIN_ROLES) throw new BadRead(`it gave roles for only ${Object.keys(cards).length} of ${wanted} cards`);
   const cmd = (d.commander ?? {}) as Record<string, unknown>;
   return {
     state,
-    plan: String(d.plan ?? '').trim().slice(0, 1500),
+    plan,
     winRoutes: groups(d.winRoutes),
     keyCards: names(d.keyCards, 8),
     themes: groups(d.themes),
@@ -354,6 +419,14 @@ export async function runPass(model: JsonModel, list: List, profileId: string | 
 
 // --- the view -------------------------------------------------------------------------------
 
+/** What plan reads have cost lately, from the AI usage trail (kept a week), or null when there are none to go by. */
+export function readCost(): { usd: number; reads: number } | null {
+  try {
+    const r = database().get(`SELECT AVG(cost) AS usd, COUNT(*) AS n FROM ai_calls WHERE step = 'read the plan' AND outcome = 'ok' AND cost > 0`) as { usd: number | null; n: number } | null;
+    return r && r.n && r.usd ? { usd: r.usd, reads: r.n } : null;
+  } catch { return null; }
+}
+
 /** Whether a read no longer matches the deck, and why. */
 export function staleness(pass: Pass, list: Pick<List, 'id' | 'commander'>, keyCards: string[]): NonNullable<PlanView['stale']> | null {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
@@ -375,6 +448,7 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
   const running = job && (job.status === 'running' || (job.status === 'failed' && (!latest || job.startedAt > latest.at)))
     ? { id: job.id, status: job.status, progress: job.detail || null, error: job.status === 'failed' ? job.error ?? 'The read failed' : null } : null;
   const edits = Object.keys(o.edits).length;
+  const size = main.reduce((n, c) => n + c.quantity, 0) + (list.commander ? 1 : 0);
   if (!latest) {
     // A plan the owner wrote with no read yet.
     const ownOnly = o.ownPlan && o.edits.plan ? {
@@ -382,7 +456,7 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
       cards: {}, summary: '', yours: { plan: true, routes: (o.edits.winRoutes ?? []).map((r) => r.name), routeCards: [], keyCards: o.edits.keyCards ?? [], themes: (o.edits.themes ?? []).map((t) => t.name) },
       questions: [], oneAway: [], commander: null, ownPlan: true, commanderRolesRead: o.commanderRoles,
     } : null;
-    return { commanderRoles: o.commanderRoles, nonland, job: running, pass: ownOnly, edits, confirmed: o.confirmedAt ? { at: o.confirmedAt } : null, stale: null, reads: { notes, commanderRoles: o.commanderRoles.length } };
+    return { commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), drafts: null, job: running, pass: ownOnly, edits, confirmed: o.confirmedAt ? { at: o.confirmedAt } : null, stale: null, reads: { notes, commanderRoles: o.commanderRoles.length } };
   }
   const out = latest.output;
   const shown = withEdits(out, o.edits);
@@ -392,7 +466,8 @@ export function planView(list: Pick<List, 'id' | 'commander'>): PlanView {
   const routeCards = new Set(shown.winRoutes.flatMap((r) => r.cards).map(front));
   const confirmed = o.confirmedAt ? { at: o.confirmedAt } : null;
   return {
-    commanderRoles: o.commanderRoles, nonland, job: running, edits, confirmed, stale,
+    commanderRoles: o.commanderRoles, nonland, size, cost: readCost(), job: running, edits, confirmed, stale,
+    drafts: o.drafts && o.drafts.passId === latest.id ? { answers: o.drafts.answers, skipped: o.drafts.skipped, note: o.drafts.note } : null,
     reads: { notes, commanderRoles: o.commanderRoles.length },
     pass: {
       id: latest.id, at: latest.at, model: latest.model, state: shown.state, plan: shown.plan, winRoutes: shown.winRoutes, keyCards: shown.keyCards, themes: shown.themes,
@@ -434,6 +509,26 @@ export function planForAi(list: Pick<List, 'id' | 'commander'>): { text: string;
     ...(p.keyCards.length ? [`Key cards: ${p.keyCards.join(', ')}`] : []),
     ...(p.themes.length ? [`Themes: ${p.themes.map((t) => `${t.name} (${t.cards.length} cards)`).join('; ')}`] : []),
     ...['engine', 'win', 'payoff', 'enabler'].filter((r) => byRole.has(r)).map((r) => `Cards read as ${r}: ${byRole.get(r)!.join(', ')}`),
+    'Never cut: the commanders, the cards the owner marked never cut, the engine cards and the cards in the ways to win.',
   ];
   return { text: L.join('\n'), passId: p.id };
+}
+
+
+/**
+ * Cards the current read protects from code cuts: the ones it reads as an
+ * engine and the cards in its ways to win, with the owner's edits on top.
+ * Code ranking alone was no better than random in the deck flow evaluation,
+ * so without this the rules list could offer combo pieces as cuts. None when
+ * there is no read, or it is out of date and the owner hasn't said to use it
+ * anyway. By card name, with why.
+ */
+export function readProtects(list: Pick<List, 'id' | 'commander'>): Map<string, string> {
+  const out = new Map<string, string>();
+  const view = planView(list);
+  const p = view.pass;
+  if (!p || (view.stale && !view.stale.usingAnyway)) return out;
+  for (const r of p.winRoutes) for (const c of r.cards) if (!out.has(c)) out.set(c, `way to win: ${r.name}`);
+  for (const [n, c] of Object.entries(p.cards)) if (c.role === 'engine' && !out.has(n)) out.set(n, 'engine in the plan');
+  return out;
 }

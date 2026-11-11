@@ -45,7 +45,9 @@ const ANSWER = {
   winRoutes: [{ name: 'Pingers', cards: ['Spell 1', 'Spell 2', 'Not In Deck'] }],
   keyCards: ['Spell 1', 'Spell 2', 'Spell 3', 'Spell 4', 'Spell 5', 'Spell 6', 'Spell 7', 'Spell 8', 'Spell 9'],
   themes: [{ name: 'Spells', cards: ['Spell 3', 'Spell 4'] }],
-  cards: [{ name: 'Spell 1', role: 'engine', note: 'draws' }, { name: 'Spell 2', role: 'win', note: 'pings' }, { name: 'Island', role: 'filler', note: 'land' }, { name: 'Spell 3', role: 'bogus', note: '' }],
+  cards: [{ name: 'Spell 1', role: 'engine', note: 'draws' }, { name: 'Spell 2', role: 'win', note: 'pings' }, { name: 'Island', role: 'filler', note: 'land' }, { name: 'Spell 3', role: 'bogus', note: '' },
+    // A role for the rest, as a real read gives (a read with roles for under half the cards fails).
+    ...Array.from({ length: 57 }, (_, i) => ({ name: `Spell ${i + 4}`, role: 'support', note: '' }))],
   questions: ['Is the loop real?', 'Combat or not?', 'Wizards for type?', 'A fourth?'],
   summary: 'A focused spells deck.',
   commander: { roles: ['multiplier', 'unsure', 'made-up'], why: 'Copies spells.' },
@@ -77,7 +79,12 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(pass.output.winRoutes[0].cards).toEqual(['Spell 1', 'Spell 2']);
     expect(pass.output.keyCards).toHaveLength(8);
     expect(pass.output.questions).toHaveLength(3);
-    expect(pass.output.cards).toEqual({ 'Spell 1': { role: 'engine', note: 'draws' }, 'Spell 2': { role: 'win', note: 'pings' } });
+    expect(pass.output.cards['Spell 1']).toEqual({ role: 'engine', note: 'draws' });
+    expect(pass.output.cards['Spell 2']).toEqual({ role: 'win', note: 'pings' });
+    // Not a land, not an unknown role.
+    expect(pass.output.cards.Island).toBeUndefined();
+    expect(pass.output.cards['Spell 3']).toBeUndefined();
+    expect(Object.keys(pass.output.cards)).toHaveLength(59);
     expect(pass.output.commander.roles).toEqual(['multiplier']);
     // One Opus call, the shape in the prompt, every card's text in, never asked to show its working.
     expect(asked).toHaveLength(1);
@@ -135,7 +142,9 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(plan.notes.filter((n) => n.by === 'owner').map((n) => n.text)).toEqual(['Is the loop real? A bonus.', 'Lean on combat.']);
     const kinds = (await import('./db')).database().all('SELECT kind FROM conversation_events ORDER BY at, kind') as Array<{ kind: string }>;
     expect(kinds.map((k) => k.kind).sort()).toEqual(['approach_corrected', 'question_answered', 'question_asked', 'question_asked', 'question_asked', 'question_skipped']);
-    // An edit afterwards unconfirms.
+    // Correcting a card's role keeps it confirmed; editing the plan unconfirms.
+    pp.setEdits(list.id, { roles: { 'Spell 4': 'engine' } });
+    expect(pp.planView(list).confirmed).toBeTruthy();
     pp.setEdits(list.id, { plan: 'My words.' });
     expect(pp.planView(list).confirmed).toBeNull();
   });
@@ -210,6 +219,61 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(text).toContain('Cards read as engine: Spell 1');
     expect(text).toContain('Lynchpin');
     expect(text).toContain('Spell 9 stays.');
+    // With a current read, the code's own detected plan is left out: no second set of key cards or ways to win.
+    expect(text).not.toContain('Key cards (built around');
+    expect(text).not.toMatch(/^- Ways to win:/m);
+    expect(text).not.toContain('Leans on the commander');
+    expect(text).toContain('Lands:');
+  });
+
+  it('fails a garbled answer instead of storing it', async () => {
+    const { list } = await deck();
+    const pp = await import('./plan-pass');
+    const bad = [
+      { ...ANSWER, state: undefined },
+      { ...ANSWER, plan: '  ' },
+      { ...ANSWER, cards: ANSWER.cards.slice(0, 20) },
+    ];
+    for (const a of bad) await expect(pp.runPass(fakeModel(() => a).model, list, 'dk')).rejects.toBeInstanceOf(pp.BadRead);
+    expect(pp.latestPass(list.id)).toBeNull();
+  });
+
+  it('checks key cards and route cards against the deck, and fixes their spelling', async () => {
+    const { list } = await deck();
+    const pp = await import('./plan-pass');
+    await pp.runPass(fakeModel(() => ANSWER).model, list, 'dk');
+    expect(() => pp.setEdits(list.id, { keyCards: ['Spell 1', 'Spel 2'] }, list)).toThrow(pp.NotInDeck);
+    expect(() => pp.setEdits(list.id, { winRoutes: [{ name: 'X', cards: ['Nope'] }] }, list)).toThrow(/Not in the deck: Nope/);
+    pp.setEdits(list.id, { keyCards: ['spell 7'] }, list);
+    const v = pp.planView(list);
+    expect(v.pass!.keyCards).toEqual(['Spell 7']);
+    expect(v.stale).toBeNull();
+  });
+
+  it('protects the read’s engines and way-to-win cards from cuts while it is current', async () => {
+    const { db, list } = await deck();
+    const pp = await import('./plan-pass');
+    expect(pp.readProtects(list).size).toBe(0);
+    await pp.runPass(fakeModel(() => ANSWER).model, list, 'dk');
+    const p = pp.readProtects(list);
+    expect(p.get('Spell 1')).toBe('way to win: Pingers');
+    expect(p.get('Spell 2')).toBe('way to win: Pingers');
+    expect(p.has('Spell 4')).toBe(false);
+    pp.setEdits(list.id, { roles: { 'Spell 4': 'engine' } }, list);
+    expect(pp.readProtects(list).get('Spell 4')).toBe('engine in the plan');
+    // Out of date: nothing from the read is protected.
+    for (let i = 40; i < 50; i++) db.removeCardFromList(list.id, `Spell ${i}`);
+    expect(pp.readProtects(list).size).toBe(0);
+  });
+
+  it('keeps typed answers for the latest read until they are sent', async () => {
+    const { list } = await deck();
+    const pp = await import('./plan-pass');
+    await pp.runPass(fakeModel(() => ANSWER).model, list, 'dk');
+    pp.saveDrafts(list.id, { answers: { 'Is the loop real?': 'Half' }, skipped: ['Combat or not?'], note: 'hm' });
+    expect(pp.planView(list).drafts).toEqual({ answers: { 'Is the loop real?': 'Half' }, skipped: ['Combat or not?'], note: 'hm' });
+    pp.takeOwnerInput(list.id, 'dk', { answers: [{ question: 'Is the loop real?', answer: 'Half' }] });
+    expect(pp.planView(list).drafts).toBeNull();
   });
 });
 
@@ -234,6 +298,8 @@ describe('the plan read through its route', { timeout: 60_000 }, () => {
     expect(v.pass.plan).toBe('Copy spells while Azula attacks.');
     v = await post({ action: 'edits', edits: { keyCards: ['Spell 5'] } });
     expect(v.pass.keyCards).toEqual(['Spell 5']);
+    const typo = await post({ action: 'edits', edits: { keyCards: ['Spel 5'] } });
+    expect(typo).toMatchObject({ names: ['Spel 5'] });
     v = await post({ action: 'confirm', answers: [{ question: 'Is the loop real?', answer: 'Yes.' }] });
     expect(v.confirmed).toBeTruthy();
     expect(v.pass.questions).toEqual([]);
