@@ -10,7 +10,6 @@ import { cardsInList, deckTags, type List } from './db';
 import { cutSettings, effectiveCutSettings, planFor, planStyles } from './deck-plan';
 import { commanderRoles as rolesOfCommander, deckRoles, keeps } from './deck-roles';
 import { fitProfile } from './fit';
-import { readProtects } from './plan-pass';
 import { analyse } from './health';
 
 export async function deckCutList(list: Pick<List, 'id' | 'commander'>, opts: { landCut?: string | null } = {}) {
@@ -25,11 +24,9 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>, opts: { 
   const styles = planStyles(list.id, list.commander, main);
   const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
-  // Never cut: the owner's ★ never-cut list (the commander is never in the list), and the current
-  // plan read's engine cards and ways to win.
+  // Never cut: the owner's ★ never-cut list (the commander is never in the list). The plan read's
+  // engines and key cards are flagged where a cut is shown, not blocked (plan-pass.ts readFlags).
   const keep = keeps(list.id);
-  const fromRead = readProtects(list);
-  for (const c of main) if (fromRead.has(c.card.name)) keep.add(c.card.oracle_id ?? c.card.id);
   const result = cutCandidates({
     // A second commander leads the deck with the first: never a cut.
     cards: main.filter((c) => c.slot !== 'partner'), roles, fit: fitProfile(list.commander), commander: list.commander, commanderRoles,

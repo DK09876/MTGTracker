@@ -874,6 +874,27 @@ export const savePlaytest = (listId: string, change: { settings?: GoldfishSettin
 
 // --- Tune ----------------------------------------------------------------------
 
+/** Trim: the cut flow for a deck over 100 (lib/trim.ts). */
+export type TrimView = import('./trim-shared').TrimView;
+export type TrimAction =
+  | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
+  | { action: 'correction'; text: string }
+  | { action: 'model'; model: import('./trim-shared').TrimModel }
+  | { action: 'find'; rerun?: boolean }
+  | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
+  | { action: 'apply'; cutsTo?: string }
+  | { action: 'undo' }
+  | { action: 'reset' };
+export const trim = (listId: string) => get<TrimView>(`lists/${listId}/trim`);
+export const trimAct = (listId: string, act: TrimAction) => {
+  const paid = act.action === 'find' || (act.action === 'approach' && act.claude === true);
+  const work = send(`lists/${listId}/trim`, 'POST', act).then(json<TrimView>).finally(() => {
+    if (paid) jobsChanged();
+    if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
+  });
+  return paid ? spending(work) : work;
+};
+
 export type TuneState = import('./tune').TuneState;
 type TuneAction =
   | { action: 'stage'; items: import('./tune-shared').Suggestion[] }

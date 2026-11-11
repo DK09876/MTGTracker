@@ -509,26 +509,29 @@ export function planForAi(list: Pick<List, 'id' | 'commander'>): { text: string;
     ...(p.keyCards.length ? [`Key cards: ${p.keyCards.join(', ')}`] : []),
     ...(p.themes.length ? [`Themes: ${p.themes.map((t) => `${t.name} (${t.cards.length} cards)`).join('; ')}`] : []),
     ...['engine', 'win', 'payoff', 'enabler'].filter((r) => byRole.has(r)).map((r) => `Cards read as ${r}: ${byRole.get(r)!.join(', ')}`),
-    'Never cut: the commanders, the cards the owner marked never cut, the engine cards and the cards in the ways to win.',
+    'Never cut: the commanders and the cards the owner marked never cut. Engines and key cards are cut only with a clear reason.',
   ];
   return { text: L.join('\n'), passId: p.id };
 }
 
 
 /**
- * Cards the current read protects from code cuts: the ones it reads as an
- * engine and the cards in its ways to win, with the owner's edits on top.
- * Code ranking alone was no better than random in the deck flow evaluation,
- * so without this the rules list could offer combo pieces as cuts. None when
+ * What the current read says about cards worth a second look before cutting:
+ * its engines, key cards and the cards in its ways to win, with the owner's
+ * edits on top. Shown as a flag beside a cut, never a block: on the 29 decks
+ * of the deck flow evaluation owners cut way-to-win cards as often as any
+ * other card (16%) and engines and key cards about half as often (8%), so
+ * blocking them would have refused a quarter of their real cuts. None when
  * there is no read, or it is out of date and the owner hasn't said to use it
- * anyway. By card name, with why.
+ * anyway. By card name.
  */
-export function readProtects(list: Pick<List, 'id' | 'commander'>): Map<string, string> {
-  const out = new Map<string, string>();
+export function readFlags(list: Pick<List, 'id' | 'commander'>): Map<string, { flag: string; strong: boolean }> {
+  const out = new Map<string, { flag: string; strong: boolean }>();
   const view = planView(list);
   const p = view.pass;
   if (!p || (view.stale && !view.stale.usingAnyway)) return out;
-  for (const r of p.winRoutes) for (const c of r.cards) if (!out.has(c)) out.set(c, `way to win: ${r.name}`);
-  for (const [n, c] of Object.entries(p.cards)) if (c.role === 'engine' && !out.has(n)) out.set(n, 'engine in the plan');
+  for (const [n, c] of Object.entries(p.cards)) if (c.role === 'engine') out.set(n, { flag: 'Engine in the plan', strong: true });
+  for (const n of p.keyCards) if (!out.has(n)) out.set(n, { flag: 'Key card in the plan', strong: true });
+  for (const r of p.winRoutes) for (const c of r.cards) if (!out.has(c)) out.set(c, { flag: `In a way to win: ${r.name}`, strong: false });
   return out;
 }

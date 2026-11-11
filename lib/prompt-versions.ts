@@ -10,6 +10,8 @@ export const PROMPT_VERSIONS = {
   chat: 'chat-1',
   planRead: 'plan-read-1',
   planPass: 'plan-pass-1',
+  trim: 'trim-1',
+  trimApproach: 'trim-approach-1',
 } as const;
 
 export type PromptName = keyof typeof PROMPT_VERSIONS;

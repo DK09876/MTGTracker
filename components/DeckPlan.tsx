@@ -31,6 +31,8 @@ interface Props {
   onTab: (tab: 'tags' | 'tune') => void;
   /** The deck's card names, for picking key cards and route cards. */
   cardNames?: string[];
+  /** The commander, and its partner if it has one, with their pictures. */
+  commanders?: Array<{ name: string; image: string | null }>;
 }
 
 type Part = api.PlanPart;
@@ -121,7 +123,7 @@ function How({ how, changedBy }: { how: Part['how'] | { inputs: string[]; steps:
 }
 
 
-export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab, cardNames = [] }: Props) {
+export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab, cardNames = [], commanders = [] }: Props) {
   const [plan, setPlan] = useState<api.DeckPlanState | 'loading' | 'failed'>(() => api.peek<api.DeckPlanState>(api.paths.plan(listId)) ?? 'loading');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -163,7 +165,6 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
   return (
     <div className="mt-5 flex flex-col gap-6">
-      {view && <DeckSize size={view.size} onTune={() => onTab('tune')} />}
       {noPlan && (
         <section className="flex flex-col gap-2 rounded-2xl border border-violet-300/40 bg-violet-300/[0.04] p-4">
           <h3 className="font-display text-lg font-semibold">This deck has no plan yet</h3>
@@ -174,7 +175,7 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
           </span>
         </section>
       )}
-      {view && <CommanderRoles view={view} act={act} commander={commander} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
+      {view && <CommanderRoles view={view} act={act} commander={commander} pictures={commanders} readRoles={view.pass && !view.pass.ownPlan ? view.pass.commanderRolesRead : null} />}
 
       <section data-tour="plan-settings" data-section="2 · Your settings" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
         <h3 className="flex items-center gap-2 font-display text-lg font-semibold"><span className="text-xs text-[var(--faint)]">2</span>Your settings
@@ -215,19 +216,6 @@ export default function DeckPlan({ listId, tags, onTags, version, onPlan, onTab,
 
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
     </div>
-  );
-}
-
-/** Where the deck stands against 100 cards, and what comes next. */
-function DeckSize({ size, onTune }: { size: number; onTune: () => void }) {
-  const over = size - 100;
-  return (
-    <p className="text-sm text-[var(--muted)]">
-      <b className="tabular-nums text-[var(--foreground)]">{size} of 100 cards</b>
-      {over > 0 && <>: {over} over. Trim next, on <button onClick={onTune} className="underline hover:text-[var(--foreground)]">Tune</button>.</>}
-      {over < 0 && <>: {-over} short. Fill next, on <button onClick={onTune} className="underline hover:text-[var(--foreground)]">Tune</button>.</>}
-      {over === 0 && <>. The plan is what Tune, Chat and Check read.</>}
-    </p>
   );
 }
 

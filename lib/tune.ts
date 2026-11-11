@@ -13,7 +13,7 @@ import { lastReview } from './cut-review';
 import { addCardToList, cachedRoles, cardsInList, database, deckTags, setQuantity, updateListCard, type List, type ListedCard } from './db';
 import { drawKind, isImpulse, jobs as countJobs, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
 import { planFor, planStyles, type Plan } from './deck-plan';
-import { readProtects } from './plan-pass';
+import { readFlags } from './plan-pass';
 import { commanderRoles as rolesOfCommander, deckRoles, keeps, overrides as roleOverrides, withOverrides } from './deck-roles';
 import type { Board } from './decklist';
 import { filterCards } from './filter';
@@ -89,6 +89,8 @@ export interface Context {
   /** Cards in "Might go in" sections. */
   pool: ListedCard[];
   protectedWhy: Map<string, string>;
+  /** What the current plan read says about cards worth a second look before cutting: flagged, never blocked. */
+  flags: Map<string, { flag: string; strong: boolean }>;
   styles: Array<{ label: string; test: RegExp }>;
   rolesOf: (card: ScryfallCard) => string[];
   where: Map<string, string>;
@@ -124,20 +126,19 @@ export async function tuneContext(list: List, profileId: string): Promise<Contex
   const inBoards = new Set(sections.filter((s) => s.purpose === 'in').map((s) => s.id as string));
   const pool = all.filter((c) => inBoards.has(c.board));
   const known = knownRoles([...all.map((c) => c.card), ...commanders]);
-  // Never cut: the commanders, the owner's ★ never-cut list, and while the plan read is current its
-  // engine cards and the cards in its ways to win (code ranking alone was no better than random).
+  // Never cut: the commanders and the owner's ★ never-cut list, nothing else (the owner's call, 2026-11-10).
+  // The plan read's engines and key cards are flagged on a cut and ranked last, not blocked.
   const protectedWhy = new Map<string, string>();
   for (const c of commanders) protectedWhy.set(c.name, 'commander');
   const starred = keeps(list.id);
   for (const c of main) if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedWhy.has(c.card.name)) protectedWhy.set(c.card.name, '★ never cut');
-  for (const [name, why] of readProtects(list)) if (!protectedWhy.has(name)) protectedWhy.set(name, why);
   const companion = all.find((c) => c.slot === 'companion')?.card;
   if (companion) protectedWhy.set(companion.name, 'companion');
   const size = count(main) + (list.commander ? 1 : 0);
   const bracket = plan.bracket;
   return {
     list, profileId, all, main, sections, plan, roles, jobs: jobRows, cmdRoles, commanders,
-    identity: deckIdentity(commanders), size, pool, protectedWhy,
+    identity: deckIdentity(commanders), size, pool, protectedWhy, flags: readFlags(list),
     styles: planStyles(list.id, list.commander, main),
     rolesOf: (card) => known.get(card.oracle_id ?? card.id) ?? [],
     where: holdings(profileId, list.id),
@@ -561,9 +562,11 @@ async function cutGroups(ctx: Context, landCut: string | null): Promise<{ groups
     const item = cutItem(card, `cuts:rule:${c.name}`, c.reasons.slice(0, 2).join('; '), 1, {
       inputs: [`Jobs: ${c.roles.join(', ') || 'none it tracks'}`, `Mana value: ${c.cmc}`],
       steps: c.why.map((r) => `${r.text}: ${r.delta > 0 ? '+' : ''}${r.delta}`).concat([`Total: ${c.score}`]),
-    });
+    }, ctx.flags.get(c.name)?.strong ? `${ctx.flags.get(c.name)!.flag}: look twice before cutting it` : undefined);
     (filtered[filter] ??= []).push(item);
   }
+  // The plan's engines and key cards go last in each group: the rules can't tell what the deck is built on.
+  for (const items of Object.values(filtered)) items.sort((a, b) => Number(!!a.warn) - Number(!!b.warn));
   const LABEL: Record<string, string> = { curve: 'Heavy curve', interaction: 'Interaction over range', rampdraw: 'Ramp or draw over range', offplan: 'Off the plan', other: 'Other cuts' };
   for (const f of ['curve', 'interaction', 'rampdraw', 'offplan', 'other'] as const) {
     const items = filtered[f] ?? [];
@@ -780,7 +783,8 @@ export async function stage(list: List, profileId: string, items: Suggestion[]):
       const landsCut = changes.cut.filter((c) => { const k = known.get(c.card.id); return k && isLand(k); }).reduce((n, c) => n + c.quantity, 0);
       if (ctx.plan.landNumber.have - landsCut - (item.cut?.quantity ?? 1) < landFloor(ctx)) { blocked += 1; continue; }
     }
-    const sizeAfter = (await impactOf(ctx, changes)).size.after;
+    // The size with what is staged so far: counted, not worked out again from the whole deck for every item.
+    const sizeAfter = ctx.size + count(changes.add) - count(changes.cut);
     if (cutCard && !addCard && cutsLeft(sizeAfter) < (item.cut?.quantity ?? 1)) { capped += 1; continue; }
     const pairKey = addCard && cutCard ? newKey('pair') : undefined;
     const next: Changes = { add: [...changes.add], cut: [...changes.cut] };
@@ -863,6 +867,34 @@ async function move(
     added += a.quantity;
   }
   return { added, cut, undo };
+}
+
+/** The numbers now and with these cards cut, by name (one copy each): for Trim, which keeps its own choices. */
+export async function cutImpact(ctx: Context, names: string[]): Promise<Impact> {
+  return impactOf(ctx, { add: [], cut: cutsByName(ctx.main, names.map((name) => ({ name, why: '' }))) });
+}
+
+function cutsByName(main: ListedCard[], cuts: Array<{ name: string; why: string }>): Staged[] {
+  return cuts.flatMap((c) => {
+    const row = main.find((m) => m.card.name === c.name && m.slot !== 'partner');
+    return row ? [{ key: newKey('c'), card: ref(row.card, { from: 'main' }), quantity: 1, why: c.why }] : [];
+  });
+}
+
+/**
+ * Cut cards by name, outside Your changes (Trim keeps its own choices): each
+ * moves to the section for cards that came out, with its reason. Returns the
+ * exact inverse for an undo, and the section they went to.
+ */
+export async function applyCuts(list: List, cuts: Array<{ name: string; why: string }>, cutsTo?: Board): Promise<{ added: number; cut: number; undo: UndoMoves; to: Board }> {
+  const sections = sectionsOf(list.id);
+  const to: Board = cutsTo && cutsTo !== 'main' && sections.some((x) => x.id === cutsTo) ? cutsTo : cutBoard(sections);
+  const at = new Date().toISOString();
+  const reasons: Record<string, { why: string; at: string }> = {};
+  const main = cardsInList(list.id).filter((c) => c.board === 'main');
+  const done = await move(list, { add: [], cut: cutsByName(main, cuts) }, () => to, (name, why) => { reasons[name] = { why, at }; }, () => {});
+  updateTune(list.id, (s) => { Object.assign(s.cutReasons, reasons); });
+  return { ...done, to };
 }
 
 /** Put back what an apply moved. Anything staged since stays staged. */

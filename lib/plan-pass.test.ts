@@ -250,20 +250,21 @@ describe('the plan read', { timeout: 30_000 }, () => {
     expect(v.stale).toBeNull();
   });
 
-  it('protects the read’s engines and way-to-win cards from cuts while it is current', async () => {
+  it('flags the read’s engines, key cards and way-to-win cards while it is current, and blocks none of them', async () => {
     const { db, list } = await deck();
     const pp = await import('./plan-pass');
-    expect(pp.readProtects(list).size).toBe(0);
+    expect(pp.readFlags(list).size).toBe(0);
     await pp.runPass(fakeModel(() => ANSWER).model, list, 'dk');
-    const p = pp.readProtects(list);
-    expect(p.get('Spell 1')).toBe('way to win: Pingers');
-    expect(p.get('Spell 2')).toBe('way to win: Pingers');
-    expect(p.has('Spell 4')).toBe(false);
-    pp.setEdits(list.id, { roles: { 'Spell 4': 'engine' } }, list);
-    expect(pp.readProtects(list).get('Spell 4')).toBe('engine in the plan');
-    // Out of date: nothing from the read is protected.
+    const f = pp.readFlags(list);
+    expect(f.get('Spell 1')).toEqual({ flag: 'Engine in the plan', strong: true });
+    // A key card that is also in a way to win reads as the key card.
+    expect(f.get('Spell 2')).toEqual({ flag: 'Key card in the plan', strong: true });
+    expect(f.has('Spell 30')).toBe(false);
+    pp.setEdits(list.id, { roles: { 'Spell 30': 'engine' } }, list);
+    expect(pp.readFlags(list).get('Spell 30')?.strong).toBe(true);
+    // Out of date: nothing is flagged.
     for (let i = 40; i < 50; i++) db.removeCardFromList(list.id, `Spell ${i}`);
-    expect(pp.readProtects(list).size).toBe(0);
+    expect(pp.readFlags(list).size).toBe(0);
   });
 
   it('keeps typed answers for the latest read until they are sent', async () => {

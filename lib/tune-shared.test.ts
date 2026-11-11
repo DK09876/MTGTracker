@@ -15,7 +15,8 @@ describe('the suggested intent', () => {
     expect(suggestedIntent(80, 60)).toBe('find');
     expect(suggestedIntent(100, 9)).toBe('swaps');
     expect(suggestedIntent(108, 5)).toBe('cuts');
-    expect(suggestedIntent(116, 24)).toBe('find');
+    expect(suggestedIntent(116, 24)).toBe('cuts');
+    expect(suggestedIntent(128, 0)).toBe('cuts');
   });
 });
 

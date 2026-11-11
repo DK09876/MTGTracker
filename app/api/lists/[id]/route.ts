@@ -13,6 +13,7 @@ import { isPublic, setPublic } from '@/lib/profile-style';
 import { type Finish, getCard, ScryfallError } from '@/lib/scryfall';
 import { dropSections, sectionsOf } from '@/lib/sections';
 import { dropTune } from '@/lib/tune-store';
+import { dropTrim } from '@/lib/trim';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -86,6 +87,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // The deck's own sections and Tune state go with it.
     dropSections(id);
     dropTune(id);
+    dropTrim(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[list] delete failed', error);

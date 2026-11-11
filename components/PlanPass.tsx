@@ -45,7 +45,7 @@ export function usePlanView(listId: string, version: string) {
 
 // --- 1. What the commander does --------------------------------------------------------------
 
-export function CommanderRoles({ view, act, commander, readRoles }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<unknown>; commander: string; readRoles: CommanderRole[] | null }) {
+export function CommanderRoles({ view, act, commander, readRoles, pictures = [] }: { view: PlanView; act: (a: api.PlanPassAction) => Promise<unknown>; commander: string; readRoles: CommanderRole[] | null; pictures?: Array<{ name: string; image: string | null }> }) {
   const picked = new Set(view.commanderRoles);
   const toggle = (id: CommanderRole) => {
     const next = new Set(picked);
@@ -62,7 +62,14 @@ export function CommanderRoles({ view, act, commander, readRoles }: { view: Plan
           <Tip label="About this">Pick any that fit; the ⓘ by each says what it means. The plan reads this, and so does every AI step after it.</Tip></h3>
         {changed && view.pass && <span className="text-xs text-violet-200">Changed since the plan was read</span>}
       </div>
-      <div role="group" aria-label={`What ${commander} does for the deck`} className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-start gap-4">
+      {pictures.some((c) => c.image) && (
+        <div className="flex shrink-0 gap-2" data-tour="plan-commander-art">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {pictures.filter((c) => c.image).map((c) => <img key={c.name} src={c.image!} alt={c.name} loading="lazy" className="w-28 rounded-lg sm:w-36" style={{ aspectRatio: '488 / 680' }} />)}
+        </div>
+      )}
+      <div role="group" aria-label={`What ${commander} does for the deck`} className="flex min-w-0 flex-[1_1_18rem] flex-wrap content-start gap-1.5">
         {COMMANDER_ROLES.map((r) => (
           <span key={r.id} className={`inline-flex items-center gap-1 rounded-full border py-1 pl-3 pr-1.5 text-sm focus-within:ring-2 focus-within:ring-[var(--accent)]/50 ${picked.has(r.id) ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
             <label className="inline-flex cursor-pointer items-center gap-1.5">
@@ -72,6 +79,7 @@ export function CommanderRoles({ view, act, commander, readRoles }: { view: Plan
             <Tip label={`About ${r.label}`}>{r.tip}</Tip>
           </span>
         ))}
+      </div>
       </div>
     </section>
   );

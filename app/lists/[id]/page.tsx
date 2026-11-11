@@ -631,6 +631,14 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
       {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
       <div className="min-w-0">
+      {/* One line on every tab: where the deck stands against 100, and the step that comes next. */}
+      {deck && deckSize !== 100 && deckSize > 0 && (
+        <p data-tour="deck-state" className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] px-3.5 py-2 text-sm ${deckSize > 100 ? 'border-[#ffb4a8]/50' : 'border-[var(--border)]'}`}>
+          <b className="tabular-nums">{deckSize} of 100 cards</b>
+          <span className="min-w-0 flex-1 text-[var(--muted)]">{deckSize > 100 ? `${deckSize - 100} over. Trim comes next.` : `${100 - deckSize} short. Filling it comes next.`}</span>
+          {section !== 'tune' && <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-go rounded-full px-3.5 py-1 text-sm font-semibold">{deckSize > 100 ? `Trim ${deckSize - 100}` : `Fill ${100 - deckSize}`}</button>}
+        </p>
+      )}
       {deck && section === 'plan' ? (
         tags ? (
           <DeckPlan
@@ -641,6 +649,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onPlan={onPlan}
             onTab={(tab) => setSection(tab)}
             cardNames={[...new Set([...(list.commander ? [list.commander.name] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card.name)])].sort()}
+            commanders={[list.commander, partner].filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ name: c.name, image: imageOf(c, 'normal') }))}
           />
         ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
       ) : null}

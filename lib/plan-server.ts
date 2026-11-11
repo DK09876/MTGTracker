@@ -14,7 +14,6 @@ import {
   changePlan, cutSettings, draftFromCards, effectiveCutSettings, GOALS, PARTS, planFor, saveSnapshot, type Override, type PartId, type Plan, type PlanChange, type Source,
 } from './deck-plan';
 import { commanderRoles, deckRoles, keeps } from './deck-roles';
-import { readProtects } from './plan-pass';
 import { fitProfile } from './fit';
 import {
   COMMANDER_ROLES, dependentShare, detectArchetype, detectBracket, detectBuild, detectCommanderRole, detectFlip, detectLean, detectRoutes, detectStages,
@@ -192,12 +191,11 @@ export async function planState(list: List): Promise<PlanState> {
     })),
   ];
 
-  // Never cut: the commanders, the owner's ★ list, and the current plan read's engines and ways to win.
+  // Never cut: the commanders and the owner's ★ list, nothing else (the owner's call, 2026-11-10; the read's engines and key cards are flagged, not blocked).
   const starred = keeps(list.id);
   const protectedList = new Map<string, string>();
   for (const c of commanders) protectedList.set(c.name, 'commander');
   for (const c of main) if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedList.has(c.card.name)) protectedList.set(c.card.name, '★ never cut');
-  for (const [name, why] of readProtects(list)) if (!protectedList.has(name)) protectedList.set(name, why);
 
   // Keep the detection for the pages that only read the plan.
   saveSnapshot(list.id, {
@@ -269,7 +267,7 @@ export async function planState(list: List): Promise<PlanState> {
     }, changedBy((o) => o.kind === 'range')),
     protected: part('protected', [...protectedList.entries()].map(([name, why]) => ({ name, why })), 'yours', 'clear', {
       inputs: [`★ never cut: ${[...protectedList.values()].filter((w) => w.startsWith('★')).length}`],
-      steps: ['The commanders and the cards you mark ★ never cut are never offered as cuts.', 'While the plan is current, neither are the cards it reads as an engine or the cards in its ways to win. Change a card’s role on the Tags tab, or edit the ways to win, to free one.'],
+      steps: ['The commanders and the cards you mark ★ never cut are never offered as cuts.', 'The plan’s engines and key cards can be cut, with a warning beside them: owners cut them about half as often as other cards.'],
       idea: 'Don’t cut the cards that are why you play the deck.',
     }),
     archetype: part('archetype', archetypeD.value, 'detected', archetypeD.strength, archetypeD.how),
@@ -302,7 +300,7 @@ export async function planState(list: List): Promise<PlanState> {
     { group: 'The plan', name: 'Flip turn', rule: 'The commander’s mana value, or a key card’s when it costs more.', setting: String(plan.flip.value), changed: null },
     { group: 'The plan', name: 'Archetype', rule: 'Combo if the main way to win is a combo; control with 15+ interaction, 14+ draw and under 15 creatures; aggro with 30+ cheap creatures; else midrange.', setting: archetypeD.value, changed: null },
     { group: 'The plan', name: 'Bracket', rule: 'Suggestions never add more Game Changers than the bracket allows (none in 1–2, three in 3), nor extra turns or mass land destruction below 4.', setting: plan.bracket ? String(plan.bracket) : `not set (looks like ${bracketD.value})`, changed: null },
-    { group: 'Never cut', name: 'Never cut', rule: 'The commanders, the cards you mark ★ never cut, and the current plan’s engine cards and ways to win.', setting: `${protectedList.size} cards`, changed: null },
+    { group: 'Never cut', name: 'Never cut', rule: 'The commanders and the cards you mark ★ never cut.', setting: `${protectedList.size} cards`, changed: null },
     ...CUT_RULES.map((r) => ({
       group: 'The cut list', name: r.label, rule: r.why,
       setting: !ruleOn(eff.settings, r.id) ? 'off' : r.protects ? 'on' : `on, weight ${weightOf(eff.settings, r.id)}${mineCut.rules[r.id] ? ' (yours)' : ''}`,

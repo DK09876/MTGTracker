@@ -18,13 +18,17 @@ export const INTENTS: Array<{ id: Intent; label: string; why: string }> = [
   { id: 'lands', label: 'Lands', why: 'The one land number, how your colours split, and basics to add or cut.' },
 ];
 
-/** The intent the deck's state points to: far from 100, short, at 100, a little over, a pile. */
+/**
+ * The step the deck's size points to (the deck flow plan): over 100, trim;
+ * at 100, swaps from what waits to go in; under 100, fill it - from scratch
+ * when it is far from 100. However far over, a deck over 100 is trimmed:
+ * "the best 100 from everything" is still there under Find cards.
+ */
 export function suggestedIntent(size: number, pool: number): Intent {
-  if (size < 60) return 'finish';
-  if (size > 110 || (size < 100 && size + pool >= 110)) return 'find';
-  if (size < 100) return 'find';
+  void pool;
+  if (size > 100) return 'cuts';
   if (size === 100) return 'swaps';
-  return 'cuts';
+  return size < 60 ? 'finish' : 'find';
 }
 
 /** A card as a suggestion shows it. */
