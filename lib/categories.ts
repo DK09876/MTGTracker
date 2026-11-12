@@ -20,17 +20,18 @@
  *                        again) and skipped ones (back on the next run or
  *                        refresh), by a key that outlives the category
  *
- * The migration (migrateAll) runs once, at the first start after this
- * shipped: decks that exist then keep what they had. Server only.
+ * Decks that existed before this shipped are reset once at the first start
+ * (lib/deck-reset.ts): they start with no categories, like a deck just
+ * imported. Server only.
  */
 
 import { randomUUID } from 'node:crypto';
 
 import { cardTags } from './card-store';
-import { cardsInList, database, getSetting, setSetting, type List, type ListedCard } from './db';
-import { JOB_ROLES } from './deck-numbers';
+import { cardsInList, database, type List, type ListedCard } from './db';
+import { resetAll, resetNeeded } from './deck-reset';
 import { primaryType } from './deckview';
-import { SIX_JOBS, identity, type AddedBy, type Category, type CategoryCard, type CategoryKind } from './categories-shared';
+import { identity, type AddedBy, type Category, type CategoryCard, type CategoryKind } from './categories-shared';
 import { nextColor, tagKey } from './tags';
 import type { JobId } from './deck-numbers';
 
@@ -44,12 +45,12 @@ function db() {
       listId TEXT NOT NULL, key TEXT NOT NULL, mark TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', at TEXT NOT NULL,
       PRIMARY KEY (listId, key, mark))`);
     ready = true;
-    if (!getSetting('categories.migrated')) migrateAll();
+    if (resetNeeded()) resetAll();
   }
   return d;
 }
 
-/** At server start: makes the tables and runs the one-time migration before any new deck is made. */
+/** At server start: makes the tables and runs the one-time reset of existing decks before any new deck is made. */
 export function startCategories(): void { db(); }
 
 const now = () => new Date().toISOString();
@@ -333,154 +334,6 @@ export function jobChanges(listId: string): Map<string, { add: Array<{ key: stri
 /** Copy a deck's categories, card rows and marks to its duplicate (the rows themselves are copied with the deck's tags in db.ts). */
 export function copyCategoryMarks(fromId: string, toId: string): void {
   db().run('INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) SELECT ?, key, mark, scope, at FROM deck_category_marks WHERE listId = ?', [toId, fromId]);
-}
-
-// --- the migration -------------------------------------------------------------------
-
-/** What the migration did to one deck, for the report and the tests. */
-export interface Migrated { listId: string; own: number; dropped: number; folded: number; jobs: number; corrections: number; wins: number; keys: number; planText: boolean }
-
-const OLD_ROLE: Record<string, string> = { Multiplier: 'multiplier', Enabler: 'enabler', 'Covers a weakness': 'counter-weight' };
-
-/**
- * Run once, at the first start after categories shipped. For every deck that
- * exists then: the owner's and the tagger's accepted tags become their own
- * categories ("yours" or "AI" by origin); unreviewed suggestions go, and
- * turned-down ones are remembered as removed; the six jobs are accepted, so
- * counts and warnings do not silently disappear; per-deck role corrections
- * become cards added to or taken out of the matching job; the plan's text,
- * ways to win and key cards carry over with who added each. Card roles and
- * themes from the old read are dropped.
- */
-export function migrateAll(): Migrated[] {
-  const d = database();
-  // The first attempt's time: decks made after it are new decks, never migrated. A deck that fails is retried at the next start.
-  const started = getSetting('categories.migrating') ?? now();
-  setSetting('categories.migrating', started);
-  const decks = d.all(`SELECT id FROM lists WHERE kind = 'deck' AND createdAt <= ?`, [started]) as Array<{ id: string }>;
-  const done: Migrated[] = [];
-  let failed = 0;
-  for (const { id } of decks) {
-    if (d.get(`SELECT 1 FROM deck_category_marks WHERE listId = ? AND mark = 'migrated'`, [id])) continue;
-    d.run('BEGIN');
-    try {
-      done.push(migrateDeck(id));
-      d.run(`INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) VALUES (?, 'migrated', 'migrated', '', ?)`, [id, now()]);
-      d.run('COMMIT');
-    } catch (e) {
-      d.run('ROLLBACK');
-      failed++;
-      console.error('[categories] migration failed for', id, e);
-    }
-  }
-  if (!failed) setSetting('categories.migrated', now());
-  return done;
-}
-
-/** An old tag with the same meaning as one of the six jobs: folded into the job, so the deck has one "Ramp", not two. */
-const OLD_JOB_NAMES: Record<string, string> = {
-  ramp: 'ramp', 'mana ramp': 'ramp', mana: 'ramp', 'mana rocks': 'ramp',
-  draw: 'draw', 'card draw': 'draw', 'card advantage': 'draw',
-  removal: 'interaction', interaction: 'interaction', 'spot removal': 'interaction', 'targeted removal': 'interaction',
-  boardwipe: 'wipe', boardwipes: 'wipe', 'board wipe': 'wipe', 'board wipes': 'wipe', wipes: 'wipe', wipe: 'wipe', wraths: 'wipe', wrath: 'wipe', sweepers: 'wipe', 'mass removal': 'wipe',
-  protection: 'protection',
-  finishers: 'finishers', finisher: 'finishers', 'ways to finish': 'finishers', 'win cons': 'finishers', wincons: 'finishers', 'win conditions': 'finishers',
-};
-export const oldJobOf = (name: string): string | null => OLD_JOB_NAMES[name.trim().toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim()] ?? null;
-
-const hasTable = (name: string) => !!database().get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, [name]);
-
-function migrateDeck(listId: string): Migrated {
-  const d = database();
-  const m: Migrated = { listId, own: 0, dropped: 0, folded: 0, jobs: 0, corrections: 0, wins: 0, keys: 0, planText: false };
-  // 1. The deck's own tags.
-  const legacy = d.all(`SELECT id, name, status, origin FROM deck_tags WHERE listId = ? AND cat IS NULL`, [listId]) as Array<{ id: string; name: string; status: string; origin: string }>;
-  for (const t of legacy) {
-    if (t.status === 'accepted') {
-      d.run(`UPDATE deck_tags SET cat = 'own', addedBy = ? WHERE id = ?`, [t.origin === 'ai' ? 'ai' : 'owner', t.id]);
-      m.own++;
-    } else {
-      if (t.status === 'rejected') markGone(listId, identity('own', t.name));
-      d.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, t.id]);
-      d.run('DELETE FROM deck_tags WHERE id = ?', [t.id]);
-      m.dropped++;
-    }
-  }
-  // 2. The six jobs, so the deck's counts and warnings carry on.
-  const jobIds = new Map<string, string>();
-  for (const j of SIX_JOBS) { jobIds.set(j.id, addCategory(listId, { kind: 'job', name: j.label, by: 'cards', jobId: j.id, how: j.how })); m.jobs++; }
-  // An old tag that means one of the jobs ("Ramp", "Boardwipe", "Draw") folds into it: its cards join the job with who added them.
-  for (const t of d.all(`SELECT id, name, addedBy FROM deck_tags WHERE listId = ? AND cat = 'own'`, [listId]) as Array<{ id: string; name: string; addedBy: string }>) {
-    const job = oldJobOf(t.name);
-    const catId = job ? jobIds.get(job) : undefined;
-    if (!catId) continue;
-    for (const x of d.all('SELECT cardKey, reason FROM deck_card_tags WHERE listId = ? AND tagId = ? AND isOn = 1', [listId, t.id]) as Array<{ cardKey: string; reason: string }>) {
-      d.run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(listId, cardKey, tagId) DO NOTHING`,
-        [listId, x.cardKey, catId, t.addedBy === 'ai' ? 'ai' : 'manual', x.reason]);
-    }
-    const into = d.get('SELECT madeOf FROM deck_tags WHERE id = ?', [catId]) as { madeOf: string };
-    d.run('UPDATE deck_tags SET madeOf = ? WHERE id = ?', [JSON.stringify([...new Set([...parse<string[]>(into.madeOf, []), t.name])]), catId]);
-    d.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, t.id]);
-    d.run('DELETE FROM deck_tags WHERE id = ?', [t.id]);
-    m.own--;
-    m.folded++;
-  }
-  // 3. Per-deck role corrections, as cards added to or taken out of each job.
-  if (hasTable('deck_role_overrides')) {
-    const corrections = d.all('SELECT oracleId, role, has FROM deck_role_overrides WHERE listId = ?', [listId]) as Array<{ oracleId: string; role: string; has: number }>;
-    const nameOf = (key: string) => (d.get(`SELECT json_extract(c.data, '$.name') AS name FROM list_cards lc JOIN cards c ON c.id = lc.cardId WHERE lc.listId = ? AND json_extract(c.data, '$.oracle_id') = ?`, [listId, key]) as { name: string } | null)?.name ?? key;
-    for (const o of corrections) {
-      const jobs = SIX_JOBS.filter((j) => (JOB_ROLES[j.id] ?? []).includes(o.role));
-      for (const j of o.has ? jobs.slice(0, 1) : jobs) {
-        const catId = jobIds.get(j.id)!;
-        d.run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, 'manual', ?, ?)
-          ON CONFLICT(listId, cardKey, tagId) DO UPDATE SET source = 'manual', isOn = excluded.isOn`, [listId, o.oracleId, catId, o.has ? 1 : 0, nameOf(o.oracleId)]);
-        m.corrections++;
-      }
-    }
-  }
-  // 4. The plan: its text, ways to win and key cards, with who added each.
-  const cardKeyOf = (name: string): { key: string; name: string } | null => {
-    const r = d.get(`SELECT json_extract(c.data, '$.oracle_id') AS key, json_extract(c.data, '$.name') AS name FROM list_cards lc JOIN cards c ON c.id = lc.cardId
-      WHERE lc.listId = ? AND lower(json_extract(c.data, '$.name')) = lower(?) LIMIT 1`, [listId, name]) as { key: string | null; name: string } | null;
-    if (r?.key) return { key: r.key, name: r.name };
-    const cmd = d.get(`SELECT json_extract(c.data, '$.oracle_id') AS key, json_extract(c.data, '$.name') AS name FROM lists l JOIN cards c ON c.id = l.commanderId WHERE l.id = ? AND lower(json_extract(c.data, '$.name')) = lower(?)`, [listId, name]) as { key: string | null; name: string } | null;
-    return cmd?.key ? { key: cmd.key, name: cmd.name } : null;
-  };
-  const owner = hasTable('plan_owner') ? d.get('SELECT * FROM plan_owner WHERE listId = ?', [listId]) as Record<string, string | null> | null : null;
-  const edits = parse<{ plan?: string; winRoutes?: Array<{ name: string; cards: string[] }>; keyCards?: string[] }>(owner?.edits, {});
-  const pass = hasTable('plan_passes') ? d.get('SELECT output FROM plan_passes WHERE listId = ? ORDER BY at DESC LIMIT 1', [listId]) as { output: string } | null : null;
-  const read = parse<{ plan?: string; winRoutes?: Array<{ name: string; cards: string[] }>; keyCards?: string[] }>(pass?.output, {});
-  const plans = hasTable('deck_plans') ? d.get('SELECT parts FROM deck_plans WHERE listId = ?', [listId]) as { parts: string } | null : null;
-  const parts = parse<{ key?: { v?: string[]; by?: string }; routes?: { custom?: Array<{ label: string; how: string; cards: string[] }>; by?: string }; role?: { v?: string } }>(plans?.parts, {});
-  const wins: Array<{ name: string; how: string; cards: string[]; by: AddedBy }> = [
-    ...(edits.winRoutes ? edits.winRoutes.map((r) => ({ name: r.name, how: '', cards: r.cards, by: 'owner' as AddedBy })) : (read.winRoutes ?? []).map((r) => ({ name: r.name, how: '', cards: r.cards, by: 'ai' as AddedBy }))),
-    // Ways to win the old plan page saved: AI's when the old page says AI wrote them.
-    ...(parts.routes?.custom ?? []).map((r) => ({ name: r.label, how: r.how ?? '', cards: r.cards ?? [], by: (parts.routes?.by === 'claude' ? 'ai' : 'owner') as AddedBy })),
-  ];
-  for (const w of wins) {
-    if (!w.name?.trim()) continue;
-    addCategory(listId, { kind: 'win', name: w.name, by: w.by, how: w.how, cards: w.cards.map(cardKeyOf).filter((c): c is { key: string; name: string } => !!c).map((c) => ({ ...c, by: w.by })) });
-    m.wins++;
-  }
-  const keys: Array<{ name: string; by: AddedBy }> = edits.keyCards ? edits.keyCards.map((n) => ({ name: n, by: 'owner' as AddedBy }))
-    : read.keyCards?.length ? read.keyCards.map((n) => ({ name: n, by: 'ai' as AddedBy }))
-      : (parts.key?.v ?? []).map((n) => ({ name: n, by: (parts.key?.by === 'claude' ? 'ai' : 'owner') as AddedBy }));
-  if (keys.length) {
-    const keyId = keyCategoryId(listId);
-    for (const k of keys) { const c = cardKeyOf(k.name); if (c) { putCard(listId, keyId, c.key, c.name, k.by); m.keys++; } }
-  }
-  ensurePlanColumns();
-  const text = edits.plan?.trim() ? { t: edits.plan.trim(), by: 'owner' } : read.plan?.trim() ? { t: read.plan.trim(), by: 'ai' } : null;
-  const roles = parse<string[]>(owner?.commanderRoles, []).filter((r) => r !== 'unsure');
-  const oldRole = parts.role?.v && OLD_ROLE[parts.role.v] ? [OLD_ROLE[parts.role.v]] : [];
-  if (text || (!roles.length && oldRole.length)) {
-    d.run(`INSERT INTO plan_owner (listId, commanderRoles, edits, updatedAt) VALUES (?, ?, '{}', ?) ON CONFLICT(listId) DO NOTHING`, [listId, JSON.stringify(roles.length ? roles : oldRole), now()]);
-    if (text) d.run('UPDATE plan_owner SET planText = ?, planBy = ? WHERE listId = ?', [text.t.slice(0, 2000), text.by, listId]);
-    if (!roles.length && oldRole.length) d.run(`UPDATE plan_owner SET commanderRoles = ?, commanderBy = 'owner' WHERE listId = ?`, [JSON.stringify(oldRole), listId]);
-    m.planText = !!text;
-  }
-  return m;
 }
 
 /** The plan's own table, with the columns the new Plan tab keeps (lib/plan-help.ts reads them). */

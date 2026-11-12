@@ -1,8 +1,9 @@
 /**
  * The one category store: nothing on a new deck, live card-data tags, the
  * owner's changes kept, key cards that only empty, merges, jobs that count
- * the owner's changes, and the one-time migration of decks that existed
- * before. Each test has its own database; nothing calls out.
+ * the owner's changes, and jobs and ways to win that can't be merged away.
+ * The one-time reset of older decks is tested in deck-reset.test.ts. Each
+ * test has its own database; nothing calls out.
  */
 
 import { mkdtempSync, rmSync } from 'fs';
@@ -54,7 +55,7 @@ async function deck(name = 'Azula', spells = ['Bolt', 'Shock', 'Opt']) {
 }
 
 describe('categories', { timeout: 30_000 }, () => {
-  it('a deck made after the migration starts with nothing on it', async () => {
+  it('a new deck starts with nothing on it', async () => {
     const c = await import('./categories');
     c.startCategories();
     const { list } = await deck();
@@ -129,76 +130,6 @@ describe('categories', { timeout: 30_000 }, () => {
     expect(view.cards.map((x) => `${x.name}:${x.by}`)).toEqual(['Bolt:cards', 'Opt:owner']);
     expect([...c.jobsOnDeck(list.id)]).toEqual(['interaction']);
   });
-});
-
-describe('the migration', { timeout: 30_000 }, () => {
-  it('keeps what decks had: own tags by who made them, the six jobs, corrections, the plan\'s text, ways to win and key cards', async () => {
-    const { db, list } = await deck();
-    const d = db.database();
-    // The owner's tag, the tagger's tag, an unreviewed and a turned-down suggestion.
-    const mine = db.createTag(list.id, { name: 'Burn', color: '#f00', status: 'accepted', origin: 'manual' });
-    const ai = db.createTag(list.id, { name: 'Spells', color: '#0f0', status: 'accepted', origin: 'ai' });
-    db.createTag(list.id, { name: 'Maybe', color: '#00f', status: 'proposed', origin: 'ai' });
-    db.createTag(list.id, { name: 'Nope', color: '#00f', status: 'rejected', origin: 'ai' });
-    db.setCardTag(list.id, 'o-Bolt', mine.id, true);
-    d.run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, 'o-Opt', ?, 'ai', 1, 'cheap')`, [list.id, ai.id]);
-    // A role correction, a plan read and the owner's edits (the branch's tables).
-    const dr = await import('./deck-roles');
-    dr.setOverride(list.id, 'o-Shock', 'removal', false);
-    dr.setOverride(list.id, 'o-Opt', 'ramp', true);
-    const c0 = await import('./categories');
-    c0.ensurePlanColumns();
-    d.run(`INSERT INTO plan_owner (listId, commanderRoles, edits, updatedAt) VALUES (?, '[]', ?, ?)`, [list.id, JSON.stringify({ keyCards: ['Bolt'] }), new Date().toISOString()]);
-    d.run(`CREATE TABLE IF NOT EXISTS plan_passes (id TEXT PRIMARY KEY, listId TEXT NOT NULL, profileId TEXT, at TEXT NOT NULL, model TEXT NOT NULL, promptVersion TEXT NOT NULL,
-      deckHash TEXT NOT NULL, deckKeys TEXT NOT NULL, commanderName TEXT, input TEXT NOT NULL, output TEXT NOT NULL)`);
-    d.run(`INSERT INTO plan_passes (id, listId, profileId, at, model, promptVersion, deckHash, deckKeys, commanderName, input, output) VALUES ('p1', ?, 'dk', ?, 'opus', 'plan-pass-2', '', '[]', 'Azula', '{}', ?)`,
-      [list.id, new Date().toISOString(), JSON.stringify({ plan: 'Burn them out.', winRoutes: [{ name: 'Burn', cards: ['Bolt', 'Shock', 'Not here'] }], keyCards: ['Opt'], themes: [{ name: 'x', cards: [] }], cards: {} })]);
-
-    const c = await import('./categories');
-    c.startCategories();
-    const all = await c.categories(list, dr.jobCards);
-    const names = all.map((x) => `${x.kind}:${x.name}:${x.by}`);
-    expect(names).toEqual(expect.arrayContaining(['own:Burn:owner', 'own:Spells:ai', 'win:Burn:ai', 'key:Key cards:owner',
-      'job:Ramp:cards', 'job:Card draw:cards', 'job:Interaction:cards', 'job:Board wipes:cards', 'job:Protection:cards', 'job:Ways to finish:cards']));
-    expect(names.some((n) => n.includes('Maybe') || n.includes('Nope'))).toBe(false);
-    expect(c.goneKeys(list.id).has('own:nope')).toBe(true);
-    expect(all.find((x) => x.name === 'Burn' && x.kind === 'own')!.cards.map((x) => x.name)).toEqual(['Bolt']);
-    expect(all.find((x) => x.name === 'Spells')!.cards).toEqual([{ key: 'o-Opt', name: 'Opt', by: 'ai' }]);
-    expect(all.find((x) => x.kind === 'win')!.cards.map((x) => x.name)).toEqual(['Bolt', 'Shock']);
-    // The owner's key cards win over the read's.
-    expect(all.find((x) => x.kind === 'key')!.cards).toEqual([{ key: 'o-Bolt', name: 'Bolt', by: 'owner' }]);
-    // Corrections: Shock is not interaction here; Opt is ramp.
-    expect(all.find((x) => x.jobId === 'interaction')!.cards.map((x) => x.name)).toEqual(['Bolt']);
-    expect(all.find((x) => x.jobId === 'ramp')!.cards.map((x) => x.name)).toEqual(['Opt']);
-    const plan = d.get('SELECT planText, planBy FROM plan_owner WHERE listId = ?', [list.id]) as { planText: string; planBy: string };
-    expect(plan).toEqual({ planText: 'Burn them out.', planBy: 'ai' });
-    // The Cards tab's own tags still read the same.
-    expect(db.deckTags(list.id).tags.map((t) => t.name).sort()).toEqual(['Burn', 'Spells']);
-  });
-
-  it('folds an old tag that means a job into the job, and keeps AI-written ways to win as AI', async () => {
-    const { db, list } = await deck();
-    const ramp = db.createTag(list.id, { name: 'Ramp', color: '#f00', status: 'accepted', origin: 'manual' });
-    const wipe = db.createTag(list.id, { name: 'Boardwipe', color: '#0f0', status: 'accepted', origin: 'ai' });
-    db.setCardTag(list.id, 'o-Opt', ramp.id, true);
-    db.database().run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, 'o-Shock', ?, 'ai', 1, 'Shock')`, [list.id, wipe.id]);
-    const parts = { routes: { custom: [{ label: 'Lone attacker', how: 'Swing alone.', cards: ['Bolt'] }], by: 'claude' } };
-    (await import('./deck-plan')).changePlan(list.id, { bracket: 3 });
-    db.database().run('UPDATE deck_plans SET parts = ? WHERE listId = ?', [JSON.stringify(parts), list.id]);
-    const c = await import('./categories');
-    const dr = await import('./deck-roles');
-    c.startCategories();
-    const all = await c.categories(list, dr.jobCards);
-    expect(all.filter((x) => x.name === 'Ramp')).toHaveLength(1);
-    expect(all.some((x) => x.name === 'Boardwipe')).toBe(false);
-    const job = (id: string) => all.find((x) => x.jobId === id)!;
-    expect(job('ramp').cards).toContainEqual({ key: 'o-Opt', name: 'Opt', by: 'owner' });
-    expect(job('wipe').cards).toContainEqual({ key: 'o-Shock', name: 'Shock', by: 'ai' });
-    expect(job('wipe').madeOf).toEqual(['Boardwipe']);
-    expect(all.find((x) => x.kind === 'win')).toMatchObject({ name: 'Lone attacker', by: 'ai' });
-    // Each deck is migrated once: running it again skips decks already done.
-    expect(c.migrateAll()).toEqual([]);
-  });
 
   it('never merges a job or a way to win away', async () => {
     const c = await import('./categories');
@@ -211,17 +142,5 @@ describe('the migration', { timeout: 30_000 }, () => {
     expect(c.mergeCategory(list.id, all.find((x) => x.kind === 'job')!, into)).toBe(false);
     expect(c.mergeCategory(list.id, all.find((x) => x.kind === 'win')!, into)).toBe(false);
     expect(await c.categories(list)).toHaveLength(3);
-  });
-
-  it('runs once: a second start changes nothing', async () => {
-    const { list } = await deck();
-    const c = await import('./categories');
-    c.startCategories();
-    const first = (await c.categories(list)).length;
-    expect(c.migrateAll).toBeTypeOf('function');
-    vi.resetModules();
-    const again = await import('./categories');
-    again.startCategories();
-    expect((await again.categories(list)).length).toBe(first);
   });
 });

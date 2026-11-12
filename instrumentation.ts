@@ -4,7 +4,7 @@
  */
 
 export async function register() {
-  // Decks that exist when categories ship keep what they had (lib/categories.ts): migrate before anything else runs.
+  // Decks that exist when the Plan and Tags redesign ships are reset to a fresh import once (lib/deck-reset.ts), before anything else runs.
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     try { (await import('./lib/categories')).startCategories(); } catch (e) { console.error('[categories] start failed', e); }
   }
