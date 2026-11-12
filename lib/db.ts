@@ -155,6 +155,14 @@ function open(): Database {
       PRIMARY KEY (listId, cardKey, tagId)
     );
   `);
+  // The one category store (lib/categories.ts): a tag is a category of the
+  // deck - a job it tracks, a tag from the card data, a way to win, its key
+  // cards or the owner's own - with who added it. Rows from before these
+  // columns are the owner's or the tagger's tags, sorted out by the migration.
+  const tagColumns = db.all('PRAGMA table_info(deck_tags)') as Array<{ name: string }>;
+  for (const [col, def] of [['cat', 'TEXT'], ['addedBy', 'TEXT'], ['jobId', 'TEXT'], ['slugs', "TEXT NOT NULL DEFAULT '[]'"], ['madeOf', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
+    if (!tagColumns.some((c) => c.name === col)) db.run(`ALTER TABLE deck_tags ADD COLUMN ${col} ${def}`);
+  }
   // Requests sent to each model per quota day - see modelUsage.
   db.run(`
     CREATE TABLE IF NOT EXISTS model_usage (
@@ -484,9 +492,9 @@ export function duplicateList(listId: string, profileId: string, name: string): 
       const tagId = randomUUID();
       newId.set(String(t.id), tagId);
       database.run(
-        `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [tagId, id, t.name, t.description, t.color, t.kind, t.status, t.origin, t.position, t.examples, stamp],
+        `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt, cat, addedBy, jobId, slugs, madeOf)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [tagId, id, t.name, t.description, t.color, t.kind, t.status, t.origin, t.position, t.examples, stamp, t.cat ?? null, t.addedBy ?? null, t.jobId ?? null, t.slugs ?? '[]', t.madeOf ?? '[]'],
       );
     }
     const cardTags = database.all('SELECT * FROM deck_card_tags WHERE listId = ?', [listId]) as Array<Record<string, string | number>>;
@@ -872,11 +880,14 @@ export function deckTags(listId: string): DeckTags {
   const list = database.get('SELECT tagBrief, tagOverview FROM lists WHERE id = ?', [listId]) as { tagBrief: string; tagOverview: string } | null;
   const tags = (database.all(
     `SELECT id, name, description, color, kind, status, origin, position, examples
-     FROM deck_tags WHERE listId = ? ORDER BY position, createdAt`, [listId],
+     FROM deck_tags WHERE listId = ? AND (cat IS NULL OR cat = 'own') ORDER BY position, createdAt`, [listId],
   ) as unknown as TagRow[]).map((t) => ({ ...t, examples: JSON.parse(t.examples) as string[] }));
+  // Jobs, card-data tags, ways to win and key cards are categories too, read
+  // with their live members through lib/categories.ts; this is the owner's own.
+  const own = new Set(tags.map((t) => t.id));
   const cardTags = (database.all(
     'SELECT cardKey, tagId, source, isOn, reason FROM deck_card_tags WHERE listId = ?', [listId],
-  ) as Array<{ cardKey: string; tagId: string; source: CardTag['source']; isOn: number; reason: string }>)
+  ).filter((r) => own.has(String(r.tagId))) as Array<{ cardKey: string; tagId: string; source: CardTag['source']; isOn: number; reason: string }>)
     .map((r) => ({ key: r.cardKey, tagId: r.tagId, source: r.source, on: r.isOn === 1, reason: r.reason }));
   return { brief: list?.tagBrief ?? '', overview: list?.tagOverview ?? '', tags, cardTags };
 }

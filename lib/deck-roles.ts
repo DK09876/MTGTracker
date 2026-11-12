@@ -6,6 +6,7 @@
  * Server only.
  */
 
+import { jobChanges } from './categories';
 import { cachedRoles, cardsInList, database, saveRoles, type ListedCard } from './db';
 import { jobs, withJobs, type JobId } from './deck-numbers';
 import { planFor } from './deck-plan';
@@ -85,7 +86,33 @@ export async function deckRoles(listId: string, main: ListedCard[] = cardsInList
   const plan = planFor(listId, '', commander, main);
   const ranges = Object.fromEntries(plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
   const rangeFrom = Object.fromEntries(plan.targets.map((t) => [t.role, t.from])) as Partial<Record<JobId, string>>;
-  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: await commanderRoles(commander), flip: plan.flip.value, ranges, rangeFrom }));
+  return withJobChanges(listId, main, withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: await commanderRoles(commander), flip: plan.flip.value, ranges, rangeFrom })));
+}
+
+/**
+ * The owner's changes to the jobs on the deck (lib/categories.ts): a card
+ * they added to a job counts in it, a card they took out does not.
+ */
+export function withJobChanges(listId: string, main: ListedCard[], roles: RoleCount[]): RoleCount[] {
+  const changes = jobChanges(listId);
+  if (!changes.size) return roles;
+  const nameOf = new Map(main.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));
+  const qty = new Map(main.map((c) => [c.card.name, c.quantity]));
+  return roles.map((r) => {
+    const ch = changes.get(r.id);
+    if (!ch) return r;
+    const out = new Set([...ch.out].map((k) => nameOf.get(k)).filter((n): n is string => !!n));
+    const add = ch.add.map((a) => nameOf.get(a.key)).filter((n): n is string => !!n && !r.cards.includes(n));
+    const removed = r.cards.filter((n) => out.has(n));
+    if (!add.length && !removed.length) return r;
+    const count = Math.max(0, r.count + add.reduce((n, x) => n + (qty.get(x) ?? 1), 0) - removed.reduce((n, x) => n + (qty.get(x) ?? 1), 0));
+    return { ...r, cards: [...r.cards.filter((n) => !out.has(n)), ...add].sort(), count };
+  });
+}
+
+/** Each job's cards by name, with the owner's changes: what a job category on the Tags tab holds. */
+export async function jobCards(listId: string, main: ListedCard[]): Promise<Map<string, string[]>> {
+  return new Map((await deckRolesKnown(listId, main)).map((r) => [r.id, r.cards]));
 }
 
 /**
@@ -101,7 +128,7 @@ export async function deckRolesKnown(listId: string, main: ListedCard[] = cardsI
   const ranges = Object.fromEntries(plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
   const rangeFrom = Object.fromEntries(plan.targets.map((t) => [t.role, t.from])) as Partial<Record<JobId, string>>;
   const cmdRoles = commander ? (await countRoles([{ card: commander, quantity: 1 }], none)).filter((r) => r.count > 0).map((r) => r.id) : [];
-  return withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: cmdRoles, flip: plan.flip.value, ranges, rangeFrom }));
+  return withJobChanges(listId, main, withJobs(roles, jobs({ cards: main, roles, commander, commanderRoles: cmdRoles, flip: plan.flip.value, ranges, rangeFrom })));
 }
 
 /** A deck's commander, by list id alone. */
