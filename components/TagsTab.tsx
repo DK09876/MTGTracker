@@ -86,7 +86,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
       <p className="text-[var(--muted)]">This deck starts with no tags and no categories. Accept only what fits it from the suggestions below, or name your own. A card can be in several. Open any row to see its cards, take one out, or add one.</p>
       {error && <p role="alert" className="rounded-xl border border-red-400/40 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
-      <section data-section="On this deck" data-section-count={String(shown.length)} className={`${C.sec} flex flex-col gap-2`}>
+      <section data-tour="tags-on-deck" data-section="On this deck" data-section-count={String(shown.length)} className={`${C.sec} flex flex-col gap-2`}>
         <H2 extra={shown.length ? `${shown.length} ${shown.length === 1 ? 'category' : 'categories'}` : 'nothing yet'}>On this deck</H2>
         {shown.length >= 6 && (
           <div className="flex flex-wrap items-center gap-2">

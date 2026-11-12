@@ -25,7 +25,7 @@ export async function deckCutList(list: Pick<List, 'id' | 'commander'>, opts: { 
   const plan = planFor(list.id, '', list.commander, main);
   const tags = deckTags(list.id);
   // Never cut: the owner's ★ never-cut list (the commander is never in the list). The plan read's
-  // engines and key cards are flagged where a cut is shown, not blocked (plan-pass.ts readFlags).
+  // engines and key cards are flagged where a cut is shown, not blocked (deck-context.ts planFlags).
   const keep = keeps(list.id);
   const result = cutCandidates({
     // A second commander leads the deck with the first: never a cut.

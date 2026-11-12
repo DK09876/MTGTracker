@@ -26,7 +26,7 @@ export const TOUR_PROFILE = 'tour';
 const DECK_KEY = 'tour.deck';
 const VERSION_KEY = 'tour.version';
 // Bumped whenever the sample changes, so a server reseeds it.
-const TOUR_VERSION = '3';
+const TOUR_VERSION = '4';
 
 const DECKLIST = `
 1 Archmage Emeritus
@@ -169,6 +169,16 @@ async function seed(): Promise<string> {
       if (card) setCardTag(deck.id, tagKey(card), tag.id, true);
     }
   });
+
+  // The sample's plan is confirmed, with the six jobs and a way to win on it, so Tune is open in the tour.
+  const cats = await import('./categories');
+  for (const j of cats.SIX_JOBS) cats.addCategory(deck.id, { kind: 'job', name: j.label, by: 'cards', jobId: j.id, how: j.how });
+  const storm = ['Storm-Kiln Artist', 'Past in Flames', 'Seething Song', 'Longshot, Rebel Bowman'].map((n) => byName.get(n)).filter((c): c is NonNullable<typeof c> => !!c);
+  cats.addCategory(deck.id, { kind: 'win', name: 'Storm turn', by: 'owner', how: 'Rituals and cantrips make Treasure off Storm-Kiln Artist, then Past in Flames replays the graveyard into Longshot.', cards: storm.map((c) => ({ key: tagKey(c), name: c.name, by: 'owner' as const })) });
+  const help = await import('./plan-help');
+  await help.act({ id: deck.id, commander: azula }, TOUR_PROFILE, { action: 'commander', roles: ['multiplier'] });
+  await help.act({ id: deck.id, commander: azula }, TOUR_PROFILE, { action: 'planText', text: BRIEF });
+  await help.act({ id: deck.id, commander: azula }, TOUR_PROFILE, { action: 'confirm' });
 
   const read = addRead({
     listId: deck.id, profileId: TOUR_PROFILE, mode: 'build', model: 'claude-opus-5-5',

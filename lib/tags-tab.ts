@@ -107,6 +107,9 @@ async function fromCards(list: Pick<List, 'id' | 'commander'>, cats: Category[],
   try {
     ranked = standoutTags((f) => foldedTags(deck.spells, f), (f) => tagCounts(f), jobs).filter((t) => !gone.has(`tag:${t.slug}`));
   } catch { /* no card data yet: no tags to offer */ }
+  // A tag is not offered under a name a job or a category on the deck already has: two "Ramp" rows read as one.
+  const taken = new Set([...SIX_JOBS.map((j) => low(j.label)), ...cats.map((c) => low(c.name))]);
+  ranked = ranked.filter((t) => !taken.has(low(tidyTag(t.slug))) || cats.some((c) => c.slugs.includes(t.slug)));
   const onDeck = new Set(cats.flatMap((c) => c.slugs));
   const tagRow = (t: { slug: string; cards: string[] }): TagRow => ({ key: `tag:${t.slug}`, slug: t.slug, name: tidyTag(t.slug), cards: t.cards.map((k) => deck.nameByKey.get(k) ?? k).sort() });
   const visible = ranked.slice(0, SHOWN).filter((t) => !onDeck.has(t.slug)).map(tagRow);

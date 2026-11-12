@@ -50,10 +50,10 @@ describe('the plan', () => {
     expect([p.style.id, p.targets.find((t) => t.role === 'ramp')?.mine]).toEqual(['landfall', false]);
   });
 
-  it('is confirmed only when the owner confirms the plan read (lib/plan-pass.ts)', async () => {
+  it('is confirmed only when the owner confirms the plan (lib/plan-help.ts)', async () => {
     const db = await import('./db');
     const plan = await import('./deck-plan');
-    const pass = await import('./plan-pass');
+    const help = await import('./plan-help');
     db.addProfile('dk', 'DK');
     const old = db.createList('dk', 'Old', '', { kind: 'deck' });
     db.setTagBrief(old.id, 'Win with landfall.');
@@ -62,7 +62,7 @@ describe('the plan', () => {
     // The old whole-plan confirm no longer counts.
     plan.changePlan(fresh.id, { confirm: true });
     expect(plan.planConfirmed(fresh.id)).toBe(false);
-    pass.confirmPlan(fresh.id);
+    await help.act({ id: fresh.id, commander: null }, 'dk', { action: 'confirm' });
     expect(plan.planConfirmed(fresh.id)).toBe(true);
   });
 

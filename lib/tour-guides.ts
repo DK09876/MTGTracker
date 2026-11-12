@@ -41,12 +41,12 @@ const DECK_STEPS: TourStep[] = [
   { click: [closeCard, '[data-tour="add-cards"]'], target: 'add-panel', title: 'Add cards', body: 'Search by name or in plain words, paste a list, or add from your collection. Cards in the commander\'s colours come first.' },
   { click: [closeAdd], target: 'deck-more', title: 'The ⋯ menu', body: 'Import a list (from Moxfield, Arena or MTGO) or an Archidekt link over the deck, export it, rename, duplicate, change the commander, show it on your profile (decks are private until you do), or delete it.' },
 
-  { click: [tab('plan')], target: 'plan-commander', title: 'Plan: what the commander does', body: 'Start here. Pick what the commander does for the deck - hover an option for what it means - or Unsure, and the plan will suggest it. Everything that reads the plan reads this too.' },
-  { target: 'plan-settings', title: 'Your settings', body: 'The bracket, budget, only cards you own, a deck rule, and the cards never to cut. Every suggestion keeps to them, AI or rules.' },
-  { target: 'plan-notes', title: 'Your notes', body: 'Anything you want the plan and every AI step to know, in your words. Your answers to the plan\'s questions land here too.' },
-  { target: 'plan-read', title: 'The plan', body: 'Have Claude read the deck - it reads your commander choice, settings, notes and every card - or write the plan yourself. Edit anything it says, read it again with your changes kept, and confirm it. Nothing is locked: Tune and Chat read it once there is one.' },
+  { click: [tab('plan')], target: 'plan-commander', title: 'Plan: what the commander does', body: 'Start here. The Plan tab is what you want the deck to be. Pick what the commander does for the deck, or leave it on Not sure. Every AI step reads what you set here.' },
+  { target: 'plan-settings', title: 'Your settings', body: 'What you want from the deck and the bracket, then the limits Tune stays inside: never cut, budget, only cards you own and a deck rule. Never cut is the only thing that blocks a cut.' },
+  { target: 'plan-notes', title: 'Your notes', body: 'Anything you want every AI step to know, in your words. Your answers to AI\'s questions land here when you confirm.' },
+  { target: 'plan-read', title: 'The plan', body: 'How the deck wins, its ways to win and its key cards. Fill them in, or ask AI for suggestions you accept or skip. Confirm the plan to open Tune; you can confirm with everything on Not sure.' },
 
-  { click: [tab('tags')], target: 'basic-roles', title: 'Tags', body: 'Every card\'s role from the plan, which you can correct, then the built-in tags from Scryfall and your own. Have Claude suggest tags and put them on the cards, or make your own.' },
+  { click: [tab('tags')], target: 'tags-on-deck', title: 'Tags', body: 'A deck starts with no tags. Accept the jobs to count and the tags that stand out from the card data, refine them with AI if you like, or name your own. Nothing is added until you accept it.' },
 
   { click: [tab('tune')], target: 'tune-intents', title: 'Tune: what do you want to do?', body: 'Finish the deck, find cards, swaps, cuts, fix a problem, or lands. The deck\'s size picks one for you - marked "suggested" - and you can switch any time.' },
   { target: 'tune-changes', title: 'Your changes', body: 'Everything you accept lands here: cards to add, cards to cut, swaps paired up, and what they would do to the deck\'s numbers. Nothing touches the deck until you press Apply; cuts go to the section for cards that came out, with their reason.' },

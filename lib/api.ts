@@ -36,10 +36,9 @@ import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
 import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
-import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { CardDataStatus } from './card-store';
-import type { CutReview, ReviewItem, ReviewMode, Tier as CardTier } from './cut-review-shared';
+import type { CutReview } from './cut-review-shared';
 import type { GoldfishSettings } from './goldfish';
 import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
@@ -656,17 +655,6 @@ export const setCardTag = (listId: string, cardKey: string, tagId: string, on: b
   fetch(url(`lists/${listId}/tags/cards`), { method: 'PATCH', headers: editHeaders(), body: JSON.stringify({ cardKey, tagId, on }) })
     .then(json<DeckTags & { change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
-export interface TagJobState { job: TagJob | null; tags: DeckTags; budget: Budget }
-
-/** The deck's latest tagging job, its tags and today's budget. */
-export const tagJob = (listId: string) => fetch(url(`lists/${listId}/tags/job`)).then(json<TagJobState>);
-
-export const startTagJob = (listId: string, params: JobParams) =>
-  send(`lists/${listId}/tags/job`, 'POST', params).then(json<TagJobState>);
-
-export const stopTagJob = (listId: string) =>
-  fetch(url(`lists/${listId}/tags/job`), { method: 'DELETE' }).then(json<TagJobState>);
-
 /** Today's requests left on the tagging model - and, for Claude, today's spending. */
 export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);
 
@@ -838,30 +826,10 @@ export type PlanChange = PlanChangeCore & {
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 
-/** The plan read (lib/plan-pass.ts): the Plan tab's view, and what the owner does with it. */
-export const planPath = (listId: string) => `lists/${listId}/plan/pass`;
-export const planPass = (listId: string) => fetch(url(planPath(listId))).then(json<import('./plan-shared').PlanView>);
-export type PlanPassAction =
-  | { action: 'generate' | 'confirm'; answers?: Array<{ question: string; answer: string }>; skipped?: string[]; note?: string }
-  | { action: 'commanderRoles'; roles: string[] }
-  | { action: 'edits'; edits: { plan?: string | null; winRoutes?: Array<{ name: string; cards: string[] }> | null; keyCards?: string[] | null; themes?: Array<{ name: string; cards: string[] }> | null; roles?: Record<string, string> | null } }
-  | { action: 'undoEdits' | 'useStale' | 'acceptCommander' | 'acceptBracket' }
-  | { action: 'neverCut'; add?: string[]; remove?: string[] }
-  | { action: 'ownPlan'; text: string; fill?: boolean };
-export const planPassAct = (listId: string, act: PlanPassAction) =>
-  spending(send(planPath(listId), 'POST', act).then(json<import('./plan-shared').PlanView>));
-/** Keep what's typed into the plan's questions and note, so leaving the tab doesn't lose it. Spends nothing. */
-export const planDrafts = (listId: string, d: { answers: Record<string, string>; skipped: string[]; note: string }) =>
-  send(planPath(listId), 'POST', { action: 'drafts', ...d }).then(json<import('./plan-shared').PlanView>);
 
 /** Claude's last review of the cut list, what the owner has done about it since, and the job if one is running. */
 export interface CutReviewState { review: CutReview | null; settled?: { cut: string[]; kept: string[] }; job: Job | null }
 export const cutReview = (listId: string) => get<CutReviewState>(paths.review(listId));
-export const startCutReview = (listId: string, instructions: string, mode: ReviewMode = 'top') =>
-  spending(send(`lists/${listId}/cuts/review`, 'POST', { instructions, mode }).then(json<{ job: Job }>).finally(jobsChanged));
-/** Disagree with a card's rating: Claude re-rates it with the reason. S or A also stars it to keep. */
-export const rerateCut = (listId: string, name: string, tier: CardTier | null, reason: string) =>
-  spending(send(`lists/${listId}/cuts/review/rerate`, 'POST', { name, tier, reason }).then(json<{ item: ReviewItem; kept: boolean }>));
 
 /** A deck's playtest settings, presets, and each card's tags by name. */
 export interface PlaytestState {

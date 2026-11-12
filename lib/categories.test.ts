@@ -146,8 +146,11 @@ describe('the migration', { timeout: 30_000 }, () => {
     const dr = await import('./deck-roles');
     dr.setOverride(list.id, 'o-Shock', 'removal', false);
     dr.setOverride(list.id, 'o-Opt', 'ramp', true);
-    const pp = await import('./plan-pass');
-    pp.setEdits(list.id, { keyCards: ['Bolt'] });
+    const c0 = await import('./categories');
+    c0.ensurePlanColumns();
+    d.run(`INSERT INTO plan_owner (listId, commanderRoles, edits, updatedAt) VALUES (?, '[]', ?, ?)`, [list.id, JSON.stringify({ keyCards: ['Bolt'] }), new Date().toISOString()]);
+    d.run(`CREATE TABLE IF NOT EXISTS plan_passes (id TEXT PRIMARY KEY, listId TEXT NOT NULL, profileId TEXT, at TEXT NOT NULL, model TEXT NOT NULL, promptVersion TEXT NOT NULL,
+      deckHash TEXT NOT NULL, deckKeys TEXT NOT NULL, commanderName TEXT, input TEXT NOT NULL, output TEXT NOT NULL)`);
     d.run(`INSERT INTO plan_passes (id, listId, profileId, at, model, promptVersion, deckHash, deckKeys, commanderName, input, output) VALUES ('p1', ?, 'dk', ?, 'opus', 'plan-pass-2', '', '[]', 'Azula', '{}', ?)`,
       [list.id, new Date().toISOString(), JSON.stringify({ plan: 'Burn them out.', winRoutes: [{ name: 'Burn', cards: ['Bolt', 'Shock', 'Not here'] }], keyCards: ['Opt'], themes: [{ name: 'x', cards: [] }], cards: {} })]);
 

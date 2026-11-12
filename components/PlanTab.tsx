@@ -250,7 +250,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       {error && <p role="alert" className="rounded-xl border border-red-400/40 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
       {/* 1 */}
-      <section id="p-role" data-section="1 · The commander" data-section-state={rail[0].status} data-section-tone={rail[0].tone} className={`${C.sec} flex flex-col gap-3`}>
+      <section id="p-role" data-tour="plan-commander" data-section="1 · The commander" data-section-state={rail[0].status} data-section-tone={rail[0].tone} className={`${C.sec} flex flex-col gap-3`}>
         <H2 n={1} tip="What the commander does sets how much the deck leans on it and what the 99 has to back up. Every AI step is told which you picked, and whether you set it or accepted it from AI.">What {s.commanderNames} does for the deck</H2>
         <div role="group" aria-label="What the commander does" className="flex flex-wrap gap-2">
           {COMMANDER_ROLES.map((r) => {
@@ -271,7 +271,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       </section>
 
       {/* 2 */}
-      <section id="p-settings" data-section="2 · Your settings" data-section-state={rail[1].status} data-section-tone={rail[1].tone} className={`${C.sec} flex flex-col gap-3`}>
+      <section id="p-settings" data-tour="plan-settings" data-section="2 · Your settings" data-section-state={rail[1].status} data-section-tone={rail[1].tone} className={`${C.sec} flex flex-col gap-3`}>
         <H2 n={2}>Your settings</H2>
         <Group>What you want</Group>
         <div className={`${C.box} flex flex-col gap-2`}>
@@ -335,7 +335,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       </section>
 
       {/* 3 */}
-      <section id="p-notes" data-section="3 · Your notes" data-section-state={rail[2].status} data-section-tone={rail[2].tone} className={`${C.sec} flex flex-col gap-3`}>
+      <section id="p-notes" data-tour="plan-notes" data-section="3 · Your notes" data-section-state={rail[2].status} data-section-tone={rail[2].tone} className={`${C.sec} flex flex-col gap-3`}>
         <H2 n={3}>Your notes</H2>
         <p className="text-[13px] text-[var(--muted)]">Read word for word by every AI step. Your answers to AI’s questions are saved here when you confirm.</p>
         {s.notes.map((n) => (
@@ -357,7 +357,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       </section>
 
       {/* 4 */}
-      <section id="p-four" data-section="4 · The plan" data-section-state={rail[3].status} data-section-tone={rail[3].tone} className={`${C.sec} flex flex-col gap-3 border-[#4a443b]`}>
+      <section id="p-four" data-tour="plan-read" data-section="4 · The plan" data-section-state={rail[3].status} data-section-tone={rail[3].tone} className={`${C.sec} flex flex-col gap-3 border-[#4a443b]`}>
         <H2 n={4}>The plan</H2>
         <p className="text-sm text-[var(--muted)]">Three parts: how the deck wins, its ways to win, and its key cards. You fill them in, and every item shows who added it. Suggestions drawn from the cards themselves, with no AI, are on the <button type="button" onClick={() => onTab('tags')} className="font-semibold text-[#d6aa2e] underline-offset-2 hover:underline">Tags tab</button>.</p>
         <div className={`${C.aiBox} flex flex-col gap-2`}>
