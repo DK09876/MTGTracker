@@ -18,12 +18,17 @@ export interface AiRow {
 
 export interface TagsView {
   categories: Category[];
+  /**
+   * Each job's number as the Cards tab shows it: the weighted count, the
+   * usual range, and warn for a hard failure (no card draw at 90+ cards).
+   */
+  jobNumbers: Record<string, { count: number; range: [number, number] | null; warn: boolean }>;
   cardNames: string[];
   confirmed: boolean;
   hasKey: boolean;
   step1: {
-    /** The six jobs most decks track, or the ones not on the deck. */
-    jobs: { key: 'jobs'; all: boolean; missing: Array<{ id: string; label: string }> } | null;
+    /** Any of the six jobs not on the deck. skipped: the owner said Skip, so it is offered quietly, not as a suggestion. */
+    jobs: { key: 'jobs'; all: boolean; skipped: boolean; missing: Array<{ id: string; label: string }> } | null;
     /** The top tags that stand out, still open. */
     tags: TagRow[];
     /** The rest, behind "Show more". */

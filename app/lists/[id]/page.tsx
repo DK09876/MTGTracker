@@ -631,11 +631,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
       <div className="min-w-0">
       {/* One line on every tab: where the deck stands against 100, whether Tune is open, and the step that comes next. */}
-      {deck && deckSize > 0 && (
+      {/* Nothing to say once the plan is confirmed and the deck is exactly 100. */}
+      {deck && deckSize > 0 && !(planConfirmed && deckSize === 100) && (
         <p data-tour="deck-state" data-plan-line className={`flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] py-1.5 pl-3.5 pr-1.5 text-sm ${planConfirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
           <b className="tabular-nums">{deckSize} of 100{deckSize > 100 ? ` · ${deckSize - 100} over` : deckSize < 100 ? ` · ${100 - deckSize} short` : ''}</b>
           <span className="min-w-0 flex-1 text-[var(--muted)]">{planConfirmed ? 'Tune is open.' : 'Tune is locked until you confirm the plan.'}</span>
-          {!planConfirmed && section !== 'plan' && section !== 'tune' && <button onClick={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">Confirm the plan</button>}
+          {!planConfirmed && section !== 'plan' && section !== 'tune' && <button onClick={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">Go to Plan</button>}
           {planConfirmed && section !== 'tune' && deckSize !== 100 && <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">{deckSize > 100 ? `Trim ${deckSize - 100} in Tune` : `Fill ${100 - deckSize} in Tune`}</button>}
         </p>
       )}

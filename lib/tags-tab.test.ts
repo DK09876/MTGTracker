@@ -75,12 +75,28 @@ describe('the Tags tab', { timeout: 30_000 }, () => {
     expect(v.categories.map((c) => `${c.kind}:${c.name}`)).toContain('tag:Magecraft');
     expect(v.categories.filter((c) => c.kind === 'job')).toHaveLength(6);
     expect(v.step1.open).toBe(0);
+    // Each job's number for its tile: the weighted count and the usual range, as the Cards tab shows them.
+    const dr = await import('./deck-roles');
+    const known = await dr.deckRolesKnown(list.id);
+    for (const id of ['ramp', 'draw', 'interaction', 'wipe', 'protection', 'finishers']) {
+      const r = known.find((x) => x.id === id)!;
+      expect(v.jobNumbers[id]).toEqual({ count: r.count, range: r.target ?? null, warn: false });
+    }
     // A removed job comes back as "Jobs not on this deck"; a removed tag does not come back.
     await t.tagsAct(list, 'dk', { action: 'remove', id: v.categories.find((c) => c.jobId === 'wipe')!.id });
     await t.tagsAct(list, 'dk', { action: 'remove', id: v.categories.find((c) => c.kind === 'tag')!.id });
     v = await t.tagsTab(list);
-    expect(v.step1.jobs).toMatchObject({ all: false, missing: [{ id: 'wipe', label: 'Board wipes' }] });
+    expect(v.step1.jobs).toMatchObject({ all: false, skipped: false, missing: [{ id: 'wipe', label: 'Board wipes' }] });
     expect(v.step1.tags).toEqual([]);
+    // Skipped, the missing job is still offered (quietly, not counted as waiting) and can be added.
+    await t.tagsAct(list, 'dk', { action: 'skip', key: 'jobs' });
+    v = await t.tagsTab(list);
+    expect(v.step1.jobs).toMatchObject({ skipped: true, missing: [{ id: 'wipe', label: 'Board wipes' }] });
+    expect(v.step1.open).toBe(0);
+    await t.tagsAct(list, 'dk', { action: 'accept', keys: ['jobs'] });
+    v = await t.tagsTab(list);
+    expect(v.step1.jobs).toBeNull();
+    expect(v.categories.filter((c) => c.kind === 'job')).toHaveLength(6);
   });
 
   it('step 2 shows differences only, never removes from key cards, and nothing on a second run once applied', async () => {
@@ -124,6 +140,10 @@ describe('the Tags tab', { timeout: 30_000 }, () => {
     await expect(t.tagsAct(list, 'dk', { action: 'add', name: 'magecraft' })).rejects.toThrow(/already on this deck/);
     let v = await t.tagsTab(list);
     const eng = v.categories.find((c) => c.name === 'Engines')!;
+    // Renaming to a name already on the deck is refused the same way; its own name in other case is fine.
+    await expect(t.tagsAct(list, 'dk', { action: 'edit', id: eng.id, name: ' MageCraft ' })).rejects.toThrow(/Magecraft is already on this deck/);
+    await t.tagsAct(list, 'dk', { action: 'edit', id: eng.id, name: 'engines' });
+    await t.tagsAct(list, 'dk', { action: 'edit', id: eng.id, name: 'Engines' });
     await t.tagsAct(list, 'dk', { action: 'card', id: eng.id, name: 'Spell 10', on: true });
     await ph.act(list, 'dk', { action: 'confirm' });
     const { model, asked } = fakeModel(() => ({ addTo: [{ category: 'Engines', card: 'Spell 11', why: 'Draws.' }], removeFrom: [{ category: 'Engines', card: 'Spell 10', why: 'No.' }], categories: [], notes: '' }));

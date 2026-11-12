@@ -51,7 +51,7 @@ const FULL = {
 
 async function deck(name = 'Azula') {
   const db = await import('./db');
-  db.addProfile('dk', 'DK');
+  if (!db.knownProfile('dk')) db.addProfile('dk', 'DK');
   const c = await import('./categories');
   c.startCategories();
   const list = db.createList('dk', name, '', { kind: 'deck', commander });
@@ -153,14 +153,59 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     expect(s.help!.wins).toEqual([]);
   });
 
-  it('refuses to confirm with a suggestion or question open, and confirms with everything on Not sure', async () => {
+  it('refuses to confirm with a suggestion or question open, and confirms with everything on Not sure, once', async () => {
     const { list } = await deck();
     const ph = await import('./plan-help');
     await ph.act(list, 'dk', { action: 'confirm' });
     expect((await ph.planState(list)).confirmed).not.toBeNull();
+    await expect(ph.act(list, 'dk', { action: 'confirm' })).rejects.toThrow(/already confirmed/);
+    const { list: other } = await deck('Other');
+    const { model } = fakeModel(() => FULL);
+    await ph.runHelp(model, other, 'dk');
+    await expect(ph.act(other, 'dk', { action: 'confirm' })).rejects.toThrow(/Accept or skip 9 suggestions, and answer or skip 3 questions/);
+  });
+
+  it('an accepted way to win the owner renames or removes is not suggested again', async () => {
+    const { list, c } = await deck();
+    const ph = await import('./plan-help');
+    await ph.runHelp(fakeModel(() => FULL).model, list, 'dk');
+    let s = await ph.planState(list);
+    expect(s.help!.wins.map((w) => w.name)).toEqual(['Copy loop']);
+    await ph.act(list, 'dk', { action: 'acceptWin', name: 'Copy loop' } as never);
+    const win = (await c.categories(list)).find((x) => x.kind === 'win')!;
+    c.editCategory(list.id, win.id, { name: 'My spell loop' });
+    await ph.runHelp(fakeModel(() => FULL).model, list, 'dk');
+    s = await ph.planState(list);
+    expect(s.help!.wins).toEqual([]);
+    // Removing it under its new name still retires the original suggestion.
+    c.removeCategory(list.id, win.id);
+    await ph.runHelp(fakeModel(() => FULL).model, list, 'dk');
+    s = await ph.planState(list);
+    expect(s.wins).toEqual([]);
+    expect(s.help!.wins).toEqual([]);
+  });
+
+  it('on a confirmed plan, an answer goes to the notes at once, with other suggestions still open', async () => {
+    const { list } = await deck();
+    const ph = await import('./plan-help');
     const { model } = fakeModel(() => FULL);
     await ph.runHelp(model, list, 'dk');
-    await expect(ph.act(list, 'dk', { action: 'confirm' })).rejects.toThrow(/Accept or skip 9 suggestions, and answer or skip 3 questions/);
+    let s = await ph.planState(list);
+    // Before confirming, answers wait for Confirm.
+    await expect(ph.act(list, 'dk', { action: 'answerToNotes', id: s.help!.questions[0].id, text: 'Burn.' })).rejects.toThrow(/when you confirm/);
+    await ph.act(list, 'dk', { action: 'skipAll' });
+    await ph.act(list, 'dk', { action: 'confirm' });
+    await ph.runHelp(fakeModel(() => ({ ...FULL, questions: [{ text: 'New one?' }, { text: 'Other?' }] })).model, list, 'dk');
+    s = await ph.planState(list);
+    expect(s.open.suggestions).toBeGreaterThan(0);
+    const q = s.help!.questions.find((x) => x.text === 'New one?')!;
+    await ph.act(list, 'dk', { action: 'answerToNotes', id: q.id, text: '  Combat.  ' });
+    s = await ph.planState(list);
+    expect(s.notes.map((n) => n.text)).toContain('New one? Combat.');
+    expect(s.help!.questions.map((x) => x.text)).toEqual(['Other?']);
+    expect(s.open.questions).toBe(1);
+    expect(s.open.suggestions).toBeGreaterThan(0);
+    expect(s.confirmed).not.toBeNull();
   });
 
   it('Skip the rest skips every open suggestion and question; Tune refuses until the plan is confirmed', async () => {

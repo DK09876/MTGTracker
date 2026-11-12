@@ -226,7 +226,6 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
   const confirmNote = confirmed ? (left ? `${left} new from AI (${leftWhat}); none apply until you accept them.` : 'Tune is open. Tags are optional. You can still change anything here.')
     : left ? `${leftWhat}. Accept, answer or skip each, then confirm.`
       : 'You can confirm with anything left on Not sure. The more you leave open, the less Tune has to go on.';
-  const answeredUnsaved = confirmed && !left && (h?.questions ?? []).some((q) => !q.skipped && (answers[q.id] ?? '').trim());
   /** Scroll to the next suggestion or question still waiting, below where the screen is now (or the first one). */
   const nextSuggestion = () => {
     const all = [...document.querySelectorAll<HTMLElement>('[data-suggestion]')].filter((el) => el.getClientRects().length);
@@ -382,7 +381,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
 
       {/* 3 */}
       <section id="p-notes" data-tour="plan-notes" data-section="3 · Your notes" data-section-state={rail[2].status} data-section-tone={rail[2].tone} className={`${C.sec} flex flex-col gap-3`}>
-        <H2 n={3} tip="Read word for word by every AI step. Your answers to AI’s questions are saved here when you confirm.">Your notes</H2>
+        <H2 n={3} tip="Read word for word by every AI step. Your answers to AI’s questions are saved here when you confirm, or as soon as you answer once the plan is confirmed.">Your notes</H2>
         {s.notes.map((n) => (
           <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#141210] px-3 py-1.5">
             {editing?.id === n.id ? (
@@ -513,9 +512,16 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
                 {q.about && <span className={`text-[11px] font-bold ${C.yours}`}>About something you set</span>}
                 <label htmlFor={q.id} className={`text-sm ${q.skipped ? 'line-through text-[var(--muted)]' : ''}`}>{q.text}</label>
                 <div className="flex flex-wrap gap-2">
-                  <input id={q.id} value={answers[q.id] ?? ''} disabled={q.skipped} placeholder="A line is plenty" onFocus={() => { setTyping(true); }}
+                  <input id={q.id} value={answers[q.id] ?? ''} disabled={q.skipped} placeholder={confirmed ? 'A line is plenty. It goes to your notes when you leave the box.' : 'A line is plenty'} onFocus={() => { setTyping(true); }}
                     onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                    onBlur={() => { setTyping(false); if ((answers[q.id] ?? '') !== q.answer) void act({ action: 'answer', id: q.id, text: answers[q.id] ?? '' }); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                    onBlur={() => {
+                      setTyping(false);
+                      const text = answers[q.id] ?? '';
+                      // Confirmed: the answer goes straight to the notes. Before that it is a draft until Confirm.
+                      if (confirmed && text.trim()) void act({ action: 'answerToNotes', id: q.id, text });
+                      else if (text !== q.answer) void act({ action: 'answer', id: q.id, text });
+                    }}
                     className={`${C.input} flex-[1_1_14rem]`} />
                   <button type="button" className={C.btn} aria-pressed={q.skipped} onClick={() => act({ action: 'answer', id: q.id, skip: !q.skipped })}>{q.skipped ? 'Skipped · undo' : 'Skip'}</button>
                 </div>
@@ -534,7 +540,6 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           {left > 0 && <button type="button" className={C.btn} aria-label="Skip the rest" onClick={() => act({ action: 'skipAll' })}>Skip<span className="max-sm:hidden"> the rest</span></button>}
           {s.bulk > 0 && <button type="button" className={C.aiBtn} aria-label={s.bulk === 1 ? 'Accept the 1 suggestion' : `Accept all ${s.bulk} suggestions`} onClick={() => act({ action: 'acceptAll' })}>✦ Accept<span className="max-sm:hidden"> {s.bulk === 1 ? 'the 1 suggestion' : 'all'}</span>{s.bulk > 1 ? ` ${s.bulk}` : ''}</button>}
           {!confirmed && <button type="button" className={C.go} aria-label="Confirm the plan" disabled={left > 0} onClick={() => act({ action: 'confirm' })}>Confirm<span className="max-sm:hidden"> the plan</span></button>}
-          {answeredUnsaved && <button type="button" className={C.btn} onClick={() => act({ action: 'confirm' })}>Save answers<span className="max-sm:hidden"> to notes</span></button>}
           {confirmed && <><button type="button" className={C.go} onClick={() => onTab('tune')}>Go to Tune</button>{!left && <button type="button" className={C.btn} onClick={() => onTab('tags')}>Tags (optional)</button>}</>}
         </span>
       </div>

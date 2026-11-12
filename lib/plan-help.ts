@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 
 import { ModelError, type JsonModel } from './ai';
 import {
-  addCategory, cardMark, categories, clearSkips, ensurePlanColumns, goneKeys, keyCategoryId, markSkipped, setCategoryCard, skippedKeys,
+  addCategory, cardMark, categories, clearSkips, ensurePlanColumns, fromKeys, goneKeys, keyCategoryId, markFrom, markSkipped, setCategoryCard, skippedKeys,
   type Category,
 } from './categories';
 import { cardsInList, database, type List } from './db';
@@ -70,7 +70,8 @@ const low = (s: string) => s.trim().toLowerCase();
 
 // --- the owner's side ----------------------------------------------------------------
 
-interface Drafts { helpId: string | null; answers: Record<string, string>; skipped: string[] }
+/** saved: questions whose answer already went to the notes (on a confirmed plan); they leave the list. */
+interface Drafts { helpId: string | null; answers: Record<string, string>; skipped: string[]; saved?: string[] }
 interface Owner {
   commanderRoles: CommanderRole[]; commanderBy: Who; planText: string; planBy: Who; direction: string | null;
   confirmedAt: string | null; confirmedCommander: string | null; drafts: Drafts | null; skippedQuestions: string[]; helpDone: string | null;
@@ -340,6 +341,7 @@ function openOf(listId: string, help: Help | null, o: Owner, bracket: number | n
   const out = help.output;
   const skip = skippedKeys(listId, 'plan');
   const gone = goneKeys(listId);
+  const from = fromKeys(listId);
   const wins = cats.filter((c) => c.kind === 'win');
   const key = cats.find((c) => c.kind === 'key');
   return {
@@ -347,7 +349,8 @@ function openOf(listId: string, help: Help | null, o: Owner, bracket: number | n
     bracket: out.fill?.bracket && bracket === null && !skip.has('bracket') ? out.fill.bracket : null,
     plan: out.fill?.plan && !o.planText.trim() && !skip.has('plan') ? out.fill.plan : null,
     fuller: out.fuller && o.planBy === 'owner' && o.planText.trim() && !skip.has('fuller') ? out.fuller : null,
-    wins: (out.winRoutes ?? []).filter((w) => !skip.has(`win:${low(w.name)}`) && !gone.has(`win:${low(w.name)}`) && !wins.some((c) => low(c.name) === low(w.name))),
+    // Matched by the suggestion's own key, so one accepted and then renamed doesn't come back as new.
+    wins: (out.winRoutes ?? []).filter((w) => !skip.has(`win:${low(w.name)}`) && !gone.has(`win:${low(w.name)}`) && !from.has(`win:${low(w.name)}`) && !wins.some((c) => low(c.name) === low(w.name))),
     keys: (out.keyCards ?? []).map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n, why: out.keyWhy?.[n] ?? '' }))
       .filter((k) => k.key && !skip.has(`key:${k.key}`) && !gone.has(cardMark('key:key cards', k.key)) && !key?.cards.some((x) => x.key === k.key)),
   };
@@ -362,10 +365,11 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
   const deckKey = new Map<string, string>([...main.map((c) => [front(c.card.name), tagKey(c.card)] as [string, string]), ...(list.commander ? [[front(list.commander.name), tagKey(list.commander)] as [string, string]] : [])]);
   const open = openOf(list.id, help, o, plan.bracket, cats, deckKey);
   const drafts = help && o.drafts?.helpId === help.id ? o.drafts : { helpId: null, answers: {}, skipped: [] };
+  const saved = new Set(drafts.saved ?? []);
   const questions = help && o.helpDone !== help.id ? (help.output.questions ?? []).map((q, i) => {
     const id = qId(help.id, i);
     return { id, text: q.text, about: q.about, answer: drafts.answers[id] ?? '', skipped: drafts.skipped.includes(id) };
-  }) : [];
+  }).filter((q) => !saved.has(q.id)) : [];
   const openQ = questions.filter((q) => !q.skipped && !q.answer.trim()).length;
   const suggestions = (open.commander ? 1 : 0) + (open.bracket ? 1 : 0) + (open.plan ? 1 : 0) + (open.fuller ? 1 : 0) + open.wins.length + open.keys.length;
   const kept = keeps(list.id);
@@ -450,7 +454,8 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
   const cats = await categories(list);
   const open = openOf(id, help, o, plan.bracket, cats, deckKey);
   const acceptWin = (w: { name: string; how: string; cards: string[] }) => {
-    addCategory(id, { kind: 'win', name: w.name, by: 'ai', how: w.how, cards: w.cards.map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n, by: 'ai' as const })).filter((c) => c.key) });
+    const catId = addCategory(id, { kind: 'win', name: w.name, by: 'ai', how: w.how, cards: w.cards.map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n, by: 'ai' as const })).filter((c) => c.key) });
+    markFrom(id, catId, `win:${low(w.name)}`);
     outcome(id, [`plan:win:${low(w.name)}`], 'accepted');
   };
   const acceptKey = (k: { key: string; name: string }) => { setCategoryCard(id, keyCategoryId(id), { key: k.key, name: k.name }, true, 'ai'); outcome(id, [`plan:key:${k.key}`], 'accepted'); };
@@ -572,7 +577,26 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
       });
       return;
     }
+    case 'answerToNotes': {
+      // On a confirmed plan an answer goes to the notes when it is saved, not when everything else is cleared.
+      if (!o.confirmedAt) throw new PlanRefused('Answers go to your notes when you confirm the plan');
+      if (!help) return;
+      const i = (help.output.questions ?? []).findIndex((_, n) => qId(help.id, n) === a.id);
+      const text = String(a.text ?? '').trim().slice(0, 600);
+      if (i < 0 || !text) return;
+      const q = help.output.questions[i];
+      changePlan(id, { notes: { add: [`${q.text} ${text}`], by: 'owner' } });
+      quietly(() => logConversation(profileId, id, 'plan', 'question_answered', `${q.text}\n${text}`, PROMPT_VERSIONS.planHelp));
+      update(id, (x) => {
+        const d = x.drafts?.helpId === help.id ? x.drafts : { helpId: help.id, answers: {}, skipped: [] };
+        const answers = { ...d.answers };
+        delete answers[a.id];
+        x.drafts = { ...d, answers, saved: [...new Set([...(d.saved ?? []), a.id])] };
+      });
+      return;
+    }
     case 'confirm': {
+      if (o.confirmedAt) throw new PlanRefused('The plan is already confirmed');
       const s = await planState(list);
       if (s.open.suggestions || s.open.questions) {
         throw new PlanRefused(`Accept or skip ${s.open.suggestions} suggestion${s.open.suggestions === 1 ? '' : 's'}, and answer or skip ${s.open.questions} question${s.open.questions === 1 ? '' : 's'} first`);

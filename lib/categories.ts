@@ -144,6 +144,17 @@ export function goneKeys(listId: string): Set<string> {
 export function markGone(listId: string, key: string): void {
   db().run(`INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) VALUES (?, ?, 'gone', '', ?)`, [listId, key, now()]);
 }
+/**
+ * A category made by accepting a suggestion keeps that suggestion's key
+ * (mark 'from', scope = the category's id), so a rename doesn't bring the
+ * suggestion back as new and removing the renamed category still retires it.
+ */
+export function markFrom(listId: string, catId: string, key: string): void {
+  db().run(`INSERT OR REPLACE INTO deck_category_marks (listId, key, mark, scope, at) VALUES (?, ?, 'from', ?, ?)`, [listId, key, catId, now()]);
+}
+export function fromKeys(listId: string): Set<string> {
+  return new Set((db().all(`SELECT key FROM deck_category_marks WHERE listId = ? AND mark = 'from'`, [listId]) as Array<{ key: string }>).map((r) => r.key));
+}
 export function skippedKeys(listId: string, scope: MarkScope): Set<string> {
   return new Set((db().all(`SELECT key FROM deck_category_marks WHERE listId = ? AND mark = 'skip' AND scope = ?`, [listId, scope]) as Array<{ key: string }>).map((r) => r.key));
 }
@@ -267,6 +278,9 @@ export function removeCategory(listId: string, catId: string): boolean {
   d.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, catId]);
   if (kind === 'key') return true;
   if (whoOf(r) !== 'owner' && kind !== 'job') markGone(listId, identityOf(r));
+  // What it was accepted from, under whatever name it has now.
+  for (const m of d.all(`SELECT key FROM deck_category_marks WHERE listId = ? AND mark = 'from' AND scope = ?`, [listId, catId]) as Array<{ key: string }>) markGone(listId, m.key);
+  d.run(`DELETE FROM deck_category_marks WHERE listId = ? AND mark = 'from' AND scope = ?`, [listId, catId]);
   d.run('DELETE FROM deck_tags WHERE listId = ? AND id = ?', [listId, catId]);
   return true;
 }
@@ -333,7 +347,17 @@ export function jobChanges(listId: string): Map<string, { add: Array<{ key: stri
 
 /** Copy a deck's categories, card rows and marks to its duplicate (the rows themselves are copied with the deck's tags in db.ts). */
 export function copyCategoryMarks(fromId: string, toId: string): void {
-  db().run('INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) SELECT ?, key, mark, scope, at FROM deck_category_marks WHERE listId = ?', [toId, fromId]);
+  const d = db();
+  d.run('INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) SELECT ?, key, mark, scope, at FROM deck_category_marks WHERE listId = ?', [toId, fromId]);
+  // The copy's categories have new ids: point each 'from' mark at the copy's category of the same kind and name.
+  const before = new Map(rows(fromId).map((r) => [r.id, r]));
+  const after = rows(toId);
+  for (const m of d.all(`SELECT key, scope FROM deck_category_marks WHERE listId = ? AND mark = 'from'`, [toId]) as Array<{ key: string; scope: string }>) {
+    const old = before.get(m.scope);
+    const match = old && after.find((r) => r.cat === old.cat && r.name === old.name);
+    if (match) d.run(`UPDATE deck_category_marks SET scope = ? WHERE listId = ? AND key = ? AND mark = 'from'`, [match.id, toId, m.key]);
+    else d.run(`DELETE FROM deck_category_marks WHERE listId = ? AND key = ? AND mark = 'from'`, [toId, m.key]);
+  }
 }
 
 /** The plan's own table, with the columns the new Plan tab keeps (lib/plan-help.ts reads them). */

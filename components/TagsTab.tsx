@@ -95,7 +95,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   const aiOpen = !!fold.ai;
   const s1 = v.step1;
   // The jobs suggestion shows in the Jobs section, so it is not counted here.
-  const step1Open = s1.open - (s1.jobs ? 1 : 0);
+  const step1Open = s1.open - (s1.jobs && !s1.jobs.skipped ? 1 : 0);
   const visibleTags = more ? [...s1.tags, ...s1.more] : s1.tags;
   const acceptShown = visibleTags.map((t) => t.key);
   const comboCount = s1.combos.length;
@@ -125,19 +125,37 @@ export default function TagsTab({ listId, version, onTab }: Props) {
               <button key={c.id} type="button" aria-expanded={job === c.id} onClick={() => setJob(job === c.id ? null : c.id)}
                 className={`flex min-h-14 flex-col justify-center rounded-xl border px-3 py-1.5 text-left hover:bg-[var(--surface-hover)] ${job === c.id ? 'border-[#d6aa2e] bg-[#1f1a10]' : 'border-[var(--border)] bg-[var(--background)]'}`}>
                 <b className="text-sm">{c.name}</b>
-                <span className="text-[13px] tabular-nums text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>
+                {(() => {
+                  // The same number and aim the Cards tab shows; the card list (and its count) is in the opened job.
+                  const n = c.jobId ? v.jobNumbers[c.jobId] : undefined;
+                  if (!n) return <span className="text-[13px] tabular-nums text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>;
+                  return (
+                    <span className="text-[13px] tabular-nums">
+                      <b className={`font-semibold ${n.warn ? 'text-amber-300' : 'text-[var(--foreground)]'}`}>{n.count}</b>
+                      {n.range && <span className="text-[var(--muted)]"> aim {n.range[0]}–{n.range[1]}</span>}
+                    </span>
+                  );
+                })()}
               </button>
             ))}
           </div>
-        ) : s1.jobs ? (
+        ) : s1.jobs && !s1.jobs.skipped ? (
           <SugRow title={s1.jobs.all ? 'Count the six jobs most decks track' : 'Jobs not on this deck'} meta={s1.jobs.missing.map((j) => j.label).join(' · ')}
             why="Each is counted and checked against a usual range once accepted. Remove any you do not want afterwards." busy={busy}
             onAccept={() => act({ action: 'accept', keys: ['jobs'] })} onSkip={() => act({ action: 'skip', key: 'jobs' })} />
-        ) : <p className="text-sm text-[var(--muted)]">No jobs counted on this deck.</p>}
-        {jobs.length > 0 && s1.jobs && !s1.jobs.all && (
+        ) : null}
+        {s1.jobs && (jobs.length > 0 && !s1.jobs.skipped ? (
           <SugRow title="Jobs not on this deck" meta={s1.jobs.missing.map((j) => j.label).join(' · ')} busy={busy}
             onAccept={() => act({ action: 'accept', keys: ['jobs'] })} onSkip={() => act({ action: 'skip', key: 'jobs' })} />
-        )}
+        ) : s1.jobs.skipped && (
+          // Skipped: no longer a suggestion, but the jobs can always be added from here.
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[var(--border)] pt-2 text-sm">
+            <span className="min-w-0 flex-[1_1_16rem] text-[var(--muted)]">{jobs.length ? `Not counted: ${s1.jobs.missing.map((j) => j.label).join(', ')}.` : 'No jobs counted on this deck.'}</span>
+            <button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'accept', keys: ['jobs'] })}>
+              {s1.jobs.all ? 'Count the six jobs' : s1.jobs.missing.length === 1 ? `Count ${s1.jobs.missing[0].label}` : `Count these ${s1.jobs.missing.length}`}
+            </button>
+          </div>
+        ))}
         {openJob && <CatRow c={openJob} all={v.categories} names={v.cardNames} open onToggle={() => setJob(null)} filter={[]} act={act} takeOut={takeOut} />}
       </section>
 
@@ -154,7 +172,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
             <button type="submit" className={C.btn} disabled={busy || !catName.trim()}>Add</button>
           </form>
         )}
-        {groups.length >= 6 && (allGroups || filter.length > 0 || groups.length <= FIRST) && (
+        {groups.length >= 6 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-[var(--muted)]">Filter by card</span>
             {filter.map((n) => <CardChip key={n} name={n} label={`Stop filtering by ${n}`} onRemove={() => setFilter(filter.filter((x) => x !== n))} />)}
@@ -243,7 +261,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
           {!aiOpen && (
             <button type="button" aria-expanded={false} data-section="✦ Refine with AI" onClick={() => setFold({ ...fold, ai: true })}
               className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-[#a98bd0] bg-[#1c1723] px-4 text-left hover:brightness-125">
-              <span><b className={C.ai}>✦ Refine with AI</b> <span className="text-[var(--muted)]">· optional{!v.confirmed ? ', after the plan is confirmed' : ''}</span></span>
+              <span><b className={C.ai}>✦ Refine with AI</b> <span className="text-[var(--muted)]">· optional</span></span>
               <span aria-hidden className={C.ai}>▸</span>
             </button>
           )}
@@ -251,7 +269,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <span className="text-sm text-[var(--muted)]">{v.confirmed ? 'Tags are optional. Tune is open either way.' : 'Tune opens once the plan is confirmed.'}</span>
+        <span className="text-sm text-[var(--muted)]">{v.confirmed ? 'Tags are optional. Tune is open either way.' : 'Tags are optional.'}</span>
         <button type="button" className={C.go} onClick={() => onTab(v.confirmed ? 'tune' : 'plan')}>{v.confirmed ? 'Next: Tune' : 'Back to Plan'}</button>
       </div>
       {undoBar}

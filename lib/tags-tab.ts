@@ -30,7 +30,7 @@ import {
 import { cardsInList, database, type List } from './db';
 import { deckContext } from './deck-context';
 import { deckHash } from './deck-hash';
-import { jobCards } from './deck-roles';
+import { deckRolesKnown, jobCards } from './deck-roles';
 import { primaryType } from './deckview';
 import { latestJob } from './jobs';
 import { planFacts } from './plan-facts';
@@ -279,10 +279,17 @@ function aiRows(listId: string, run: Run | null, cats: Category[], deck: ReturnT
 
 export async function tagsTab(list: Pick<List, 'id' | 'commander'>, profileId?: string): Promise<TagsView> {
   const deck = deckOf(list);
-  const cats = await categories(list, jobCards);
+  // Counted once: the jobs' cards for the categories and their numbers for the tiles.
+  const counts = await deckRolesKnown(list.id, deck.main).catch(() => []);
+  const cats = await categories(list, async () => new Map(counts.map((r) => [r.id, r.cards])));
+  const size = deck.main.reduce((n, c) => n + c.quantity, 0) + deck.commanders.length;
+  const jobNumbers = Object.fromEntries(SIX_JOBS.map((j) => {
+    const r = counts.find((x) => x.id === j.id);
+    return [j.id, { count: r?.count ?? 0, range: r?.target ?? null, warn: j.id === 'draw' && (r?.count ?? 0) === 0 && size >= 90 }];
+  }));
   const skip = skippedKeys(list.id, 'cards');
   const s1 = await fromCards(list, cats, deck);
-  const jobsRow = s1.missing.length && !skip.has('jobs') ? { key: 'jobs' as const, all: s1.missing.length === SIX_JOBS.length, missing: s1.missing.map((j) => ({ id: j.id, label: j.label })) } : null;
+  const jobsRow = s1.missing.length ? { key: 'jobs' as const, all: s1.missing.length === SIX_JOBS.length, skipped: skip.has('jobs'), missing: s1.missing.map((j) => ({ id: j.id, label: j.label })) } : null;
   const visible = s1.visible.filter((t) => !skip.has(t.key));
   const more = s1.more.filter((t) => !skip.has(t.key));
   const combos = s1.comboRows.filter((c) => !skip.has(c.key));
@@ -294,10 +301,11 @@ export async function tagsTab(list: Pick<List, 'id' | 'commander'>, profileId?: 
     ? { id: job.id, status: job.status, progress: job.detail || null, error: job.status === 'failed' ? job.error ?? 'The AI read failed' : null } : null;
   const view: TagsView = {
     categories: cats,
+    jobNumbers,
     cardNames: [...new Set([...deck.commanders, ...deck.main.map((c) => c.card.name)])].sort(),
     confirmed: isConfirmed(list.id),
     hasKey: !!process.env.ANTHROPIC_API_KEY,
-    step1: { jobs: jobsRow, tags: visible, more, combos, comboKeys, open: (jobsRow ? 1 : 0) + visible.length, comboCount: s1.combos.length },
+    step1: { jobs: jobsRow, tags: visible, more, combos, comboKeys, open: (jobsRow && !jobsRow.skipped ? 1 : 0) + visible.length, comboCount: s1.combos.length },
     ai: { ran: !!run, at: run?.at ?? null, notes: run?.output.notes ?? '', rows, job: running },
   };
   if (profileId) quietly(() => logShown(profileId, list.id, 'tags:', [
@@ -348,9 +356,13 @@ export async function tagsAct(list: Pick<List, 'id' | 'commander'>, _profileId: 
       if (!mergeCategory(id, from, str(b.into))) throw new TagsRefused('Those two can’t be merged');
       return;
     }
-    case 'edit':
+    case 'edit': {
+      const rename = typeof b.name === 'string' ? b.name.trim() : '';
+      const same = rename ? cats.find((c) => c.id !== str(b.id) && low(c.name) === low(rename)) : undefined;
+      if (same) throw new TagsRefused(`${same.name} is already on this deck. Open it to add cards.`);
       if (!editCategory(id, str(b.id), { name: typeof b.name === 'string' ? b.name : undefined, how: typeof b.how === 'string' ? b.how : undefined })) throw new TagsRefused('That category is not on this deck', 404);
       return;
+    }
     case 'skip': {
       const key = str(b.key);
       markSkipped(id, key.startsWith('ai:') ? 'ai' : 'cards', key, b.on !== false);

@@ -101,4 +101,5 @@ export type PlanAction =
   | { action: 'acceptAll' } | { action: 'skipAll' }
   | { action: 'answer'; id: string; text?: string; skip?: boolean }
   | { action: 'run' }
+  | { action: 'answerToNotes'; id: string; text: string }
   | { action: 'confirm' };
