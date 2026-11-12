@@ -288,8 +288,9 @@ async function gather(list: List): Promise<{ input: HelpInput; md: string }> {
 
 /**
  * Ask the helper, store what it suggested, and open it on the page. A new
- * run un-confirms the plan, brings back what was skipped last time and
- * starts the questions afresh; what was accepted stays.
+ * run brings back what was skipped last time and starts the questions
+ * afresh; what was accepted stays. A confirmed plan stays confirmed (Tune
+ * stays open): nothing AI returns is part of the plan until it is accepted.
  */
 export async function runHelp(model: JsonModel, list: List, profileId: string | null, progress: (s: string) => void = () => {}): Promise<Help> {
   progress('Gathering the deck’s facts');
@@ -306,7 +307,7 @@ export async function runHelp(model: JsonModel, list: List, profileId: string | 
   db().run('INSERT INTO plan_helps (id, listId, profileId, at, model, promptVersion, deckHash, commanderName, input, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [help.id, list.id, profileId, help.at, help.model, PROMPT_VERSIONS.planHelp, deckHash(list.commander, main), list.commander?.name ?? null, JSON.stringify(input), JSON.stringify(output)]);
   clearSkips(list.id, 'plan');
-  update(list.id, (o) => { o.confirmedAt = null; o.drafts = null; o.helpDone = null; });
+  update(list.id, (o) => { o.drafts = null; o.helpDone = null; });
   if (profileId) quietly(() => { for (const q of output.questions) logConversation(profileId, list.id, 'plan', 'question_asked', q.text, PROMPT_VERSIONS.planHelp); });
   return help;
 }
@@ -397,6 +398,7 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
     hasKey: !!process.env.ANTHROPIC_API_KEY,
     cost: helpCost(),
     categoryCount: cats.filter((c) => c.kind !== 'key' || c.cards.length).length,
+    jobs: cats.filter((c) => c.kind === 'job').map((c) => c.name),
     generatedAccepted: cats.some((c) => (c.kind === 'tag' || c.kind === 'own' || c.kind === 'job') && c.by !== 'owner'),
   };
   if (profileId && help) quietly(() => logShown(profileId, list.id, 'plan:help', [{

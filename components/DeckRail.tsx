@@ -145,7 +145,6 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
           ))}
           {footer && (
             <div className="hidden flex-col gap-1.5 border-t border-[var(--border)] px-2.5 pt-2 lg:flex">
-              <span className={`text-[13px] font-semibold ${footer === 'yes' ? 'text-emerald-300' : 'text-[#e8c558]'}`}>{footer === 'yes' ? 'Confirmed · Tune is open' : 'Not confirmed · Tune is locked'}</span>
               <span className="whitespace-normal text-xs text-[var(--muted)]"><span className="text-[#e8c558]">Gold</span> is yours · <span className="text-[#c3a6e6]">violet ✦</span> is AI · <span className="text-[#8cc0ee]">blue</span> is from the cards</span>
             </div>
           )}

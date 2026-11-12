@@ -1,17 +1,17 @@
 'use client';
 
 /**
- * The Tags tab: "On this deck" (every category: jobs, tags from the card
- * data, ways to win, key cards, the owner's own and AI's), then
- * "1 · From your cards" (no AI, shown as soon as the tab opens) and
- * "2 · Refine with AI" (optional, after the plan is confirmed). A deck starts
- * with nothing on it; nothing is added until the owner accepts it.
+ * The Tags tab: the jobs the app counts (tiles with their counts), then
+ * "Your groups" (ways to win, key cards, the owner's own, AI's and tags from
+ * the card data, each marked with who added it), then two folded rows:
+ * "More from your cards" (no AI) and "Refine with AI" (optional, after the
+ * plan is confirmed). Nothing is added until the owner accepts it.
  * lib/tags-tab.ts holds the rules.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { C, CardChip, CardPick, MARK, PlanStatusLine, RemoveButton, usePlanState, useUndo } from './PlanTab';
+import { C, CardChip, CardPick, MARK, RemoveButton, useUndo } from './PlanTab';
 import Tip from './Tip';
 import * as api from '@/lib/api';
 import type { Category } from '@/lib/categories-shared';
@@ -44,9 +44,13 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   const [more, setMore] = useState(false);
   const [filter, setFilter] = useState<string[]>([]);
   const [filterText, setFilterText] = useState('');
-  const [sort, setSort] = useState<'az' | 'size'>('az');
+  const [sort, setSort] = useState<'plan' | 'az' | 'size'>('plan');
   const [catName, setCatName] = useState('');
-  const plan = usePlanState(listId, version);
+  const [adding, setAdding] = useState(false);
+  const [allGroups, setAllGroups] = useState(false);
+  const [job, setJob] = useState<string | null>(null);
+  // The two optional parts sit folded; a deck with nothing on it opens "More from your cards".
+  const [fold, setFold] = useState<{ cards?: boolean; ai?: boolean }>({});
 
   const load = useCallback(() => api.tagsTab(listId).then(setV).catch((e) => setError(e instanceof Error ? e.message : 'Could not read the tags')), [listId]);
   useEffect(() => { void load(); }, [load, version]);
@@ -66,7 +70,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
     setPending((n) => n + 1);
     queue.current = queue.current.then(async () => {
       setError(null);
-      try { setV(await api.tagsTabAct(listId, a)); void plan.load(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not save that'); }
+      try { setV(await api.tagsTabAct(listId, a)); } catch (e) { setError(e instanceof Error ? e.message : 'Could not save that'); }
     }).finally(() => { inFlight.current.delete(key); setPending((n) => n - 1); });
   };
   const takeOut = (c: Category, x: { name: string; by: string }) => {
@@ -76,19 +80,31 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
   const shown = v.categories.filter((c) => c.kind !== 'key' || c.cards.length);
-  const filtered = shown.filter((c) => !filter.length || c.cards.some((x) => filter.includes(x.name)))
-    .sort((a, b) => (sort === 'size' ? b.cards.length - a.cards.length : 0) || a.name.localeCompare(b.name));
+  const jobs = shown.filter((c) => c.kind === 'job');
+  const groups = shown.filter((c) => c.kind !== 'job');
+  const order = (c: Category) => (c.kind === 'win' ? 0 : c.kind === 'key' ? 1 : c.kind === 'own' && c.by === 'owner' ? 2 : c.kind === 'own' ? 3 : 4);
+  const filtered = groups.filter((c) => !filter.length || c.cards.some((x) => filter.includes(x.name)))
+    .sort((a, b) => (sort === 'size' ? b.cards.length - a.cards.length : sort === 'plan' ? order(a) - order(b) : 0) || a.name.localeCompare(b.name));
+  const FIRST = 8;
+  const listed = allGroups || filter.length ? filtered : filtered.slice(0, FIRST);
+  const openJob = jobs.find((c) => c.id === job) ?? null;
+  // Opened by the page (nothing from the cards or of the owner's on the deck yet, or AI rows waiting) means it stays open until the owner folds it.
+  if (fold.cards === undefined && !shown.some((c) => c.kind === 'job' || c.kind === 'tag' || c.kind === 'own')) setFold((f) => ({ ...f, cards: true }));
+  if (fold.ai === undefined && (v.ai.rows.length > 0 || running)) setFold((f) => ({ ...f, ai: true }));
+  const cardsOpen = !!fold.cards;
+  const aiOpen = !!fold.ai;
   const s1 = v.step1;
-  const step1Open = s1.open;
+  // The jobs suggestion shows in the Jobs section, so it is not counted here.
+  const step1Open = s1.open - (s1.jobs ? 1 : 0);
   const visibleTags = more ? [...s1.tags, ...s1.more] : s1.tags;
-  const acceptShown = [...(s1.jobs ? [s1.jobs.key] : []), ...visibleTags.map((t) => t.key)];
+  const acceptShown = visibleTags.map((t) => t.key);
   const comboCount = s1.combos.length;
   const keyCount = s1.comboKeys.length;
   const combosLabel = [comboCount ? `${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} found in the deck` : '', keyCount ? `${keyCount} key ${keyCount === 1 ? 'card' : 'cards'} several combos share` : ''].filter(Boolean).join(', and ');
   const aiOff = !v.hasKey || !v.confirmed || running || pending > 0;
   const aiNote = !v.hasKey ? 'Needs a Claude key on the server. Step 1 works without one.'
     : !v.confirmed ? 'AI reads your confirmed plan, so confirm the plan first.'
-      : step1Open > 0 ? `Best after step 1: AI works with what is on the deck. ${step1Open} still to look at there.` : 'Step 1 is done, so AI has your choices to work with.';
+      : step1Open > 0 ? `Best after “More from your cards”: AI works with what is on the deck. ${step1Open} still to look at there.` : 'AI has your choices to work with.';
   const pickFilter = (text: string) => {
     const hit = v.cardNames.find((n) => n.toLowerCase() === text.trim().toLowerCase());
     if (hit) { if (!filter.includes(hit)) setFilter([...filter, hit]); setFilterText(''); } else setFilterText(text);
@@ -96,57 +112,87 @@ export default function TagsTab({ listId, version, onTab }: Props) {
 
   return (
     <div className="mt-4 flex flex-col gap-4 pb-4">
-      <PlanStatusLine state={plan.state} />
-      <p className="text-[var(--muted)]">{shown.length
-        ? 'Groups of cards on this deck: jobs the app counts, tags from the card data, your ways to win and key cards, and your own groups. A card can be in several. Open any row to see its cards, take one out, or add one. Tags are optional: Tune works without them.'
-        : 'Nothing is tagged on this deck yet. Accept only what fits it from the suggestions below, or name your own. Tags are optional: Tune works without them.'}</p>
+      <p className="flex flex-wrap items-center gap-2 text-[var(--muted)]">{shown.length ? 'Groups of cards in this deck. Optional: Tune works without them.' : 'Nothing is grouped on this deck yet. Optional: Tune works without it.'}
+        <Tip label="About this tab">Jobs are counted and checked against a usual range. Your groups are ways to win, key cards, groups you or AI named, and tags from the card data. A card can be in several. Open any one to see its cards, take one out, or add one.</Tip></p>
       {error && <p role="alert" className="rounded-xl border border-red-400/40 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
-      <section data-tour="tags-on-deck" data-section="On this deck" data-section-count={String(shown.length)} className={`${C.sec} flex flex-col gap-2`}>
-        <H2 extra={shown.length ? `${shown.length} ${shown.length === 1 ? 'category' : 'categories'}` : 'nothing yet'}>On this deck</H2>
-        {shown.length >= 6 && (
+      <section data-tour="tags-on-deck" data-section="Jobs" data-section-count={String(jobs.length)} className={`${C.sec} flex flex-col gap-3`}>
+        <h2 className="flex flex-wrap items-center gap-2 font-display text-[19px] font-bold">Jobs the app counts
+          <Tip label="About jobs">Ramp, card draw, interaction, board wipes, protection and finishers: counted from the card data and checked against a usual range for the deck. Open one to see its cards, add one, or stop counting it.</Tip></h2>
+        {jobs.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {jobs.map((c) => (
+              <button key={c.id} type="button" aria-expanded={job === c.id} onClick={() => setJob(job === c.id ? null : c.id)}
+                className={`flex min-h-14 flex-col justify-center rounded-xl border px-3 py-1.5 text-left hover:bg-[var(--surface-hover)] ${job === c.id ? 'border-[#d6aa2e] bg-[#1f1a10]' : 'border-[var(--border)] bg-[var(--background)]'}`}>
+                <b className="text-sm">{c.name}</b>
+                <span className="text-[13px] tabular-nums text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>
+              </button>
+            ))}
+          </div>
+        ) : s1.jobs ? (
+          <SugRow title={s1.jobs.all ? 'Count the six jobs most decks track' : 'Jobs not on this deck'} meta={s1.jobs.missing.map((j) => j.label).join(' · ')}
+            why="Each is counted and checked against a usual range once accepted. Remove any you do not want afterwards." busy={busy}
+            onAccept={() => act({ action: 'accept', keys: ['jobs'] })} onSkip={() => act({ action: 'skip', key: 'jobs' })} />
+        ) : <p className="text-sm text-[var(--muted)]">No jobs counted on this deck.</p>}
+        {jobs.length > 0 && s1.jobs && !s1.jobs.all && (
+          <SugRow title="Jobs not on this deck" meta={s1.jobs.missing.map((j) => j.label).join(' · ')} busy={busy}
+            onAccept={() => act({ action: 'accept', keys: ['jobs'] })} onSkip={() => act({ action: 'skip', key: 'jobs' })} />
+        )}
+        {openJob && <CatRow c={openJob} all={v.categories} names={v.cardNames} open onToggle={() => setJob(null)} filter={[]} act={act} takeOut={takeOut} />}
+      </section>
+
+      <section data-section="Your groups" data-section-count={String(groups.length)} className={`${C.sec} flex flex-col gap-2`}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h2 className="font-display text-[19px] font-bold">Your groups</h2>
+          <span className="text-[13px] tabular-nums text-[var(--muted)]">{groups.length || 'none yet'}</span>
+          <span className="ml-auto" />
+          <button type="button" className={C.btn} aria-expanded={adding} onClick={() => setAdding(!adding)}>+ New group</button>
+        </div>
+        {adding && (
+          <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (catName.trim()) { void act({ action: 'add', name: catName.trim() }); setCatName(''); setAdding(false); } }}>
+            <input autoFocus aria-label="Name a new group" value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="e.g. Pet cards" className={`${C.input} flex-[1_1_14rem]`} />
+            <button type="submit" className={C.btn} disabled={busy || !catName.trim()}>Add</button>
+          </form>
+        )}
+        {groups.length >= 6 && (allGroups || filter.length > 0 || groups.length <= FIRST) && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm text-[var(--muted)]">Filter by card</span>
             {filter.map((n) => <CardChip key={n} name={n} label={`Stop filtering by ${n}`} onRemove={() => setFilter(filter.filter((x) => x !== n))} />)}
             <input list={`deck-cards-${listId}`} aria-label="Type a card name to filter by" value={filterText} onChange={(e) => pickFilter(e.target.value)} placeholder={filter.length ? 'Add another card…' : 'Type a card name…'} className={`${C.input} w-full flex-[1_1_12rem] sm:max-w-[18rem]`} />
             <datalist id={`deck-cards-${listId}`}>{v.cardNames.map((n) => <option key={n} value={n} />)}</datalist>
             {filter.length > 0 && <button type="button" className={C.btn} onClick={() => { setFilter([]); setFilterText(''); }}>Clear</button>}
-            {filter.length > 0 && <span className="flex-[1_1_8rem] text-[13px] text-[var(--muted)]">Showing {filtered.length} of {shown.length} {filter.length > 1 ? 'that have at least one of these' : 'that have it'}</span>}
-            <span className="ml-auto flex items-center gap-2">
+            {filter.length > 0 && <span className="flex-[1_1_8rem] text-[13px] text-[var(--muted)]">Showing {filtered.length} of {groups.length} {filter.length > 1 ? 'that have at least one of these' : 'that have it'}</span>}
+            <span className="ml-auto flex flex-wrap items-center gap-2">
               <span className="text-sm text-[var(--muted)]">Sort</span>
-              {([['az', 'A to Z'], ['size', 'Most cards']] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={sort === k} onClick={() => setSort(k)} className={`${C.pill} ${sort === k ? C.on : C.off}`}>{l}</button>)}
+              {([['plan', 'Plan first'], ['az', 'A to Z'], ['size', 'Most cards']] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={sort === k} onClick={() => setSort(k)} className={`${C.pill} ${sort === k ? C.on : C.off}`}>{l}</button>)}
             </span>
           </div>
         )}
-        {!shown.length && <p className="text-sm text-[var(--muted)]">Nothing yet. Accept what fits from the suggestions below, or name a category of your own.</p>}
-        <div className="flex flex-col">
-          {filtered.map((c) => <CatRow key={c.id} c={c} all={v.categories} names={v.cardNames} open={!!open[`cat:${c.id}`]} onToggle={() => toggle(`cat:${c.id}`)} filter={filter} act={act} takeOut={takeOut} />)}
+        {!groups.length && <p className="text-sm text-[var(--muted)]">Nothing yet. Add a way to win on the Plan tab, accept something from your cards below, or name a group of your own.</p>}
+        <div className="grid gap-x-8 xl:grid-cols-2 xl:items-start">
+          {listed.map((c) => <CatRow key={c.id} c={c} all={v.categories} names={v.cardNames} open={!!open[`cat:${c.id}`]} onToggle={() => toggle(`cat:${c.id}`)} filter={filter} act={act} takeOut={takeOut} />)}
         </div>
-        <form className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-2.5" onSubmit={(e) => { e.preventDefault(); if (catName.trim()) { void act({ action: 'add', name: catName.trim() }); setCatName(''); } }}>
-          <input aria-label="Name a new category" value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Your own category, e.g. Pet cards" className={`${C.input} flex-[1_1_14rem]`} />
-          <button type="submit" className={C.btn} disabled={busy || !catName.trim()}>Add category</button>
-        </form>
+        {!filter.length && filtered.length > FIRST && (
+          <button type="button" aria-expanded={allGroups} onClick={() => setAllGroups(!allGroups)} className="flex min-h-11 items-center border-t border-[var(--border)] text-left text-sm font-semibold text-[#e8c558] hover:text-[#f3d77a]">
+            {allGroups ? 'Show fewer' : `Show all ${filtered.length} ›`}
+          </button>
+        )}
       </section>
 
-      <section id="t-cards" data-section="1 · From your cards" data-section-count={step1Open ? String(step1Open) : 'done'} className={`${C.sec} flex flex-col gap-2`}>
-        <H2 n={1} extra={step1Open ? `${step1Open} to look at` : 'done'}>From your cards</H2>
-        <p className="text-sm text-[var(--muted)]">Jobs and tags that come with the cards in this deck. No AI, and nothing is added until you accept it.</p>
-        {step1Open === 0 && <p className="flex flex-wrap gap-2 text-sm"><span className="font-semibold text-[#9bdcae]">Step 1 done.</span><span className="text-[var(--muted)]">Anything you skipped comes back if you refresh.</span></p>}
-        {(s1.jobs || visibleTags.length > 0 || s1.more.length > 0 || comboCount + keyCount > 0) && (
+      {cardsOpen && <section id="t-cards" data-section="More from your cards" data-section-count={step1Open ? String(step1Open) : 'done'} className={`${C.sec} flex flex-col gap-2`}>
+        <div className="flex items-start justify-between gap-2"><H2 extra={step1Open ? `${step1Open} to look at` : 'done'}>More from your cards</H2><button type="button" aria-expanded className={C.btn} onClick={() => setFold({ ...fold, cards: false })}>Fold</button></div>
+        <p className="text-sm text-[var(--muted)]">Groups that come with the cards in this deck. No AI, and nothing is added until you accept it.</p>
+        {step1Open === 0 && <p className="flex flex-wrap gap-2 text-sm"><span className="font-semibold text-[#9bdcae]">Nothing left to look at.</span><span className="text-[var(--muted)]">Anything you skipped comes back if you refresh.</span></p>}
+        {(visibleTags.length > 0 || s1.more.length > 0 || comboCount + keyCount > 0) && (
           <div className={`${C.cardsBox} flex flex-col gap-2`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className={`font-bold ${C.cards}`}>Suggested from your cards <Tip label="How these are found">Every tag the card data gives this deck’s non-land cards, kept when it is on two or more of them, is not trivia, and is at least three times more common here than across all cards. Ranked by how many cards have it and how unusual it is here; a tag that is nearly the same cards as a stronger one, or as one of the six jobs, is left out.</Tip></span>
               <span className="flex flex-wrap gap-2">
-                {s1.more.length > 0 && <button type="button" className={C.btn} aria-expanded={more} onClick={() => setMore(!more)}>{more ? 'Show only the top 5 tags' : `Show ${s1.more.length} more tags`}</button>}
+                {s1.more.length > 0 && <button type="button" className={C.btn} aria-expanded={more} onClick={() => setMore(!more)}>{more ? 'Show only the top 5' : `Show ${s1.more.length} more`}</button>}
                 {acceptShown.length > 1 && <button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'accept', keys: acceptShown })}>{s1.more.length && !more ? 'Accept all shown' : 'Accept all'}</button>}
               </span>
             </div>
             <p className="text-[13px] text-[var(--muted)]">Accepted tags stay live: a card you add later that has the tag joins by itself.</p>
-            {s1.jobs && (
-              <SugRow title={s1.jobs.all ? 'The six jobs most decks track' : 'Jobs not on this deck'} meta={s1.jobs.missing.map((j) => j.label).join(' · ')}
-                why="Each is counted and checked against a usual range once accepted. Remove any you do not want afterwards." busy={busy}
-                onAccept={() => act({ action: 'accept', keys: ['jobs'] })} onSkip={() => act({ action: 'skip', key: 'jobs' })} />
-            )}
             {visibleTags.map((t) => <TagSug key={t.key} t={t} open={!!open[`sug:${t.key}`]} onToggle={() => toggle(`sug:${t.key}`)} busy={busy} act={act} />)}
             {comboCount + keyCount > 0 && (
               <details className="border-t border-[var(--border)] pt-1">
@@ -159,11 +205,11 @@ export default function TagsTab({ listId, version, onTab }: Props) {
           </div>
         )}
         <div><button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'refresh' })}>Refresh</button></div>
-      </section>
+      </section>}
 
-      <section id="t-ai" data-section="2 · Refine with AI" className={`${C.sec} flex flex-col gap-2`}>
-        <H2 n={2} extra="optional">Refine with AI</H2>
-        <p className="text-sm text-[var(--muted)]">AI reads your confirmed plan and what you accepted in step 1. It first suggests cards to add to those or take out of them, and only then anything new the plan depends on. Tags help you read the deck. Tune’s ranking of cuts doesn’t use them; Tune’s AI reads them as a description of the deck, never as a reason to keep a card.</p>
+      {aiOpen && <section id="t-ai" data-section="✦ Refine with AI" className={`${C.sec} flex flex-col gap-2`}>
+        <div className="flex items-start justify-between gap-2"><H2 extra="optional">Refine with AI</H2><button type="button" aria-expanded className={C.btn} onClick={() => setFold({ ...fold, ai: false })}>Fold</button></div>
+        <p className="text-sm text-[var(--muted)]">AI suggests cards to add to your groups or take out of them, then anything new the plan depends on. Tune’s ranking of cuts doesn’t use groups; Tune’s AI reads them as a description of the deck, never as a reason to keep a card.</p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={step1Open === 0 ? C.aiBtn : C.btn} disabled={aiOff} onClick={() => act({ action: 'ai' })}>
             {running ? 'AI is reading the deck…' : `${v.ai.ran ? '✦ Ask AI again' : '✦ Refine with AI'} · Claude Opus`}
@@ -183,7 +229,26 @@ export default function TagsTab({ listId, version, onTab }: Props) {
             {v.ai.rows.map((r) => <AiSug key={r.key} r={r} busy={busy} act={act} />)}
           </div>
         )}
-      </section>
+      </section>}
+
+      {(!cardsOpen || !aiOpen) && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {!cardsOpen && (
+            <button type="button" aria-expanded={false} data-section="More from your cards" data-section-count={step1Open ? String(step1Open) : 'done'} onClick={() => setFold({ ...fold, cards: true })}
+              className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-[#8cc0ee]/70 bg-[#0f1a22] px-4 text-left hover:brightness-125">
+              <span><b className={C.cards}>More from your cards</b> <span className="text-[var(--muted)]">· {step1Open ? `${step1Open} ${step1Open === 1 ? 'suggestion' : 'suggestions'}` : 'nothing new'}</span></span>
+              <span aria-hidden className={C.cards}>▸</span>
+            </button>
+          )}
+          {!aiOpen && (
+            <button type="button" aria-expanded={false} data-section="✦ Refine with AI" onClick={() => setFold({ ...fold, ai: true })}
+              className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-[#a98bd0] bg-[#1c1723] px-4 text-left hover:brightness-125">
+              <span><b className={C.ai}>✦ Refine with AI</b> <span className="text-[var(--muted)]">· optional{!v.confirmed ? ', after the plan is confirmed' : ''}</span></span>
+              <span aria-hidden className={C.ai}>▸</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-end gap-3">
         <span className="text-sm text-[var(--muted)]">{v.confirmed ? 'Tags are optional. Tune is open either way.' : 'Tune opens once the plan is confirmed.'}</span>
@@ -233,7 +298,7 @@ function AiSug({ r, busy, act }: { r: AiRow; busy: boolean; act: (a: Record<stri
 
 const KIND: Record<Category['kind'], [string, string]> = {
   job: ['job · counted', 'text-emerald-300'],
-  tag: ['tag from the cards', C.cards],
+  tag: ['from the cards', C.cards],
   win: ['way to win', C.yours],
   key: ['key cards', C.yours],
   own: ['group', 'text-[var(--muted)]'],
@@ -242,20 +307,21 @@ const KIND: Record<Category['kind'], [string, string]> = {
 /** One category: a compact row that opens to its cards, a picker, rename, what was merged in, and Merge into. */
 function CatRow({ c, all, names, open, onToggle, filter, act, takeOut }: { c: Category; all: Category[]; names: string[]; open: boolean; onToggle: () => void; filter: string[]; act: (a: Record<string, unknown>) => void; takeOut: (c: Category, x: { name: string; by: string }) => void }) {
   const [edit, setEdit] = useState<{ name: string; how: string } | null>(null);
-  const who = c.by === 'cards' || c.kind === 'key' ? null : MARK[c.by];
+  // One label: what it is for ways to win and key cards, who added it for groups, blue for the card data.
+  const who = c.kind === 'own' ? MARK[c.by] : c.kind === 'win' && c.by === 'ai' ? MARK.ai : null;
   const has = filter.length ? c.cards.filter((x) => filter.includes(x.name)).map((x) => x.name) : [];
   // Jobs, ways to win and key cards are never merged away; anything can take another in.
   const mergeable = c.kind === 'own' || c.kind === 'tag';
   const targets = all.filter((x) => x.id !== c.id).sort((a, b) => a.name.localeCompare(b.name));
   const removeWhat = c.kind === 'job' ? 'Stop counting this job' : c.kind === 'key' ? 'Empty the key cards' : c.kind === 'win' ? 'Remove this way to win' : 'Remove this category';
-  const kind = KIND[c.kind];
+  const kind = c.kind === 'own' ? null : KIND[c.kind];
   return (
     <div className="flex items-start gap-1 border-t border-[var(--border)] py-1">
       <div className="min-w-0 flex-1">
         <button type="button" aria-expanded={open} onClick={onToggle} className="flex min-h-11 w-full flex-wrap items-center gap-x-2 text-left">
           <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span>
           <b className="min-w-0 break-words">{c.name}</b>
-          <span className={`text-[11px] font-bold ${kind[1]}`}>{kind[0]}</span>
+          {kind && <span className={`text-[11px] font-bold ${kind[1]}`}>{kind[0]}</span>}
           <span className="text-[13px] text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>
           {who && <span className={`text-[11px] font-bold ${who[1]}`}>{who[0]}</span>}
           {has.length > 0 && <span className={`text-[11px] font-bold ${C.yours}`}>has {has.join(', ')}</span>}

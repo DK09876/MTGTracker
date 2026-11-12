@@ -77,6 +77,8 @@ export interface PlanState {
   cost: number | null;
   /** How many categories the deck has, for the line under the tabs. */
   categoryCount: number;
+  /** The jobs counted on this deck, for Tune's summary before confirming. */
+  jobs: string[];
   /** Whether any generated tag has been accepted (Tune's nudge to the Tags tab). */
   generatedAccepted: boolean;
 }

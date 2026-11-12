@@ -118,18 +118,6 @@ function Suggested({ title = '✦ Suggested', children, onAccept, onSkip, note }
   );
 }
 
-/** One line under the deck's tabs: whether the plan is confirmed, and how many categories the deck has. */
-export function PlanStatusLine({ state }: { state: Pick<PlanState, 'confirmed' | 'categoryCount'> | null }) {
-  if (!state) return null;
-  const n = state.categoryCount;
-  return (
-    <p data-plan-line className={`mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-[var(--surface)] px-4 py-3 text-sm ${state.confirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
-      <b>{state.confirmed ? 'Plan confirmed · Tune is open' : 'Plan not confirmed yet · Tune is locked'}</b>
-      <span className="text-[var(--muted)]">{n ? `${n} ${n === 1 ? 'category' : 'categories'} on this deck` : 'No tags or categories on this deck yet'}</span>
-    </p>
-  );
-}
-
 /** The Plan tab's state, loaded and kept fresh while an AI run is going. */
 export function usePlanState(listId: string, version: string) {
   const [state, setState] = useState<PlanState | null>(() => api.peek<PlanState>(api.planHelpPath(listId)) ?? null);
@@ -172,6 +160,8 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [typing, setTyping] = useState(false);
   const [seen, setSeen] = useState<PlanState | null>(null);
+  // Budget, cards and the deck rule sit folded in one line while they are at their defaults.
+  const [limitsOpen, setLimitsOpen] = useState(false);
 
   useEffect(() => { api.deckPlan(listId).then(setSettings).catch(() => {}); }, [listId, version]);
   // The boxes follow what is saved unless the owner is typing in them.
@@ -227,13 +217,24 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
     { id: 'p-four', label: '4 · The plan', status: step4 || openQ ? [step4 ? sug(step4) : '', openQ ? `${openQ} ${openQ === 1 ? 'question' : 'questions'}` : ''].filter(Boolean).join(' · ') : planEmpty ? 'not sure' : noText ? 'no “how it wins” yet' : 'set', tone: step4 || openQ ? C.ai : noText ? 'text-[var(--muted)]' : 'text-emerald-300' },
   ];
   const confirmed = !!s.confirmed;
+  const newTitle = confirmed ? '✦ New since you confirmed' : '✦ Suggested';
   // Questions count as answered as soon as something is typed, so Confirm is ready the moment the box loses focus.
   const openQNow = (h?.questions ?? []).filter((q) => !q.skipped && !(answers[q.id] ?? '').trim()).length;
   const left = openS + openQNow;
-  const confirmHead = confirmed ? 'Plan confirmed.' : left ? 'Not confirmed yet.' : 'Ready to confirm.';
-  const confirmNote = confirmed ? 'Tune is open. Tags are optional. You can still change anything here.'
-    : left ? `${[openS ? `Accept or skip ${sug(openS)}` : '', openQNow ? `${openS ? 'answer' : 'Answer'} or skip ${openQNow} ${openQNow === 1 ? 'question' : 'questions'}` : ''].filter(Boolean).join(', and ')} first.`
+  const leftWhat = [openS ? sug(openS) : '', openQNow ? `${openQNow} ${openQNow === 1 ? 'question' : 'questions'}` : ''].filter(Boolean).join(', ');
+  const confirmHead = confirmed ? (left ? 'Confirmed · Tune is open.' : 'Plan confirmed.') : left ? `${left} left:` : 'Ready to confirm.';
+  const confirmNote = confirmed ? (left ? `${left} new from AI (${leftWhat}); none apply until you accept them.` : 'Tune is open. Tags are optional. You can still change anything here.')
+    : left ? `${leftWhat}. Accept, answer or skip each, then confirm.`
       : 'You can confirm with anything left on Not sure. The more you leave open, the less Tune has to go on.';
+  const answeredUnsaved = confirmed && !left && (h?.questions ?? []).some((q) => !q.skipped && (answers[q.id] ?? '').trim());
+  /** Scroll to the next suggestion or question still waiting, below where the screen is now (or the first one). */
+  const nextSuggestion = () => {
+    const all = [...document.querySelectorAll<HTMLElement>('[data-suggestion]')].filter((el) => el.getClientRects().length);
+    const el = all.find((x) => x.getBoundingClientRect().top > 120) ?? all[0];
+    if (!el) return;
+    el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    el.querySelector<HTMLElement>('input, button')?.focus({ preventScroll: true });
+  };
   const cost = s.cost ? ` · about $${s.cost.toFixed(2)}` : '';
   const willSuggest = [
     ...(unsure ? ['a commander role, because yours is on Not sure'] : []),
@@ -245,6 +246,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
   const budget = settings?.parts.budget?.value as number | null | undefined;
   const own = settings?.parts.own?.value as boolean | undefined;
   const rule = settings?.parts.rule?.value as { text: string; filter: string } | undefined;
+  const limitsShown = limitsOpen || !!budget || !!own || !!rule?.text || !!rule?.filter;
   const planMark = !s.plan.text.trim() ? ['not sure yet', 'text-[var(--muted)]'] : s.plan.by === 'ai'
     ? [s.plan.direction ? '✦ AI direction, picked by you · edit to make it yours' : '✦ AI suggestion, accepted by you · edit to make it yours', C.ai] : ['yours', C.yours];
   const pickRole = (id: string) => {
@@ -267,8 +269,8 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
 
   return (
     <div className="mt-4 flex flex-col gap-4 pb-4">
-      <PlanStatusLine state={s} />
-      <p className="text-[var(--muted)]">This page is what you want the deck to be. Set what you know and leave the rest on Not sure. If you get stuck, AI can suggest the rest in step 4, and you accept or skip each suggestion. Everything in Tune works toward what you confirm here.</p>
+      <p className="flex flex-wrap items-center gap-2 text-[var(--muted)]">What you want this deck to be. Set what you know; leave the rest on Not sure.
+        <Tip label="About the Plan tab">If you get stuck, AI can suggest the rest in step 4, and you accept or skip each suggestion. Everything in Tune works toward what you confirm here.</Tip></p>
 
       {/* Phones: the steps at the top, not sticking (wide screens show them in the rail on the left). */}
       <nav aria-label="On this page" className="flex flex-col gap-0.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 lg:hidden">
@@ -279,8 +281,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             <span className={`text-xs font-semibold ${r.tone}`}>{r.status}</span>
           </button>
         ))}
-        <span className={`mt-1 border-t border-[var(--border)] px-2.5 pt-2 text-[13px] font-semibold ${confirmed ? 'text-emerald-300' : C.yours}`}>{confirmed ? 'Confirmed · Tune is open' : 'Not confirmed · Tune is locked'}</span>
-        <div className="px-2.5 pb-1">{legend}</div>
+        <div className="mt-1 border-t border-[var(--border)] px-2.5 pb-1 pt-2">{legend}</div>
       </nav>
       {/* Wide screens: the rail on the left reads these. */}
       <div hidden data-rail-footer data-confirmed={confirmed ? '1' : ''} />
@@ -300,7 +301,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           {s.commander.roles.map((id) => { const r = COMMANDER_ROLES.find((x) => x.id === id)!; return <p key={id}><b className="text-[var(--foreground)]">{id === 'unsure' ? 'Not sure' : r.label}:</b> {id === 'unsure' ? NOT_SURE_TIP : r.tip}</p>; })}
         </div>
         {h?.commander && (
-          <Suggested onAccept={() => act({ action: 'acceptCommander' })} onSkip={() => act({ action: 'skip', what: 'commander' })} note="Skipping leaves this on Not sure.">
+          <Suggested title={newTitle} onAccept={() => act({ action: 'acceptCommander' })} onSkip={() => act({ action: 'skip', what: 'commander' })} note="Skipping leaves this on Not sure.">
             <b>{h.commander.roles.map((id) => COMMANDER_ROLES.find((x) => x.id === id)?.label).join(', ')}</b>. {h.commander.why}
           </Suggested>
         )}
@@ -312,6 +313,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       <section id="p-settings" data-tour="plan-settings" data-section="2 · Your settings" data-section-state={rail[1].status} data-section-tone={rail[1].tone} className={`${C.sec} flex flex-col gap-3`}>
         <H2 n={2}>Your settings</H2>
         <Group>What you want</Group>
+        <div className="grid gap-3 xl:grid-cols-2 xl:items-start">
         <div className={`${C.box} flex flex-col gap-2`}>
           <h3 className="flex flex-wrap items-baseline gap-2 text-[15px] font-bold">What you want from this deck <span className="text-[13px] font-normal text-[var(--muted)]">pick any that fit, or none</span>
             <Tip label="About what you want">Every AI step reads this as the tie-breaker for what counts as on plan: cuts, swaps and ideas are judged against it.</Tip></h3>
@@ -332,25 +334,31 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </div>
           {s.bracket.value !== null && <p className="text-[13px] text-[var(--muted)]">{BRACKETS[s.bracket.value]}</p>}
           {h?.bracket && (
-            <Suggested onAccept={() => act({ action: 'acceptBracket' })} onSkip={() => act({ action: 'skip', what: 'bracket' })} note="Skipping leaves this on Not sure.">
+            <Suggested title={newTitle} onAccept={() => act({ action: 'acceptBracket' })} onSkip={() => act({ action: 'skip', what: 'bracket' })} note="Skipping leaves this on Not sure.">
               <b>Bracket {h.bracket.level}</b>. {h.bracket.why}
             </Suggested>
           )}
           {s.bracket.value !== null && s.bracket.by === 'ai' && <p className={`text-sm ${C.ai}`}>✦ AI suggestion, accepted by you. Pick another any time.</p>}
           {settings && s.bracket.value !== null && <GameChangerLine names={settings.gameChangers} bracket={s.bracket.value} />}
         </div>
+        </div>
         <Group>Limits <span className="font-normal normal-case tracking-normal">· what Tune has to stay inside</span></Group>
         <div className={`${C.box} flex flex-col gap-2`}>
           <h3 className="flex flex-wrap items-baseline gap-2 text-[15px] font-bold">Never cut
-            <Tip label="About never cut">The only thing that blocks a cut, checked by code before and after AI answers. Ways to win, key cards and tags never protect a card: owners cut those as often as any other.</Tip></h3>
-          <p className="text-[13px] text-[var(--muted)]">The only thing that blocks a cut. It starts with the commander alone. Add any card you want protected, and remove it again whenever you like.</p>
+            <Tip label="About never cut">The only thing that blocks a cut, checked by code before and after AI answers. It starts with the commander alone; add any card you want protected. Ways to win, key cards and tags never protect a card: owners cut those as often as any other.</Tip></h3>
           <div className="flex flex-wrap items-center gap-2">
             {s.neverCut.commanders.map((n) => <span key={n} className={`${C.chip} cursor-default`}>{n} <span className="text-[11px] font-bold text-[var(--muted)]">commander</span></span>)}
             {s.neverCut.cards.map((c) => <CardChip key={c.key} name={c.name} by="owner" label={`Remove ${c.name} from never cut`} onRemove={() => { void act({ action: 'neverCut', remove: c.name }); setUndo({ text: `${c.name} can be cut again.`, run: () => void act({ action: 'neverCut', add: c.name }) }); }} />)}
             <CardPick names={s.cardNames} label="Add a never-cut card" skip={[...s.neverCut.commanders, ...s.neverCut.cards.map((c) => c.name)]} onPick={(n) => act({ action: 'neverCut', add: n })} />
           </div>
         </div>
-        {settings && (
+        {settings && !limitsShown && (
+          <button type="button" aria-expanded={false} onClick={() => setLimitsOpen(true)} className={`${C.box} flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-left hover:bg-[var(--surface-hover)]`}>
+            <span className="text-[15px] font-bold">Budget · cards · deck rule</span>
+            <span className="font-semibold text-[#e8c558]">Any price · any card · no rule <span aria-hidden>›</span></span>
+          </button>
+        )}
+        {settings && limitsShown && (
           <div className={`${C.box} flex flex-col gap-3`}>
             <div className="flex flex-col gap-1.5">
               <span className="flex items-center gap-2 text-[15px] font-bold">Budget per card <Tip label="About the budget">Cards over this price aren’t suggested, unless you own them.</Tip></span>
@@ -374,8 +382,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
 
       {/* 3 */}
       <section id="p-notes" data-tour="plan-notes" data-section="3 · Your notes" data-section-state={rail[2].status} data-section-tone={rail[2].tone} className={`${C.sec} flex flex-col gap-3`}>
-        <H2 n={3}>Your notes</H2>
-        <p className="text-[13px] text-[var(--muted)]">Read word for word by every AI step. Your answers to AI’s questions are saved here when you confirm.</p>
+        <H2 n={3} tip="Read word for word by every AI step. Your answers to AI’s questions are saved here when you confirm.">Your notes</H2>
         {s.notes.map((n) => (
           <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#141210] px-3 py-1.5">
             {editing?.id === n.id ? (
@@ -396,12 +403,11 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
 
       {/* 4 */}
       <section id="p-four" data-tour="plan-read" data-section="4 · The plan" data-section-state={rail[3].status} data-section-tone={rail[3].tone} className={`${C.sec} flex flex-col gap-3 border-[#4a443b]`}>
-        <H2 n={4}>The plan</H2>
-        <p className="text-sm text-[var(--muted)]">Three parts: how the deck wins, its ways to win, and its key cards. You fill them in, and every item shows who added it. Suggestions drawn from the cards themselves, with no AI, are on the <button type="button" onClick={() => onTab('tags')} className="font-semibold text-[#d6aa2e] underline-offset-2 hover:underline">Tags tab</button>.</p>
+        <H2 n={4} tip="Three parts: how the deck wins, its ways to win, and its key cards. You fill them in, and every item shows who added it. Suggestions drawn from the cards themselves, with no AI, are on the Tags tab.">The plan</H2>
         <div className={`${C.aiBox} flex flex-col gap-2`}>
           <h3 className="flex flex-wrap items-baseline gap-2 text-[15px] font-bold">Stuck, or want a second look? <span className="text-[13px] font-normal text-[var(--muted)]">optional</span>
             <Tip label="What AI reads">AI reads the deck’s facts the app works out (every card with its rules text, the numbers, combos and bracket facts) and everything set on this page, including your notes word for word. One call to Claude Opus.</Tip></h3>
-          <p className="text-sm text-[var(--muted)]">AI reads the deck and what you’ve set on this page, then suggests what’s missing to finish it. It never changes what you set, and nothing is added until you accept it.</p>
+          <p className="text-sm text-[var(--muted)]">AI suggests what’s missing. It never changes what you set, and nothing is added until you accept it.</p>
           {!h && <div className="text-sm"><p>It would suggest:</p><ul className="ml-5 list-disc">{willSuggest.map((w) => <li key={w}>{w}</li>)}</ul></div>}
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={C.aiBtn} disabled={!s.hasKey || pending > 0 || running} onClick={() => act({ action: 'run' })}>
@@ -410,14 +416,14 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             {!s.hasKey && <span className="text-[13px] text-[var(--muted)]">Needs a Claude key on the server. Everything else on this page works without one.</span>}
             {running && <span role="status" className="text-[13px] text-[var(--muted)]">{s.job?.progress ?? 'Working…'} This takes about a minute.</span>}
             {s.job?.error && <span role="alert" className="text-[13px] text-red-300">{s.job.error}</span>}
-            {h && confirmed && <span className="text-[13px] text-[var(--muted)]">Asking again un-confirms the plan until you look at what comes back.</span>}
+            {h && confirmed && !running && <span className="text-[13px] text-[var(--muted)]">Your plan stays confirmed and Tune stays open: nothing new applies until you accept it.</span>}
           </div>
         </div>
 
         {h && (
           <div className={`${C.box} flex flex-col gap-2 border-[#a98bd0]`} role="status">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`font-bold ${C.ai}`}>✦ AI suggestions are ready</span>
+              <span className={`font-bold ${C.ai}`}>{confirmed && left ? `✦ New since you confirmed · ${left} to look at` : '✦ AI suggestions are ready'}</span>
               <span className={`rounded-lg px-2.5 py-0.5 text-xs font-bold ${h.state === 'focused' ? 'bg-[#1d3324] text-[#9bdcae]' : 'bg-[#3a3010] text-[#f0cf6a]'}`}>{h.state === 'focused' ? 'One clear plan' : h.state === 'unfocused' ? 'Competing plans' : 'No clear plan'}</span>
             </div>
             {h.summary && <p className="text-sm">{h.summary}</p>}
@@ -453,7 +459,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             <Suggested title="✦ Suggested · a fuller version, built on yours" onAccept={() => act({ action: 'acceptFuller' })} onSkip={() => act({ action: 'skip', what: 'fuller' })} note="Accepting replaces your text. Skipping keeps yours as it is.">{h.fuller}</Suggested>
           )}
           {h?.plan && (
-            <Suggested onAccept={() => act({ action: 'acceptPlan' })} onSkip={() => act({ action: 'skip', what: 'plan' })} note="Accepting puts it in the box, where you can edit it.">{h.plan}</Suggested>
+            <Suggested title={newTitle} onAccept={() => act({ action: 'acceptPlan' })} onSkip={() => act({ action: 'skip', what: 'plan' })} note="Accepting puts it in the box, where you can edit it.">{h.plan}</Suggested>
           )}
         </div>
 
@@ -467,7 +473,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </form>
           {h && h.wins.length > 0 && (
             <div className={`${C.aiBox} flex flex-col gap-2`} data-suggestion>
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>✦ Suggested ways to win</span>{h.wins.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · ways to win' : '✦ Suggested ways to win'}</span>{h.wins.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button>}</div>
               {h.wins.map((w) => (
                 <div key={w.name} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
                   <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]">{w.how}</p><p className="text-[13px] text-[var(--muted)]">{w.cards.join(', ')}</p></div>
@@ -488,7 +494,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </div>
           {h && h.keys.length > 0 && (
             <div className={`${C.aiBox} flex flex-col gap-2`} data-suggestion>
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>✦ Suggested key cards</span>{h.keys.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · key cards' : '✦ Suggested key cards'}</span>{h.keys.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button>}</div>
               {h.keys.map((k) => (
                 <div key={k.key} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
                   <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words">{k.name}</b>{k.why && <p className="text-sm text-[var(--muted)]">{k.why}</p>}</div>
@@ -503,7 +509,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           <div id="p-q" className={`${C.box} flex flex-col gap-2 border-[#a98bd0]`}>
             <h3 className="flex flex-wrap items-baseline gap-2 text-[15px] font-bold">✦ AI asks <span className="text-[13px] font-normal text-[var(--muted)]">answer in a line, or skip</span></h3>
             {h.questions.map((q) => (
-              <div key={q.id} className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-2.5">
+              <div key={q.id} className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-2.5" data-suggestion={!q.skipped && !(answers[q.id] ?? '').trim() ? '' : undefined}>
                 {q.about && <span className={`text-[11px] font-bold ${C.yours}`}>About something you set</span>}
                 <label htmlFor={q.id} className={`text-sm ${q.skipped ? 'line-through text-[var(--muted)]' : ''}`}>{q.text}</label>
                 <div className="flex flex-wrap gap-2">
@@ -522,12 +528,14 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       {/* Confirm: the row itself stays at the bottom of the screen. */}
       <div data-confirm-bar className={`sticky bottom-[calc(var(--nav-h)+4.75rem)] z-20 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border bg-[#1f1c18] px-3 py-2.5 shadow-[0_-10px_24px_rgba(0,0,0,0.55)] sm:px-4 sm:py-3 lg:bottom-3 ${confirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
         <span className="min-w-0 flex-[1_1_12rem] text-[13px] sm:text-sm"><b>{confirmHead}</b> <span className={`text-[var(--muted)] ${!left && !confirmed ? 'max-sm:hidden' : ''}`}>{confirmNote}</span></span>
-        <span className="flex w-full gap-2 sm:w-auto [&>button]:max-sm:flex-1 [&>button]:max-sm:px-2.5 [&>button]:max-sm:text-[13px]">
+        <span className="flex w-full gap-2 sm:w-auto [&>button]:max-sm:flex-auto [&>button]:max-sm:whitespace-nowrap [&>button]:max-sm:px-2.5 [&>button]:max-sm:text-[13px]">
           {/* Short labels on a phone, so the bar stays one row of buttons. */}
+          {left > 0 && <button type="button" className={C.aiBtn} aria-label="Next suggestion" onClick={nextSuggestion}>Next<span className="max-sm:hidden"> ✦</span> ↓</button>}
           {left > 0 && <button type="button" className={C.btn} aria-label="Skip the rest" onClick={() => act({ action: 'skipAll' })}>Skip<span className="max-sm:hidden"> the rest</span></button>}
           {s.bulk > 0 && <button type="button" className={C.aiBtn} aria-label={s.bulk === 1 ? 'Accept the 1 suggestion' : `Accept all ${s.bulk} suggestions`} onClick={() => act({ action: 'acceptAll' })}>✦ Accept<span className="max-sm:hidden"> {s.bulk === 1 ? 'the 1 suggestion' : 'all'}</span>{s.bulk > 1 ? ` ${s.bulk}` : ''}</button>}
           {!confirmed && <button type="button" className={C.go} aria-label="Confirm the plan" disabled={left > 0} onClick={() => act({ action: 'confirm' })}>Confirm<span className="max-sm:hidden"> the plan</span></button>}
-          {confirmed && <><button type="button" className={C.go} onClick={() => onTab('tune')}>Go to Tune</button><button type="button" className={C.btn} onClick={() => onTab('tags')}>Tags (optional)</button></>}
+          {answeredUnsaved && <button type="button" className={C.btn} onClick={() => act({ action: 'confirm' })}>Save answers<span className="max-sm:hidden"> to notes</span></button>}
+          {confirmed && <><button type="button" className={C.go} onClick={() => onTab('tune')}>Go to Tune</button>{!left && <button type="button" className={C.btn} onClick={() => onTab('tags')}>Tags (optional)</button>}</>}
         </span>
       </div>
       {undoBar}

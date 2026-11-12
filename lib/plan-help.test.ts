@@ -2,7 +2,7 @@
  * The Plan tab with a stand-in model (no paid call): AI fills only what the
  * owner left on Not sure, nothing is applied without a tap, accepted values
  * count as set, asking again brings back skips but not removed items, a new
- * run un-confirms, and confirm is refused with anything open. Ways to win
+ * run keeps a confirmed plan confirmed, and confirm is refused with anything open. Ways to win
  * and key cards are the Tags tab's records. Each test has its own database.
  */
 
@@ -110,7 +110,7 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     expect((await ph.planState(list)).plan.text).toBe('Swing with Azula.');
   });
 
-  it('accepting counts as set, asking again brings back skips but not what was removed, and a new run un-confirms', async () => {
+  it('accepting counts as set, asking again brings back skips but not what was removed, and a new run keeps the plan confirmed', async () => {
     const { list, c } = await deck();
     const ph = await import('./plan-help');
     const { model } = fakeModel(() => FULL);
@@ -146,7 +146,7 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     expect(again.asked[0].user).toContain('What the commander does for the deck: Multiplier');
     expect(again.asked[0].user).toContain('Questions the owner skipped before');
     s = await ph.planState(list);
-    expect(s.confirmed).toBeNull();
+    expect(s.confirmed).not.toBeNull();
     expect(s.help!.commander).toBeNull();
     expect(s.help!.bracket?.level).toBe(3);
     expect(s.help!.keys.map((k) => k.name)).not.toContain('Spell 3');

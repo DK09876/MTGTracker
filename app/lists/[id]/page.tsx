@@ -630,12 +630,13 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
       {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
       <div className="min-w-0">
-      {/* One line on every tab: where the deck stands against 100, and the step that comes next. */}
-      {deck && deckSize !== 100 && deckSize > 0 && (
-        <p data-tour="deck-state" className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] px-3.5 py-2 text-sm ${deckSize > 100 ? 'border-[#ffb4a8]/50' : 'border-[var(--border)]'}`}>
-          <b className="tabular-nums">{deckSize} of 100 cards</b>
-          <span className="min-w-0 flex-1 text-[var(--muted)]">{deckSize > 100 ? `${deckSize - 100} over. Trim comes next.` : `${100 - deckSize} short. Filling it comes next.`}</span>
-          {section !== 'tune' && section !== 'plan' && <button onClick={() => { setSection(planConfirmed ? 'tune' : 'plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-go rounded-full px-3.5 py-1 text-sm font-semibold">{!planConfirmed ? 'Confirm the plan first' : deckSize > 100 ? `Trim ${deckSize - 100}` : `Fill ${100 - deckSize}`}</button>}
+      {/* One line on every tab: where the deck stands against 100, whether Tune is open, and the step that comes next. */}
+      {deck && deckSize > 0 && (
+        <p data-tour="deck-state" data-plan-line className={`flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] py-1.5 pl-3.5 pr-1.5 text-sm ${planConfirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
+          <b className="tabular-nums">{deckSize} of 100{deckSize > 100 ? ` · ${deckSize - 100} over` : deckSize < 100 ? ` · ${100 - deckSize} short` : ''}</b>
+          <span className="min-w-0 flex-1 text-[var(--muted)]">{planConfirmed ? 'Tune is open.' : 'Tune is locked until you confirm the plan.'}</span>
+          {!planConfirmed && section !== 'plan' && section !== 'tune' && <button onClick={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">Confirm the plan</button>}
+          {planConfirmed && section !== 'tune' && deckSize !== 100 && <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">{deckSize > 100 ? `Trim ${deckSize - 100} in Tune` : `Fill ${100 - deckSize} in Tune`}</button>}
         </p>
       )}
       {deck && section === 'plan' ? (
@@ -650,7 +651,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       {deck && section === 'tags' ? (
         <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       ) : deck && section === 'tune' && !planConfirmed ? (
-        <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+        <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
         <>
           <TuneLead listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTags={() => { setSection('tags'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
