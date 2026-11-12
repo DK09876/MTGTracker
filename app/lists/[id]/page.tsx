@@ -660,7 +660,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             listId={id}
             version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
             sections={sections}
-            brief={tags?.brief ?? ''}
             tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
             onChanged={load}
             onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}

@@ -34,7 +34,6 @@ interface Props {
   /** Changes when the deck does, to read Tune again. */
   version: string;
   sections: DeckSection[];
-  brief: string;
   styleLabel?: string | null;
   tagNames: string[];
   /** After applying, the deck page reads the deck again. */
@@ -52,7 +51,7 @@ const remembered = (listId: string): Intent | null => {
   try { const v = sessionStorage.getItem(`mtg-tune:${listId}`); return INTENTS.some((i) => i.id === v) ? v as Intent : null; } catch { return null; }
 };
 
-export default function DeckTune({ listId, version, sections, brief, styleLabel, tagNames, onChanged, onTab, onAsk }: Props) {
+export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk }: Props) {
   const [intent, setIntent] = useState<Intent | null>(() => remembered(listId));
   const [symptom, setSymptom] = useState<Symptom>('gas');
   const [state, setState] = useState<api.TuneState | null>(null);
@@ -67,7 +66,8 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   const [instructions, setInstructions] = useState('');
   const [job, setJob] = useState<Job | null>(null);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
-  // How the deck wins, from the confirmed plan (the Plan tab), else the old brief.
+  // How the deck wins, from the Plan tab only. The old tag brief is not the plan: falling back to it
+  // showed a paragraph here while the Plan and the locked summary said "Not sure".
   const [planText, setPlanText] = useState<string | null>(null);
   useEffect(() => {
     let stop = false;
@@ -187,7 +187,7 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
 
   return (
     <div className="mt-5 flex flex-col gap-5" data-tour="tune">
-      <PlanLine data-tour="tune-plan" brief={planText ?? brief} note={styleLabel ?? undefined} action="Edit" onAction={() => onTab('plan')} />
+      <PlanLine data-tour="tune-plan" brief={planText ?? ''} note={styleLabel ?? undefined} action="Edit" onAction={() => onTab('plan')} />
 
       {/* The deck's next step leads; everything else Tune does sits beside it, out of the way. */}
       <div role="tablist" aria-label="What do you want to do?" data-tour="tune-intents" className="flex flex-wrap items-center gap-1.5">

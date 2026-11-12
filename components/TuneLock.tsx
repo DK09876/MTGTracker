@@ -44,7 +44,7 @@ export function TuneLocked({ listId, version, onPlan, onConfirmed }: { listId: s
           <Row k={`What ${s.commanderNames} does`}>{roles.length ? <>{roles.join(', ')}<Who by={s.commander.by} /></> : 'Not sure'}</Row>
           <Row k="Bracket">{s.bracket.value !== null ? <>Bracket {s.bracket.value}<Who by={s.bracket.by} /></> : 'Not sure'}</Row>
           <Row k="How it wins">{text ? <span className="line-clamp-2 text-left sm:text-right">{text}<Who by={s.plan.by} /></span> : 'Not sure'}</Row>
-          <Row k="Ways to win">{s.wins.length ? s.wins.map((w, i) => <span key={w.id}>{i ? ', ' : ''}{w.name}<Who by={w.by} /></span>) : 'None yet'}</Row>
+          <Row k="Ways to win">{s.wins.length ? s.wins.map((w, i) => <span key={w.id}>{i ? ', ' : ''}{w.name}<Who by={w.by} />{!w.cards.length && <span className="text-[var(--muted)]"> (no cards left)</span>}</span>) : 'None yet'}</Row>
           <Row k="Never cut">{[...s.neverCut.commanders.length ? [s.neverCut.commanders.length > 1 ? 'The commanders' : 'The commander'] : [], ...s.neverCut.cards.length ? [`${s.neverCut.cards.length} more ${s.neverCut.cards.length === 1 ? 'card' : 'cards'}`] : []].join(' and ') || 'Nothing'}</Row>
           <Row k="Jobs counted">{s.jobs.length === 6 ? 'All six' : s.jobs.length ? s.jobs.join(', ') : 'None'}</Row>
         </dl>
