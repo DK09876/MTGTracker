@@ -38,6 +38,8 @@ function open(): Database {
   if (db) return db;
   mkdirSync(dirname(DB_PATH), { recursive: true });
   db = new Database(DB_PATH);
+  // A database made just now has no older decks for the one-time reset (lib/deck-reset.ts) to clear.
+  const brandNew = !db.get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'lists'`);
   db.run(`
     CREATE TABLE IF NOT EXISTS lists (
       id TEXT PRIMARY KEY,
@@ -274,6 +276,7 @@ function open(): Database {
   `);
   // Settings: each profile's model per feature, the AI spending caps - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  if (brandNew) db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('decks.reset', ?)`, [`new database ${new Date().toISOString()}`]);
   // What each paid (Claude) request cost, by day, profile, model and feature -
   // see spend.ts. The app's own daily caps are checked against it.
   db.run(`
