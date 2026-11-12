@@ -4,7 +4,7 @@
  * Tune before and after the plan is confirmed. Before: a locked page that
  * says why and leads to the Plan tab (the plan can be confirmed with
  * everything on Not sure). After: one line above Tune while no generated tag
- * has been accepted, pointing to the Tags tab, and which model Tune runs on.
+ * has been accepted, pointing to the Tags tab.
  */
 
 import { C, PlanStatusLine, usePlanState } from './PlanTab';
@@ -34,7 +34,6 @@ export function TuneLead({ listId, version, onTags }: { listId: string; version:
           <button type="button" className={C.btn} onClick={onTags}>Generate tags</button>
         </div>
       )}
-      <p className="text-[13px] text-[var(--muted)]">Every AI step on the deck pages runs on Claude Opus. There is no cheaper model to pick.</p>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server';
 
 import { chatsFor, getChat } from '@/lib/deck-chat';
 import { ask, ChatError } from '@/lib/deck-chat-server';
-import { requireList, requirePlan } from '@/lib/profile-route';
+import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,8 +24,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const locked = requirePlan(id);
-  if (locked) return locked;
   const body = await request.json().catch(() => ({})) as { text?: string; chatId?: string };
   const text = (body.text ?? '').trim();
   if (!text) return NextResponse.json({ error: 'Ask something first' }, { status: 400 });

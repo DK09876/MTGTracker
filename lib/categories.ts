@@ -235,6 +235,22 @@ export function setCategoryCard(listId: string, catId: string, card: { key: stri
 }
 
 /**
+ * Undo taking a card out: it goes back the way it was. A card the card data
+ * put in a job or a tag goes back to being live; any other goes back with
+ * who added it. Not remembered as removed any more.
+ */
+export function restoreCard(listId: string, catId: string, card: { key: string; name: string }, by: AddedBy): boolean {
+  const r = rowOf(listId, catId);
+  if (!r) return false;
+  const d = db();
+  d.run(`DELETE FROM deck_category_marks WHERE listId = ? AND key = ? AND mark = 'gone'`, [listId, cardMark(identityOf(r), card.key)]);
+  const kind = kindOf(r);
+  if ((kind === 'job' || kind === 'tag') && by === 'cards') d.run('DELETE FROM deck_card_tags WHERE listId = ? AND cardKey = ? AND tagId = ?', [listId, card.key, catId]);
+  else putCard(listId, catId, card.key, card.name, by);
+  return true;
+}
+
+/**
  * Take a category off the deck. Key cards keep their slot (the Plan tab's
  * list) and only empty. A generated category the owner removes is not
  * suggested again; a job can be accepted again from the Tags tab.
@@ -266,13 +282,14 @@ export function editCategory(listId: string, catId: string, change: { name?: str
 /**
  * Merge one category into another: its cards move across (a tag's stay live,
  * by its tags joining the other's), what was merged is recorded, and the
- * source goes. A merged generated category is not suggested again. Key cards
- * can take cards in but are never merged away.
+ * source goes. A merged generated category is not suggested again. Jobs,
+ * ways to win and key cards can take cards in but are never merged away.
  */
 export function mergeCategory(listId: string, from: Category, intoId: string): boolean {
   const into = rowOf(listId, intoId);
   const src = rowOf(listId, from.id);
-  if (!into || !src || into.id === src.id || from.kind === 'key') return false;
+  // A job, a way to win or the key cards are never merged away: that would silently stop a job's counts and warnings, or take a way to win off the plan.
+  if (!into || !src || into.id === src.id || from.kind === 'key' || from.kind === 'job' || from.kind === 'win') return false;
   const d = db();
   const intoKind = kindOf(into);
   const intoSlugs = parse<string[]>(into.slugs, []);
@@ -291,7 +308,7 @@ export function mergeCategory(listId: string, from: Category, intoId: string): b
   d.run('UPDATE deck_tags SET madeOf = ? WHERE id = ?', [JSON.stringify([...new Set([...parse<string[]>(into.madeOf, []), from.name, ...from.madeOf])]), into.id]);
   d.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, from.id]);
   d.run('DELETE FROM deck_tags WHERE listId = ? AND id = ?', [listId, from.id]);
-  if (from.by !== 'owner' && from.kind !== 'job') markGone(listId, identityOf(src));
+  if (from.by !== 'owner') markGone(listId, identityOf(src));
   return true;
 }
 
@@ -321,7 +338,7 @@ export function copyCategoryMarks(fromId: string, toId: string): void {
 // --- the migration -------------------------------------------------------------------
 
 /** What the migration did to one deck, for the report and the tests. */
-export interface Migrated { listId: string; own: number; dropped: number; jobs: number; corrections: number; wins: number; keys: number; planText: boolean }
+export interface Migrated { listId: string; own: number; dropped: number; folded: number; jobs: number; corrections: number; wins: number; keys: number; planText: boolean }
 
 const OLD_ROLE: Record<string, string> = { Multiplier: 'multiplier', Enabler: 'enabler', 'Covers a weakness': 'counter-weight' };
 
@@ -337,27 +354,45 @@ const OLD_ROLE: Record<string, string> = { Multiplier: 'multiplier', Enabler: 'e
  */
 export function migrateAll(): Migrated[] {
   const d = database();
-  setSetting('categories.migrated', now());
-  const decks = d.all(`SELECT id FROM lists WHERE kind = 'deck'`) as Array<{ id: string }>;
+  // The first attempt's time: decks made after it are new decks, never migrated. A deck that fails is retried at the next start.
+  const started = getSetting('categories.migrating') ?? now();
+  setSetting('categories.migrating', started);
+  const decks = d.all(`SELECT id FROM lists WHERE kind = 'deck' AND createdAt <= ?`, [started]) as Array<{ id: string }>;
   const done: Migrated[] = [];
+  let failed = 0;
   for (const { id } of decks) {
+    if (d.get(`SELECT 1 FROM deck_category_marks WHERE listId = ? AND mark = 'migrated'`, [id])) continue;
     d.run('BEGIN');
     try {
       done.push(migrateDeck(id));
+      d.run(`INSERT OR IGNORE INTO deck_category_marks (listId, key, mark, scope, at) VALUES (?, 'migrated', 'migrated', '', ?)`, [id, now()]);
       d.run('COMMIT');
     } catch (e) {
       d.run('ROLLBACK');
+      failed++;
       console.error('[categories] migration failed for', id, e);
     }
   }
+  if (!failed) setSetting('categories.migrated', now());
   return done;
 }
+
+/** An old tag with the same meaning as one of the six jobs: folded into the job, so the deck has one "Ramp", not two. */
+const OLD_JOB_NAMES: Record<string, string> = {
+  ramp: 'ramp', 'mana ramp': 'ramp', mana: 'ramp', 'mana rocks': 'ramp',
+  draw: 'draw', 'card draw': 'draw', 'card advantage': 'draw',
+  removal: 'interaction', interaction: 'interaction', 'spot removal': 'interaction', 'targeted removal': 'interaction',
+  boardwipe: 'wipe', boardwipes: 'wipe', 'board wipe': 'wipe', 'board wipes': 'wipe', wipes: 'wipe', wipe: 'wipe', wraths: 'wipe', wrath: 'wipe', sweepers: 'wipe', 'mass removal': 'wipe',
+  protection: 'protection',
+  finishers: 'finishers', finisher: 'finishers', 'ways to finish': 'finishers', 'win cons': 'finishers', wincons: 'finishers', 'win conditions': 'finishers',
+};
+export const oldJobOf = (name: string): string | null => OLD_JOB_NAMES[name.trim().toLowerCase().replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim()] ?? null;
 
 const hasTable = (name: string) => !!database().get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, [name]);
 
 function migrateDeck(listId: string): Migrated {
   const d = database();
-  const m: Migrated = { listId, own: 0, dropped: 0, jobs: 0, corrections: 0, wins: 0, keys: 0, planText: false };
+  const m: Migrated = { listId, own: 0, dropped: 0, folded: 0, jobs: 0, corrections: 0, wins: 0, keys: 0, planText: false };
   // 1. The deck's own tags.
   const legacy = d.all(`SELECT id, name, status, origin FROM deck_tags WHERE listId = ? AND cat IS NULL`, [listId]) as Array<{ id: string; name: string; status: string; origin: string }>;
   for (const t of legacy) {
@@ -374,6 +409,22 @@ function migrateDeck(listId: string): Migrated {
   // 2. The six jobs, so the deck's counts and warnings carry on.
   const jobIds = new Map<string, string>();
   for (const j of SIX_JOBS) { jobIds.set(j.id, addCategory(listId, { kind: 'job', name: j.label, by: 'cards', jobId: j.id, how: j.how })); m.jobs++; }
+  // An old tag that means one of the jobs ("Ramp", "Boardwipe", "Draw") folds into it: its cards join the job with who added them.
+  for (const t of d.all(`SELECT id, name, addedBy FROM deck_tags WHERE listId = ? AND cat = 'own'`, [listId]) as Array<{ id: string; name: string; addedBy: string }>) {
+    const job = oldJobOf(t.name);
+    const catId = job ? jobIds.get(job) : undefined;
+    if (!catId) continue;
+    for (const x of d.all('SELECT cardKey, reason FROM deck_card_tags WHERE listId = ? AND tagId = ? AND isOn = 1', [listId, t.id]) as Array<{ cardKey: string; reason: string }>) {
+      d.run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, ?, ?, ?, 1, ?) ON CONFLICT(listId, cardKey, tagId) DO NOTHING`,
+        [listId, x.cardKey, catId, t.addedBy === 'ai' ? 'ai' : 'manual', x.reason]);
+    }
+    const into = d.get('SELECT madeOf FROM deck_tags WHERE id = ?', [catId]) as { madeOf: string };
+    d.run('UPDATE deck_tags SET madeOf = ? WHERE id = ?', [JSON.stringify([...new Set([...parse<string[]>(into.madeOf, []), t.name])]), catId]);
+    d.run('DELETE FROM deck_card_tags WHERE listId = ? AND tagId = ?', [listId, t.id]);
+    d.run('DELETE FROM deck_tags WHERE id = ?', [t.id]);
+    m.own--;
+    m.folded++;
+  }
   // 3. Per-deck role corrections, as cards added to or taken out of each job.
   if (hasTable('deck_role_overrides')) {
     const corrections = d.all('SELECT oracleId, role, has FROM deck_role_overrides WHERE listId = ?', [listId]) as Array<{ oracleId: string; role: string; has: number }>;
@@ -404,7 +455,8 @@ function migrateDeck(listId: string): Migrated {
   const parts = parse<{ key?: { v?: string[]; by?: string }; routes?: { custom?: Array<{ label: string; how: string; cards: string[] }>; by?: string }; role?: { v?: string } }>(plans?.parts, {});
   const wins: Array<{ name: string; how: string; cards: string[]; by: AddedBy }> = [
     ...(edits.winRoutes ? edits.winRoutes.map((r) => ({ name: r.name, how: '', cards: r.cards, by: 'owner' as AddedBy })) : (read.winRoutes ?? []).map((r) => ({ name: r.name, how: '', cards: r.cards, by: 'ai' as AddedBy }))),
-    ...(parts.routes?.custom ?? []).map((r) => ({ name: r.label, how: r.how ?? '', cards: r.cards ?? [], by: 'owner' as AddedBy })),
+    // Ways to win the old plan page saved: AI's when the old page says AI wrote them.
+    ...(parts.routes?.custom ?? []).map((r) => ({ name: r.label, how: r.how ?? '', cards: r.cards ?? [], by: (parts.routes?.by === 'claude' ? 'ai' : 'owner') as AddedBy })),
   ];
   for (const w of wins) {
     if (!w.name?.trim()) continue;

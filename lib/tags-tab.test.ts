@@ -115,6 +115,33 @@ describe('the Tags tab', { timeout: 30_000 }, () => {
     expect(v.ai.rows).toEqual([]);
   });
 
+  it('AI can add to a category the owner made, never take from it; a second category with a name already on the deck is refused; Undo puts a card back', async () => {
+    const list = await deck();
+    const t = await import('./tags-tab');
+    const ph = await import('./plan-help');
+    await t.tagsAct(list, 'dk', { action: 'add', name: 'Engines' });
+    await t.tagsAct(list, 'dk', { action: 'accept', keys: ['tag:magecraft'] });
+    await expect(t.tagsAct(list, 'dk', { action: 'add', name: 'magecraft' })).rejects.toThrow(/already on this deck/);
+    let v = await t.tagsTab(list);
+    const eng = v.categories.find((c) => c.name === 'Engines')!;
+    await t.tagsAct(list, 'dk', { action: 'card', id: eng.id, name: 'Spell 10', on: true });
+    await ph.act(list, 'dk', { action: 'confirm' });
+    const { model, asked } = fakeModel(() => ({ addTo: [{ category: 'Engines', card: 'Spell 11', why: 'Draws.' }], removeFrom: [{ category: 'Engines', card: 'Spell 10', why: 'No.' }], categories: [], notes: '' }));
+    await t.runTagsAi(model, list, 'dk');
+    // Every card in each category is sent, not the first 14.
+    expect(asked[0].user).toMatch(/Magecraft \[from the card data\] \(a tag from the card data, stays live\): Spell 1, Spell 2, Spell 3$/m);
+    v = await t.tagsTab(list);
+    expect(v.ai.rows.map((r) => `${r.kind}:${r.card}`)).toEqual(['add:Spell 11']);
+    // Undo: a card-data card taken out of a live tag goes back to being live.
+    const mage = v.categories.find((c) => c.kind === 'tag')!;
+    await t.tagsAct(list, 'dk', { action: 'card', id: mage.id, name: 'Spell 2', on: false });
+    expect((await t.tagsTab(list)).categories.find((c) => c.id === mage.id)!.cards.map((x) => x.name)).toEqual(['Spell 1', 'Spell 3']);
+    await t.tagsAct(list, 'dk', { action: 'card', id: mage.id, name: 'Spell 2', undo: true, by: 'cards' });
+    const back = (await t.tagsTab(list)).categories.find((c) => c.id === mage.id)!;
+    expect(back.cards.map((x) => `${x.name}:${x.by}`)).toEqual(['Spell 1:cards', 'Spell 2:cards', 'Spell 3:cards']);
+    expect(back.out).toEqual([]);
+  });
+
   it('skips come back on the next run', async () => {
     const list = await deck();
     const t = await import('./tags-tab');

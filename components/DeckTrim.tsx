@@ -270,7 +270,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           <div className={`${CARD} flex flex-wrap items-center gap-x-5 gap-y-3`}>
             <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2">
               <span className="text-sm font-semibold">Who ranks the cuts</span>
-              <span className="text-sm text-[var(--muted)]">Claude Opus, {money(view.costs.opus)}. Every AI step on the deck pages runs on Opus; there is no cheaper model to pick.</span>
+              <span className="text-sm text-[var(--muted)]">Claude Opus, {money(view.costs.opus)}.</span>
             </div>
             <button className={GO} disabled={busy || cutsRunning || view.noKey} onClick={() => find(false)} data-tour="trim-find">
               {cutsRunning ? 'Claude is ranking…' : view.run ? `✦ Find ${over} cuts again` : view.approach ? `✦ Find ${over} cuts` : `✦ Skip the approach and find ${over} cuts`}

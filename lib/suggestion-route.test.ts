@@ -44,6 +44,7 @@ describe('logging through the Tune route', { timeout: 60_000 }, () => {
     db.addCardToList(list.id, card('Swamp', { type_line: 'Basic Land — Swamp', cmc: 0 }), 37);
     for (let i = 0; i < 66; i++) db.addCardToList(list.id, card(`Spell ${i}`, { cmc: i % 7 }));
     plan.changePlan(list.id, { confirm: true });
+    await (await import('./plan-help')).act(list, 'kevin', { action: 'confirm' });
     // A review from Claude, so Cuts shows an AI group too.
     (await import('./cut-review')).saveReview(list.id, { at: new Date().toISOString(), model: 'claude-opus-5-5', instructions: '', over: 4, mode: 'top',
       items: ['Spell 1', 'Spell 2', 'Spell 3'].map((name) => ({ name, verdict: 'cut' as const, why: 'test' })) });
@@ -83,6 +84,7 @@ describe('logging through the Tune route', { timeout: 60_000 }, () => {
     db.addCardToList(list.id, card('Swamp', { type_line: 'Basic Land — Swamp', cmc: 0 }), 37);
     for (let i = 0; i < 72; i++) db.addCardToList(list.id, card(`Spell ${i}`, { cmc: i % 7 }));
     plan.changePlan(list.id, { confirm: true });
+    await (await import('./plan-help')).act(list, 'kevin', { action: 'confirm' });
     const names = Array.from({ length: 10 }, (_, i) => `Spell ${i}`);
     (await import('./cut-review')).saveReview(list.id, { at: new Date().toISOString(), model: 'claude-opus-5-5', instructions: '', over: 10, mode: 'top',
       items: names.map((name) => ({ name, verdict: 'cut' as const, why: 'test' })) });

@@ -1,7 +1,7 @@
 /**
  * The Plan tab: what the owner wants the deck to be. They set what they
  * know and leave the rest on Not sure. The optional AI helper (one Opus
- * call, prompt "plan-help-2") suggests what is missing - a commander role
+ * call, prompt "plan-help-3") suggests what is missing - a commander role
  * and a bracket while those are on Not sure, how the deck wins (or a fuller
  * version of the owner's words), ways to win and key cards not yet listed,
  * up to three questions, and for a pile with no plan, two or three
@@ -102,6 +102,13 @@ function update(listId: string, fn: (o: Owner) => void): Owner {
   return o;
 }
 
+/** Copy the plan's own row to a duplicated deck: how it wins, the commander's role, who set each, and the confirmation. */
+export function copyPlanOwner(fromId: string, toId: string): void {
+  const d = db();
+  const cols = (d.all('PRAGMA table_info(plan_owner)') as Array<{ name: string }>).map((c) => c.name).filter((c) => c !== 'listId');
+  d.run(`INSERT OR IGNORE INTO plan_owner (listId, ${cols.join(', ')}) SELECT ?, ${cols.join(', ')} FROM plan_owner WHERE listId = ?`, [toId, fromId]);
+}
+
 /** What the commander does: any of the roles, or Not sure alone. */
 const cleanRoles = (roles: unknown[]): CommanderRole[] => {
   const picked = [...new Set(roles.filter(isCommanderRole))];
@@ -127,7 +134,7 @@ Return only these fields:
 - fill: values for the fields the owner left as "not sure yet", and only those. commander: one or more roles and one sentence why. bracket: 1 to 5 and one sentence why. plan: 2-4 sentences on how the deck wins, its main engine and when. Leave out any field the owner set.
 - fuller: only when the owner wrote how the deck wins. Their text made fuller, in 2-4 sentences: keep everything they said and add only what they left out (the main engine, when it happens, how it closes). Never change their meaning. Leave it out when theirs is already complete.
 - winRoutes: ways to win the owner has not listed. Each has a short name, one sentence on how it wins, and its cards. Do not repeat, reword or correct the owner's.
-- keyCards: cards the deck cannot function without that the owner has not listed. Suggest at most 5, however many the owner listed. Never the commander.
+- keyCards: cards the deck cannot function without that the owner has not listed. Suggest at most 5, however many the owner listed. Never the commander. Each has the card and one sentence on what the deck loses without it.
 - questions: at most 3, written for THIS deck, each answerable in a sentence or two. Ask (a) where something the owner set and the cards point different ways, and (b) where the cards leave the owner's intent open. For (a), ask what they mean; never propose changing the setting. Put (a) first, and mark each (a) question with "aboutSetting": true. Ask only what would most change what to cut or add; a deck with one clear plan usually needs none. For (a), a list that plays below the bracket the owner set counts as much as one that plays above it. Never ask what the owner already told the app, or a question they skipped before.
 - directions: only when state is "unfocused" or "no_plan" and the owner has not written a plan. Two or three directions these cards could support. Each has a short name, a plan of one or two sentences, and up to 8 cards already in the list that fit it. When you return directions, leave out fill.plan, winRoutes and keyCards: the owner picks a direction first.
 - summary: 2 sentences in plain words for the owner.
@@ -150,7 +157,7 @@ Answer with one JSON object, nothing else:
  "fill": {"commander": {"roles": ["id"], "why": "..."}, "bracket": {"level": 3, "why": "..."}, "plan": "..."},
  "fuller": "...",
  "winRoutes": [{"name": "...", "how": "...", "cards": ["..."]}],
- "keyCards": ["..."],
+ "keyCards": [{"card": "...", "why": "..."}],
  "questions": [{"text": "...", "aboutSetting": false}],
  "directions": [{"name": "...", "plan": "...", "cards": ["..."]}],
  "summary": "..."}
@@ -225,14 +232,18 @@ export function parseHelp(data: unknown, deckNames: string[], commanders: string
   const fuller = set.plan ? str(d.fuller, 1500) : '';
   const winRoutes = pile ? [] : (Array.isArray(d.winRoutes) ? d.winRoutes : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
     .map((x) => ({ name: str(x.name, 80), how: str(x.how, 300), cards: names(x.cards, 12) })).filter((x) => x.name && x.cards.length).slice(0, 6);
-  const keyCards = pile ? [] : names(d.keyCards, 20).filter((n) => !cmd.has(front(n))).slice(0, MAX_KEY_SUGGESTIONS);
+  // Key cards: {card, why} (plan-help-3), or plain names.
+  const keyIn = (Array.isArray(d.keyCards) ? d.keyCards : []).map((x) => (typeof x === 'string' ? { card: x, why: '' } : x && typeof x === 'object' ? { card: (x as Record<string, unknown>).card ?? (x as Record<string, unknown>).name, why: str((x as Record<string, unknown>).why, 300) } : null)).filter((x): x is { card: unknown; why: string } => !!x);
+  const keyWhy: Record<string, string> = {};
+  for (const k of keyIn) { const n = nameOf(k.card); if (n && k.why && !keyWhy[n]) keyWhy[n] = k.why; }
+  const keyCards = pile ? [] : names(keyIn.map((k) => k.card), 20).filter((n) => !cmd.has(front(n))).slice(0, MAX_KEY_SUGGESTIONS);
   const questions = (Array.isArray(d.questions) ? d.questions : [])
     .map((q) => (typeof q === 'string' ? { text: q.trim(), about: false } : q && typeof q === 'object' ? { text: str((q as Record<string, unknown>).text, 300), about: (q as Record<string, unknown>).aboutSetting === true } : null))
     .filter((q): q is { text: string; about: boolean } => !!q && !!q.text);
   // A question about something the owner set comes first.
   const ordered = [...questions.filter((q) => q.about), ...questions.filter((q) => !q.about)].slice(0, MAX_QUESTIONS).map((q) => ({ ...q, text: q.text.slice(0, 300) }));
   return {
-    state: d.state, fill, ...(fuller ? { fuller } : {}), winRoutes, keyCards, questions: ordered,
+    state: d.state, fill, ...(fuller ? { fuller } : {}), winRoutes, keyCards, keyWhy: Object.fromEntries(keyCards.filter((n) => keyWhy[n]).map((n) => [n, keyWhy[n]])), questions: ordered,
     directions: pile ? directions : [], summary: str(d.summary, 600),
   };
 }
@@ -318,7 +329,7 @@ interface Open {
   plan: string | null;
   fuller: string | null;
   wins: HelpAnswer['winRoutes'];
-  keys: Array<{ key: string; name: string }>;
+  keys: Array<{ key: string; name: string; why: string }>;
 }
 
 /** The last run's suggestions still waiting: not set since, not skipped, not accepted, not removed before. */
@@ -336,7 +347,7 @@ function openOf(listId: string, help: Help | null, o: Owner, bracket: number | n
     plan: out.fill?.plan && !o.planText.trim() && !skip.has('plan') ? out.fill.plan : null,
     fuller: out.fuller && o.planBy === 'owner' && o.planText.trim() && !skip.has('fuller') ? out.fuller : null,
     wins: (out.winRoutes ?? []).filter((w) => !skip.has(`win:${low(w.name)}`) && !gone.has(`win:${low(w.name)}`) && !wins.some((c) => low(c.name) === low(w.name))),
-    keys: (out.keyCards ?? []).map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n }))
+    keys: (out.keyCards ?? []).map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n, why: out.keyWhy?.[n] ?? '' }))
       .filter((k) => k.key && !skip.has(`key:${k.key}`) && !gone.has(cardMark('key:key cards', k.key)) && !key?.cards.some((x) => x.key === k.key)),
   };
 }
@@ -396,7 +407,7 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
       ...(open.plan ? [{ key: 'plan:text', reasonShown: open.plan }] : []),
       ...(open.fuller ? [{ key: 'plan:fuller', reasonShown: open.fuller }] : []),
       ...open.wins.map((w) => ({ key: `plan:win:${low(w.name)}`, reasonShown: w.how })),
-      ...open.keys.map((k) => ({ key: `plan:key:${k.key}`, cardIn: { oracleId: k.key, name: k.name }, reasonShown: 'Key card' })),
+      ...open.keys.map((k) => ({ key: `plan:key:${k.key}`, cardIn: { oracleId: k.key, name: k.name }, reasonShown: k.why || 'Key card' })),
     ],
   }]));
   return state;
@@ -440,7 +451,7 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
     addCategory(id, { kind: 'win', name: w.name, by: 'ai', how: w.how, cards: w.cards.map((n) => ({ key: deckKey.get(front(n)) ?? '', name: n, by: 'ai' as const })).filter((c) => c.key) });
     outcome(id, [`plan:win:${low(w.name)}`], 'accepted');
   };
-  const acceptKey = (k: { key: string; name: string }) => { setCategoryCard(id, keyCategoryId(id), k, true, 'ai'); outcome(id, [`plan:key:${k.key}`], 'accepted'); };
+  const acceptKey = (k: { key: string; name: string }) => { setCategoryCard(id, keyCategoryId(id), { key: k.key, name: k.name }, true, 'ai'); outcome(id, [`plan:key:${k.key}`], 'accepted'); };
   switch (a.action) {
     case 'commander':
       update(id, (x) => { x.commanderRoles = cleanRoles(Array.isArray(a.roles) ? a.roles : []); x.commanderBy = 'owner'; });
@@ -528,6 +539,24 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
       open.wins.forEach(acceptWin);
       open.keys.forEach(acceptKey);
       return;
+    case 'skipAll': {
+      // Everything still waiting: suggestions skipped (back on the next run), open questions skipped.
+      const what = [
+        ...(open.commander ? ['commander'] : []), ...(open.bracket ? ['bracket'] : []), ...(open.plan ? ['plan'] : []), ...(open.fuller ? ['fuller'] : []),
+        ...open.wins.map((w) => `win:${low(w.name)}`), ...open.keys.map((k) => `key:${k.key}`),
+      ];
+      for (const w of what) markSkipped(id, 'plan', w);
+      outcome(id, what.map((w) => (w === 'plan' ? 'plan:text' : `plan:${w}`)), 'refused');
+      if (help && o.helpDone !== help.id) {
+        const qs = (help.output.questions ?? []).map((_, i) => qId(help.id, i));
+        update(id, (x) => {
+          const d = x.drafts?.helpId === help.id ? x.drafts : { helpId: help.id, answers: {}, skipped: [] };
+          d.skipped = [...new Set([...d.skipped, ...qs.filter((q) => !(d.answers[q] ?? '').trim())])];
+          x.drafts = d;
+        });
+      }
+      return;
+    }
     case 'answer': {
       if (!help) return;
       const qs = (help.output.questions ?? []).map((_, i) => qId(help.id, i));

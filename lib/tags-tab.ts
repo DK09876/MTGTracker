@@ -25,7 +25,7 @@ import { ModelError, type JsonModel } from './ai';
 import { foldedTags, tagCounts } from './card-store';
 import {
   addCategory, cardMark, categories, clearSkips, editCategory, goneKeys, identity, keyCategoryId, markSkipped, mergeCategory, removeCategory,
-  setCategoryCard, SIX_JOBS, skippedKeys, tidyTag, type Category,
+  restoreCard, setCategoryCard, SIX_JOBS, skippedKeys, tidyTag, type Category,
 } from './categories';
 import { cardsInList, database, type List } from './db';
 import { deckContext } from './deck-context';
@@ -89,6 +89,8 @@ async function combosOf(deck: ReturnType<typeof deckOf>, hash: string): Promise<
     comboCache.set(hash, { at: Date.now(), combos });
     return combos;
   } catch {
+    // The lookup is down: remember that for ten minutes, so the tab does not wait on it every load.
+    comboCache.set(hash, { at: Date.now() - 24 * 3600_000 + 10 * 60_000, combos: [] });
     return [];
   }
 }
@@ -208,7 +210,7 @@ export async function runTagsAi(model: JsonModel, list: List, profileId: string 
   progress('Gathering the deck');
   const deck = deckOf(list);
   const cats = await categories(list, jobCards);
-  const context = await deckContext(list);
+  const context = await deckContext(list, { allCards: true });
   const { md } = await planFacts(list, list.id, list.name, deck.commanders);
   const removed = removedText(list.id, cats, deck.nameByKey);
   const user = `${context}\n\nRemoved or skipped by the owner (do not bring back):\n${removed.join('\n') || '- nothing'}\n\n${md}\n`;
@@ -226,20 +228,24 @@ export async function runTagsAi(model: JsonModel, list: List, profileId: string 
 /**
  * The last AI answer compared with the deck as it is: additions not yet
  * made, removals of cards still in, and new groups not yet on the deck (a
- * group that is already there turns into its differences). Nothing that
- * touches what the owner set, removed or skipped.
+ * group that is already there turns into its differences). Never takes a
+ * card out of a category the owner made, or anything the owner put in, and
+ * never brings back what they removed or skipped.
  */
 function aiRows(listId: string, run: Run | null, cats: Category[], deck: ReturnType<typeof deckOf>): AiRow[] {
   if (!run) return [];
   const gone = goneKeys(listId);
   const skip = skippedKeys(listId, 'ai');
   const rows: AiRow[] = [];
-  const catOf = (name: string) => cats.find((c) => low(c.name) === low(name));
+  // Two categories can share a name (an own group named like a tag): the plan's and the owner's come first.
+  const rank = { win: 0, key: 1, own: 2, job: 3, tag: 4 } as const;
+  const catOf = (name: string) => cats.filter((c) => low(c.name) === low(name)).sort((a, b) => rank[a.kind] - rank[b.kind])[0];
   const identOf = (c: Category) => identity(c.kind, c.name, c.jobId, c.slugs);
+  // A category the owner made can be added to (as a suggestion they accept), never taken from.
   const fixed = (c: Category) => c.by === 'owner' && c.kind !== 'win' && c.kind !== 'key';
   const add = (c: Category, card: string, why: string) => {
     const key = deck.keyByName.get(front(card));
-    if (!key || fixed(c) || c.cards.some((x) => x.key === key) || c.out.some((x) => x.key === key) || gone.has(cardMark(identOf(c), key))) return;
+    if (!key || c.cards.some((x) => x.key === key) || c.out.some((x) => x.key === key) || gone.has(cardMark(identOf(c), key))) return;
     const k = `ai:add:${identOf(c)}|${key}`;
     if (!skip.has(k) && !rows.some((r) => r.key === k)) rows.push({ key: k, kind: 'add', category: c.name, categoryId: c.id, card: deck.nameByKey.get(key) ?? card, why });
   };
@@ -317,6 +323,8 @@ export async function tagsAct(list: Pick<List, 'id' | 'commander'>, _profileId: 
     case 'add': {
       const name = str(b.name).trim();
       if (!name) throw new TagsRefused('Name the category first');
+      const same = cats.find((c) => low(c.name) === low(name));
+      if (same) throw new TagsRefused(`${same.name} is already on this deck. Open it to add cards.`);
       addCategory(id, { kind: 'own', name, by: 'owner' });
       return;
     }
@@ -331,7 +339,8 @@ export async function tagsAct(list: Pick<List, 'id' | 'commander'>, _profileId: 
       const name = str(b.name);
       const key = deck.keyByName.get(front(name));
       if (!key) throw new TagsRefused(`${name} is not in the deck`);
-      setCategoryCard(id, c.id, { key, name: deck.nameByKey.get(key) ?? name }, b.on !== false, 'owner');
+      if (b.undo === true) restoreCard(id, c.id, { key, name: deck.nameByKey.get(key) ?? name }, b.by === 'ai' || b.by === 'cards' ? b.by : 'owner');
+      else setCategoryCard(id, c.id, { key, name: deck.nameByKey.get(key) ?? name }, b.on !== false, 'owner');
       return;
     }
     case 'merge': {

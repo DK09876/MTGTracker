@@ -9,9 +9,9 @@
  * lib/tags-tab.ts holds the rules.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { C, CardChip, CardPick, MARK, PlanStatusLine, usePlanState } from './PlanTab';
+import { C, CardChip, CardPick, MARK, PlanStatusLine, RemoveButton, usePlanState, useUndo } from './PlanTab';
 import Tip from './Tip';
 import * as api from '@/lib/api';
 import type { Category } from '@/lib/categories-shared';
@@ -34,7 +34,12 @@ const H2 = ({ n, children, extra }: { n?: number; children: React.ReactNode; ext
 export default function TagsTab({ listId, version, onTab }: Props) {
   const [v, setV] = useState<TagsView | null>(() => api.peek<TagsView>(api.categoriesPath(listId)) ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Saves run one after another and nothing is disabled meanwhile (see PlanTab): a double tap on the same thing is dropped.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const inFlight = useRef(new Set<string>());
+  const [pending, setPending] = useState(0);
+  const busy = false;
+  const { setUndo, bar: undoBar } = useUndo();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [more, setMore] = useState(false);
   const [filter, setFilter] = useState<string[]>([]);
@@ -54,10 +59,19 @@ export default function TagsTab({ listId, version, onTab }: Props) {
 
   if (!v) return error ? <p className="mt-8 text-center text-red-400">{error}</p> : <p className="mt-8 text-center text-[var(--muted)]">Reading the tags…</p>;
 
-  const act = async (a: Record<string, unknown>) => {
-    setBusy(true);
-    setError(null);
-    try { setV(await api.tagsTabAct(listId, a)); void plan.load(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not save that'); } finally { setBusy(false); }
+  const act = (a: Record<string, unknown>) => {
+    const key = JSON.stringify(a);
+    if (inFlight.current.has(key)) return;
+    inFlight.current.add(key);
+    setPending((n) => n + 1);
+    queue.current = queue.current.then(async () => {
+      setError(null);
+      try { setV(await api.tagsTabAct(listId, a)); void plan.load(); } catch (e) { setError(e instanceof Error ? e.message : 'Could not save that'); }
+    }).finally(() => { inFlight.current.delete(key); setPending((n) => n - 1); });
+  };
+  const takeOut = (c: Category, x: { name: string; by: string }) => {
+    act({ action: 'card', id: c.id, name: x.name, on: false });
+    setUndo({ text: `${x.name} taken out of ${c.name}.`, run: () => act({ action: 'card', id: c.id, name: x.name, undo: true, by: x.by }) });
   };
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
 
@@ -71,7 +85,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   const comboCount = s1.combos.length;
   const keyCount = s1.comboKeys.length;
   const combosLabel = [comboCount ? `${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} found in the deck` : '', keyCount ? `${keyCount} key ${keyCount === 1 ? 'card' : 'cards'} several combos share` : ''].filter(Boolean).join(', and ');
-  const aiOff = !v.hasKey || !v.confirmed || running || busy;
+  const aiOff = !v.hasKey || !v.confirmed || running || pending > 0;
   const aiNote = !v.hasKey ? 'Needs a Claude key on the server. Step 1 works without one.'
     : !v.confirmed ? 'AI reads your confirmed plan, so confirm the plan first.'
       : step1Open > 0 ? `Best after step 1: AI works with what is on the deck. ${step1Open} still to look at there.` : 'Step 1 is done, so AI has your choices to work with.';
@@ -83,7 +97,9 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   return (
     <div className="mt-4 flex flex-col gap-4 pb-4">
       <PlanStatusLine state={plan.state} />
-      <p className="text-[var(--muted)]">This deck starts with no tags and no categories. Accept only what fits it from the suggestions below, or name your own. A card can be in several. Open any row to see its cards, take one out, or add one.</p>
+      <p className="text-[var(--muted)]">{shown.length
+        ? 'Groups of cards on this deck: jobs the app counts, tags from the card data, your ways to win and key cards, and your own groups. A card can be in several. Open any row to see its cards, take one out, or add one. Tags are optional: Tune works without them.'
+        : 'Nothing is tagged on this deck yet. Accept only what fits it from the suggestions below, or name your own. Tags are optional: Tune works without them.'}</p>
       {error && <p role="alert" className="rounded-xl border border-red-400/40 bg-red-400/10 px-3 py-2 text-sm text-red-300">{error}</p>}
 
       <section data-tour="tags-on-deck" data-section="On this deck" data-section-count={String(shown.length)} className={`${C.sec} flex flex-col gap-2`}>
@@ -104,7 +120,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
         )}
         {!shown.length && <p className="text-sm text-[var(--muted)]">Nothing yet. Accept what fits from the suggestions below, or name a category of your own.</p>}
         <div className="flex flex-col">
-          {filtered.map((c) => <CatRow key={c.id} c={c} all={v.categories} names={v.cardNames} open={!!open[`cat:${c.id}`]} onToggle={() => toggle(`cat:${c.id}`)} filter={filter} busy={busy} act={act} />)}
+          {filtered.map((c) => <CatRow key={c.id} c={c} all={v.categories} names={v.cardNames} open={!!open[`cat:${c.id}`]} onToggle={() => toggle(`cat:${c.id}`)} filter={filter} act={act} takeOut={takeOut} />)}
         </div>
         <form className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-2.5" onSubmit={(e) => { e.preventDefault(); if (catName.trim()) { void act({ action: 'add', name: catName.trim() }); setCatName(''); } }}>
           <input aria-label="Name a new category" value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Your own category, e.g. Pet cards" className={`${C.input} flex-[1_1_14rem]`} />
@@ -147,7 +163,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
 
       <section id="t-ai" data-section="2 · Refine with AI" className={`${C.sec} flex flex-col gap-2`}>
         <H2 n={2} extra="optional">Refine with AI</H2>
-        <p className="text-sm text-[var(--muted)]">AI reads your confirmed plan and what you accepted in step 1. It first suggests cards to add to those or take out of them, and only then anything new the plan depends on. Tags help you read the deck and help Find search your collection. They do not change how Tune ranks cuts.</p>
+        <p className="text-sm text-[var(--muted)]">AI reads your confirmed plan and what you accepted in step 1. It first suggests cards to add to those or take out of them, and only then anything new the plan depends on. Tags help you read the deck. Tune’s ranking of cuts doesn’t use them; Tune’s AI reads them as a description of the deck, never as a reason to keep a card.</p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={step1Open === 0 ? C.aiBtn : C.btn} disabled={aiOff} onClick={() => act({ action: 'ai' })}>
             {running ? 'AI is reading the deck…' : `${v.ai.ran ? '✦ Ask AI again' : '✦ Refine with AI'} · Claude Opus`}
@@ -173,6 +189,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
         <span className="text-sm text-[var(--muted)]">{v.confirmed ? 'Tags are optional. Tune is open either way.' : 'Tune opens once the plan is confirmed.'}</span>
         <button type="button" className={C.go} onClick={() => onTab(v.confirmed ? 'tune' : 'plan')}>{v.confirmed ? 'Next: Tune' : 'Back to Plan'}</button>
       </div>
+      {undoBar}
     </div>
   );
 }
@@ -196,8 +213,9 @@ function SugRow({ title, meta, why, busy, onAccept, onSkip, children }: { title:
 function TagSug({ t, open, onToggle, busy, act }: { t: TagRow; open: boolean; onToggle: () => void; busy: boolean; act: (a: Record<string, unknown>) => void }) {
   return (
     <SugRow title={t.name} meta={`${t.cards.length} cards`} busy={busy} onAccept={() => act({ action: 'accept', keys: [t.key] })} onSkip={() => act({ action: 'skip', key: t.key })}>
+      {!open && <p className="text-[13px] text-[var(--muted)]">{t.cards.slice(0, 3).join(', ')}{t.cards.length > 3 ? ', …' : ''}</p>}
       <button type="button" aria-expanded={open} onClick={onToggle} className="flex min-h-11 items-center gap-1.5 text-[13px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
-        <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span> See the {t.cards.length} cards
+        <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span> {open ? 'Hide the cards' : `See all ${t.cards.length} cards`}
       </button>
       {open && <p className="text-sm text-[var(--muted)]">{t.cards.join('  ·  ')}</p>}
     </SugRow>
@@ -213,36 +231,60 @@ function AiSug({ r, busy, act }: { r: AiRow; busy: boolean; act: (a: Record<stri
   );
 }
 
-/** One category: a compact row that opens to its cards, a picker, what was merged in, and Merge into. */
-function CatRow({ c, all, names, open, onToggle, filter, busy, act }: { c: Category; all: Category[]; names: string[]; open: boolean; onToggle: () => void; filter: string[]; busy: boolean; act: (a: Record<string, unknown>) => void }) {
-  const plan = c.kind === 'win' || c.kind === 'key';
+const KIND: Record<Category['kind'], [string, string]> = {
+  job: ['job · counted', 'text-emerald-300'],
+  tag: ['tag from the cards', C.cards],
+  win: ['way to win', C.yours],
+  key: ['key cards', C.yours],
+  own: ['group', 'text-[var(--muted)]'],
+};
+
+/** One category: a compact row that opens to its cards, a picker, rename, what was merged in, and Merge into. */
+function CatRow({ c, all, names, open, onToggle, filter, act, takeOut }: { c: Category; all: Category[]; names: string[]; open: boolean; onToggle: () => void; filter: string[]; act: (a: Record<string, unknown>) => void; takeOut: (c: Category, x: { name: string; by: string }) => void }) {
+  const [edit, setEdit] = useState<{ name: string; how: string } | null>(null);
   const who = c.by === 'cards' || c.kind === 'key' ? null : MARK[c.by];
   const has = filter.length ? c.cards.filter((x) => filter.includes(x.name)).map((x) => x.name) : [];
-  const targets = all.filter((x) => x.id !== c.id && (x.kind !== 'key' || true)).sort((a, b) => a.name.localeCompare(b.name));
+  // Jobs, ways to win and key cards are never merged away; anything can take another in.
+  const mergeable = c.kind === 'own' || c.kind === 'tag';
+  const targets = all.filter((x) => x.id !== c.id).sort((a, b) => a.name.localeCompare(b.name));
+  const removeWhat = c.kind === 'job' ? 'Stop counting this job' : c.kind === 'key' ? 'Empty the key cards' : c.kind === 'win' ? 'Remove this way to win' : 'Remove this category';
+  const kind = KIND[c.kind];
   return (
-    <div className="flex items-start gap-2 border-t border-[var(--border)] py-1">
+    <div className="flex items-start gap-1 border-t border-[var(--border)] py-1">
       <div className="min-w-0 flex-1">
         <button type="button" aria-expanded={open} onClick={onToggle} className="flex min-h-11 w-full flex-wrap items-center gap-x-2 text-left">
           <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span>
           <b className="min-w-0 break-words">{c.name}</b>
-          <span className="text-[13px] text-[var(--muted)]">{plan ? 'From the plan · ' : ''}{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>
+          <span className={`text-[11px] font-bold ${kind[1]}`}>{kind[0]}</span>
+          <span className="text-[13px] text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>
           {who && <span className={`text-[11px] font-bold ${who[1]}`}>{who[0]}</span>}
           {has.length > 0 && <span className={`text-[11px] font-bold ${C.yours}`}>has {has.join(', ')}</span>}
         </button>
         {open && (
           <div className="flex flex-col gap-2 pb-2 pl-5">
-            {c.how && <p className="text-[13px] text-[var(--muted)]">{c.how}</p>}
+            {edit ? (
+              <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); if (edit.name.trim()) { act({ action: 'edit', id: c.id, name: edit.name.trim(), how: edit.how }); setEdit(null); } }}>
+                <input aria-label={`Name of ${c.name}`} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} className={`${C.input} w-full`} />
+                <input aria-label={`What ${c.name} is for`} value={edit.how} onChange={(e) => setEdit({ ...edit, how: e.target.value })} placeholder="What this group is for, in a line (optional)" className={`${C.input} w-full`} />
+                <span className="flex gap-2"><button type="submit" className={C.btn} disabled={!edit.name.trim()}>Save</button><button type="button" className={C.btn} onClick={() => setEdit(null)}>Cancel</button></span>
+              </form>
+            ) : (
+              <div className="flex flex-wrap items-start gap-2">
+                <p className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{c.how || (c.kind === 'own' ? 'No description yet.' : '')}</p>
+                {(c.kind === 'own' || c.kind === 'win' || c.kind === 'tag') && <button type="button" className="min-h-11 rounded-xl px-2.5 text-[13px] font-semibold text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]" onClick={() => setEdit({ name: c.name, how: c.how })}>Rename or describe</button>}
+              </div>
+            )}
             {c.gone.length > 0 && <p className={`text-[13px] ${C.yours}`}>Look again: {c.gone.join(', ')} left the deck.</p>}
             <div className="flex flex-wrap items-center gap-2">
-              {c.cards.map((x) => <CardChip key={x.key} name={x.name} by={x.by === 'cards' ? undefined : x.by} label={`Remove ${x.name} from ${c.name}`} onRemove={() => act({ action: 'card', id: c.id, name: x.name, on: false })} />)}
+              {c.cards.map((x) => <CardChip key={x.key} name={x.name} by={x.by === 'cards' ? undefined : x.by} label={`Remove ${x.name} from ${c.name}`} onRemove={() => takeOut(c, x)} />)}
               <CardPick names={names} label={`Add a card to ${c.name}`} skip={c.cards.map((x) => x.name)} onPick={(n) => act({ action: 'card', id: c.id, name: n, on: true })} />
             </div>
             {!c.cards.length && <p className="text-[13px] text-[var(--muted)]">No cards yet.</p>}
             {c.out.length > 0 && <p className="text-[13px] text-[var(--muted)]">Taken out by you: {c.out.map((x) => x.name).join(', ')}</p>}
             {c.madeOf.length > 0 && <p className="text-[13px] text-[var(--muted)]">Includes what was merged in: {c.madeOf.join(', ')}</p>}
-            {c.kind !== 'key' && targets.length > 0 && (
+            {mergeable && targets.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                <select aria-label={`Merge ${c.name} into another category`} value="" disabled={busy} onChange={(e) => { if (e.target.value) act({ action: 'merge', id: c.id, into: e.target.value }); }} className={`${C.input} max-w-full sm:max-w-[16rem]`}>
+                <select aria-label={`Merge ${c.name} into another category`} value="" onChange={(e) => { if (e.target.value) act({ action: 'merge', id: c.id, into: e.target.value }); }} className={`${C.input} max-w-full sm:max-w-[16rem]`}>
                   <option value="">Merge into…</option>
                   {targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
@@ -252,7 +294,7 @@ function CatRow({ c, all, names, open, onToggle, filter, busy, act }: { c: Categ
           </div>
         )}
       </div>
-      <button type="button" className={`${C.btn} shrink-0 max-sm:px-3`} disabled={busy} aria-label={`Remove ${c.name}`} onClick={() => act({ action: 'remove', id: c.id })}>Remove</button>
+      <RemoveButton label={`Remove ${c.name}`} what={removeWhat} text={c.kind === 'key' ? 'Empty' : 'Remove'} onRemove={() => act({ action: 'remove', id: c.id })} />
     </div>
   );
 }

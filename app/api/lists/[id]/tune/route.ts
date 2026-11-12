@@ -63,10 +63,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const locked = requirePlan(id);
-  if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
+  // Chat can hand Tune a proposal at any time; everything else in Tune waits for the confirmed plan.
+  const locked = b.action === 'propose' ? null : requirePlan(id);
+  if (locked) return locked;
   switch (b.action) {
     case 'stage': {
       const items = itemsOf(b.items);

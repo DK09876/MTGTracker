@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 
 import { access, guarded, signedIn } from './auth';
 import { getList, knownProfile, type List } from './db';
+import { isConfirmed } from './plan-help';
 
 // Kept here rather than imported from tour.ts, which pulls in the seeding.
 const TOUR_PROFILE = 'tour';
@@ -58,12 +59,10 @@ export function requireList(request: Request, id: string): { profile: string; li
 }
 
 /**
- * Tune, Chat and the AI steps used to wait for a confirmed plan. They no
- * longer do (deck flow plan, slice 3): the evaluation found no case for a
- * hard lock, and they read the plan when there is one. Kept so the routes
- * that call it need no change; it never refuses.
+ * Tune (and Trim inside it) works toward the confirmed plan: until the plan
+ * is confirmed its routes refuse, the same as the page shows it locked.
+ * Chat and the Plan and Tags tabs stay open.
  */
 export function requirePlan(listId: string): NextResponse | null {
-  void listId;
-  return null;
+  return isConfirmed(listId) ? null : NextResponse.json({ error: 'Confirm the plan first: Tune works toward it. It takes one click on the Plan tab.' }, { status: 409 });
 }

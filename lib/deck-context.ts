@@ -28,8 +28,8 @@ export const CONTEXT_RULES = `How to read this:
 
 const cardsLine = (c: Category, max = 14) => `${c.cards.slice(0, max).map((x) => x.name).join(', ') || 'no cards'}${c.cards.length > max ? `, and ${c.cards.length - max} more` : ''}`;
 
-/** The block, from the pages as they are now. */
-export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { rules?: boolean } = {}): Promise<string> {
+/** The block, from the pages as they are now. allCards lists every card in each category (the tags read judges what is missing); otherwise 14 each. */
+export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { rules?: boolean; allCards?: boolean } = {}): Promise<string> {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
   const plan = planFor(list.id, '', list.commander, main);
   const o = owner(list.id);
@@ -59,7 +59,7 @@ export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { 
   if (!rest.length) L.push('- none');
   for (const c of rest) {
     const kind = c.kind === 'job' ? `a job the deck tracks, ${c.cards.length} cards` : c.kind === 'tag' ? 'a tag from the card data, stays live' : 'a group';
-    L.push(`- ${c.name}${who(c.by)} (${kind}): ${cardsLine(c)}`);
+    L.push(`- ${c.name}${who(c.by)} (${kind}): ${cardsLine(c, opts.allCards ? Infinity : 14)}`);
   }
   const missing = SIX_JOBS.filter((j) => !rest.some((c) => c.jobId === j.id));
   if (missing.length && missing.length < SIX_JOBS.length) L.push(`Jobs not tracked on this deck (no counts or warnings for them): ${missing.map((j) => j.label).join(', ')}.`);

@@ -635,7 +635,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         <p data-tour="deck-state" className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] px-3.5 py-2 text-sm ${deckSize > 100 ? 'border-[#ffb4a8]/50' : 'border-[var(--border)]'}`}>
           <b className="tabular-nums">{deckSize} of 100 cards</b>
           <span className="min-w-0 flex-1 text-[var(--muted)]">{deckSize > 100 ? `${deckSize - 100} over. Trim comes next.` : `${100 - deckSize} short. Filling it comes next.`}</span>
-          {section !== 'tune' && <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-go rounded-full px-3.5 py-1 text-sm font-semibold">{deckSize > 100 ? `Trim ${deckSize - 100}` : `Fill ${100 - deckSize}`}</button>}
+          {section !== 'tune' && section !== 'plan' && <button onClick={() => { setSection(planConfirmed ? 'tune' : 'plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="btn-go rounded-full px-3.5 py-1 text-sm font-semibold">{!planConfirmed ? 'Confirm the plan first' : deckSize > 100 ? `Trim ${deckSize - 100}` : `Fill ${100 - deckSize}`}</button>}
         </p>
       )}
       {deck && section === 'plan' ? (

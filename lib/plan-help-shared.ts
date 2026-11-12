@@ -26,6 +26,8 @@ export interface HelpAnswer {
   fuller?: string;
   winRoutes: Array<{ name: string; how: string; cards: string[] }>;
   keyCards: string[];
+  /** Why each suggested key card, by name (plan-help-3 on). */
+  keyWhy?: Record<string, string>;
   questions: Array<{ text: string; about: boolean }>;
   directions: Array<{ name: string; plan: string; cards: string[] }>;
   summary: string;
@@ -59,7 +61,7 @@ export interface PlanState {
     plan: string | null;
     fuller: string | null;
     wins: Array<{ name: string; how: string; cards: string[] }>;
-    keys: Array<{ key: string; name: string }>;
+    keys: Array<{ key: string; name: string; why: string }>;
     questions: PlanQuestion[];
   } | null;
   /** Suggestions and questions still waiting, which block confirming. */
@@ -94,7 +96,7 @@ export type PlanAction =
   | { action: 'acceptWin'; name: string } | { action: 'acceptAllWins' }
   | { action: 'acceptKey'; name: string } | { action: 'acceptAllKeys' }
   | { action: 'addKey'; name: string }
-  | { action: 'acceptAll' }
+  | { action: 'acceptAll' } | { action: 'skipAll' }
   | { action: 'answer'; id: string; text?: string; skip?: boolean }
   | { action: 'run' }
   | { action: 'confirm' };

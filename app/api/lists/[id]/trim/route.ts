@@ -22,7 +22,7 @@ import { NextResponse } from 'next/server';
 import { modelById, ModelError } from '@/lib/ai';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { startJob } from '@/lib/jobs';
-import { requireList } from '@/lib/profile-route';
+import { requireList, requirePlan } from '@/lib/profile-route';
 import { hasBoard } from '@/lib/sections';
 import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setCorrection, trimView, undoTrim, writeApproach } from '@/lib/trim';
 import { TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
@@ -44,6 +44,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
+  const locked = requirePlan(id);
+  if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
   const warn = (e: unknown) => (e instanceof ModelError ? 'warn' as const : 'error' as const);

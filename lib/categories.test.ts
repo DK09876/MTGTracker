@@ -176,6 +176,43 @@ describe('the migration', { timeout: 30_000 }, () => {
     expect(db.deckTags(list.id).tags.map((t) => t.name).sort()).toEqual(['Burn', 'Spells']);
   });
 
+  it('folds an old tag that means a job into the job, and keeps AI-written ways to win as AI', async () => {
+    const { db, list } = await deck();
+    const ramp = db.createTag(list.id, { name: 'Ramp', color: '#f00', status: 'accepted', origin: 'manual' });
+    const wipe = db.createTag(list.id, { name: 'Boardwipe', color: '#0f0', status: 'accepted', origin: 'ai' });
+    db.setCardTag(list.id, 'o-Opt', ramp.id, true);
+    db.database().run(`INSERT INTO deck_card_tags (listId, cardKey, tagId, source, isOn, reason) VALUES (?, 'o-Shock', ?, 'ai', 1, 'Shock')`, [list.id, wipe.id]);
+    const parts = { routes: { custom: [{ label: 'Lone attacker', how: 'Swing alone.', cards: ['Bolt'] }], by: 'claude' } };
+    (await import('./deck-plan')).changePlan(list.id, { bracket: 3 });
+    db.database().run('UPDATE deck_plans SET parts = ? WHERE listId = ?', [JSON.stringify(parts), list.id]);
+    const c = await import('./categories');
+    const dr = await import('./deck-roles');
+    c.startCategories();
+    const all = await c.categories(list, dr.jobCards);
+    expect(all.filter((x) => x.name === 'Ramp')).toHaveLength(1);
+    expect(all.some((x) => x.name === 'Boardwipe')).toBe(false);
+    const job = (id: string) => all.find((x) => x.jobId === id)!;
+    expect(job('ramp').cards).toContainEqual({ key: 'o-Opt', name: 'Opt', by: 'owner' });
+    expect(job('wipe').cards).toContainEqual({ key: 'o-Shock', name: 'Shock', by: 'ai' });
+    expect(job('wipe').madeOf).toEqual(['Boardwipe']);
+    expect(all.find((x) => x.kind === 'win')).toMatchObject({ name: 'Lone attacker', by: 'ai' });
+    // Each deck is migrated once: running it again skips decks already done.
+    expect(c.migrateAll()).toEqual([]);
+  });
+
+  it('never merges a job or a way to win away', async () => {
+    const c = await import('./categories');
+    c.startCategories();
+    const { list } = await deck();
+    c.addCategory(list.id, { kind: 'job', name: 'Ramp', by: 'cards', jobId: 'ramp' });
+    c.addCategory(list.id, { kind: 'win', name: 'Burn', by: 'owner' });
+    const into = c.addCategory(list.id, { kind: 'own', name: 'Mine', by: 'owner' });
+    const all = await c.categories(list);
+    expect(c.mergeCategory(list.id, all.find((x) => x.kind === 'job')!, into)).toBe(false);
+    expect(c.mergeCategory(list.id, all.find((x) => x.kind === 'win')!, into)).toBe(false);
+    expect(await c.categories(list)).toHaveLength(3);
+  });
+
   it('runs once: a second start changes nothing', async () => {
     const { list } = await deck();
     const c = await import('./categories');

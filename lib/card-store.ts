@@ -175,7 +175,7 @@ export function saveTags(file: TagFile, d: Database = table()): { tags: number; 
     throw error;
   }
   tagIndex = null;
-  tagTotals = null;
+  tagTotals.clear();
   return { tags: ids.length, cards: byCard.size };
 }
 
@@ -226,7 +226,7 @@ export function cardTags(oracleIds: string[], d: Database = table()): Map<string
 }
 
 // How many cards carry each tag, folded by families (see foldedTags), across every tagged card: read once per family list and kept.
-let tagTotals: { key: string; cards: number; bySlug: Map<string, number> } | null = null;
+const tagTotals = new Map<string, { cards: number; bySlug: Map<string, number> }>();
 
 /** A card's tags, folded: a tag inside a family counts as the family; any other tag as itself. */
 function fold(own: number[], t: ReturnType<typeof tags>, families: Set<string>): string[] {
@@ -275,7 +275,8 @@ export function foldedTags(oracleIds: string[], families: Set<string>, d: Databa
  */
 export function tagCounts(families: Set<string>, d: Database = table()): { cards: number; bySlug: Map<string, number> } {
   const key = [...families].sort().join(',');
-  if (tagTotals?.key === key) return tagTotals;
+  const hit = tagTotals.get(key);
+  if (hit) return hit;
   const t = tags(d);
   const counts = new Map<string, number>();
   let cards = 0;
@@ -283,8 +284,11 @@ export function tagCounts(families: Set<string>, d: Database = table()): { cards
     cards++;
     for (const s of fold(r.tags.split(',').map(Number), t, families)) counts.set(s, (counts.get(s) ?? 0) + 1);
   }
-  tagTotals = { key, cards, bySlug: counts };
-  return tagTotals;
+  const out = { cards, bySlug: counts };
+  // Two family lists are asked for per Tags load (lib/tag-suggest.ts): keep a few.
+  if (tagTotals.size > 8) tagTotals.clear();
+  tagTotals.set(key, out);
+  return out;
 }
 
 /** Oracle ids of every card with this tag, or with a tag under it. */

@@ -163,6 +163,26 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     await expect(ph.act(list, 'dk', { action: 'confirm' })).rejects.toThrow(/Accept or skip 9 suggestions, and answer or skip 3 questions/);
   });
 
+  it('Skip the rest skips every open suggestion and question; Tune refuses until the plan is confirmed', async () => {
+    const { list } = await deck();
+    const ph = await import('./plan-help');
+    const { requirePlan } = await import('./profile-route');
+    expect(requirePlan(list.id)?.status).toBe(409);
+    const keyed = { ...FULL, keyCards: [{ card: 'Spell 1', why: 'The engine.' }, 'Spell 2'] };
+    await ph.runHelp(fakeModel(() => keyed).model, list, 'dk');
+    let s = await ph.planState(list);
+    expect(s.help!.keys).toEqual([expect.objectContaining({ name: 'Spell 1', why: 'The engine.' }), expect.objectContaining({ name: 'Spell 2', why: '' })]);
+    await ph.act(list, 'dk', { action: 'answer', id: s.help!.questions[0].id, text: 'Combat, mostly.' });
+    await ph.act(list, 'dk', { action: 'skipAll' });
+    s = await ph.planState(list);
+    expect(s.open).toEqual({ suggestions: 0, questions: 0 });
+    // The typed answer is kept, not skipped.
+    expect(s.help!.questions[0]).toMatchObject({ answer: 'Combat, mostly.', skipped: false });
+    await ph.act(list, 'dk', { action: 'confirm' });
+    expect(requirePlan(list.id)).toBeNull();
+    expect((await ph.planState(list)).notes.map((n) => n.text).join(' ')).toContain('Combat, mostly.');
+  });
+
   it('a pile with no plan gets directions only; picking one fills the plan and three key cards', async () => {
     const { list } = await deck();
     const ph = await import('./plan-help');

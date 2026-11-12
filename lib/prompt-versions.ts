@@ -10,7 +10,7 @@ export const PROMPT_VERSIONS = {
   chat: 'chat-1',
   planRead: 'plan-read-1',
   planPass: 'plan-pass-2',
-  planHelp: 'plan-help-2',
+  planHelp: 'plan-help-3',
   tagsAi: 'tags-2',
   trim: 'trim-1',
   trimApproach: 'trim-approach-1',
