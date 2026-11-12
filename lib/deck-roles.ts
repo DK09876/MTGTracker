@@ -6,7 +6,7 @@
  * Server only.
  */
 
-import { jobChanges } from './categories';
+import { jobChanges, jobsOnDeck, SIX_JOB_IDS } from './categories';
 import { cachedRoles, cardsInList, database, saveRoles, type ListedCard } from './db';
 import { jobs, withJobs, type JobId } from './deck-numbers';
 import { planFor } from './deck-plan';
@@ -94,6 +94,9 @@ export async function deckRoles(listId: string, main: ListedCard[] = cardsInList
  * they added to a job counts in it, a card they took out does not.
  */
 export function withJobChanges(listId: string, main: ListedCard[], roles: RoleCount[]): RoleCount[] {
+  // Only the jobs on the deck have a range to be checked against; the rest are plain counts.
+  const on = jobsOnDeck(listId);
+  roles = roles.map((r) => ((SIX_JOB_IDS as string[]).includes(r.id) || r.id === 'impulse') && !on.has(r.id === 'impulse' ? 'draw' : r.id) ? { ...r, target: null } : r);
   const changes = jobChanges(listId);
   if (!changes.size) return roles;
   const nameOf = new Map(main.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));

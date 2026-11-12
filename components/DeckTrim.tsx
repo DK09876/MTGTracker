@@ -17,8 +17,8 @@ import Tip from './Tip';
 import * as api from '@/lib/api';
 import type { DeckSection } from '@/lib/sections-shared';
 import {
-  chosenCuts, CUT_CHIPS, KEEP_CHIPS, saidSomething, TRIM_CHIP_LABELS, TRIM_MODELS,
-  type TrimChoice, type TrimItem, type TrimModel, type TrimTier, type TrimView,
+  chosenCuts, CUT_CHIPS, KEEP_CHIPS, saidSomething, TRIM_CHIP_LABELS,
+  type TrimChoice, type TrimItem, type TrimTier, type TrimView,
 } from '@/lib/trim-shared';
 
 interface Props {
@@ -270,17 +270,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           <div className={`${CARD} flex flex-wrap items-center gap-x-5 gap-y-3`}>
             <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-2">
               <span className="text-sm font-semibold">Who ranks the cuts</span>
-              <div role="radiogroup" aria-label="Who ranks the cuts" className="flex flex-wrap gap-2">
-                {(['opus', 'haiku'] as TrimModel[]).map((m) => {
-                  const off = m === 'haiku' && !view.canHaiku;
-                  return (
-                    <button key={m} role="radio" aria-checked={view.model === m} disabled={busy || off} onClick={() => act({ action: 'model', model: m })}
-                      className={`rounded-xl border px-3 py-1.5 text-left text-sm disabled:opacity-50 ${view.model === m ? 'border-[var(--accent)] bg-[var(--surface-hover)]' : 'border-[var(--border)]'}`}>
-                      <b className="font-semibold">{TRIM_MODELS[m].label}</b> <span className="text-[var(--muted)]">{off ? 'needs a current plan' : `${money(view.costs[m])}, ${TRIM_MODELS[m].note}`}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <span className="text-sm text-[var(--muted)]">Claude Opus, {money(view.costs.opus)}. Every AI step on the deck pages runs on Opus; there is no cheaper model to pick.</span>
             </div>
             <button className={GO} disabled={busy || cutsRunning || view.noKey} onClick={() => find(false)} data-tour="trim-find">
               {cutsRunning ? 'Claude is ranking…' : view.run ? `✦ Find ${over} cuts again` : view.approach ? `✦ Find ${over} cuts` : `✦ Skip the approach and find ${over} cuts`}

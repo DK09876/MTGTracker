@@ -66,3 +66,17 @@ export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { 
   if (opts.rules !== false) L.push('', CONTEXT_RULES);
   return L.join('\n');
 }
+
+/**
+ * Cards worth a second look before cutting: key cards and the cards in the
+ * ways to win, from the plan's categories. A flag beside a cut, never a
+ * block: owners cut way-to-win cards as often as any other card, and only
+ * never-cut blocks. By card name.
+ */
+export async function planFlags(list: Pick<List, 'id' | 'commander'>): Promise<Map<string, { flag: string; strong: boolean }>> {
+  const out = new Map<string, { flag: string; strong: boolean }>();
+  const cats = await categories(list);
+  for (const c of cats.find((x) => x.kind === 'key')?.cards ?? []) out.set(c.name, { flag: 'Key card in the plan', strong: true });
+  for (const w of cats.filter((x) => x.kind === 'win')) for (const c of w.cards) if (!out.has(c.name)) out.set(c.name, { flag: `In a way to win: ${w.name}`, strong: false });
+  return out;
+}

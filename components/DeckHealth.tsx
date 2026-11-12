@@ -71,13 +71,14 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
 
   if (error) return <p className="mt-8 text-center text-red-400">{error}</p>;
   if (!data) return <p className="mt-8 text-center text-[var(--muted)]">Checking the deck…</p>;
-  const { health, landTarget, landCount } = data;
+  const { health, landTarget, landCount, untracked = [] } = data;
   const short = commander?.card.name.split(',')[0] ?? 'the commander';
 
   return (
     // Refetches keep the last numbers on screen rather than flashing empty.
     <div className="mt-5 flex flex-col gap-8">
       <Warnings warnings={health.warnings} />
+      {untracked.length > 0 && <p className="-mt-4 text-sm text-[var(--muted)]">Not tracked on this deck, so not counted or checked: {untracked.join(', ')}. {untracked.includes('Card draw') ? 'The no-card-draw check is skipped. ' : ''}Add them on the Tags tab.</p>}
 
       <div data-tour="bracket"><Bracket insights={insights} /></div>
 

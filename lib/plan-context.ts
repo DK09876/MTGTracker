@@ -8,9 +8,10 @@
  * count. Server only.
  */
 
-import { cardsInList, deckTags, type List } from './db';
+import { cardsInList, type List } from './db';
 import { noteBy, planFor, type Plan } from './deck-plan';
-import { owner, planForAi } from './plan-pass';
+import { jobsOnDeck } from './categories';
+import { deckContext } from './deck-context';
 import { deckRolesKnown } from './deck-roles';
 import type { RoleCount } from './roles';
 
@@ -84,19 +85,21 @@ export function planText(plan: Plan, roles: RoleCount[] | null, read = false): s
 }
 
 /**
- * The plan in words for one deck, reading what it needs: the plan read when
- * it is current, else the code's detection, then settings, numbers and notes.
+ * What every AI step on the deck pages reads (Tune, Trim, chat, the tags
+ * read): the block from lib/deck-context.ts - the plan with who set each
+ * part, never-cut, ways to win and key cards with who added each, the
+ * owner's notes and every category - then the numbers the app counted (only
+ * for the jobs on the deck) and the default ways to judge a deck.
  */
 export async function planContext(list: Pick<List, 'id' | 'commander'>): Promise<string> {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
-  const tags = deckTags(list.id);
-  const plan = planFor(list.id, tags.brief, list.commander, main);
+  const plan = planFor(list.id, '', list.commander, main);
   const roles = await deckRolesKnown(list.id, main).catch(() => null);
-  // The plan read, with the owner's edits, when it matches the deck (or the owner said to use it anyway).
-  const read = planForAi(list);
-  const commander = owner(list.id).commanderRoles.filter((r) => r !== 'unsure');
-  return [
-    ...(read ? [read.text, ''] : commander.length ? [`What the commander does for the deck (the owner's pick): ${commander.join(', ')}`, ''] : []),
-    planText(plan, roles, !!read),
-  ].join('\n');
+  const on = jobsOnDeck(list.id);
+  const L = [await deckContext(list), '', 'The numbers, as the app counted them:', `- Lands: ${plan.landNumber.have}, the plan wants ${plan.lands[0]}-${plan.lands[1]}`];
+  for (const r of (roles ?? []).filter((x) => on.has(x.id) || (x.id === 'impulse' && on.has('draw')))) L.push(`- ${r.label}: ${r.count}${r.target ? ` (range ${r.target[0]}-${r.target[1]})` : ''}`);
+  const changed = plan.overrides.filter((o) => o.on);
+  if (changed.length) L.push('', 'Changes to the usual rules for this deck:', ...changed.map((o) => `- ${o.what}: ${o.why} [${by(o.by)}]`));
+  L.push('', AI_RULES);
+  return L.join('\n');
 }

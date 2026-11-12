@@ -67,11 +67,11 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   const [instructions, setInstructions] = useState('');
   const [job, setJob] = useState<Job | null>(null);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
-  // The plan as later steps read it: the plan read when there is one, else the old brief.
+  // How the deck wins, from the confirmed plan (the Plan tab), else the old brief.
   const [planText, setPlanText] = useState<string | null>(null);
   useEffect(() => {
     let stop = false;
-    api.planPass(listId).then((v) => { if (!stop) setPlanText(v.pass?.plan ?? null); }).catch(() => {});
+    api.planHelp(listId).then((v) => { if (!stop) setPlanText(v.plan.text.trim() || null); }).catch(() => {});
     return () => { stop = true; };
   }, [listId, version]);
   const loadId = useRef(0);

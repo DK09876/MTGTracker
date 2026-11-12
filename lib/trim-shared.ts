@@ -8,15 +8,19 @@
 
 import type { ImpactRow } from './tune-shared';
 
-/** Who ranks the cuts: Opus on everything, or Haiku on the saved plan read (about a cent, a little worse). */
-export type TrimModel = 'opus' | 'haiku';
+/**
+ * Who ranks the cuts: Claude Opus, always. Haiku was an option and is gone:
+ * a confirmed plan, with or without card-data tags, did not improve its cuts
+ * (15.2% and 15.5% of owners' real cuts against 15.4% alone; FINDINGS,
+ * Session 3), so the deck pages run on Opus only.
+ */
+export type TrimModel = 'opus';
 export const TRIM_MODELS: Record<TrimModel, { id: string; label: string; note: string }> = {
-  opus: { id: 'claude-opus-5-5', label: 'Opus', note: 'best ranking' },
-  haiku: { id: 'claude-haiku-5-5', label: 'Haiku on the saved plan', note: 'slightly worse' },
+  opus: { id: 'claude-opus-5-5', label: 'Claude Opus', note: 'best ranking' },
 };
 
 /** What a call is expected to cost before any have been made (the flow plan's token estimates), shown as estimates. */
-export const TRIM_COST_GUESS: Record<TrimModel | 'approach', number> = { opus: 0.12, haiku: 0.01, approach: 0.02 };
+export const TRIM_COST_GUESS: Record<TrimModel | 'approach', number> = { opus: 0.12, approach: 0.02 };
 
 /** Why the owner keeps a suggested cut, or cuts a card: one tap. */
 export const KEEP_CHIPS = ['pet_card', 'part_of_plan', 'already_tried'] as const;
@@ -74,8 +78,6 @@ export interface TrimView {
   /** A line the owner added to correct the approach. */
   correction: string;
   model: TrimModel;
-  /** Haiku ranks from the saved plan, so it needs a current one. */
-  canHaiku: boolean;
   costs: Record<TrimModel | 'approach', { usd: number; measured: boolean }>;
   /** The latest list, or null before the first. */
   run: {

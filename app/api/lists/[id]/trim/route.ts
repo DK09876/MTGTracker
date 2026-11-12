@@ -8,7 +8,6 @@
  *       code's draft from the deck's numbers (free), none, or one written by
  *       Claude in the background
  *   correction {text}     a line added to the approach, kept as it is typed
- *   model {model}         who ranks the cuts: 'opus' or 'haiku' (needs a current plan)
  *   find {rerun?}         ask Claude for the cut list in the background; rerun
  *       sends the choices made so far and keeps the approach
  *   choices {choices}     the owner's choices and reasons, replaced whole; answers
@@ -25,7 +24,7 @@ import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { startJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
 import { hasBoard } from '@/lib/sections';
-import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setCorrection, setModel, trimStore, trimView, undoTrim, writeApproach } from '@/lib/trim';
+import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setCorrection, trimView, undoTrim, writeApproach } from '@/lib/trim';
 import { TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
 import type { Board } from '@/lib/decklist';
 
@@ -63,11 +62,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     case 'correction':
       setCorrection(id, b.text);
       break;
-    case 'model':
-      setModel(id, b.model);
-      break;
     case 'find': {
-      const which: TrimModel = trimStore(id).model === 'haiku' ? 'haiku' : 'opus';
+      const which: TrimModel = 'opus';
       const model = modelById(TRIM_MODELS[which].id, [], { profile, feature: 'tagging', label: list.name });
       if (!model) return NextResponse.json({ error: NO_KEY }, { status: 503 });
       startJob({ kind: 'trim', label: 'Ranking the cuts', subject: list.name, profileId: profile, listId: id, errorLevel: warn },

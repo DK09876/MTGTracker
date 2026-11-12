@@ -10,6 +10,8 @@ import { deckRoles, deckRolesKnown } from '@/lib/deck-roles';
 import { hardWarnings } from '@/lib/hard-checks';
 import { NextResponse } from 'next/server';
 
+import { jobsOnDeck, SIX_JOBS } from '@/lib/categories';
+
 import { cardsInList } from '@/lib/db';
 import { analyse } from '@/lib/health';
 import { requireList } from '@/lib/profile-route';
@@ -29,9 +31,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const plan = planFor(id, '', owned.list.commander, main);
     const health = analyse({ commander: owned.list.commander, cards: main });
     // Hard failures past legality: no draw (from roles already known, no lookup), lands far under.
-    const draw = await deckRolesKnown(id, main).then((r) => r.find((x) => x.id === 'draw')?.count ?? null).catch(() => null);
+    // Card draw is checked only when it is one of the jobs on the deck: otherwise the check is skipped, not failed.
+    const on = jobsOnDeck(id);
+    const draw = on.has('draw') ? await deckRolesKnown(id, main).then((r) => r.find((x) => x.id === 'draw')?.count ?? null).catch(() => null) : null;
     health.warnings.push(...hardWarnings({ lands: { have: plan.landNumber.have, range: plan.lands }, draw, nearlyBuilt: health.size >= 90 }));
-    return NextResponse.json({ health, landTarget: plan.lands, landCount: plan.landNumber.have });
+    const untracked = SIX_JOBS.filter((j) => !on.has(j.id)).map((j) => j.label);
+    return NextResponse.json({ health, landTarget: plan.lands, landCount: plan.landNumber.have, untracked });
   }
   try {
     const roles = await deckRoles(id, main);

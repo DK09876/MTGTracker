@@ -517,6 +517,8 @@ export const createProfile = (name: string) =>
 export interface DeckHealth {
   health: Health;
   landTarget: [number, number];
+  /** The six jobs not on this deck: no counts or warnings for them (the Tags tab adds them). */
+  untracked?: string[];
   /** Lands as the plan counts them: a land on the back of a double-faced card is part of one. */
   landCount?: number;
 }
@@ -880,7 +882,6 @@ export type TrimView = import('./trim-shared').TrimView;
 export type TrimAction =
   | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
   | { action: 'correction'; text: string }
-  | { action: 'model'; model: import('./trim-shared').TrimModel }
   | { action: 'find'; rerun?: boolean }
   | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
   | { action: 'apply'; cutsTo?: string }

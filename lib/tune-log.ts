@@ -7,7 +7,7 @@
 import { localCards } from './card-store';
 import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
-import { planForAi } from './plan-pass';
+import { owner as planOwner } from './plan-help';
 import { logShown, type CardSide, type ShownBatch, type Task } from './suggestion-log';
 import type { CardRef, Intent, SuggestionGroup } from './tune-shared';
 
@@ -53,7 +53,7 @@ export function logTuneView(list: List, profileId: string, intent: Intent, group
   try {
     const main = cardsInList(list.id).filter((c) => c.board === 'main');
     // The plan read in force when these were shown, if any.
-    logShown(profileId, list.id, `tune:${intent}:`, tuneBatches(intent, groups, deckHash(list.commander, main), planForAi(list)?.passId ?? null));
+    logShown(profileId, list.id, `tune:${intent}:`, tuneBatches(intent, groups, deckHash(list.commander, main), planOwner(list.id).confirmedAt));
   } catch (e) {
     console.error('[suggestion-log] tune view not logged', e);
   }

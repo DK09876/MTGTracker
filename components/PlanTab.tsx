@@ -267,6 +267,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </Suggested>
         )}
         {!unsure && s.commander.by === 'ai' && <p className={`text-sm ${C.ai}`}>✦ AI suggestion, accepted by you. Pick another any time.</p>}
+        {s.commanderChanged && <p className={`text-sm ${C.yours}`}>Look again: the commander changed since you confirmed the plan. Tune stays open.</p>}
       </section>
 
       {/* 2 */}
@@ -298,7 +299,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             </Suggested>
           )}
           {s.bracket.value !== null && s.bracket.by === 'ai' && <p className={`text-sm ${C.ai}`}>✦ AI suggestion, accepted by you. Pick another any time.</p>}
-          {settings && <GameChangerLine names={settings.gameChangers} bracket={s.bracket.value} />}
+          {settings && s.bracket.value !== null && <GameChangerLine names={settings.gameChangers} bracket={s.bracket.value} />}
         </div>
         <Group>Limits <span className="font-normal normal-case tracking-normal">· what Tune has to stay inside</span></Group>
         <div className={`${C.box} flex flex-col gap-2`}>
@@ -483,9 +484,11 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
       {/* Confirm: the row itself stays at the bottom of the screen. */}
       <div data-confirm-bar className={`sticky bottom-[calc(var(--nav-h)+4.75rem)] z-20 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border bg-[#1f1c18] px-3 py-2.5 shadow-[0_-10px_24px_rgba(0,0,0,0.55)] sm:px-4 sm:py-3 lg:bottom-3 ${confirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
         <span className="min-w-0 flex-[1_1_12rem] text-[13px] sm:text-sm"><b>{confirmHead}</b> <span className={`text-[var(--muted)] ${!left && !confirmed ? 'max-sm:hidden' : ''}`}>{confirmNote}</span></span>
-        {s.bulk > 0 && <button type="button" className={C.aiBtn} disabled={busy} onClick={() => act({ action: 'acceptAll' })}>{s.bulk === 1 ? '✦ Accept the 1 suggestion' : `✦ Accept all ${s.bulk} suggestions`}</button>}
-        {!confirmed && <button type="button" className={C.go} disabled={busy || left > 0} onClick={() => act({ action: 'confirm' })}>Confirm the plan</button>}
-        {confirmed && <><button type="button" className={C.go} onClick={() => onTab('tags')}>Next: Tags</button><button type="button" className={C.btn} onClick={() => onTab('tune')}>Skip to Tune</button></>}
+        <span className="flex w-full gap-2 sm:w-auto [&>button]:max-sm:flex-1 [&>button]:max-sm:px-2.5 [&>button]:max-sm:text-[13px]">
+          {s.bulk > 0 && <button type="button" className={C.aiBtn} disabled={busy} onClick={() => act({ action: 'acceptAll' })}>{s.bulk === 1 ? '✦ Accept the 1 suggestion' : `✦ Accept all ${s.bulk} suggestions`}</button>}
+          {!confirmed && <button type="button" className={C.go} disabled={busy || left > 0} onClick={() => act({ action: 'confirm' })}>Confirm the plan</button>}
+          {confirmed && <><button type="button" className={C.go} onClick={() => onTab('tags')}>Next: Tags</button><button type="button" className={C.btn} onClick={() => onTab('tune')}>Skip to Tune</button></>}
+        </span>
       </div>
     </div>
   );

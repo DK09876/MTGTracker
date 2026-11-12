@@ -29,17 +29,17 @@ import { randomUUID } from 'node:crypto';
 
 import { ModelError, type JsonModel } from './ai';
 import { guardCuts } from './cut-guard';
-import { cardsInList, database, deckTags, type List } from './db';
+import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
 import { changePlan } from './deck-plan';
 import { setKeep } from './deck-roles';
 import { latestJob } from './jobs';
 import { planContext } from './plan-context';
-import { gatherInput, ownerText, planForAi, planView } from './plan-pass';
+import { owner as planOwner } from './plan-help';
+import { planFacts } from './plan-facts';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { cutBoard } from './sections-shared';
 import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
-import { tagKey } from './tags';
 import { clearOutcome, closeAll, logConversation, logOutcome, logShown, quietly, type ReasonChip } from './suggestion-log';
 import { applyCuts, cutImpact, landFloor, tuneContext, undoApply, type Context, type UndoMoves } from './tune';
 import { tuneStore } from './tune-store';
@@ -140,7 +140,7 @@ const APPROACH_SCHEMA = { type: 'OBJECT', properties: { bullets: { type: 'ARRAY'
 export async function writeApproach(model: JsonModel, list: List, profileId: string): Promise<TrimApproach> {
   const ctx = await tuneContext(list, profileId);
   const over = Math.max(0, ctx.size - 100);
-  const read = planForAi(list);
+  const read = planOwner(list.id).planText.trim();
   const s = trimStore(list.id);
   const user = [
     `The deck has ${ctx.size} cards including the commander: ${over} to cut.`,
@@ -240,24 +240,17 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
   const ctx = await tuneContext(list, profileId);
   const over = Math.max(0, ctx.size - 100);
   const ask = over + extraFor(over);
-  const { input, md } = await gatherInput(list);
-  const read = planForAi(list);
+  const { md } = await planFacts(list, list.id, list.name, ctx.commanders.map((c) => c.name));
   const main = new Set(ctx.main.map((c) => c.card.name));
-  const tags = deckTags(list.id);
-  const accepted = tags.tags.filter((t) => t.status === 'accepted');
-  const nameOfKey = new Map(ctx.main.map((c) => [tagKey(c.card), c.card.name]));
-  const taggedWith = (tagId: string) => tags.cardTags.filter((t) => t.on && t.tagId === tagId).map((t) => nameOfKey.get(t.key)).filter((n): n is string => !!n).slice(0, 40);
   const store = tuneStore(list.id);
   const out = ctx.all.filter((c) => ctx.sections.find((x) => x.id === c.board)?.purpose === 'out');
   const landsFree = Math.max(0, Math.floor(ctx.plan.landNumber.have - landFloor(ctx)));
   const never = [...ctx.protectedWhy.entries()].filter(([, w]) => w !== 'commander');
   const user = [
     md,
-    ownerText(input),
     '',
-    read ? `## The deck's plan\n${read.text}` : '## The deck\'s plan\nNo plan has been read for this deck (or it is out of date), so judge from the cards.',
-    // The owner's own groupings, with the cards in each: a tag often means "this is part of my plan".
-    ...(accepted.length ? ['', "## The owner's tags (their own groupings of this deck's cards)", ...accepted.map((t) => `- ${t.name}${t.description ? `: ${t.description}` : ''}${taggedWith(t.id).length ? `. Cards: ${taggedWith(t.id).join(', ')}` : ''}`)] : []),
+    // The block every AI step reads: the confirmed plan with who set each part, never-cut, every category with who added it, and the rules.
+    await planContext(list),
     ...(never.length ? ['', `## Never cut\n${never.map(([n, w]) => `${n} (${w})`).join(', ')}`] : []),
     ...(s.approach ? ['', `## The approach for these cuts (${s.approach.by === 'owner' ? "the owner's own words" : s.approach.by === 'claude' ? 'written by you earlier, seen by the owner' : "drafted by the app from the numbers, seen by the owner"})`, s.approach.text] : []),
     ...(s.correction.trim() ? ['', `## The owner adds\n"""\n${s.correction.trim()}\n"""`] : []),
@@ -271,7 +264,7 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
     `Rank exactly ${ask} cards, most cuttable first: your first ${over} are your cuts, the other ${ask - over} the closer calls.`,
     landsFree > 0 ? `Lands: at most ${landsFree} may be listed; fewer than ${Math.ceil(landFloor(ctx))} lands is not allowed.` : 'Lands: none may be listed; the deck is at or under the fewest lands it should have.',
   ].join('\n');
-  return { user, ctx, over, ask, planPassId: read?.passId ?? null, landsFree };
+  return { user, ctx, over, ask, planPassId: planOwner(list.id).confirmedAt, landsFree };
 }
 
 /**
@@ -341,7 +334,7 @@ export async function runTrim(model: JsonModel, list: List, profileId: string, o
     user,
     schema: TRIM_SCHEMA,
     promptOnly: true,
-    thinking: opts.model === 'opus' ? 'high' : 'medium',
+    thinking: 'high',
     timeoutMs: 5 * 60_000,
   }, { maxBusy: 1 });
   const { items, notes } = parseTrim(answer.data, ctx, s, over);
@@ -408,10 +401,6 @@ export function setChoices(listId: string, choices: unknown): void {
 
 export function setCorrection(listId: string, text: unknown): void {
   update(listId, (s) => { s.correction = typeof text === 'string' ? text.slice(0, 600) : ''; });
-}
-
-export function setModel(listId: string, model: unknown): void {
-  update(listId, (s) => { s.model = model === 'haiku' ? 'haiku' : 'opus'; });
 }
 
 /** Start over: the list and the choices go, what was remembered about cards stays. */
@@ -484,10 +473,11 @@ function costOf(stepLike: string, guess: number): { usd: number; measured: boole
 
 export const TRIM_READS = [
   'Every card in the deck with its rules text, and the counts the app worked out',
-  'The plan and each card’s role in it, when a current plan has been read',
-  'Your notes, your settings and what the commander does',
+  'The plan you confirmed, with who set each part: what the commander does, your settings, how the deck wins, ways to win and key cards',
+  'Your notes, word for word',
+  'Every category on the deck with its cards and who added it',
   'The approach, and anything you add to it',
-  'Your ★ never-cut cards, and your tags with the cards in each',
+  'Your never-cut cards',
   'What you kept or cut on this deck before, with your reasons',
   'The names in the sections for cards that came out, and in your maybeboard',
 ];
@@ -496,8 +486,8 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
   const ctx = await tuneContext(list, profileId);
   const s = trimStore(list.id);
   const over = Math.max(0, ctx.size - 100);
-  const pv = planView(list);
-  const planState = !pv.pass ? 'none' : pv.stale && !pv.stale.usingAnyway ? 'stale' : 'current';
+  const po = planOwner(list.id);
+  const planState = po.confirmedAt ? 'current' : 'none';
   const inMain = new Map(ctx.main.filter((c) => c.slot !== 'partner').map((c) => [c.card.name, c.card]));
   const hash = deckHash(list.commander, ctx.main);
   const items: TrimItem[] = (s.run?.items ?? []).filter((i) => inMain.has(i.name)).map((i) => {
@@ -520,13 +510,11 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
   const cutsTo = cutBoard(ctx.sections);
   return {
     size: ctx.size, over,
-    plan: { state: planState, text: pv.pass?.plan ?? null, at: pv.pass?.at ?? null, confirmed: !!pv.confirmed },
+    plan: { state: planState, text: po.planText.trim() || null, at: po.confirmedAt, confirmed: !!po.confirmedAt },
     approach: s.approach, correction: s.correction,
-    model: s.model === 'haiku' && planState !== 'current' ? 'opus' : s.model,
-    canHaiku: planState === 'current',
+    model: 'opus',
     costs: {
       opus: costOf('trim: rank the cuts (opus)', TRIM_COST_GUESS.opus),
-      haiku: costOf('trim: rank the cuts (haiku)', TRIM_COST_GUESS.haiku),
       approach: costOf('trim: write the approach', TRIM_COST_GUESS.approach),
     },
     run: s.run ? { id: s.run.id, at: s.run.at, model: s.run.model, round: s.run.round, notes: s.run.notes, items, stale: !s.done && s.run.deckHash !== hash } : null,

@@ -13,7 +13,8 @@ import { lastReview } from './cut-review';
 import { addCardToList, cachedRoles, cardsInList, database, deckTags, setQuantity, updateListCard, type List, type ListedCard } from './db';
 import { drawKind, isImpulse, jobs as countJobs, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
 import { planFor, planStyles, type Plan } from './deck-plan';
-import { readFlags } from './plan-pass';
+import { jobsOnDeck } from './categories';
+import { planFlags } from './deck-context';
 import { commanderRoles as rolesOfCommander, deckRoles, keeps, overrides as roleOverrides, withOverrides } from './deck-roles';
 import type { Board } from './decklist';
 import { filterCards } from './filter';
@@ -119,7 +120,9 @@ export async function tuneContext(list: List, profileId: string): Promise<Contex
   const tags = deckTags(list.id);
   const plan = planFor(list.id, tags.brief, list.commander, main);
   const [roles, cmdRoles] = await Promise.all([deckRoles(list.id, main).catch(() => [] as RoleCount[]), rolesOfCommander(list.commander).catch(() => [] as string[])]);
-  const jobRows = roles.filter((r) => (JOBS as string[]).includes(r.id) || r.id === 'impulse' || r.id === 'wipe')
+  // Only the jobs on the deck are counted and checked (lib/categories.ts).
+  const onDeck = jobsOnDeck(list.id);
+  const jobRows = roles.filter((r) => ((JOBS as string[]).includes(r.id) || r.id === 'impulse' || r.id === 'wipe') && onDeck.has(r.id === 'impulse' ? 'draw' : r.id))
     .map((r) => ({ id: r.id as JobId, label: r.label, group: r.group, count: r.count, cards: r.cards, range: r.target, how: r.how ?? { inputs: [], steps: [] } }));
   const partner = main.find((c) => c.slot === 'partner')?.card ?? null;
   const commanders = [list.commander, partner].filter((c): c is ScryfallCard => !!c);
@@ -138,7 +141,7 @@ export async function tuneContext(list: List, profileId: string): Promise<Contex
   const bracket = plan.bracket;
   return {
     list, profileId, all, main, sections, plan, roles, jobs: jobRows, cmdRoles, commanders,
-    identity: deckIdentity(commanders), size, pool, protectedWhy, flags: readFlags(list),
+    identity: deckIdentity(commanders), size, pool, protectedWhy, flags: await planFlags(list).catch(() => new Map()),
     styles: planStyles(list.id, list.commander, main),
     rolesOf: (card) => known.get(card.oracle_id ?? card.id) ?? [],
     where: holdings(profileId, list.id),

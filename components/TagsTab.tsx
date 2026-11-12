@@ -220,8 +220,8 @@ function CatRow({ c, all, names, open, onToggle, filter, busy, act }: { c: Categ
   const has = filter.length ? c.cards.filter((x) => filter.includes(x.name)).map((x) => x.name) : [];
   const targets = all.filter((x) => x.id !== c.id && (x.kind !== 'key' || true)).sort((a, b) => a.name.localeCompare(b.name));
   return (
-    <div className="flex flex-wrap items-start gap-2 border-t border-[var(--border)] py-1">
-      <div className="min-w-0 flex-[1_1_18rem]">
+    <div className="flex items-start gap-2 border-t border-[var(--border)] py-1">
+      <div className="min-w-0 flex-1">
         <button type="button" aria-expanded={open} onClick={onToggle} className="flex min-h-11 w-full flex-wrap items-center gap-x-2 text-left">
           <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span>
           <b className="min-w-0 break-words">{c.name}</b>
@@ -252,7 +252,7 @@ function CatRow({ c, all, names, open, onToggle, filter, busy, act }: { c: Categ
           </div>
         )}
       </div>
-      <button type="button" className={C.btn} disabled={busy} aria-label={`Remove ${c.name}`} onClick={() => act({ action: 'remove', id: c.id })}>Remove</button>
+      <button type="button" className={`${C.btn} shrink-0 max-sm:px-3`} disabled={busy} aria-label={`Remove ${c.name}`} onClick={() => act({ action: 'remove', id: c.id })}>Remove</button>
     </div>
   );
 }
