@@ -13,7 +13,9 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
-import DeckPlan from '@/components/DeckPlan';
+import PlanTab from '@/components/PlanTab';
+import TagsTab from '@/components/TagsTab';
+import { TuneLead, TuneLocked } from '@/components/TuneLock';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
 import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
@@ -23,8 +25,6 @@ import Tip from '@/components/Tip';
 import { useDeckCopies } from '@/components/useDeckCopies';
 import DeckHealth from '@/components/DeckHealth';
 import DeckTune from '@/components/DeckTune';
-import DeckTags from '@/components/DeckTags';
-import { CardRoles as PlanCardRoles } from '@/components/PlanPass';
 import FlaggedZone from '@/components/FlaggedZone';
 import GameChangerLine from '@/components/GameChangerLine';
 import SlotQuestions from '@/components/SlotQuestions';
@@ -109,7 +109,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [questions, setQuestions] = useState<SlotQuestion[]>(seen?.slotQuestions ?? []);
   // The bracket the plan aims for, which the Cards tab checks the Game Changers against.
   const [bracket, setBracket] = useState<number | null>(() => api.peek<api.DeckPlanState>(api.paths.plan(id))?.bracket ?? null);
-  const onPlan = useCallback((p: api.DeckPlanState) => { setBracket(p.bracket ?? null); }, []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
 
@@ -640,29 +639,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </p>
       )}
       {deck && section === 'plan' ? (
-        tags ? (
-          <DeckPlan
-            listId={id}
-            tags={tags}
-            onTags={setTags}
-            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-            onPlan={onPlan}
-            onTab={(tab) => setSection(tab)}
-            cardNames={[...new Set([...(list.commander ? [list.commander.name] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card.name)])].sort()}
-          />
-        ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+        <PlanTab
+          listId={id}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onConfirmed={setPlanConfirmed}
+          onBracket={setBracket}
+        />
       ) : null}
       {deck && section === 'tags' ? (
-        <div className="mt-5 flex flex-col gap-8">
-          <PlanCardRoles listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} />
-          {tags ? (
-            <section id="plan-tags" data-section="Tags" className="scroll-mt-24">
-              <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} sections={sections} />
-            </section>
-          ) : <p className="text-center text-[var(--muted)]">Reading the tags…</p>}
-        </div>
+        <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+      ) : deck && section === 'tune' && !planConfirmed ? (
+        <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
       ) : deck && section === 'tune' ? (
         <>
+          <TuneLead listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTags={() => { setSection('tags'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
           <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />
           <DeckTune
             listId={id}

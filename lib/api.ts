@@ -958,3 +958,22 @@ export const finishGame = (id: string, winner: number | null, events: GameEvent[
 export const editGame = (id: string, change: { winner?: number | null; note?: string; layout?: string; seat?: { seat: number; deckId: string | null; deckName: string } }) =>
   send(`games/${id}`, 'PATCH', change).then(json<{ game: Game }>);
 export const deleteGame = (id: string) => fetch(url(`games/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+
+// --- the Plan and Tags tabs (lib/plan-help.ts, lib/tags-tab.ts) ----------------------------
+
+export const planHelpPath = (listId: string) => `lists/${listId}/plan/help`;
+export const categoriesPath = (listId: string) => `lists/${listId}/categories`;
+/** The Plan tab: settings, how the deck wins, ways to win and key cards, open AI suggestions, confirmation. */
+export const planHelp = (listId: string) => get<import('./plan-help-shared').PlanState>(planHelpPath(listId));
+export const planHelpAct = (listId: string, a: import('./plan-help-shared').PlanAction) => {
+  const work = send(planHelpPath(listId), 'POST', a).then(json<import('./plan-help-shared').PlanState>)
+    .then((v) => { memo.set(url(planHelpPath(listId)), v); return v; });
+  return a.action === 'run' ? spending(work.finally(jobsChanged)) : work;
+};
+/** The Tags tab: what is on the deck, and the suggestions from the cards and from AI. */
+export const tagsTab = (listId: string) => get<import('./tags-tab-shared').TagsView>(categoriesPath(listId));
+export const tagsTabAct = (listId: string, a: Record<string, unknown>) => {
+  const work = send(categoriesPath(listId), 'POST', a).then(json<import('./tags-tab-shared').TagsView>)
+    .then((v) => { memo.set(url(categoriesPath(listId)), v); return v; });
+  return a.action === 'ai' ? spending(work.finally(jobsChanged)) : work;
+};

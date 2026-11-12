@@ -38,7 +38,7 @@ const Icon = ({ tab }: { tab: DeckTab }) => (
   </svg>
 );
 
-interface Section { id: string; label: string; count: string | null }
+interface Section { id: string; label: string; count: string | null; state: string | null; tone: string | null }
 
 interface Props {
   section: DeckTab;
@@ -51,6 +51,7 @@ const smooth = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduc
 
 export default function DeckRail({ section, onSection, planConfirmed, deck }: Props) {
   const [parts, setParts] = useState<Section[]>([]);
+  const [footer, setFooter] = useState<string | null>(null);
 
   // The page's sections, read from the page and read again when it changes.
   useEffect(() => {
@@ -62,15 +63,19 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
           .filter((el) => el.getClientRects().length)
           .map((el, i) => {
             if (!el.id) el.id = `section-${i}-${(el.dataset.section ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-            return { id: el.id, label: el.dataset.section ?? '', count: el.dataset.sectionCount ?? null };
+            return { id: el.id, label: el.dataset.section ?? '', count: el.dataset.sectionCount ?? null, state: el.dataset.sectionState ?? null, tone: el.dataset.sectionTone ?? null };
           });
         setParts((prev) => (JSON.stringify(prev) === JSON.stringify(found) ? prev : found));
+        // A page can put a line under its sections: the Plan tab says whether the plan is confirmed.
+        const foot = document.querySelector<HTMLElement>('[data-rail-footer]');
+        const next = foot ? (foot.dataset.confirmed ? 'yes' : 'no') : null;
+        setFooter((prev) => (prev === next ? prev : next));
       });
     };
     read();
     const watch = new MutationObserver(read);
     const root = document.querySelector('main') ?? document.body;
-    watch.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-section', 'data-section-count'] });
+    watch.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-section', 'data-section-count', 'data-section-state', 'data-confirmed'] });
     return () => { watch.disconnect(); cancelAnimationFrame(frame); };
   }, [section]);
 
@@ -112,7 +117,7 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
               >
                 {/* Narrow phones: words only, so all five tabs fit without scrolling. */}
                 <span className={`max-[429px]:hidden ${on ? 'text-[var(--c1)]' : ''}`}><Icon tab={value} /></span>
-                <span className="flex-1">{label}</span>
+                <span className="flex-1">{value === 'tune' && !planConfirmed ? <>Tune<span className="text-[var(--faint)]"> · locked</span></> : label}</span>
                 {value === 'plan' && !planConfirmed && !on && (<>
                   <span className="rounded-full bg-amber-300/15 px-1.5 text-[11px] font-semibold text-amber-300 max-lg:hidden">start here</span>
                   {/* Phones: a dot, so all five tabs still fit the bar. */}
@@ -131,12 +136,19 @@ export default function DeckRail({ section, onSection, planConfirmed, deck }: Pr
             <button
               key={p.id}
               onClick={() => document.getElementById(p.id)?.scrollIntoView({ behavior: smooth(), block: 'start' })}
-              className="flex shrink-0 items-center justify-between gap-3 whitespace-nowrap rounded-lg px-2.5 py-1 text-left text-[var(--muted)] hover:text-[var(--foreground)] lg:text-[13px]"
+              className={`flex shrink-0 items-center justify-between gap-3 whitespace-nowrap rounded-lg px-2.5 py-1 text-left text-[var(--muted)] hover:text-[var(--foreground)] lg:text-[13px] ${p.state ? 'lg:flex-col lg:items-start lg:gap-0 lg:py-1.5' : ''}`}
             >
-              <span className="truncate">{p.label}</span>
+              <span className={`truncate ${p.state ? 'lg:font-semibold lg:text-[var(--foreground)]' : ''}`}>{p.label}</span>
               {p.count && <span className="tabular-nums text-[var(--faint)]">{p.count}</span>}
+              {p.state && <span className={`hidden text-xs font-semibold lg:block ${p.tone ?? ''}`}>{p.state}</span>}
             </button>
           ))}
+          {footer && (
+            <div className="hidden flex-col gap-1.5 border-t border-[var(--border)] px-2.5 pt-2 lg:flex">
+              <span className={`text-[13px] font-semibold ${footer === 'yes' ? 'text-emerald-300' : 'text-[#e8c558]'}`}>{footer === 'yes' ? 'Confirmed · Tune is open' : 'Not confirmed · Tune is locked'}</span>
+              <span className="whitespace-normal text-xs text-[var(--muted)]"><span className="text-[#e8c558]">Gold</span> is yours · <span className="text-[#c3a6e6]">violet ✦</span> is AI · <span className="text-[#8cc0ee]">blue</span> is from the cards</span>
+            </div>
+          )}
           <button onClick={() => window.scrollTo({ top: 0, behavior: smooth() })} className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-left text-[var(--faint)] hover:text-[var(--foreground)] lg:text-[13px]">↑ Back to top</button>
         </div>
       )}

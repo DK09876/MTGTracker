@@ -32,7 +32,7 @@ import { REASON_CHIPS, REASON_LABELS, type ReasonChip } from './suggestion-share
 
 export { REASON_CHIPS, REASON_LABELS, type ReasonChip };
 
-export type Task = 'trim' | 'find' | 'tune' | 'build' | 'plan';
+export type Task = 'trim' | 'find' | 'tune' | 'build' | 'plan' | 'tags';
 export type Method = 'code' | 'ai';
 export type Outcome = 'accepted' | 'refused' | 'ignored';
 export type ConversationKind = 'question_asked' | 'question_answered' | 'question_skipped' | 'approach_shown' | 'approach_corrected';
