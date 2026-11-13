@@ -79,6 +79,18 @@ export function sourceOf(h: Held, copies: Copies): { src: Source; deck?: string;
   return null;
 }
 
+const COLOUR_WORD: Record<string, string> = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green', C: 'colourless' };
+/**
+ * What a land makes and how it enters, as words a search can match (Part E): "makes-blue, makes-red, untapped".
+ * Worked out in code from the card's mana and rules text, so Claude needn't read every land to find them.
+ */
+export function landWords(c: ScryfallCard, identity?: Set<string>): string {
+  const makes = [...'WUBRGC'].filter((m) => (c.produced_mana ?? []).includes(m) && (!identity || m === 'C' || identity.has(m))).map((m) => `makes-${COLOUR_WORD[m]}`);
+  const text = oracleTextOf(c);
+  const tapped = /enters (the battlefield )?tapped/i.test(text) ? (/unless|if you (control|don't)|you may pay/i.test(text) ? 'sometimes-tapped' : 'enters-tapped') : 'untapped';
+  return [...makes, tapped].join(', ');
+}
+
 /**
  * One card as a search answers it. Finish's lines end "(in <deck>)" only for a card another deck holds (its
  * prompt and tests rely on that); Chat's (`where`) say where every copy is: a spare copy, this deck's section,
@@ -129,7 +141,11 @@ export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.pr
   const cards = new Map<string, ScryfallCard>();
   for (const h of mine) { cards.set(h.card.name.toLowerCase(), h.card); cards.set(front(h.card.name), h.card); }
   const landOk = opts.chat ? [] : addable(ctx, fit.filter((h) => isLand(h.card) && !isBasic(h.card) && !out(h) && sourceOf(h, copies)).map((h) => h.card), null);
-  const landLines = landOk.map((c) => { const s = sourceOf(held.get(keyOf(c))!, copies)!; return poolLine(c, s.src, s.deck, { section: s.section }); }).sort((a, b) => a.name.localeCompare(b.name));
+  const landLines = landOk.map((c) => {
+    const s = sourceOf(held.get(keyOf(c))!, copies)!;
+    const l = poolLine(c, s.src, s.deck, { section: s.section });
+    return { ...l, line: `${l.line} [${landWords(c, ctx.identity)}]` };
+  }).sort((a, b) => a.name.localeCompare(b.name));
   const landCards = new Map<string, ScryfallCard>();
   for (const c of landOk) { landCards.set(c.name.toLowerCase(), c); landCards.set(front(c.name), c); }
   return { lines, cards, held, lands: { lines: landLines, cards: landCards }, counts: { held: all.length, fit: fit.length, spare: spare.length, any: any.length, otherOnly: any.length - spare.length } };

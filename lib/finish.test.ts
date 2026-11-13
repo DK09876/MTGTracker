@@ -133,9 +133,9 @@ describe('the search', () => {
     expect(searchLines(pool, 'draw t:instant').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'draw mv<=1').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'destroy').lines[0].line).toContain('(in Zuko)');
-    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], not: [], types: ['instant'], mv: 2, mvMin: null, ignored: [] });
+    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], not: [], types: ['instant'], notTypes: [], mv: 2, mvMin: null, ignored: [] });
     // What Claude tends to write beyond that: mv>=, mv=, o:, -word; anything else is named, not matched as a word.
-    expect(parseQuery('o:treasure mv>=3 -creature c:r pow>=4')).toEqual({ words: ['treasure'], not: ['creature'], types: [], mv: null, mvMin: 3, ignored: ['c:r', 'pow>=4'] });
+    expect(parseQuery('o:treasure mv>=3 -creature c:r pow>=4')).toEqual({ words: ['treasure'], not: ['creature'], types: [], notTypes: [], mv: null, mvMin: 3, ignored: ['c:r', 'pow>=4'] });
     expect(parseQuery('mv=2')).toMatchObject({ mv: 2, mvMin: 2 });
     expect(searchLines(pool, 'o:draw mv>=3').lines.map((l) => l.name)).toEqual(['Divination']);
     expect(searchLines(pool, 'draw -scry').lines.map((l) => l.name)).not.toContain('Opt');
@@ -365,6 +365,8 @@ describe('Claude picks the lands worth playing; the app counts (Part E)', { time
     expect(text(asked[0])).toContain('Also choose up to 10 of the owner\'s nonbasic lands');
     const landResult = JSON.stringify(asked[1].messages.at(-1));
     expect(landResult).toContain('Reliquary Tower');
+    // Each land says what it makes and how it enters, as words a search can match.
+    expect(landResult).toContain('Lonely Lagoon {T}: Add {U}. - Land'.slice(0, 0) + '[makes-blue, untapped]');
     expect(landResult).not.toContain('Sulfur Falls'); // red: outside the colours
     expect(landResult).not.toContain('Lent Land'); // only in another deck, spare copies only
     expect(landResult).not.toMatch(/Island \{/);
@@ -548,6 +550,10 @@ describe('held review fixes (handoff 9, Part D)', { timeout: 60_000 }, () => {
     expect(chipTone(1.6, 2)).toBe('amber');
     expect(chipTone(2, 2)).toBe('red');
     expect(chipTone(0, 0)).toBe('quiet');
+    const { soundsUnsure } = await import('./finish-shared');
+    expect(soundsUnsure('kind of expensive for what it does')).toBe(true);
+    expect(soundsUnsure('is this good enough?')).toBe(true);
+    expect(soundsUnsure('the best draw spell here')).toBe(false);
   });
 });
 

@@ -203,9 +203,14 @@ The owner's cards:
   for payoffs and one for enablers. Counts come from the search totals, never
   from memory. Search words differ in breadth ("token" also finds Treasure
   makers), so give counts as "about N", say what each was a search for, and
-  never rank themes by raw totals alone. Answer short: one line per theme
-  (about how many cards, three to five standouts), then the pick and what it
-  is missing.
+  never rank themes by raw totals alone.
+- A theme answer stays under about 150 words, in this shape:
+  one line per theme, "<theme>: about N (X spare, Y in other decks), from
+  <what you searched>; standouts A, B, C"; then one line "Pick: <theme>,
+  because <one reason>"; then one line "Missing: <what it lacks>". No
+  paragraph per theme, no extra card lists, no lands count. Buttons don't
+  count toward that: after the pick, propose it as a note to the plan, and on
+  a deck that is only its commander add the Finish button.
 - If the search says the commander isn't set, tell the owner to set it first.
 
 Doing it here, or opening a page:
@@ -241,7 +246,7 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: 'search_my_cards',
-    description: `Search the owner's own cards that may go in this deck: in its colours, Commander-legal, not already in it, within the plan's budget, deck rule and bracket. Lands included. Covers spare copies, this deck's sections and cards in the owner's other decks; each line ends with where the copy is. Plain words must all match the name, type line or rules text; add t:<type>, mv<=N, mv>=N, mv=N or o:word to narrow, and -word to leave cards out. Nothing else is understood (no colour filters): a filter it can't use is named in the answer. Answers with the total, how many are spare copies and how many sit in other decks, and up to 40 cards. At most ${CHAT_SEARCH_LIMIT} searches for one answer.`,
+    description: `Search the owner's own cards that may go in this deck: in its colours, Commander-legal, not already in it, within the plan's budget, deck rule and bracket. Lands included. Covers spare copies, this deck's sections and cards in the owner's other decks; each line ends with where the copy is. Plain words must all match the name, type line or rules text; add t:<type>, mv<=N, mv>=N, mv=N or o:word to narrow, and -word or -t:<type> to leave cards out. Nothing else is understood (no colour filters): a filter it can't use is named in the answer. Answers with the total, how many are spare copies and how many sit in other decks, and up to 40 cards. At most ${CHAT_SEARCH_LIMIT} searches for one answer.`,
     input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
   },
   {
@@ -292,7 +297,7 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
 /** A search over the owner's cards as Claude reads it: the total split by where the copies are, then the lines. */
 export function mineText(r: MineResult): string {
   const split = [`${r.bySrc.spare} spare cop${r.bySrc.spare === 1 ? 'y' : 'ies'}`, `${r.bySrc.other} in other decks`, ...(r.bySrc.maybe ? [`${r.bySrc.maybe} in this deck's sections`] : [])].join(', ');
-  return searchText(r).replace(/^[^\n]*/, (first) => `${first} (${split})`).replace('The search takes plain words, -word, t:<type>, mv<=N, mv>=N and mv=N only.', 'The search takes plain words, -word, t:<type>, o:word, mv<=N, mv>=N and mv=N only.');
+  return searchText(r).replace(/^[^\n]*/, (first) => `${first} (${split})`).replace('The search takes plain words, -word, t:<type>, -t:<type>, mv<=N, mv>=N and mv=N only.', 'The search takes plain words, -word, t:<type>, -t:<type>, o:word, mv<=N, mv>=N and mv=N only.');
 }
 
 /**

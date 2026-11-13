@@ -166,12 +166,13 @@ describe('search_my_cards', { timeout: 60_000 }, () => {
     ];
     expect(searchLines(pool, 't:zombie t:creature').lines.map((l) => l.name)).toEqual(['Zed']);
     expect(searchLines(pool, 't:creature').total).toBe(2);
+    expect(searchLines(pool, 'z -t:creature').lines.map((l) => l.name)).toEqual(['Zombify']);
   });
 
   it('names a filter it can’t use', async () => {
     const { list } = await setup();
     const { asked } = await ask(list, [[s('draw c:u')], 'Done.']);
-    expect(lastResults(asked[1])[0].content).toMatch(/Ignored, not understood: c:u\. The search takes plain words, -word, t:<type>, o:word, mv<=N/);
+    expect(lastResults(asked[1])[0].content).toMatch(/Ignored, not understood: c:u\. The search takes plain words, -word, t:<type>, -t:<type>, o:word, mv<=N/);
   });
 
   it('my_collection says when an owned card can’t go in this deck, and why', async () => {

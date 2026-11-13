@@ -52,6 +52,8 @@ export interface Query {
   not: string[];
   /** Every t: filter; a card must match all of them (t:zombie t:creature is Zombie creatures). */
   types: string[];
+  /** -t: filters: a card must match none of them. */
+  notTypes: string[];
   /** Mana value at most / at least. */
   mv: number | null;
   mvMin: number | null;
@@ -61,12 +63,14 @@ export interface Query {
 
 /** A search as Claude writes it: words that must all match, `-word`, `t:<type>`, `mv<=N`, `mv>=N`, `mv=N`. */
 export function parseQuery(q: string): Query {
-  const out: Query = { words: [], not: [], types: [], mv: null, mvMin: null, ignored: [] };
+  const out: Query = { words: [], not: [], types: [], notTypes: [], mv: null, mvMin: null, ignored: [] };
   for (const w of q.toLowerCase().replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
     const mv = w.match(/^(?:mv|cmc|manavalue)(<=|>=|<|>|=|:)(\d+)$/);
     const text = w.match(/^(?:o|oracle|text|name|n):(.+)$/);
     const type = w.match(/^(?:t|type):(.+)$/);
+    const notType = w.match(/^-(?:t|type):(.+)$/);
     if (type) out.types.push(type[1]);
+    else if (notType) out.notTypes.push(notType[1]);
     else if (mv) {
       const n = Number(mv[2]);
       if (mv[1] === '<=') out.mv = n;
@@ -84,10 +88,11 @@ export function parseQuery(q: string): Query {
 
 /** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value in range. */
 export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> } {
-  const { words, not, types, mv, mvMin, ignored } = parseQuery(q);
+  const { words, not, types, notTypes, mv, mvMin, ignored } = parseQuery(q);
   const hits = pool.filter((c) => {
     const l = c.line.toLowerCase();
     if (!types.every((t) => c.typeLine.toLowerCase().includes(t))) return false;
+    if (notTypes.some((t) => c.typeLine.toLowerCase().includes(t))) return false;
     if (mv !== null && c.cmc > mv) return false;
     if (mvMin !== null && c.cmc < mvMin) return false;
     return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
@@ -101,7 +106,7 @@ export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): 
 export function searchText(r: { total: number; lines: PoolLine[]; ignored?: string[] }): string {
   return [
     `${r.total} match${r.total > r.lines.length ? `, first ${r.lines.length} shown` : ''}`,
-    ...(r.ignored?.length ? [`Ignored, not understood: ${r.ignored.join(' ')}. The search takes plain words, -word, t:<type>, mv<=N, mv>=N and mv=N only.`] : []),
+    ...(r.ignored?.length ? [`Ignored, not understood: ${r.ignored.join(' ')}. The search takes plain words, -word, t:<type>, -t:<type>, mv<=N, mv>=N and mv=N only.`] : []),
     ...r.lines.map((c) => c.line),
   ].join('\n');
 }
@@ -253,7 +258,7 @@ export function colourWords(identity: Iterable<string>): string {
 }
 
 /** A kept row's comment that reads like a doubt ("kind of expensive for what it does"): offer Rethink. A plain rule, in code. */
-export const soundsUnsure = (text: string) => /(not sure|unsure|maybe|kind of|kinda|sort of|meh|expensive|pricey|weak|not great|not sold|doubt|hmm+|iffy|idk|questionable|too slow|clunky)|\?\s*$/i.test(text.trim());
+export const soundsUnsure = (text: string) => /\b(not sure|unsure|maybe|kind of|kinda|sort of|meh|expensive|pricey|weak|not great|not sold|doubt|hmm+|iffy|idk|questionable|too slow|clunky)\b|\?\s*$/i.test(text.trim());
 
 export interface RoundCost { usd: number; measured: boolean; base?: number; perCard?: number }
 
