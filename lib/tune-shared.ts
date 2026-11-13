@@ -10,7 +10,7 @@ import type { Board } from './decklist';
 export type Intent = 'finish' | 'find' | 'swaps' | 'cuts' | 'fix' | 'lands';
 
 export const INTENTS: Array<{ id: Intent; label: string; why: string }> = [
-  { id: 'finish', label: 'Finish the deck', why: 'Fill a deck that is far from 100: lands, the jobs every deck needs, your themes, ways to win. Each group waits for you to accept it.' },
+  { id: 'finish', label: 'Finish the deck', why: 'Fill the deck from cards you own: Claude searches your collection for what fits the plan, you keep, rethink or skip each pick, and the app adds the lands. Or fill it free from the deck’s numbers.' },
   { id: 'find', label: 'Find cards', why: 'Cards for the jobs and themes the deck is short of, and combos one card away. Accept them into your changes, or save them to a section for later.' },
   { id: 'swaps', label: 'Swaps', why: 'For each card waiting in your Maybeboard, the deck cards doing the same job at about the same cost, to help you choose. Not ranked. Ask Claude for swaps it would make. The deck stays at its size.' },
   { id: 'cuts', label: 'Cuts', why: 'Where to find room when the deck is over 100, in the order to look: flagged cards, a heavy curve, your bracket, jobs over their range, cards off the plan.' },

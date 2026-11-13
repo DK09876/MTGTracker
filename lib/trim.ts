@@ -49,7 +49,8 @@ import { clearOutcome, closeAll, logConversation, logOutcome, logShown, quietly,
 import { applyCuts, cutImpact, landFloor, tuneContext, undoApply, type Context, type UndoMoves } from './tune';
 import { tuneStore } from './tune-store';
 import {
-  chosenCuts, isTrimChip, newMarks, saidSomething, TRIM_MODELS,
+  chosenCuts, cutsFor, isTrimChip, newMarks, saidSomething, targetWords, TRIM_MODELS,
+  type TrimTarget,
   type CutMark, type TrimApproach, type TrimChoice, type TrimDone, type TrimItem, type TrimMark, type TrimModel, type TrimTier, type TrimTurn, type TrimView,
 } from './trim-shared';
 import type { Board } from './decklist';
@@ -84,9 +85,11 @@ export interface TrimStore {
   turns: TrimTurn[];
   said: Record<string, Said>;
   done: TrimDone | null;
+  /** How many to cut: a number, or a size to reach. Null is down to 100. */
+  target: TrimTarget | null;
 }
 
-const EMPTY: TrimStore = { approach: null, model: 'opus', run: null, choices: {}, carried: {}, turns: [], said: {}, done: null };
+const EMPTY: TrimStore = { approach: null, model: 'opus', run: null, choices: {}, carried: {}, turns: [], said: {}, done: null, target: null };
 
 let ready = false;
 function db() {
@@ -124,8 +127,7 @@ export function dropTrim(listId: string): void {
  * to look at last. Untested against a Claude-written one; it is a starting
  * point the owner can edit.
  */
-export function draftApproach(ctx: Context): string {
-  const over = Math.max(0, ctx.size - 100);
+export function draftApproach(ctx: Context, target: TrimTarget | null = null): string {
   const n = (x: number) => String(Math.round(x * 10) / 10);
   const jobs = ctx.jobs.filter((j) => j.range && j.id !== 'impulse' && j.id !== 'wipe');
   const high = jobs.filter((j) => j.count > j.range![1]).sort((a, b) => (b.count - b.range![1]) - (a.count - a.range![1]));
@@ -142,10 +144,10 @@ export function draftApproach(ctx: Context): string {
   if (strong.length) L.push(`Looked at last: the ${engines ? `${engines} engine card${engines === 1 ? '' : 's'} and ` : ''}${strong.length - engines} key card${strong.length - engines === 1 ? '' : 's'} in the plan.`);
   const starred = [...ctx.protectedWhy.values()].filter((w) => w.startsWith('★')).length;
   L.push(`Never offered: the commander${ctx.commanders.length > 1 ? 's' : ''}${starred ? ` and your ${starred} ★ card${starred === 1 ? '' : 's'}` : ''}.`);
-  return [`Cut ${over} to reach 100.`, ...L].map((l) => `- ${l}`).join('\n');
+  return [`${targetWords(ctx.size, target).replace(/^c/, 'C')}.`, ...L].map((l) => `- ${l}`).join('\n');
 }
 
-const APPROACH_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app. The owner's deck is over 100 cards and they are about to ask for a cut list. Write the approach for those cuts: 3 to 5 short bullets, each with numbers where they apply, saying where the cuts should come from and what stays protected, for THIS deck. Follow the deck's plan and what the owner has told the app; the owner outranks your own reading. When the owner has already written some lines, those stay exactly as they are: write 2 to 4 bullets that add to them, never repeating or contradicting them. Name a card only as an example. No card-by-card list: that comes next. Plain words a player would say at the table.`;
+const APPROACH_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app. The owner is about to ask for a cut list (usually down to 100 cards; the task says how many). Write the approach for those cuts: 3 to 5 short bullets, each with numbers where they apply, saying where the cuts should come from and what stays protected, for THIS deck. Follow the deck's plan and what the owner has told the app; the owner outranks your own reading. When the owner has already written some lines, those stay exactly as they are: write 2 to 4 bullets that add to them, never repeating or contradicting them. Name a card only as an example. No card-by-card list: that comes next. Plain words a player would say at the table.`;
 
 const APPROACH_SCHEMA = { type: 'OBJECT', properties: { bullets: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['bullets'] };
 
@@ -157,11 +159,10 @@ const APPROACH_SCHEMA = { type: 'OBJECT', properties: { bullets: { type: 'ARRAY'
 export async function writeApproach(model: JsonModel, list: List, profileId: string, box = ''): Promise<TrimApproach> {
   const own = box.trim().slice(0, 2000);
   const ctx = await tuneContext(list, profileId);
-  const over = Math.max(0, ctx.size - 100);
   const read = planOwner(list.id).planText.trim();
   const s = trimStore(list.id);
   const user = [
-    `The deck has ${ctx.size} cards including the commander: ${over} to cut.`,
+    `The deck has ${ctx.size} cards including the commander. The owner wants to ${targetWords(ctx.size, s.target)}.`,
     '',
     await planContext(list),
     // With no current plan read, the cards themselves are the only way to tell what the deck does.
@@ -184,7 +185,7 @@ export async function writeApproach(model: JsonModel, list: List, profileId: str
 export async function setApproach(list: List, profileId: string, input: { text?: string; draft?: boolean; clear?: boolean }): Promise<void> {
   if (input.clear || (input.text !== undefined && !input.text.trim() && !input.draft)) { update(list.id, (s) => { s.approach = null; }); return; }
   if (input.draft) {
-    const text = draftApproach(await tuneContext(list, profileId));
+    const text = draftApproach(await tuneContext(list, profileId), trimStore(list.id).target);
     update(list.id, (s) => { s.approach = { text, by: 'code', at: now() }; });
     quietly(() => logConversation(profileId, list.id, 'trim', 'approach_shown', text, 'code'));
     return;
@@ -199,12 +200,12 @@ export async function setApproach(list: List, profileId: string, input: { text?:
 
 // --- the cut list --------------------------------------------------------------------------
 
-export const TRIM_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app, helping the owner trim a deck that is over 100 cards. You get the deck's facts (the commander, numbers the app's code worked out on this exact list, and every card with its rules text); the plan the owner confirmed on the Plan tab (what the commander does, their settings, how the deck wins, ways to win and key cards, with who set each part); what the owner has told the app; what they said matters for these cuts; what they decided on earlier cut lists for this deck; and, after the first list, the whole cut session so far.
+export const TRIM_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app, helping the owner trim a deck: usually down to 100 cards, or as many cuts as the task says. You get the deck's facts (the commander, numbers the app's code worked out on this exact list, and every card with its rules text); the plan the owner confirmed on the Plan tab (what the commander does, their settings, how the deck wins, ways to win and key cards, with who set each part); what the owner has told the app; what they said matters for these cuts; what they decided on earlier cut lists for this deck; and, after the first list, the whole cut session so far.
 
 This is one conversation. Read the whole session. The owner's latest words outrank their earlier ones, and all of them outrank your own reading.
 
 The owner picks their cuts from your list. Give:
-- ranked: the number of cards the task asks for, most cuttable first. Your first N (the number the deck is over) are your own recommended cuts; the rest are the closer calls, in order. For each: "why", one or two short sentences a player would say at the table, about this card in this deck; and "with", the other cards in the deck it works with (empty when none matter to the call).
+- ranked: the number of cards the task asks for, most cuttable first. Your first N (the number of cuts the task asks for) are your own recommended cuts; the rest are the closer calls, in order. For each: "why", one or two short sentences a player would say at the table, about this card in this deck; and "with", the other cards in the deck it works with (empty when none matter to the call).
 - keep: up to 5 cards a quick look would cut (over a usual range, weak on their own, expensive) that should stay, each with why. Only where it is not obvious.
 - notes (the first list only): 2 or 3 sentences: where the cuts come from and what you protected.
 - reply (every list after the first): 2 to 4 sentences to the owner: what changed since your last list and which of their words changed it, or the answer to their question.
@@ -305,7 +306,7 @@ export function sessionLines(turns: TrimTurn[]): string[] {
 /** Everything the cut list call is sent, and what the parse needs. */
 export async function trimMessage(list: List, profileId: string, s: TrimStore = trimStore(list.id)): Promise<{ user: string; ctx: Context; over: number; want: number; ask: number; round: number; planPassId: string | null; landsFree: number }> {
   const ctx = await tuneContext(list, profileId);
-  const over = Math.max(0, ctx.size - 100);
+  const over = cutsFor(ctx.size, s.target);
   // One more than wanted: runs with no list before came back one short 6 times in 42. parseTrim trims to `want`.
   const want = over + extraFor(over);
   const ask = want + 1;
@@ -331,7 +332,7 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
     ...(ctx.pool.length ? ['', `## Waiting in the owner's maybeboard\n${ctx.pool.slice(0, 60).map((c) => c.card.name).join(NAMES)}`] : []),
     '',
     '## The task',
-    `The deck has ${ctx.size} cards including the commander${ctx.commanders.length > 1 ? 's' : ''}; a Commander deck is exactly 100. It is ${over} over.`,
+    s.target ? `The deck has ${ctx.size} cards including the commander${ctx.commanders.length > 1 ? 's' : ''}. The owner asked to ${targetWords(ctx.size, s.target)}: ${over} cuts.` : `The deck has ${ctx.size} cards including the commander${ctx.commanders.length > 1 ? 's' : ''}; a Commander deck is exactly 100. It is ${over} over.`,
     `${round > 1 ? `This is list ${round}. ` : ''}Rank exactly ${ask} cards, most cuttable first: your first ${over} are your cuts, the other ${ask - over} the closer calls.`,
     round > 1 ? 'Fill reply for the owner, and ask only if you cannot tell what they want.' : 'Fill notes. Leave ask empty unless you cannot tell what the owner wants.',
     landsFree > 0 ? `Lands: at most ${landsFree} may be listed; fewer than ${Math.ceil(landFloor(ctx))} lands is not allowed.` : 'Lands: none may be listed; the deck is at or under the fewest lands it should have.',
@@ -469,7 +470,7 @@ export async function runTrim(model: JsonModel, list: List, profileId: string, o
   }
   const s: TrimStore = { ...before, choices: rerun ? before.choices : {}, turns };
   const { user, ctx, over, want, round, planPassId } = await trimMessage(list, profileId, s);
-  if (over <= 0) throw new ModelError('The deck is at 100 or under: there is nothing to trim.');
+  if (over <= 0) throw new ModelError(s.target ? 'That number asks for no cuts on this deck. Choose how many to cut first.' : 'The deck is at 100 or under: there is nothing to trim. Choose how many to cut first.');
   progress(round > 1 ? `Claude is reading your answer (list ${round})` : `Claude is ranking the cuts (${over} to find)`);
   const answer = await model({
     step: `trim: rank the cuts (${opts.model})`,
@@ -576,6 +577,11 @@ export function setNeverCut(listId: string, name: string, on: boolean): void {
   if (card) setKeep(listId, card.oracle_id ?? card.id, on);
 }
 
+/** How many to cut: a number, a size to reach, or null for down to 100. Kept with the deck. */
+export function setTarget(listId: string, target: TrimTarget | null): void {
+  update(listId, (s) => { s.target = target; });
+}
+
 /** Start over: the list, the choices and the session go; the box and what was remembered about cards stay. */
 export function resetTrim(listId: string): void {
   quietly(() => closeAll(listId, 'trim:'));
@@ -599,7 +605,7 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board, k
   const s = trimStore(list.id);
   if (!s.run) throw new Error('There is no cut list to apply');
   const ctx = await tuneContext(list, profileId);
-  const over = Math.max(0, ctx.size - 100);
+  const over = cutsFor(ctx.size, s.target);
   const inMain = new Map(ctx.main.map((c) => [c.card.name, c.card]));
   const items = listedItems(s, (n) => inMain.has(n)).filter((i) => inMain.has(i.name));
   const names = chosenCuts(items as TrimItem[], s.choices);
@@ -688,7 +694,7 @@ export function compare(run: Pick<Run, 'prev'>, items: Array<Pick<TrimItem, 'nam
 export async function trimView(list: List, profileId: string): Promise<TrimView> {
   const ctx = await tuneContext(list, profileId);
   const s = trimStore(list.id);
-  const over = Math.max(0, ctx.size - 100);
+  const over = cutsFor(ctx.size, s.target);
   const po = planOwner(list.id);
   const planState = po.confirmedAt ? 'current' : 'none';
   const inMain = new Map(ctx.main.filter((c) => c.slot !== 'partner').map((c) => [c.card.name, c.card]));
@@ -715,7 +721,7 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
   const job = live(cutsJob, 'cuts', s.run?.at ?? null) ?? live(approachJob, 'approach', s.approach?.at ?? null);
   const cutsTo = cutBoard(ctx.sections);
   return {
-    size: ctx.size, over,
+    size: ctx.size, over, target: s.target,
     plan: { state: planState, text: po.planText.trim() || null, at: po.confirmedAt, confirmed: !!po.confirmedAt },
     approach: s.approach,
     model: 'opus',

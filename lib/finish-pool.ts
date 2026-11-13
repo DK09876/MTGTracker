@@ -1,0 +1,163 @@
+/**
+ * Which of the owner's cards Finish may offer (handoff 8, Part A), worked out
+ * by code once per run, and the lands it adds on a full fill (Part D).
+ *
+ * A copy is either in a box (collection_cards: a spare copy, free to use) or
+ * held by a deck (its list). "Only spare copies" offers a card only when a
+ * box holds a copy; a card that sits in another deck with a second copy in a
+ * box is on offer. "Take from other decks too" offers every card the owner
+ * holds, and a card only another deck holds names that deck. Cards waiting in
+ * this deck's own sections (the Maybeboard) are on offer under both.
+ *
+ * Then Tune's own checks (addable in lib/tune.ts): the colours, Commander
+ * legal, not in the deck, the budget, the deck rule and the bracket. Claude
+ * never sees a card it may not pick. Server only.
+ */
+
+import { database } from './db';
+import { addable, gcRoomOf, type Context } from './tune';
+import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
+import type { Copies, PoolLine, Source } from './finish-shared';
+import { localCards } from './card-store';
+
+const keyOf = (c: ScryfallCard) => c.oracle_id ?? c.id;
+const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+export const isLand = (c: ScryfallCard) => /\bLand\b/.test((c.type_line ?? '').split('//')[0]);
+const isBasic = (c: ScryfallCard) => /\bBasic\b/.test(c.type_line ?? '');
+const NOT_PROXY = `(',' || cc.variant || ',') NOT LIKE '%,proxy,%'`;
+
+export interface Held {
+  card: ScryfallCard;
+  /** Copies in the owner's boxes. */
+  boxes: number;
+  /** The other decks that list it. */
+  decks: string[];
+  /** In this deck's own sections (Maybeboard and the like). */
+  here: boolean;
+}
+
+/** Everything the owner holds, by card: copies in boxes, the other decks that list it, and this deck's sections. */
+export function heldCards(profileId: string, listId: string): Map<string, Held> {
+  const d = database();
+  const out = new Map<string, Held>();
+  const at = (card: ScryfallCard) => {
+    const k = keyOf(card);
+    let h = out.get(k);
+    if (!h) { h = { card, boxes: 0, decks: [], here: false }; out.set(k, h); }
+    return h;
+  };
+  for (const r of d.all(`SELECT c.data, SUM(cc.quantity) AS n FROM collection_cards cc JOIN cards c ON c.id = cc.cardId
+    WHERE cc.profileId = ? AND cc.quantity > 0 AND ${NOT_PROXY} GROUP BY cc.cardId`, [profileId]) as Array<{ data: string; n: number }>) {
+    at(JSON.parse(r.data) as ScryfallCard).boxes += r.n;
+  }
+  // Another deck's main board and its commander hold a copy; its sections are only ideas.
+  for (const r of d.all(`SELECT c.data, l.name FROM list_cards lc JOIN lists l ON l.id = lc.listId JOIN cards c ON c.id = lc.cardId
+    WHERE l.profileId = ? AND l.kind = 'deck' AND l.id != ? AND lc.board = 'main'
+    UNION ALL SELECT c.data, l.name FROM lists l JOIN cards c ON c.id = l.commanderId WHERE l.profileId = ? AND l.kind = 'deck' AND l.id != ?`,
+  [profileId, listId, profileId, listId]) as Array<{ data: string; name: string }>) {
+    const h = at(JSON.parse(r.data) as ScryfallCard);
+    if (!h.decks.includes(r.name)) h.decks.push(r.name);
+  }
+  for (const r of d.all(`SELECT c.data FROM list_cards lc JOIN cards c ON c.id = lc.cardId WHERE lc.listId = ? AND lc.board != 'main'`, [listId]) as Array<{ data: string }>) {
+    at(JSON.parse(r.data) as ScryfallCard).here = true;
+  }
+  return out;
+}
+
+/** Where the copy a pick uses comes from, under a setting; null when the setting doesn't offer it. */
+export function sourceOf(h: Held, copies: Copies): { src: Source; deck?: string } | null {
+  if (h.boxes > 0) return { src: 'spare' };
+  if (h.here) return { src: 'maybe' };
+  if (copies === 'any' && h.decks.length) return { src: 'other', deck: h.decks[0] };
+  return null;
+}
+
+export function poolLine(card: ScryfallCard, src: Source, deck?: string): PoolLine {
+  const text = oracleTextOf(card).replace(/\n+/g, ' / ');
+  return {
+    name: card.name,
+    line: `${card.name} ${manaCostOf(card)} - ${typeLineOf(card)} - ${text || '(no rules text)'}${src === 'other' && deck ? ` (in ${deck})` : ''}`,
+    cmc: card.cmc ?? 0, typeLine: typeLineOf(card), src, ...(deck ? { deck } : {}),
+  };
+}
+
+export interface Pool {
+  lines: PoolLine[];
+  cards: Map<string, ScryfallCard>;
+  counts: { held: number; fit: number; spare: number; any: number; otherOnly: number };
+  held: Map<string, Held>;
+}
+
+/**
+ * The pool under a setting: not a land, then Tune's checks (one pass of
+ * addable). A Game Changer is held back only when the bracket has no room
+ * left; how many go in is checked on the picks.
+ */
+export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.profileId, ctx.list.id)): Pool {
+  const all = [...held.values()];
+  const fit = all.filter((h) => (h.card.color_identity ?? []).every((x) => ctx.identity.has(x)) && h.card.legalities?.commander === 'legal');
+  const room = gcRoomOf(ctx);
+  const ok = new Set(addable(ctx, fit.filter((h) => !isLand(h.card)).map((h) => h.card), room === 0 ? 0 : null).map(keyOf));
+  const offered = (c: Copies) => fit.filter((h) => ok.has(keyOf(h.card)) && sourceOf(h, c));
+  const spare = offered('spare');
+  const any = offered('any');
+  const mine = copies === 'spare' ? spare : any;
+  const lines = mine.map((h) => { const s = sourceOf(h, copies)!; return poolLine(h.card, s.src, s.deck); }).sort((a, b) => a.name.localeCompare(b.name));
+  const cards = new Map<string, ScryfallCard>();
+  for (const h of mine) { cards.set(h.card.name.toLowerCase(), h.card); cards.set(front(h.card.name), h.card); }
+  return { lines, cards, held, counts: { held: all.length, fit: fit.length, spare: spare.length, any: any.length, otherOnly: any.length - spare.length } };
+}
+
+// --- lands on a full fill ---------------------------------------------------------------
+
+export const BASIC: Record<string, string> = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
+
+/** Colour symbols in a list of costs, by colour ({W/U} counts for both, {2/W} for W). */
+export function pips(costs: string[], identity: Set<string>): Record<string, number> {
+  const out: Record<string, number> = Object.fromEntries([...identity].map((c) => [c, 0]));
+  for (const cost of costs) for (const sym of cost.match(/\{[^}]+\}/g) ?? []) for (const c of sym.slice(1, -1).split('/')) if (c in out) out[c] += 1;
+  return out;
+}
+
+/** n basics split by the colour symbols: largest share first, the remainders by size. */
+export function splitBasics(n: number, pip: Record<string, number>): Record<string, number> {
+  const colors = Object.keys(pip);
+  if (!colors.length || n <= 0) return {};
+  const total = Object.values(pip).reduce((a, b) => a + b, 0);
+  const share = (c: string) => (total ? pip[c] / total : 1 / colors.length) * n;
+  const out: Record<string, number> = Object.fromEntries(colors.map((c) => [c, Math.floor(share(c))]));
+  let left = n - Object.values(out).reduce((a, b) => a + b, 0);
+  for (const c of [...colors].sort((a, b) => (share(b) - Math.floor(share(b))) - (share(a) - Math.floor(share(a))) || pip[b] - pip[a])) {
+    if (left <= 0) break;
+    out[c] += 1; left -= 1;
+  }
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v > 0));
+}
+
+export interface LandPick { card: ScryfallCard; n: number; src: Source; deck?: string }
+
+/**
+ * The lands for a full fill (Part D), the free path's rule: the owner's lands
+ * that make two or more of the deck's colours (under the copies setting), up
+ * to half of what is short, then basics split by the colour symbols in the
+ * deck and the picks. A mono-colour deck takes basics only.
+ */
+export function finishLands(ctx: Context, held: Map<string, Held>, copies: Copies, n: number, pickCosts: string[]): LandPick[] {
+  if (n <= 0 || !ctx.identity.size) return [];
+  const inDeck = new Set(ctx.main.map((c) => front(c.card.name)));
+  const duals = ctx.identity.size < 2 ? [] : addable(ctx, [...held.values()].filter((h) => isLand(h.card) && !isBasic(h.card) && sourceOf(h, copies) && !inDeck.has(front(h.card.name))
+    && (h.card.produced_mana ?? []).filter((m) => ctx.identity.has(m)).length >= 2).map((h) => h.card), null)
+    .sort((a, b) => (b.produced_mana ?? []).filter((m) => ctx.identity.has(m)).length - (a.produced_mana ?? []).filter((m) => ctx.identity.has(m)).length || a.name.localeCompare(b.name))
+    .slice(0, Math.floor(n / 2));
+  const out: LandPick[] = duals.map((card) => { const s = sourceOf(held.get(keyOf(card))!, copies)!; return { card, n: 1, ...s }; });
+  const costs = [...ctx.main.map((c) => manaCostOf(c.card)), ...ctx.commanders.map(manaCostOf), ...pickCosts];
+  const split = splitBasics(n - duals.length, pips(costs, ctx.identity));
+  const basics = localCards(Object.keys(split).map((c) => BASIC[c]));
+  const basicOf = (c: string) => ctx.main.find((x) => x.card.name === BASIC[c])?.card ?? basics.find((b) => b.name === BASIC[c]);
+  // A basic the card data lacks gives its count to the colour with the most: the deck still reaches the number.
+  const have = Object.entries(split).filter(([c]) => basicOf(c)).sort((a, b) => b[1] - a[1]);
+  const lost = Object.entries(split).filter(([c]) => !basicOf(c)).reduce((k, [, v]) => k + v, 0);
+  if (have.length) have[0][1] += lost;
+  for (const [c, k] of have) out.push({ card: basicOf(c)!, n: k, src: 'spare' });
+  return out;
+}

@@ -2,7 +2,8 @@
 
 /**
  * A card's name you can look at: hovering shows the card's picture beside
- * the pointer, as on the Cards tab, and a click opens the card the way
+ * the pointer, as on the Cards tab (focusing it with the keyboard shows it
+ * beside the name), and a click (a tap on a phone) opens the card the way
  * clicking it in the card view does. A name that isn't in the deck stays
  * plain text.
  */
@@ -28,6 +29,9 @@ export default function CardName({ name, card, onOpen, className = '' }: { name:
     <>
       <button type="button" data-card-name={name} onClick={() => { setAt(null); onOpen?.(card); }}
         onMouseEnter={(e) => { if (src) place(e); }} onMouseMove={(e) => { if (at) place(e); }} onMouseLeave={() => setAt(null)}
+        // Focus shows it too, beside the name, so the keyboard reads the card as the pointer does.
+        onFocus={(e) => { if (!src || !e.currentTarget.matches(':focus-visible')) return; const r = e.currentTarget.getBoundingClientRect(); place({ clientX: r.right, clientY: r.top + r.height / 2 } as React.MouseEvent); }}
+        onBlur={() => setAt(null)}
         className={`inline text-left underline decoration-dotted decoration-[var(--muted)] underline-offset-[3px] hover:text-[var(--accent)] ${className}`}>
         {name}
       </button>

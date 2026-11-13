@@ -665,6 +665,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onChanged={load}
             onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
+            onCard={setSelected}
           />
         </>
       ) : deck && section === 'chat' ? (

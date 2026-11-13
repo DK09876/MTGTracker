@@ -47,6 +47,8 @@ export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { 
     `The deck's plan (the owner's intent${o.confirmedAt ? ', confirmed' : ', not confirmed yet'}):`,
     `- What the commander does for the deck: ${roles.length ? roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)!.label).join(', ') + (o.commanderBy === 'ai' ? ' [suggested by AI, accepted by the owner]' : " [the owner's]") : 'not sure'}`,
     `- What they want from the deck: ${goal.length ? `${goal.join(', ')} [the owner's]` : 'nothing said'}`,
+    // Said only when the owner chose it on the Plan tab; nothing about combos otherwise.
+    ...(plan.goal.combos ? [`- Combos: ${plan.goal.combos === 'first' ? 'build around them. The owner wants this deck to win with combos' : 'none. The owner never wants every piece of an infinite combo in this deck'} [the owner's]`] : []),
     `- Bracket aimed for: ${plan.bracket === null ? 'not sure' : `${plan.bracket}${plan.stored.bracket?.by === 'claude' ? ' [suggested by AI, accepted by the owner]' : " [the owner's]"}`}`,
     `- Budget per card: ${plan.budget ? `$${plan.budget}, cards they own always allowed` : 'any'}. Only cards they own: ${plan.own ? 'yes' : 'no'}.${plan.rule.text ? ` Deck rule: ${plan.rule.text}${plan.rule.filter ? ` (cards must match: ${plan.rule.filter})` : ''}` : ''}`,
     `- Never cut: ${[...commanders.map((n) => `${n} (the commander)`), ...main.filter((c) => kept.has(tagKey(c.card)) && !commanders.includes(c.card.name)).map((c) => c.card.name)].join('; ')}`,

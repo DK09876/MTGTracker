@@ -86,7 +86,15 @@ export type Source = 'detected' | 'claude' | 'yours' | 'unset';
 export const GOALS = ['Do its thing more often', 'Win more often', 'Faster', 'More fun, keep my pets', 'Fit my table', 'Spend less'] as const;
 /** Chips from before the list changed, as they read now. */
 const goalChips = (chips: string[]) => [...new Set(chips.map((c) => (c === 'Stay on theme' ? 'Do its thing more often' : c)))].filter((c) => (GOALS as readonly string[]).includes(c));
-export interface Goal { chips: string[]; text: string }
+/**
+ * Combos, said in the plan (handoff 8, the owner's choice of a three-way
+ * switch): build around the combos the owner holds, or none at all. Not set
+ * means the plan says nothing, and Finish sends nothing about combos. Never
+ * guessed from the plan's text.
+ */
+export type CombosChoice = 'first' | 'none';
+export const isCombosChoice = (v: unknown): v is CombosChoice => v === 'first' || v === 'none';
+export interface Goal { chips: string[]; text: string; combos?: CombosChoice }
 
 export interface DeckRule { text: string; filter: string }
 export interface RouteChoices { dropped: string[]; main: string | null; extra: Record<string, string[]>; custom: Array<{ id: string; label: string; how: string; cards: string[] }> }
@@ -265,7 +273,7 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     landsSource: mine.lands ? 'yours' : landOverride ? landOverride.by : 'detected',
     packages,
     bracket: extra.bracket ?? null,
-    goal: stored.goal ? { chips: goalChips(stored.goal.v.chips ?? []), text: stored.goal.v.text ?? '' } : { chips: [], text: '' },
+    goal: stored.goal ? { chips: goalChips(stored.goal.v.chips ?? []), text: stored.goal.v.text ?? '', ...(isCombosChoice(stored.goal.v.combos) ? { combos: stored.goal.v.combos } : {}) } : { chips: [], text: '' },
     budget: stored.budget?.v ?? null,
     own: stored.own?.v ?? false,
     rule: stored.rule?.v ?? { text: '', filter: '' },
@@ -402,7 +410,7 @@ export function changePlan(listId: string, change: PlanChange): void {
   }
   // The other parts, kept as JSON with who set them; null goes back to detected or not set.
   const set = <K extends keyof StoredParts>(k: K, v: StoredParts[K] | undefined) => { if (v === undefined) delete stored[k]; else stored[k] = v; };
-  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: goalChips(change.goal.chips ?? []).slice(0, 7), text: text(change.goal.text, 500) }, by } || undefined);
+  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: goalChips(change.goal.chips ?? []).slice(0, 7), text: text(change.goal.text, 500), ...(isCombosChoice(change.goal.combos) ? { combos: change.goal.combos } : {}) }, by } || undefined);
   if (change.budget !== undefined) set('budget', change.budget === null ? undefined : Number.isFinite(change.budget) && change.budget > 0 ? { v: Math.round(change.budget * 100) / 100, by } : undefined);
   if (change.own !== undefined) set('own', change.own === null ? undefined : { v: !!change.own, by });
   if (change.rule !== undefined) set('rule', change.rule && (text(change.rule.text, 300) || text(change.rule.filter, 300)) ? { v: { text: text(change.rule.text, 300), filter: text(change.rule.filter, 300) }, by } : undefined);

@@ -869,6 +869,7 @@ export type TrimView = import('./trim-shared').TrimView;
 export type TrimAction =
   | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
   | { action: 'find'; rerun?: boolean; message?: string }
+  | { action: 'target'; target: import('./trim-shared').TrimTarget | null }
   | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
   | { action: 'never'; name: string; on: boolean }
   | { action: 'apply'; cutsTo?: string; keepNotes?: string[] }
@@ -878,6 +879,28 @@ export const trim = (listId: string) => get<TrimView>(`lists/${listId}/trim`);
 export const trimAct = (listId: string, act: TrimAction) => {
   const paid = act.action === 'find' || (act.action === 'approach' && act.claude === true);
   const work = send(`lists/${listId}/trim`, 'POST', act).then(json<TrimView>).finally(() => {
+    if (paid) jobsChanged();
+    if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
+  });
+  return paid ? spending(work) : work;
+};
+
+/** Finish the deck from your cards (lib/finish.ts). */
+export type FinishView = import('./finish-shared').FinishView;
+export type FinishAction =
+  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null }
+  | { action: 'find'; rerun?: boolean; message?: string }
+  | { action: 'choices'; choices: FinishView['choices'] }
+  | { action: 'take'; name: string; group: string }
+  | { action: 'lands'; skip?: string[]; basics?: Record<string, number> }
+  | { action: 'apply' }
+  | { action: 'undo' }
+  | { action: 'reset' };
+export const finish = (listId: string) => get<FinishView>(`lists/${listId}/finish`);
+export const finishCard = (listId: string, cardId: string) => get<import('./scryfall').ScryfallCard>(`lists/${listId}/finish?card=${encodeURIComponent(cardId)}`);
+export const finishAct = (listId: string, act: FinishAction) => {
+  const paid = act.action === 'find';
+  const work = send(`lists/${listId}/finish`, 'POST', act).then(json<FinishView>).finally(() => {
     if (paid) jobsChanged();
     if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
   });
@@ -896,7 +919,7 @@ type TuneAction =
   | { action: 'keep'; cardId: string; keep: boolean; key?: string }
   | { action: 'reason'; key: string; chip?: import('./suggestion-shared').ReasonChip; text?: string }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
-  | { action: 'finishPicks'; choice?: 'rules' | 'claude'; showRules?: boolean }
+  | { action: 'finishPicks'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
   | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };
 

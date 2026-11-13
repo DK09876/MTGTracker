@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CutRules from './CutRules';
+import DeckFinish from './DeckFinish';
 import DeckTrim from './DeckTrim';
 import ManaCost from './ManaCost';
 import PlanLine from './PlanLine';
@@ -41,6 +42,8 @@ interface Props {
   onTab: (tab: DeckTab | string) => void;
   /** Open Chat with this question ready to send. */
   onAsk: (question: string) => void;
+  /** Open a card the way the card view does. */
+  onCard?: (card: import('@/lib/scryfall').ScryfallCard) => void;
 }
 
 const BUTTON = 'rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50';
@@ -51,7 +54,7 @@ const remembered = (listId: string): Intent | null => {
   try { const v = sessionStorage.getItem(`mtg-tune:${listId}`); return INTENTS.some((i) => i.id === v) ? v as Intent : null; } catch { return null; }
 };
 
-export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk }: Props) {
+export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk, onCard }: Props) {
   const [intent, setIntent] = useState<Intent | null>(() => remembered(listId));
   const [symptom, setSymptom] = useState<Symptom>('gas');
   const [state, setState] = useState<api.TuneState | null>(null);
@@ -209,7 +212,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         })}
       </div>
 
-      {!(current === 'cuts' && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
+      {!((current === 'cuts' || (current === 'finish' && !state.finish?.showRules)) && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
         onUnstage={(k) => unstage([k])} onClear={() => act(() => api.tuneAct(listId, { action: 'clear' }))} onApply={apply} />}
 
       {note && (
@@ -234,10 +237,9 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
         {current === 'find' && state.pile && <PileQuestion pile={state.pile} busy={busy} onPick={(choice) => choice === 'cut' ? pick('cuts') : act(() => api.tuneAct(listId, { action: 'pile', choice }))} />}
 
-        {current === 'finish' && state.finish && <FinishPicks finish={state.finish} busy={busy} job={job} instructions={instructions} onInstructions={setInstructions}
-          onChoose={(choice) => act(() => api.tuneAct(listId, { action: 'finishPicks', choice }))}
-          onShowRules={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))}
-          onPick={ask} />}
+        {current === 'finish' && <DeckFinish listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : onTab(t))}
+          onChanged={async () => { await onChanged(); await load(intent, symptom); }}
+          showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
         {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy} job={job} instructions={instructions} onInstructions={setInstructions}
           onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
@@ -260,7 +262,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
             </div>
           </details>
         ) : (<>
-        {groups.length === 0 && !(current === 'find' && state.pile && !state.pile.choice) && (
+        {groups.length === 0 && current !== 'finish' && !(current === 'find' && state.pile && !state.pile.choice) && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">
             {current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”. Find cards can save some to your Maybeboard, or ask Claude for swaps.'
                 : 'Nothing to suggest here right now.'}
@@ -461,52 +463,6 @@ function PileQuestion({ pile, busy, onPick }: { pile: NonNullable<api.TuneState[
         ))}
       </div>
       {pile.choice ? <button className={`${GHOST} self-start px-0`} onClick={() => onPick(null)}>Ask again</button> : <p className="text-xs text-[var(--muted)]">Nothing is suggested until you choose.</p>}
-    </div>
-  );
-}
-
-/** Finish the deck: picks from the rules (free) or from Claude, remembered per deck; Claude's can sit beside the rules'. */
-function FinishPicks({ finish, busy, job, instructions, onInstructions, onChoose, onShowRules, onPick }: {
-  finish: NonNullable<api.TuneState['finish']>; busy: boolean; job: Job | null; instructions: string; onInstructions: (v: string) => void;
-  onChoose: (choice: 'rules' | 'claude') => void; onShowRules: (on: boolean) => void; onPick: () => void;
-}) {
-  const running = job?.status === 'running';
-  const claude = finish.picks === 'claude';
-  return (
-    <div className="flex max-w-3xl flex-col gap-2.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5" data-tour="finish-picks">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">Picks from</span>
-        <div role="radiogroup" aria-label="Where the picks come from" className="flex gap-1 rounded-full border border-[var(--border)] p-0.5">
-          {([['rules', 'Rules', 'free'], ['claude', 'Claude', null]] as const).map(([id, label, note]) => (
-            <button key={id} role="radio" aria-checked={finish.picks === id} disabled={busy} onClick={() => onChoose(id)}
-              className={`rounded-full px-3 py-1 ${finish.picks === id ? 'bg-[var(--surface-hover)] font-semibold' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
-              {label}{note && <span className="ml-1 text-xs text-[var(--muted)]">({note})</span>}
-            </button>
-          ))}
-        </div>
-        {claude && <AiModelPicker area="deck" />}
-        <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.finishPicks.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
-      </div>
-      <p className="text-xs text-[var(--muted)]">
-        {claude
-          ? 'Claude picks every card to 100, in the same groups, each with a sentence why. It keeps to your bracket, budget, “only cards I own” and deck rule. Remembered for this deck.'
-          : 'The rules pick the cards: free and instant, from your plan’s jobs, themes and lands. Switch to Claude for picks that read the whole plan.'}
-      </p>
-      {claude && (
-        <div className="flex flex-wrap items-center gap-3">
-          <button className={BUTTON} disabled={busy || running} onClick={onPick}>{running ? `${job?.detail || 'Claude is picking'}…` : finish.claudeReady ? '✦ Pick again with Claude' : '✦ Pick with Claude'}</button>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={finish.showRules} disabled={busy} onChange={(e) => onShowRules(e.target.checked)} /> Show the rules’ picks too</label>
-          {job?.status === 'failed' && <span className="text-xs text-red-400">Claude didn’t finish: {job.error}</span>}
-        </div>
-      )}
-      {claude && (
-        <textarea value={instructions} onChange={(e) => onInstructions(e.target.value)} rows={2} maxLength={2000} aria-label="Your instructions for Claude"
-          placeholder="Optional, e.g. Lean into the graveyard. No cards over $5."
-          className="resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
-      )}
-      {claude && !finish.claudeReady && !running && (finish.claudeEmpty
-        ? <p className="text-xs text-amber-300">Claude’s last picks had no card the app could use: names it didn’t recognise, cards outside your colours, or past your bracket, budget or deck rule. Pick again, or show the rules’ picks.</p>
-        : <p className="text-xs text-[var(--muted)]">No picks from Claude yet for this deck. {finish.showRules ? 'The rules’ picks are below meanwhile.' : 'Press Pick with Claude, or show the rules’ picks.'}</p>)}
     </div>
   );
 }

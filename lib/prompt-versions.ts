@@ -5,15 +5,15 @@
  */
 export const PROMPT_VERSIONS = {
   tuneIdeas: 'tune-ideas-1',
-  finishPicks: 'finish-picks-1',
+  finishPicks: 'finish-3',
   cutReview: 'cut-review-1',
   chat: 'chat-2',
   planRead: 'plan-read-1',
   planPass: 'plan-pass-2',
   planHelp: 'plan-help-3',
   tagsAi: 'tags-4',
-  trim: 'trim-3',
-  trimApproach: 'trim-approach-2',
+  trim: 'trim-4',
+  trimApproach: 'trim-approach-3',
 } as const;
 
 export type PromptName = keyof typeof PROMPT_VERSIONS;

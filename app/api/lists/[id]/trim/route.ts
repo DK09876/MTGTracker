@@ -11,6 +11,7 @@
  *   find {rerun?, message?}  ask Claude for the cut list in the background.
  *       The first starts a session; rerun sends the whole session with the
  *       marks made since the last list and the owner's message
+ *   target {target}       how many to cut: {kind: 'cut', n} or {kind: 'to', n}; null is down to 100
  *   choices {choices}     the owner's choices and reasons, replaced whole; answers
  *       with the view so the numbers follow
  *   never {name, on}      mark a card never cut from its opened card, or take it off
@@ -27,8 +28,8 @@ import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { hasBoard } from '@/lib/sections';
-import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setNeverCut, trimView, undoTrim, writeApproach } from '@/lib/trim';
-import { TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
+import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setNeverCut, setTarget, trimView, undoTrim, writeApproach } from '@/lib/trim';
+import { cleanTarget, TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
 import type { Board } from '@/lib/decklist';
 
 export const runtime = 'nodejs';
@@ -72,6 +73,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         ({ progress }) => runTrim(model, list, profile, { model: which, rerun: b.rerun === true, message: typeof b.message === 'string' ? b.message : '' }, progress));
       break;
     }
+    case 'target':
+      setTarget(id, cleanTarget(b.target));
+      break;
     case 'choices':
       setChoices(id, b.choices);
       break;

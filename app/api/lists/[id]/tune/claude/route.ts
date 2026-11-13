@@ -13,7 +13,7 @@ import { appModel, ModelError } from '@/lib/ai';
 import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { tuneState } from '@/lib/tune';
-import { finishPicks, tuneIdeas } from '@/lib/tune-claude';
+import { tuneIdeas } from '@/lib/tune-claude';
 import { INTENTS, SYMPTOMS, type Intent } from '@/lib/tune-shared';
 
 export const runtime = 'nodejs';
@@ -36,7 +36,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as { intent?: string; instructions?: string; problem?: string };
   const intent = INTENTS.find((i) => i.id === b.intent)?.id as Intent | undefined;
-  if (!intent) return NextResponse.json({ error: 'Say what to tune' }, { status: 400 });
+  if (!intent || intent === 'finish') return NextResponse.json({ error: intent ? 'Finish the deck runs from its own tab' : 'Say what to tune' }, { status: 400 });
   const model = appModel(profile, 'tagging', list.name);
   if (!model) return NextResponse.json({ error: 'No model API key is set on the server' }, { status: 503 });
   const instructions = typeof b.instructions === 'string' ? b.instructions.slice(0, 2000) : '';
@@ -45,12 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     kind: 'tuneideas', label: `Ideas from Claude: ${INTENTS.find((i) => i.id === intent)!.label.toLowerCase()}`, subject: list.name, profileId: profile, listId: id,
     errorLevel: (e) => (e instanceof ModelError ? 'warn' : 'error'),
   }, async ({ progress }) => {
-    if (intent === 'finish') {
-      // Finish the deck: Claude picks every card to 100, in the same groups the rules use.
-      progress('Claude is reading the plan and picking the cards');
-      const groups = await finishPicks(model, list, profile, instructions);
-      return { ideas: groups.reduce((n, g) => n + g.items.length, 0) };
-    }
+    // Finish the deck has its own conversation over the owner's cards (lib/finish.ts).
     progress('Reading what the rules suggest');
     const state = await tuneState(list, profile, { intent, symptom: SYMPTOMS.find((s) => s.id === b.problem)?.id });
     const suggested = state.groups.filter((g) => g.source === 'rules').flatMap((g) => g.items.map((i) => [i.add ? `add ${i.add.name}` : '', i.cut ? `cut ${i.cut.name}` : ''].filter(Boolean).join(' for ')));

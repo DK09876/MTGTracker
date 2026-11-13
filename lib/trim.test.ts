@@ -198,7 +198,7 @@ describe('trim', { timeout: 60_000 }, () => {
     const { model, asked } = fakeModel(() => ({ bullets: ['Trim the surplus spells.', '- Keep the loop.'] }));
     const a = await trim.writeApproach(model, list, 'dk');
     expect(a).toMatchObject({ by: 'claude', text: '- Trim the surplus spells.\n- Keep the loop.' });
-    expect(asked[0].user).toContain('8 to cut');
+    expect(asked[0].user).toContain('cut 8 to reach 100');
     await expect(trim.writeApproach(fakeModel(() => ({ bullets: [] })).model, list, 'dk')).rejects.toThrow(/empty/);
   });
 
@@ -519,5 +519,32 @@ describe('trim', { timeout: 60_000 }, () => {
     expect(out).toContain('You, list 3: cuts: Cut 3');
     expect(out).toContain('Owner: said: "Message 1."');
     expect(out).not.toContain('Cut 1,');
+  });
+});
+
+describe('how many to cut', { timeout: 60_000 }, () => {
+  it('cuts to 95 when asked: the task, the list and the count follow the number', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    trim.setTarget(list.id, { kind: 'to', n: 95 });
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    expect(asked[0].user).toContain('The owner asked to cut 13 to reach 95: 13 cuts.');
+    const view = await trim.trimView(list, 'dk');
+    expect(view.over).toBe(13);
+    expect(view.target).toEqual({ kind: 'to', n: 95 });
+    expect(view.run!.items.filter((i) => i.tier === 'cut')).toHaveLength(13);
+  });
+
+  it('stays open on a deck at 100 when the owner asks for cuts', async () => {
+    const { db, list } = await deck();
+    for (let i = 1; i <= 8; i++) db.setQuantity(list.id, `Spell ${70 - i + 1}`, 0);
+    const trim = await import('./trim');
+    expect((await trim.trimView(list, 'dk')).over).toBe(0);
+    trim.setTarget(list.id, { kind: 'cut', n: 5 });
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    expect(asked[0].user).toContain('cut 5, taking the deck to 95');
+    expect((await trim.trimView(list, 'dk')).run!.items.filter((i) => i.tier === 'cut')).toHaveLength(5);
   });
 });
