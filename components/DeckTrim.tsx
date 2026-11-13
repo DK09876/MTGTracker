@@ -501,20 +501,23 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
       </button>
     );
   };
+  // The columns open by the row's own width (a container query), not the window's: with the rail beside it a
+  // row is far narrower than the window, and Claude's reason was left a column 0px wide.
   return (
-    <div className="border-t border-[var(--border)] py-2.5" data-trim-card={item.name}>
-      <div className={`grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 ${marks ? 'min-[821px]:grid-cols-[auto_4.75rem_15rem_minmax(0,1fr)_17rem]' : 'min-[821px]:grid-cols-[auto_15rem_minmax(0,1fr)_17rem]'}`} data-trim-row>
+    <div className="@container border-t border-[var(--border)] py-2.5" data-trim-card={item.name}>
+      <div className={`grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 ${marks ? '@[66rem]:grid-cols-[auto_4.75rem_15rem_minmax(0,1fr)_17rem]' : '@[66rem]:grid-cols-[auto_15rem_minmax(0,1fr)_17rem]'}`} data-trim-row>
         <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">{seg('keep')}{seg('ask')}{seg('cut')}</span>
-        {marks && <span className="hidden min-[821px]:block" data-col="mark">{badge}</span>}
-        <span className="flex min-w-0 items-center gap-2" data-col="name">
-          {marks && <span className="min-[821px]:hidden">{badge}</span>}
+        {marks && <span className="hidden @[66rem]:block" data-col="mark">{badge}</span>}
+        {/* Phone width: the name gets its own line above the three buttons, so it never breaks mid-word beside them. */}
+        <span className="order-first col-span-2 flex min-w-0 items-center gap-2 @[66rem]:order-none @[66rem]:col-span-1" data-col="name">
+          {marks && <span className="@[66rem]:hidden">{badge}</span>}
           <button type="button" onClick={() => onCard(!showCard)} aria-expanded={showCard} className="inline-flex min-w-0 items-baseline gap-1.5 text-left font-bold hover:underline">
             <span aria-hidden="true" className={`shrink-0 text-[11px] text-[var(--faint)] transition-transform ${showCard ? 'rotate-90' : ''}`}>▶</span>
             <span className="min-w-0 break-words">{item.name}{item.star && <span className="text-[#e2b93b]" title="Never cut"> ★</span>}</span>
           </button>
           {item.flag && <span className="shrink-0 rounded-full border border-amber-300/60 px-1.5 text-[11px] font-semibold text-amber-300">{item.flag.split(':')[0]}</span>}
         </span>
-        <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] min-[821px]:col-span-1" data-col="why">
+        <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] @[66rem]:col-span-1" data-col="why">
           {item.tier === 'yours'
             ? <><span className={`font-semibold ${C.yours}`}>You:</span> {item.mine || 'kept, no reason given'}</>
             : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={item.why} /></>}
@@ -524,7 +527,7 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
           title={choice?.text?.trim() || undefined} onBlur={(e) => { e.currentTarget.scrollLeft = 0; }}
           placeholder={ask ? 'what should Claude weigh?' : changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' && cut ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
           aria-label={`Your reason for ${item.name}`}
-          className={`col-span-2 min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed || ask ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
+          className={`col-span-2 min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] @[66rem]:col-span-1 ${changed || ask ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
       </div>
       {showCard && (
         <div className="mt-2.5 flex flex-wrap gap-3.5 rounded-xl border border-[var(--border)] bg-[#221e1a] p-3" data-trim-card-open>
