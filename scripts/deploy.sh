@@ -27,7 +27,7 @@
 #   scripts/deploy.sh --build-only         build the release and stop there
 #
 # Environment (defaults are the Pi's): MTG_ROOT ($HOME/mtg), MTG_REPO ($HOME/development/MTGTracker),
-# MTG_PORT (3001), MTG_STOP_CMD / MTG_START_CMD (sudo systemctl stop|start mtg), MTG_KEEP (2 releases: the current one and the one before, for going back).
+# MTG_PORT (3001), MTG_STOP_CMD / MTG_START_CMD (sudo systemctl stop|start mtg). Two releases are kept: the current one and the one before.
 set -euo pipefail
 
 ROOT="${MTG_ROOT:-$HOME/mtg}"
@@ -35,7 +35,6 @@ REPO="${MTG_REPO:-$HOME/development/MTGTracker}"
 PORT="${MTG_PORT:-3001}"
 STOP_CMD="${MTG_STOP_CMD:-sudo systemctl stop mtg}"
 START_CMD="${MTG_START_CMD:-sudo systemctl start mtg}"
-KEEP="${MTG_KEEP:-2}"
 REF="origin/main"
 WAIT=180
 BUILD_ONLY=0
@@ -149,9 +148,10 @@ say "starting $SHA"
 start_release "$NEW" || rollback "$SHA didn't answer within 60 s: going back"
 say "up on $SHA: down for $(( ($(now) - STOPPED) / 1000 )) s (stop to first answer)"
 
-# --- keep the newest few releases -----------------------------------------------------------
-for old in $(ls -1t "$RELEASES" | tail -n +$((KEEP + 1))); do
-  [ "$RELEASES/$old" = "$NEW" ] || [ "$RELEASES/$old" = "$OLD" ] && continue
-  git -C "$REPO" worktree remove --force "$RELEASES/$old" 2>/dev/null || rm -rf "${RELEASES:?}/$old"
+# --- keep this release and the one before (for going back); remove the rest ------------------------
+for old in "$RELEASES"/*; do
+  [ "$old" = "$NEW" ] || [ "$old" = "$OLD" ] || [ ! -d "$old" ] && continue
+  say "removing the old release $(basename "$old")"
+  git -C "$REPO" worktree remove --force "$old" 2>/dev/null || rm -rf "$old"
 done
 git -C "$REPO" worktree prune
