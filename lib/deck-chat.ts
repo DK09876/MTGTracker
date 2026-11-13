@@ -308,7 +308,7 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: 'propose_changes',
-    description: 'Every change you recommend, each with a one-sentence reason; the owner gets a button for each and applies the ones they want. Use only the lists you need. "to" for a cut, add or move is a section of the deck (its name, or "main"); for group/ungroup it is the group\'s name. Call at most once per reply, after looking things up. "answer" is your full answer to the owner\'s question in words, exactly as it should read above the buttons: the judgement, the reasons, any counts. Never just a remark about the buttons.',
+    description: 'Every change you recommend, each with a one-sentence reason; the owner gets a button for each and applies the ones they want. Use only the lists you need. "to" for a cut, add or move is a section of the deck (its name, or "main"); for group/ungroup it is the group\'s name. Call at most once per reply, after looking things up. "answer" is your full answer to the owner\'s question in words, exactly as it should read above the buttons: the judgement, the reasons, any counts. Never just a remark about the buttons. When you also call open_page, give the answer in one of the two calls only, and don\'t write it again as text.',
     input_schema: {
       type: 'object',
       required: ['answer'],
@@ -335,7 +335,7 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
       type: 'object',
       properties: {
         page: { type: 'string', enum: ['trim', 'finish', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' },
-        answer: { type: 'string', description: 'Your full answer in words, shown above the button (the same as propose_changes\' answer when you call both: give it once).' },
+        answer: { type: 'string', description: 'Your full answer in words, shown above the button. When you also call propose_changes, give the answer in one of the two calls only (leave this one empty), and don\'t write it again as text.' },
       },
       required: ['page', 'why', 'answer'],
     },
@@ -522,6 +522,23 @@ export function onlyButtons(text: string, proposals: number, proposed: string[] 
   return (opens.test(units[0]) && units.length - units.filter((u) => about.test(u)).length <= 1) || aboutShare >= 0.6 || (words < 15 && proposals > 2);
 }
 
+/**
+ * Whether a block of text says again what `shown` already says: the same words once spacing and markup are
+ * stripped, or most of its card names and numbers (three or more of them) already in `shown`.
+ */
+export function repeats(block: string, shown: string): boolean {
+  const plain = (x: string) => x.replace(/\[\[|\]\]|\*\*|^#+\s*|^\s*([-*•]|\d+[.)])\s+/gm, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const a = plain(block); const b = plain(shown);
+  if (!a) return true;
+  if (b.includes(a) || a.includes(b)) return true;
+  const marks = (x: string) => [...new Set([...[...x.matchAll(/\[\[([^[\]]+)\]\]/g)].map((m) => m[1].trim().toLowerCase()), ...(x.match(/\b\d+\b/g) ?? [])])];
+  const mine = marks(block);
+  if (mine.length < 3) return false;
+  const there = new Set([...marks(shown), ...(shown.match(/\b\d+\b/g) ?? [])]);
+  const lower = shown.toLowerCase();
+  return mine.filter((m) => there.has(m) || lower.includes(m)).length / mine.length >= 0.7;
+}
+
 /** The card a change takes out or acts on, for spotting a later proposal that replaces an earlier one. */
 const outOf = (c: Change) => (c.kind === 'swap' ? c.out?.name : c.kind === 'cut' || c.kind === 'move' || c.kind === 'add' ? c.name : null);
 
@@ -609,13 +626,16 @@ export async function reply(
   const roundsFor = () => (searches > 0 ? MAX_ROUNDS + 8 : MAX_ROUNDS);
   // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
   const said: string[] = [];
-  // The answer in words that came with the proposals or the page button: shown first, whatever else was said.
+  // The answer in words that came with the proposals or the page button: one answer, shown first. When several
+  // tool calls carry one (a note and a page button), the longest is kept; any other answer or text block that
+  // repeats it is dropped (rerun of the real runs: the theme answer appeared twice).
   let answerText = '';
-  const takeAnswer = (input: Record<string, unknown>) => { const a = typeof input.answer === 'string' ? input.answer.trim() : ''; if (a.length > answerText.length) answerText = a.slice(0, 6000); };
+  const answers: string[] = [];
+  const takeAnswer = (input: Record<string, unknown>) => { const a = typeof input.answer === 'string' ? input.answer.trim().slice(0, 6000) : ''; if (a) answers.push(a); if (a.length > answerText.length) answerText = a; };
   const withAnswer = () => {
     if (!answerText) return said;
-    const norm = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
-    return [answerText, ...said.filter((x) => !norm(answerText).includes(norm(x)) && !norm(x).includes(norm(answerText)))];
+    const rest = [...answers.filter((a) => a !== answerText), ...said];
+    return [answerText, ...rest.filter((x, k) => !repeats(x, answerText) && rest.findIndex((y) => y === x) === k)];
   };
   const messages = [...history];
   for (let round = 0; round < roundsFor(); round++) {

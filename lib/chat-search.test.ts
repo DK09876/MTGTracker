@@ -479,3 +479,41 @@ describe('real runs of PR 55, item 1: the answer travels with the proposals', { 
     expect(onlyButtons('Cut Propaganda and Eel Umbra first: neither chains spells. Turnabout is slow. The buttons below do it.', 3, ['Propaganda', 'Eel Umbra', 'Turnabout'])).toBe(false);
   });
 });
+
+describe('rerun of the real runs: one answer when several tool calls carry one', { timeout: 60_000 }, () => {
+  // The two shapes the theme answer came in (terse in one tool call, fuller in the other), as the rerun describes them.
+  const terse = [
+    'Zombies: about 54 (52 spare, 2 in other decks), from searches for t:zombie and zombie o:create; standouts [[Undead Augur]], [[Archghoul of Thraben]], [[Cemetery Reaper]]',
+    'Aristocrats: about 53 (49 spare, 4 in other decks), from sacrifice o:creature and whenever o:dies; standouts [[Pitiless Plunderer]], [[Bastion of Remembrance]]',
+    'Pick: Zombie aristocrats, because the Ghoul triggers on nontoken Zombies dying.',
+    'Missing: drain payoffs, and rad support.',
+  ].join('\n');
+  const fuller = [
+    'Your cards support Zombie aristocrats best.',
+    '- Zombies: about 54 (52 spare, 2 in other decks), counting t:zombie and Zombie makers. [[Undead Augur]], [[Archghoul of Thraben]] and [[Cemetery Reaper]] stand out.',
+    '- Aristocrats: about 53 (49 spare, 4 in other decks): sacrifice outlets and death payoffs such as [[Pitiless Plunderer]] and [[Bastion of Remembrance]].',
+    'Pick: Zombie aristocrats: the Ghoul counts nontoken Zombies dying, and you hold dozens of both halves.',
+    'Missing: drain payoffs, and rad support.',
+  ].join('\n');
+
+  it('keeps one answer, drops the version that repeats it, and keeps a closing remark that says something new', async () => {
+    const { list } = await setup();
+    const { answer } = await ask(list, [
+      [
+        { name: 'propose_changes', input: { answer: terse, note: [{ text: 'Theme: Zombie aristocrats.' }] } },
+        { name: 'open_page', input: { page: 'finish', why: 'Fill the 99.', add: 99, answer: fuller } },
+      ],
+      'Press Finish when the note is saved.',
+    ]);
+    expect(answer.text.startsWith('Your cards support Zombie aristocrats best.')).toBe(true);
+    expect(answer.text.match(/about 54/g)).toHaveLength(1);
+    expect(answer.text).toContain('Press Finish when the note is saved.');
+  });
+
+  it('repeats: the same names and numbers in other words are a repeat; a different point is not', async () => {
+    const { repeats } = await import('./deck-chat');
+    expect(repeats(terse, fuller)).toBe(true);
+    expect(repeats('Press Finish when the note is saved.', fuller)).toBe(false);
+    expect(repeats('Swap [[Opt]] for [[Brainstorm]] and [[Ponder]]: 3 cheaper looks.', fuller)).toBe(false);
+  });
+});
