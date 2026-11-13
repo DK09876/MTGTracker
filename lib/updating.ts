@@ -36,9 +36,17 @@ export function updatingSince(now = Date.now()): string | null {
   return since;
 }
 
-/** The app is starting: any deploy that wrote the flag is over (or died), so it goes (review 24). */
+/** Remove the flag. */
 export function clearUpdating(): void {
   try { rmSync(updatingFile(), { force: true }); } catch { /* nothing to clear */ }
+}
+
+/**
+ * The app is starting: a flag past its end (a deploy that died, a reboot mid-deploy) goes (review 24). A flag still
+ * in its time is the deploy checking this very start, and stays until the script removes it (round 2, item 20).
+ */
+export function clearStaleUpdating(now = Date.now()): void {
+  if (existsSync(updatingFile()) && !updatingSince(now)) clearUpdating();
 }
 
 /** Which database the app has open, as a hash of its real path: deploy.sh checks it against the one it expects (review 23). */

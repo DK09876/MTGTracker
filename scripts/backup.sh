@@ -50,7 +50,10 @@ else
 fi
 touch "$DEST/.last-run"
 
-# Only the nightly snapshots are pruned; the named ones taken before deploys stay.
+# A deploy's snapshots (predeploy-*) keep the newest five; other named ones (the one-time move's) stay.
+old_pre=$(ls -1t "$DEST"/predeploy-*.db.gz 2>/dev/null | tail -n +6 || true)
+[ -n "$old_pre" ] && echo "$old_pre" | xargs rm -f
+# The nightly snapshots are pruned to the newest $KEEP.
 old=$(ls -1t "$DEST"/mtg_*.db.gz 2>/dev/null | tail -n +$((KEEP + 1)) || true)
 if [ -n "$old" ]; then
   echo "$old" | xargs rm -f

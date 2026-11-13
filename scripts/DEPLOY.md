@@ -76,11 +76,18 @@ outage log in `~/mtg/shared`. Compare them with what step 0 showed before instal
 Run as `admin` inside tmux (`tmux new -s deploy`), with node on the PATH
 (`export PATH=~/.nvm/versions/node/v22.23.2/bin:$PATH`).
 
-1. Keep what runs now:
+1. Keep what runs now: the unit files themselves, not `systemctl cat` (which merges drop-ins and, for a missing
+   unit, writes nothing useful):
    ```sh
    git -C ~/development/MTGTracker rev-parse --short=12 HEAD
-   mkdir -p ~/mtg-before && for u in mtg mtg-backup mtg-watch; do systemctl cat $u.service > ~/mtg-before/$u.service; done
+   mkdir -p ~/mtg-before
+   for u in mtg mtg-backup mtg-watch; do
+     sudo cp -a /etc/systemd/system/$u.service ~/mtg-before/ && test -s ~/mtg-before/$u.service || echo "MISSING OR EMPTY: $u.service"
+     [ -d /etc/systemd/system/$u.service.d ] && sudo cp -a /etc/systemd/system/$u.service.d ~/mtg-before/
+   done
+   ls -la ~/mtg-before/                     # every unit there and not empty; stop here if any isn't
    ```
+   If a unit lives somewhere else (`systemctl cat` prints its path on the first line), copy it from there instead.
 2. Build the first release while the old app keeps serving:
    ```sh
    mkdir -p ~/mtg/shared ~/mtg/releases
@@ -97,7 +104,7 @@ Run as `admin` inside tmux (`tmux new -s deploy`), with node on the PATH
    ```sh
    rm ~/mtg/shared/mtg.db
    cd ~/development/MTGTracker/data
-   mv mtg.db* cards.db* ~/mtg/shared/       # mtg.db and any -journal, -wal or -shm with it
+   for f in mtg.db* cards.db*; do [ -e "$f" ] && mv "$f" ~/mtg/shared/; done   # mtg.db and any -journal, -wal or -shm; cards.db if there is one
    [ -d rules ] && mv rules ~/mtg/shared/
    [ -f outages.log ] && mv outages.log ~/mtg/shared/
    ls -la                                   # anything left here? look at it before going on
@@ -107,31 +114,36 @@ Run as `admin` inside tmux (`tmux new -s deploy`), with node on the PATH
 5. Point the service and the timers at the new layout: `sudo systemctl edit --full mtg`
    (the lines above), then
    `sudo cp ~/mtg/releases/<the commit>/deploy/mtg-backup.service ~/mtg/releases/<the commit>/deploy/mtg-watch.service /etc/systemd/system/`
-   and `sudo systemctl daemon-reload`.
+   and `sudo systemctl daemon-reload`. Check with `systemctl cat mtg` that no drop-in (`mtg.service.d/`) still sets
+   the old folder or database path.
 6. `ln -sfn ~/mtg/releases/<the commit> ~/mtg/current`, then `sudo systemctl start mtg`.
 7. Check: `curl -s http://127.0.0.1:3001/api/status` shows the commit and `"profiles"` above
    0; `curl -sI http://127.0.0.1:3001/tesseract/worker.min.js` is 200; the app opens on
    the tailnet address. Then `sudo systemctl start mtg-backup.timer mtg-watch.timer`.
 
-From then on a deploy is `bash ~/mtg/current/scripts/deploy.sh` (or with `--ref <commit>`),
-inside tmux.
+From then on a deploy is `bash ~/mtg/current/scripts/deploy.sh` (or with `--ref <commit>`), inside tmux, with
+its output not piped. The script writes everything to `~/mtg/deploy-logs/` and prints the same lines while the
+terminal is there; it checks for about 1.5 GB of free disk and 400 MB of free memory before building, and stops
+if they aren't there.
 
 ## Going back from the one-time change
 
-If step 6 or 7 fails:
+**Not run yet**: these steps were written, not tried on the Pi. If step 6 or 7 fails:
 
 ```sh
 sudo systemctl stop mtg mtg-backup.timer mtg-watch.timer
 mv ~/mtg/shared/mtg.db* ~/mtg/shared/cards.db* ~/development/MTGTracker/data/
 [ -d ~/mtg/shared/rules ] && mv ~/mtg/shared/rules ~/development/MTGTracker/data/
 [ -f ~/mtg/shared/outages.log ] && mv ~/mtg/shared/outages.log ~/development/MTGTracker/data/
-for u in mtg mtg-backup mtg-watch; do sudo cp ~/mtg-before/$u.service /etc/systemd/system/$u.service; done   # the units as they were
+for u in mtg mtg-backup mtg-watch; do
+  test -s ~/mtg-before/$u.service && sudo cp -a ~/mtg-before/$u.service /etc/systemd/system/ || echo "not restored: $u.service (no saved copy)"
+  [ -d ~/mtg-before/$u.service.d ] && sudo cp -a ~/mtg-before/$u.service.d /etc/systemd/system/
+done
 sudo systemctl daemon-reload && sudo systemctl start mtg mtg-backup.timer mtg-watch.timer
 ```
 
-`systemctl cat` prints a comment line first with the unit's path; check the copies are
-plain unit files before putting them back. The old folder was never changed apart from
-its `data/` files moving out, so it runs as before.
+The old folder was never changed apart from its `data/` files moving out, so it runs as
+before.
 
 ## Going back after a deploy
 
@@ -140,13 +152,14 @@ seconds, and on any way out after the service stopped (an error, Ctrl-C, a dropp
 session): it starts the release that was running. To go back by hand later:
 `bash ~/mtg/current/scripts/deploy.sh --ref <earlier commit>`. The release before is
 kept, so it isn't built again. A database change the new version made isn't undone:
-restore the snapshot the deploy took (`~/backups/mtg/predeploy-<commit>_*.db.gz`) with the
-service stopped.
+restore the snapshot the deploy took (`~/backups/mtg/predeploy-<commit>_*.db.gz`; the newest
+five are kept) with the service stopped.
 
 ## A job running at deploy time
 
 The script writes `~/mtg/shared/updating`, with when it started and when it ends at the
-latest (the wait plus ten minutes). From then on no new background job starts, and open
+latest (the wait plus ten minutes). It stays while the new build is checked, so no job starts
+before the checks pass. From then on no new background job starts, and open
 pages grey out the buttons that would start one and say the app is updating. It waits
 for running jobs for up to 3 minutes (`--wait` changes it), then deploys anyway. A job
 still running then shows as interrupted, as it does today. The file is removed when the

@@ -63,7 +63,19 @@ FLAG="$SHARED/updating"
 BASE="http://127.0.0.1:$PORT"
 STATUS="$BASE/api/status"
 
-say() { echo "[deploy $(date +%H:%M:%S)] $*"; }
+# A closed output (`deploy.sh | tee`, a dropped `ssh pi 'deploy.sh'`) must not kill the script mid-recovery: no
+# SIGPIPE, and everything goes to a log the script opens itself; the terminal gets the same lines while it is
+# there (round 2, item 17).
+trap '' PIPE
+[ -d "$SHARED" ] || { echo "no $SHARED: set up the layout first (scripts/DEPLOY.md)" >&2; exit 1; }
+LOGS="$ROOT/deploy-logs"
+mkdir -p "$LOGS"
+LOG="$LOGS/deploy-$(date +%Y%m%d_%H%M%S).log"
+exec 3>&1
+exec >>"$LOG" 2>&1
+ls -1t "$LOGS"/deploy-*.log 2>/dev/null | tail -n +21 | xargs rm -f 2>/dev/null || true
+say() { local m; m="[deploy $(date +%H:%M:%S)] $*"; echo "$m"; echo "$m" >&3 2>/dev/null || true; }
+say "log: $LOG"
 now() { node -e 'process.stdout.write(String(Date.now()))'; }
 status() { curl -s -m 3 "$STATUS" 2>/dev/null || true; }
 field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]];process.stdout.write(v==null?"":String(v))}catch{}})' "$1"; }
@@ -72,8 +84,7 @@ real() { if [ -e "$1" ]; then (cd "$1" && pwd -P); fi; }
 # The id /api/status gives for a database path: a hash of its real path (lib/updating.ts databaseId).
 dbid() { node -e 'const fs=require("fs");let p=process.argv[1];try{p=fs.realpathSync(p)}catch{};process.stdout.write(require("crypto").createHash("sha1").update(p).digest("hex").slice(0,16))' "$1"; }
 
-[ -d "$SHARED" ] || { echo "no $SHARED: set up the layout first (scripts/DEPLOY.md)" >&2; exit 1; }
-[ -f "$SHARED/mtg.db" ] || { echo "no database at $SHARED/mtg.db" >&2; exit 1; }
+[ -f "$SHARED/mtg.db" ] || { say "no database at $SHARED/mtg.db"; exit 1; }
 mkdir -p "$RELEASES"
 if [ -t 0 ] && [ -z "${TMUX:-}" ] && [ -z "${STY:-}" ]; then
   say "not inside tmux or screen: a dropped connection would end this script. Ctrl-C now to start it in tmux; going on in 5 s"
@@ -90,6 +101,13 @@ if [ -n "$OLD" ] && [ "$OLD" = "$(real "$NEW")" ]; then say "$SHA is already cur
 if [ -f "$NEW/.next/BUILD_ID" ] && [ "$(cat "$NEW/.next/BUILD_ID")" = "$SHA" ] && [ -f "$NEW/public/tesseract/worker.min.js" ]; then
   say "release $SHA is already built"
 else
+  # Building beside the live app needs room: about 1.5 GB on disk (packages and the build) and some memory.
+  FREE_KB=$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')
+  if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt 1500000 ]; then say "only $((FREE_KB / 1024)) MB free on disk; a release needs about 1500. Nothing changed"; exit 1; fi
+  if [ -r /proc/meminfo ]; then
+    AVAIL_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+    if [ -n "$AVAIL_KB" ] && [ "$AVAIL_KB" -lt 400000 ]; then say "only $((AVAIL_KB / 1024)) MB of memory free; building beside the live app needs about 400. Nothing changed"; exit 1; fi
+  fi
   [ -d "$NEW" ] && { git -C "$REPO" worktree remove --force "$NEW" 2>/dev/null || rm -rf "$NEW"; }
   git -C "$REPO" worktree prune
   git -C "$REPO" worktree add --detach --quiet "$NEW" "$SHA"
@@ -122,13 +140,15 @@ UP=""
 start_release() {
   local strict="${2:-1}"
   ln -sfn "$1" "$CURRENT"
-  rm -f "$FLAG"
+  # The flag stays while the new build is checked (round 2, item 20): no job starts until it passes.
   eval "$START_CMD"
   # Up when the status answers with this release's build, from the expected database with profiles in it, and the
   # scanner's files are served (60 s at most).
   local want expect b got n
   want=$(basename "$1"); expect=$(dbid "$SHARED/mtg.db")
-  for _ in $(seq 1 120); do
+  # 60 s in all, each request at most 3 (round 2, item 18): a build that takes connections but hangs goes back.
+  local until=$((SECONDS + 60))
+  while [ "$SECONDS" -lt "$until" ]; do
     b=$(status)
     if [ "$(printf '%s' "$b" | field build)" = "$want" ]; then
       # A build from before these checks says neither; only a build that says them can fail them.
@@ -141,7 +161,7 @@ start_release() {
     fi
     sleep 0.5
   done
-  say "no answer from the new build within 60 s"
+  say "no good answer within 60 s"
   return 1
 }
 leave() {
@@ -196,7 +216,10 @@ MTG_DB_PATH="$SHARED/mtg.db" bash "$NEW/scripts/backup.sh" --tag "predeploy-$SHA
 say "starting $SHA"
 if ! start_release "$NEW"; then say "$SHA didn't pass its checks: going back"; exit 1; fi
 UP=1
+rm -f "$FLAG"
 say "up on $SHA: down for $(( ($(now) - T_STOP) / 1000 )) s (stop to first good answer)"
+
+say "the log of this deploy: $LOG"
 
 # --- keep this release and the one before (for going back); remove the rest ------------------------
 KEEP_NEW=$(real "$NEW")

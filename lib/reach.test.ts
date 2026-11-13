@@ -120,6 +120,16 @@ describe('the updating file and refused jobs (review 24, 28)', () => {
     expect(updatingSince(t0 + 6 * 60_000)).toBeNull();
     clearUpdating();
     expect(updatingSince(t0)).toBeNull();
+    // At start the app clears only a flag past its end: one in its time is the deploy checking that very start.
+    const { clearStaleUpdating } = await import('./updating');
+    const { existsSync } = await import('fs');
+    const live = new Date(Date.now() + 60_000).toISOString();
+    writeFileSync(join(dir, 'updating'), `${new Date().toISOString()} ${live}`);
+    clearStaleUpdating();
+    expect(existsSync(join(dir, 'updating'))).toBe(true);
+    writeFileSync(join(dir, 'updating'), '2026-01-01T00:00:00Z 2026-01-01T00:05:00Z');
+    clearStaleUpdating();
+    expect(existsSync(join(dir, 'updating'))).toBe(false);
   });
 
   it('a refused job steps aside after a minute, and the last good one shows again; the card refresh counts as running', async () => {
