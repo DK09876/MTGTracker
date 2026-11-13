@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import KeepRule from './KeepRule';
+import { usePlanState } from './PlanTab';
 import Tip from './Tip';
 import ManaCost from './ManaCost';
 import * as api from '@/lib/api';
@@ -44,6 +45,8 @@ interface Props {
 }
 
 export default function DeckHealth({ listId, commander, cards, version }: Props) {
+  // The confirmed plan's bracket and ways to win, shown beside the rules' own reading.
+  const { state: plan } = usePlanState(listId, version);
   const [data, setData] = useState<api.DeckHealth | null>(() => api.peek<api.DeckHealth>(api.paths.health(listId)) ?? null);
   const [roles, setRoles] = useState<RoleCount[] | 'loading' | 'failed'>(() => api.peek<{ roles: RoleCount[] }>(api.paths.roles(listId))?.roles ?? 'loading');
   const [insights, setInsights] = useState<api.DeckInsights | 'loading' | 'failed'>(() => api.peek<api.DeckInsights>(api.paths.insights(listId)) ?? 'loading');
@@ -80,13 +83,13 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
       <Warnings warnings={health.warnings} />
       {untracked.length > 0 && <p className="-mt-4 text-sm text-[var(--muted)]">Not tracked on this deck, so not counted or checked: {untracked.join(', ')}. {untracked.includes('Card draw') ? 'The no-card-draw check is skipped. ' : ''}Add them on the Tags tab.</p>}
 
-      <div data-tour="bracket"><Bracket insights={insights} /></div>
+      <div data-tour="bracket"><Bracket insights={insights} aim={plan?.bracket.value ?? null} /></div>
 
-      <WinRead insights={insights} />
+      <WinRead insights={insights} wins={plan?.wins ?? []} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Cards" value={`${health.size} / 100`} />
-        <Stat label="Lands" value={String(health.lands)} />
+        <Stat label="Lands" value={String(Math.round((landCount ?? health.lands) * 10) / 10)} note={landCount !== undefined && Math.round(landCount * 10) / 10 !== health.lands ? `${health.lands} cards; a double-faced land counts as part of one` : undefined} />
         <Stat label="Average mana value" value={health.averageMv.toFixed(2)} note="spells, commander excluded" />
         <Stat label="Game Changers" value={String(health.gameChangers.length)} />
       </div>
@@ -127,7 +130,7 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
         )}
       </Section>
 
-      <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from Scryfall.">
+      <Section tour="roles" title="Built-in tags" subtitle="How many of each kind of card, against the plan's guidelines. Tagged automatically from the card data.">
         <div className="flex flex-col divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
           <RoleRow label="Lands" count={landCount ?? health.lands} target={landTarget} />
           {roles === 'loading' && (
@@ -193,15 +196,27 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 const STRENGTH = { strong: ['Strong', '#7ccf8a'], some: ['Helps close', '#e0b64a'] } as const;
 
 /** How the deck wins, read from its cards without a model: free, and there as soon as the roles are. */
-function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
-  if (insights === 'loading' || insights === 'failed' || !insights.wincons) return null;
-  const { routes, missing } = insights.wincons;
+function WinRead({ insights, wins }: { insights: api.DeckInsights | 'loading' | 'failed'; wins: Array<{ id: string; name: string; cards: unknown[] }> }) {
+  const read = insights === 'loading' || insights === 'failed' ? null : insights.wincons;
+  if (!read && !wins.length) return null;
+  const routes = read?.routes ?? [];
+  // "No clear way to win" only when the plan has none either: the plan's ways to win are the owner's word.
+  const missing = wins.length ? null : read?.missing ?? null;
   return (
     <section data-tour="win-read" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 data-section="How it wins" className="font-display text-lg font-semibold">How it wins <span className="text-sm font-normal text-[var(--muted)]">· quick read, no AI</span></h3>
         <p className="text-xs text-[var(--muted)]">From combos, finishers and the deck&apos;s shape. Have Claude read the deck on the Plan tab for the full read.</p>
       </div>
+      {wins.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-plan-wins>
+          <span className="text-sm font-semibold">From your plan</span>
+          <ul className="flex flex-wrap gap-2">
+            {wins.map((w) => <li key={w.id} className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm"><b className="font-semibold">{w.name}</b> <span className="text-[var(--muted)]">· {w.cards.length} card{w.cards.length === 1 ? '' : 's'}</span></li>)}
+          </ul>
+        </div>
+      )}
+      {routes.length > 0 && wins.length > 0 && <span className="text-sm font-semibold">What the cards show</span>}
       {routes.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {routes.map((r) => (
@@ -225,22 +240,24 @@ function WinRead({ insights }: { insights: api.DeckInsights | 'loading' | 'faile
   );
 }
 
-function Bracket({ insights }: { insights: api.DeckInsights | 'loading' | 'failed' }) {
+function Bracket({ insights, aim }: { insights: api.DeckInsights | 'loading' | 'failed'; aim: number | null }) {
   if (insights === 'loading') {
-    return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">Estimating the bracket with Commander Spellbook…</p>;
+    return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">Reading the bracket…{aim ? ` You’re aiming for ${aim}.` : ''}</p>;
   }
   const bracket = insights === 'failed' ? null : insights.bracket;
   if (!bracket) {
-    return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">Couldn&apos;t reach Commander Spellbook for the bracket — try again in a moment.</p>;
+    return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">{aim ? `You’re aiming for ${aim}. ` : ''}Couldn&apos;t read the bracket from the combo data just now — try again in a moment.</p>;
   }
+  const rulesRead = bracket.label.replace(/^Bracket\s+/i, '');
   // A caution naming the same cards as a reason above says the same thing twice.
   const shown = new Set(bracket.reasons.map((r) => [...r.cards].sort().join('|')));
   const cautions = bracket.cautions.filter((c) => !shown.has([...c.cards].sort().join('|')));
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-lg font-semibold" title={`Commander Spellbook's own scale calls it ${bracket.spellbook.label}`}>{bracket.label}</p>
+        <p className="text-lg font-semibold">{aim ? `You’re aiming for ${aim}` : bracket.label}</p>
       </div>
+      {aim !== null && <p className="text-sm" data-bracket-aim>You’re aiming for {aim}. The bracket rules alone read this list as {rulesRead}.</p>}
       <p className="text-sm text-[var(--muted)]">
         {bracket.floor === 1
           ? 'Nothing the bracket rules name: no Game Changers, mass land denial or two-card combos. Between 1 and 2 is down to how the deck plays.'
@@ -486,7 +503,7 @@ function RoleRow({ label, count, target, cards }: { label: string; count: number
         >
           {label}
         </button>
-        <span className="min-w-8 text-right text-lg font-semibold tabular-nums">{count}</span>
+        <span className="min-w-8 text-right text-lg font-semibold tabular-nums">{by(count)}</span>
         <div className="relative h-2 min-w-[8rem] flex-1 rounded-full" style={{ background: TRACK }} aria-hidden>
           {target && (
             <div className="absolute inset-y-[-3px] rounded border border-[var(--muted)]/60"

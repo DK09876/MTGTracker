@@ -8,6 +8,10 @@
  * https://backend.commanderspellbook.com/schema/swagger/
  */
 
+import { createHash } from 'node:crypto';
+
+import { database } from './db';
+
 const API = 'https://backend.commanderspellbook.com';
 const SITE = 'https://commanderspellbook.com';
 const TIMEOUT_MS = 10_000;
@@ -108,7 +112,43 @@ const body = ({ commanders, main }: DeckList) => JSON.stringify({
   main: main.map(({ name, quantity }) => ({ card: name, quantity })),
 });
 
+/**
+ * Answers for the exact same deck list are kept for a few days, in the
+ * database so a restart doesn't lose them, and a call already on its way is
+ * shared: the plan and the insights asked for the same thing at once, and
+ * each took about two seconds on the first deck opened after a restart.
+ */
+const KEEP_MS = 3 * 86400_000;
+const pending = new Map<string, Promise<unknown>>();
+let tableReady = false;
+function store() {
+  // A test with no database of its own must not write one at the default path.
+  if (process.env.VITEST && !process.env.MTG_DB_PATH) throw new Error('no database in this test');
+  const d = database();
+  if (!tableReady) {
+    d.run('CREATE TABLE IF NOT EXISTS spellbook_cache (key TEXT PRIMARY KEY, at TEXT NOT NULL, answer TEXT NOT NULL)');
+    tableReady = true;
+  }
+  return d;
+}
+
 async function post<T>(path: string, deck: DeckList): Promise<T> {
+  const key = `${path}:${createHash('sha1').update(body(deck)).digest('hex')}`;
+  try {
+    const r = store().get('SELECT at, answer FROM spellbook_cache WHERE key = ?', [key]) as { at: string; answer: string } | null;
+    if (r && Date.now() - Date.parse(r.at) < KEEP_MS) return JSON.parse(r.answer) as T;
+  } catch { /* no cache: ask */ }
+  const was = pending.get(key) as Promise<T> | undefined;
+  if (was) return was;
+  const ask = ask_<T>(path, deck).then((v) => {
+    try { store().run('INSERT OR REPLACE INTO spellbook_cache (key, at, answer) VALUES (?, ?, ?)', [key, new Date().toISOString(), JSON.stringify(v)]); } catch { /* kept in memory only */ }
+    return v;
+  }).finally(() => pending.delete(key));
+  pending.set(key, ask);
+  return ask;
+}
+
+async function ask_<T>(path: string, deck: DeckList): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${API}${path}`, {

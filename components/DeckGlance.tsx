@@ -109,7 +109,13 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
           </span>
         );
       }
-      case 'lands': return h ? stat('Lands', h.lands, status(plan?.lands), !!plan?.lands && h.size >= 90 && landsFarUnder(health?.landCount ?? h.lands, plan.lands)) : null;
+      case 'lands': {
+        if (!h) return null;
+        // The number the range is judged against (a land on the back of a double-faced card counts as part of one),
+        // as on Check and Trim; the plain card count beside it when it differs.
+        const have = Math.round((health?.landCount ?? h.lands) * 10) / 10;
+        return stat('Lands', have, <>{status(plan?.lands)}{have !== h.lands && <span className="text-xs font-normal text-[var(--faint)]"> · {h.lands} cards</span>}</>, !!plan?.lands && h.size >= 90 && landsFarUnder(health?.landCount ?? h.lands, plan.lands));
+      }
       case 'ramp': case 'draw': case 'removal': case 'wipe': {
         const r = role(id);
         return r ? stat(r.label, r.count, status(r.target), id === 'draw' && r.count === 0 && (h?.size ?? 0) >= 90) : null;

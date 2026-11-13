@@ -75,10 +75,24 @@ function spending<T>(work: Promise<T>): Promise<T> {
 // A deck's answers are dropped as soon as the deck itself has changed.
 
 const memo = new Map<string, unknown>();
+const inFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * One request at a time per URL: several parts of a page asking for the same
+ * thing while it loads share one answer (the deck page asked for the plan,
+ * health, jobs and who is signed in two to four times on one load).
+ */
+function shared<T>(key: string, ask: () => Promise<T>): Promise<T> {
+  const was = inFlight.get(key) as Promise<T> | undefined;
+  if (was) return was;
+  const p = ask().finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
 
 function get<T>(path: string): Promise<T> {
   const u = url(path);
-  return fetch(u).then(json<T>).then((v) => { memo.set(u, v); return v; });
+  return shared(u, () => fetch(u).then(json<T>).then((v) => { memo.set(u, v); return v; }));
 }
 
 /** What a GET answered last time this visit, if anything: to show at once while it is asked again. */
@@ -89,6 +103,8 @@ export function peek<T>(path: string): T | undefined {
 /** Forget a deck's remembered answers (it changed). */
 function forgetDeck(listId: string) {
   for (const k of memo.keys()) if (k.includes(`/lists/${listId}/`)) memo.delete(k);
+  // A read already on its way may carry the deck from before the change: the next ask starts a new one.
+  for (const k of inFlight.keys()) if (k.includes(`/lists/${listId}/`)) inFlight.delete(k);
 }
 
 /** The paths the deck pages read, for peek. */
@@ -437,7 +453,7 @@ export const removeCard = (listId: string, cardId: string) =>
     .then(json<{ ok: true; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 export const fetchProfiles = () =>
-  fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
+  shared(url('profiles'), () => fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles));
 
 // --- signing in and admins -------------------------------------------------
 
@@ -454,7 +470,7 @@ export interface Me {
 /** Told when sign-in changes, so everything that shows admin parts looks again. */
 export const ME_CHANGED = 'mtg-me-changed';
 const meChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(ME_CHANGED)); };
-export const me = (profile: string) => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>);
+export const me = (profile: string) => shared(`me:${profile}`, () => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>));
 export const signIn = (profile: string, password: string) =>
   fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, password }) })
     .then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
@@ -563,7 +579,7 @@ export const JOBS_CHANGED = 'mtg-jobs-changed';
 export const jobsChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED)); };
 
 export type JobSummary = Omit<Job, 'result'>;
-export const jobs = () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>);
+export const jobs = () => shared(url('jobs'), () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>));
 
 /** Told when errors may have been acknowledged, so the banner looks again. */
 export const ERRORS_CHANGED = 'mtg-errors-changed';

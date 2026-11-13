@@ -76,7 +76,7 @@ export interface PlanState {
   job: { id: string; status: string; progress: string | null; error: string | null } | null;
   hasKey: boolean;
   /** What a run has cost lately, or null when nothing to go by. */
-  cost: number | null;
+  cost: { usd: number; measured: boolean };
   /** How many categories the deck has, for the line under the tabs. */
   categoryCount: number;
   /** The jobs counted on this deck, for Tune's summary before confirming. */

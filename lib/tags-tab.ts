@@ -9,7 +9,7 @@
  * the rest behind "Show more"), and, folded, the combos the combo lookup
  * finds and the cards several of them share.
  *
- * Refine with AI: one Opus call (prompt "tags-2") that works with what is on
+ * Refine with AI: one Opus call (prompt "tags-3") that works with what is on
  * the deck first - cards to add to a category or take out - and only then
  * suggests new categories. The model returns its whole answer; the code
  * compares it with the deck and shows only the differences.
@@ -30,6 +30,7 @@ import {
 import { cardsInList, database, type List } from './db';
 import { deckContext } from './deck-context';
 import { deckHash } from './deck-hash';
+import { estimateCost } from './ai-estimate';
 import { deckRolesKnown, jobCards } from './deck-roles';
 import { primaryType } from './deckview';
 import { latestJob } from './jobs';
@@ -153,6 +154,7 @@ Rules:
 - Categories describe; they do not protect. A category is never a reason a card must stay in the deck.
 - Do not suggest cuts, adds or swaps to the deck itself.
 - Use card names and category names exactly as given.
+- Never mention what you may or may not suggest. Say only what you suggest and why.
 - Think it through privately; the answer holds only the fields asked for.
 
 Answer with one JSON object, nothing else:
@@ -306,7 +308,7 @@ export async function tagsTab(list: Pick<List, 'id' | 'commander'>, profileId?: 
     confirmed: isConfirmed(list.id),
     hasKey: !!process.env.ANTHROPIC_API_KEY,
     step1: { jobs: jobsRow, tags: visible, more, combos, comboKeys, open: (jobsRow && !jobsRow.skipped ? 1 : 0) + visible.length, comboCount: s1.combos.length },
-    ai: { ran: !!run, at: run?.at ?? null, notes: run?.output.notes ?? '', rows, job: running },
+    ai: { ran: !!run, at: run?.at ?? null, notes: run?.output.notes ?? '', rows, job: running, cost: estimateCost(list.id, 'refine tags') },
   };
   if (profileId) quietly(() => logShown(profileId, list.id, 'tags:', [
     { key: 'tags:cards', task: 'tags', method: 'code', deckHash: deckHash(list.commander, deck.main), items: [

@@ -13,7 +13,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { C, CardChip, CardPick, MARK, RemoveButton, useUndo } from './PlanTab';
 import Tip from './Tip';
+import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
+import { price } from '@/lib/price';
 import type { Category } from '@/lib/categories-shared';
 import type { AiRow, TagRow, TagsView } from '@/lib/tags-tab-shared';
 
@@ -131,7 +133,9 @@ export default function TagsTab({ listId, version, onTab }: Props) {
                   if (!n) return <span className="text-[13px] tabular-nums text-[var(--muted)]">{c.cards.length} {c.cards.length === 1 ? 'card' : 'cards'}</span>;
                   return (
                     <span className="text-[13px] tabular-nums">
-                      <b className={`font-semibold ${n.warn ? 'text-amber-300' : 'text-[var(--foreground)]'}`}>{n.count}</b>
+                      {/* In range green, outside its aim amber, a hard failure (no draw at 90+) amber too. */}
+                      <b data-range={!n.range ? 'none' : n.count < n.range[0] || n.count > n.range[1] ? 'out' : 'in'}
+                        className={`font-semibold ${n.warn || (n.range && (n.count < n.range[0] || n.count > n.range[1])) ? 'text-amber-300' : n.range ? 'text-[#9bdcae]' : 'text-[var(--foreground)]'}`}>{n.count}</b>
                       {n.range && <span className="text-[var(--muted)]"> aim {n.range[0]}–{n.range[1]}</span>}
                     </span>
                   );
@@ -230,7 +234,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
         <p className="text-sm text-[var(--muted)]">AI suggests cards to add to your groups or take out of them, then anything new the plan depends on. Tune’s ranking of cuts doesn’t use groups; Tune’s AI reads them as a description of the deck, never as a reason to keep a card.</p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" className={step1Open === 0 ? C.aiBtn : C.btn} disabled={aiOff} onClick={() => act({ action: 'ai' })}>
-            {running ? 'AI is reading the deck…' : `${v.ai.ran ? '✦ Ask AI again' : '✦ Refine with AI'} · Claude Opus`}
+            {running ? 'AI is reading the deck…' : `${v.ai.ran ? '✦ Ask AI again' : '✦ Refine with AI'} · Claude Opus · ${price(v.ai.cost)}`}
           </button>
           <Tip label="What AI reads">The plan as you confirmed it, with who set each part; every category on this deck with its cards and who added each; what you removed or skipped before; and the deck’s facts (every card with its rules text). One call to Claude Opus.</Tip>
           <span className="flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{running ? v.ai.job?.progress ?? 'Working…' : aiNote}</span>
@@ -243,7 +247,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
               <span className={`font-bold ${C.ai}`}>✦ Suggested by AI</span>
               {v.ai.rows.length > 1 && <button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'accept', keys: v.ai.rows.map((r) => r.key) })}>Accept all</button>}
             </div>
-            {v.ai.notes && <p className="text-[13px] text-[var(--muted)]">{v.ai.notes}</p>}
+            {v.ai.notes && <p className="text-[13px] text-[var(--muted)]"><SymbolText text={v.ai.notes} /></p>}
             {v.ai.rows.map((r) => <AiSug key={r.key} r={r} busy={busy} act={act} />)}
           </div>
         )}
@@ -282,7 +286,7 @@ function SugRow({ title, meta, why, busy, onAccept, onSkip, children }: { title:
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t border-[var(--border)] pt-2" data-suggestion>
       <div className="min-w-0 flex-[1_1_18rem]">
         <b className="break-words">{title}</b> {meta && <span className="text-[13px] text-[var(--muted)]">{meta}</span>}
-        {why && <p className="text-sm text-[var(--muted)]">{why}</p>}
+        {why && <p className="text-sm text-[var(--muted)]"><SymbolText text={why} /></p>}
         {children}
       </div>
       <div className="flex gap-2">

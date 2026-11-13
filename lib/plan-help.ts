@@ -39,6 +39,7 @@ import {
 import { isCommanderRole } from './plan-shared';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { primaryType } from './deckview';
+import { estimateCost } from './ai-estimate';
 import { clearOutcome, logConversation, logOutcome, logShown, quietly } from './suggestion-log';
 import { tagKey } from './tags';
 
@@ -316,12 +317,6 @@ export async function runHelp(model: JsonModel, list: List, profileId: string | 
 // --- the view ------------------------------------------------------------------------
 
 /** What a run has cost lately, from the AI usage trail, or null. */
-function helpCost(): number | null {
-  try {
-    const r = database().get(`SELECT AVG(cost) AS usd, COUNT(*) AS n FROM ai_calls WHERE step = 'plan suggestions' AND outcome = 'ok' AND cost > 0`) as { usd: number | null; n: number } | null;
-    return r && r.n && r.usd ? r.usd : null;
-  } catch { return null; }
-}
 
 const qId = (helpId: string, i: number) => `${helpId.slice(0, 8)}-q${i}`;
 
@@ -410,7 +405,7 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
     commanderChanged: !!o.confirmedAt && !!o.confirmedCommander && o.confirmedCommander !== (list.commander?.name ?? ''),
     job: running,
     hasKey: !!process.env.ANTHROPIC_API_KEY,
-    cost: helpCost(),
+    cost: estimateCost(list.id, 'plan suggestions'),
     categoryCount: cats.filter((c) => c.kind !== 'key' || c.cards.length).length,
     jobs: cats.filter((c) => c.kind === 'job').map((c) => c.name),
     generatedAccepted: cats.some((c) => (c.kind === 'tag' || c.kind === 'own' || c.kind === 'job') && c.by !== 'owner'),

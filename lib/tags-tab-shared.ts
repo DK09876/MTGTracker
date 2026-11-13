@@ -45,5 +45,7 @@ export interface TagsView {
     notes: string;
     rows: AiRow[];
     job: { id: string; status: string; progress: string | null; error: string | null } | null;
+    /** What a run will cost (lib/ai-estimate.ts). */
+    cost: { usd: number; measured: boolean };
   };
 }

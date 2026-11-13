@@ -32,6 +32,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { ModelError, type JsonModel } from './ai';
+import { estimateCost } from './ai-estimate';
 import { guardCuts } from './cut-guard';
 import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
@@ -48,7 +49,7 @@ import { clearOutcome, closeAll, logConversation, logOutcome, logShown, quietly,
 import { applyCuts, cutImpact, landFloor, tuneContext, undoApply, type Context, type UndoMoves } from './tune';
 import { tuneStore } from './tune-store';
 import {
-  chosenCuts, isTrimChip, newMarks, saidSomething, TRIM_COST_GUESS, TRIM_MODELS,
+  chosenCuts, isTrimChip, newMarks, saidSomething, TRIM_MODELS,
   type CutMark, type TrimApproach, type TrimChoice, type TrimDone, type TrimItem, type TrimMark, type TrimModel, type TrimTier, type TrimTurn, type TrimView,
 } from './trim-shared';
 import type { Board } from './decklist';
@@ -650,14 +651,6 @@ export function undoTrim(list: List): { moved: number } {
 
 // --- the view ----------------------------------------------------------------------------------
 
-/** What a step has cost lately, from the AI usage trail (kept a week), else the estimate. */
-function costOf(stepLike: string, guess: number): { usd: number; measured: boolean } {
-  try {
-    const r = database().get(`SELECT AVG(cost) AS usd, COUNT(*) AS n FROM ai_calls WHERE step LIKE ? AND outcome = 'ok' AND cost > 0`, [stepLike]) as { usd: number | null; n: number } | null;
-    if (r?.n && r.usd) return { usd: r.usd, measured: true };
-  } catch { /* no usage trail yet */ }
-  return { usd: guess, measured: false };
-}
 
 export const TRIM_READS = [
   'Every card in the deck with its rules text, and the counts the app worked out',
@@ -722,8 +715,8 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
     approach: s.approach,
     model: 'opus',
     costs: {
-      opus: costOf('trim: rank the cuts (opus)', TRIM_COST_GUESS.opus),
-      approach: costOf('trim: write the approach', TRIM_COST_GUESS.approach),
+      opus: estimateCost(list.id, 'trim: rank the cuts (opus)'),
+      approach: estimateCost(list.id, 'trim: write the approach'),
     },
     run: s.run ? { id: s.run.id, at: s.run.at, model: s.run.model, round: s.run.round, notes: s.run.notes, reply: s.run.reply ?? '', ask: s.run.ask ?? null, items, ...compare(s.run, items), stale: !s.done && s.run.deckHash !== hash } : null,
     choices,

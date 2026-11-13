@@ -17,7 +17,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
 import Tip from './Tip';
+import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
+import { price } from '@/lib/price';
 import type { DeckSection } from '@/lib/sections-shared';
 import {
   chosenCuts, newMarks, saidSomething, TRIM_CHIP_LABELS,
@@ -45,7 +47,7 @@ const SAVE_MS = 350;
 const HINTS = ['Keep my ramp', 'Cut from interaction first', 'Keep my mana dorks', 'Protect the combo pieces', 'Fewer board wipes', 'Don’t touch my pet cards'];
 const WEIGH = ['speed', 'card advantage', 'my theme', 'staying on budget', 'interaction'];
 
-const money = (c: { usd: number; measured: boolean }) => `about ${c.usd < 0.995 ? `${Math.max(1, Math.round(c.usd * 100))}¢` : `$${c.usd.toFixed(2)}`}${c.measured ? '' : ', estimated'}`;
+const money = price;
 const TIER_TITLE: Record<TrimTier, (n: number) => [string, string]> = {
   cut: (n) => [`Claude would cut these ${n}`, 'Agree by leaving them. Press Keep to overrule one.'],
   maybe: (n) => [`Closer calls · ${n}`, 'Claude would keep these, most cuttable first. Press Cut to take one.'],
@@ -201,7 +203,6 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
       <section className={`${CARD} flex flex-col gap-3`} data-tour="trim-done" data-section="Trim">
         <h3 className="font-display text-2xl font-semibold">{d.size === 100 ? 'The deck is at 100 cards' : `The deck is at ${d.size} cards${d.size > 100 ? `, ${d.size - 100} over` : ''}`}</h3>
         <p className="text-sm text-[var(--muted)]">{d.cut} card{d.cut === 1 ? '' : 's'} moved to {d.to}, each with its reason. A snapshot from before is in History.{d.notes ? ` ${d.notes} line${d.notes === 1 ? '' : 's'} from the session went to your notes.` : ''}</p>
-        <p className="text-xs text-[var(--faint)]">Kept in the suggestion log: {d.logged.accepted} cut, {d.logged.refused} of Claude’s cuts kept, {d.logged.left} closer calls left alone, {d.logged.reasons} with a reason.</p>
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
           <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>
@@ -235,7 +236,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
         <div role="status" className="flex flex-col gap-2 rounded-2xl border border-[var(--c1)]/50 bg-[var(--surface)] p-4">
           <b>{view.job?.detail || 'Claude is ranking the cuts'}…</b>
           <div className="h-1.5 overflow-hidden rounded-full bg-[var(--border)]"><div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--c1)]" /></div>
-          <span className="text-sm text-[var(--muted)]">Usually under a minute. It runs in the background: you can switch tabs or close the page, and the list will be here when you come back.</span>
+          <span className="text-sm text-[var(--muted)]">Usually a minute or two. It runs in the background: you can switch tabs or close the page, and the list will be here when you come back.</span>
         </div>
       )}
 
@@ -303,10 +304,10 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
                 {ch.kept.length > 0 && <p><b>Kept, as you said:</b> {names(ch.kept)}.</p>}
                 {ch.dropped.length > 0 && <p><b>No longer cuts, though you didn’t name them:</b> {names(ch.dropped)}.</p>}
                 <p><b>{ch.fresh ? `${ch.fresh} new cut${ch.fresh === 1 ? '' : 's'}` : 'No new cuts'}.</b> {ch.same + ch.yours} the same as before{ch.yours ? `, ${ch.yours} of them confirmed by you` : ''}.</p>
-                {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “{view.run.reply}”</p>}
+                {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “<SymbolText text={view.run.reply} />”</p>}
               </div>
             ) : view.run.notes ? (
-              <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {view.run.notes}</p>
+              <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={view.run.notes} /></p>
             ) : null}
           <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
             disabled={busy || cutsRunning || view.noKey} onSend={send} />
@@ -413,7 +414,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
   return (
     <section className={`${CARD} flex flex-col gap-3`} data-trim-session aria-label="Say something back">
       <div className={`${C.box} flex flex-col gap-2`}>
-        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> {ask}</p>}
+        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> <SymbolText text={ask} /></p>}
         <label htmlFor="trim-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say something back
           <span className="text-[13px] font-normal text-[var(--muted)]">Make your changes on the cuts below first, then send them with anything you want to say.</span>
         </label>
@@ -441,9 +442,9 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
                 {t.added && <div className="mt-1.5 flex flex-col gap-0.5" data-added><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ ADDED BY CLAUDE</span><p className="whitespace-pre-line text-[var(--muted)]">{t.added}</p></div>}</>
             ) : t.kind === 'claude-list' ? (
               <><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ CLAUDE · LIST {t.round}</span>
-                <p>{t.cuts.length} cuts and {t.maybes.length} closer calls.{t.reply ? ` ${t.reply}` : ''}</p>
+                <p>{t.cuts.length} cuts and {t.maybes.length} closer calls.{t.reply ? ' ' : ''}<SymbolText text={t.reply} /></p>
                 {/* The latest question shows once, above the box. */}
-                {t.ask && k !== lastList && <p className={C.ai}>Asked: {t.ask}</p>}</>
+                {t.ask && k !== lastList && <p className={C.ai}>Asked: <SymbolText text={t.ask} /></p>}</>
             ) : (
               <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU</span>
                 {t.approach !== undefined && <p>Changed what matters to: “{t.approach || 'nothing'}”</p>}
@@ -471,7 +472,8 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
   item: TrimItem; cut: boolean; choice?: TrimChoice; marks: boolean; mark: CutMark | null; showCard: boolean; busy: boolean;
   onSet: (c: 'cut' | 'keep') => void; onCard: (v: boolean) => void; onReason: (text: string) => void; onStar: () => void;
 }) {
-  const changed = (cut ? 'cut' : 'keep') !== callOf(item.tier);
+  // A ★ card needs no reason: it is never cut, whatever Claude said.
+  const changed = (cut ? 'cut' : 'keep') !== callOf(item.tier) && !(item.star && !cut);
   const badge = mark ? <span className={`inline-block rounded-lg px-2 py-0.5 text-center text-[11px] font-bold ${MARK_LABEL[mark][1]}`}>{MARK_LABEL[mark][0]}</span> : null;
   const seg = (v: 'keep' | 'cut') => {
     const on = (v === 'cut') === cut;
@@ -498,12 +500,14 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
         <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] min-[821px]:col-span-1" data-col="why">
           {item.tier === 'yours'
             ? <><span className={`font-semibold ${C.yours}`}>You:</span> {item.mine || 'kept, no reason given'}</>
-            : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {item.why}</>}
+            : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={item.why} /></>}
         </span>
         <input value={choice?.text ?? ''} onChange={(e) => onReason(e.target.value)} maxLength={300} data-col="reason"
-          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
+          // One line high: the start shows with an ellipsis when not being typed in, the whole reason on hover.
+          title={choice?.text?.trim() || undefined} onBlur={(e) => { e.currentTarget.scrollLeft = 0; }}
+          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' && cut ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
           aria-label={`Your reason for ${item.name}`}
-          className={`col-span-2 min-h-9 w-full min-w-0 border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
+          className={`col-span-2 min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
       </div>
       {showCard && (
         <div className="mt-2.5 flex flex-wrap gap-3.5 rounded-xl border border-[var(--border)] bg-[#221e1a] p-3" data-trim-card-open>

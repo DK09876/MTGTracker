@@ -11,11 +11,11 @@ import { deckIdentity } from './commanders';
 import { deckCutList } from './cut-list';
 import { lastReview } from './cut-review';
 import { addCardToList, cachedRoles, cardsInList, database, deckTags, setQuantity, updateListCard, type List, type ListedCard } from './db';
-import { drawKind, isImpulse, jobs as countJobs, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
+import { drawKind, isImpulse, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
 import { planFor, planStyles, type Plan } from './deck-plan';
 import { jobsOnDeck } from './categories';
 import { planFlags } from './deck-context';
-import { commanderRoles as rolesOfCommander, deckRoles, keeps, overrides as roleOverrides, withOverrides } from './deck-roles';
+import { commanderRoles as rolesOfCommander, deckRoles, deckRolesKnown, keeps } from './deck-roles';
 import type { Board } from './decklist';
 import { filterCards } from './filter';
 import { fitOf, fitProfile, quality, THEMES } from './fit';
@@ -24,7 +24,7 @@ import { goldfish, simCard, simDeck } from './goldfish';
 import { farUnderLine, landsFarUnder } from './hard-checks';
 import { analyse, deckFlags } from './health';
 import { deckFacts } from './plan-server';
-import { countRoles, fixRoles, ROLES, ROLES_VERSION, type RoleCount } from './roles';
+import { fixRoles, ROLES, ROLES_VERSION, type RoleCount } from './roles';
 import { getCard, imageOf, manaCostOf, type ScryfallCard } from './scryfall';
 import { guardCuts, type GuardRules } from './cut-guard';
 import { cutBoard, type DeckSection } from './sections-shared';
@@ -169,12 +169,15 @@ function changed(ctx: Context, changes: Changes): Array<{ card: ScryfallCard; qu
   return [...out.values()];
 }
 
-/** The jobs and lands of any version of the deck, the plan's ranges and the owner's corrections in. */
+/**
+ * The jobs and lands of any version of the deck. The jobs are the one count
+ * every page and every message to Claude uses (deckRolesKnown): the owner's
+ * corrections and the cards they or accepted AI suggestions added to or took
+ * out of a job are in, so cutting a card added to a job by hand takes it off.
+ */
 async function numbersOf(ctx: Context, cards: Array<{ card: ScryfallCard; quantity: number }>) {
-  const none = { search: async () => ({ cards: [], totalCards: 0, hasMore: false }), cached: cachedRoles, save: () => {} };
-  const roles = withOverrides(await countRoles(cards, none), cards, roleOverrides(ctx.list.id));
-  const ranges = Object.fromEntries(ctx.plan.targets.map((t) => [t.role, t.range])) as Partial<Record<JobId, [number, number]>>;
-  const jobs = countJobs({ cards, roles, commander: ctx.list.commander, commanderRoles: ctx.cmdRoles, flip: ctx.plan.flip.value, ranges });
+  const jobs = (await deckRolesKnown(ctx.list.id, cards as ListedCard[])).filter((r) => (JOB_IDS as string[]).includes(r.id))
+    .map((r) => ({ id: r.id as JobId, count: r.count, range: r.target ?? null }));
   const known = knownRoles(cards.map((c) => c.card));
   const lands = landNumber(cards, (c) => known.get(c.oracle_id ?? c.id) ?? [], ctx.plan.landNumber.mine ? ctx.plan.lands : null);
   const spells = cards.filter((c) => !isLand(c.card));
@@ -183,14 +186,16 @@ async function numbersOf(ctx: Context, cards: Array<{ card: ScryfallCard; quanti
   return { jobs, lands, averageMv, gameChangers, size: count(cards) + (ctx.list.commander ? 1 : 0) };
 }
 
+const JOB_IDS: JobId[] = ['ramp', 'draw', 'impulse', 'interaction', 'wipe', 'protection', 'finishers'];
+
 export async function impactOf(ctx: Context, changes: Changes): Promise<Impact> {
   const [b, a] = await Promise.all([numbersOf(ctx, ctx.main), numbersOf(ctx, changed(ctx, changes))]);
   // A range only for a job on the deck, as on the Cards tab: a job the deck doesn't count has no aim.
   const onDeck = jobsOnDeck(ctx.list.id);
   const rows = ['ramp', 'draw', 'impulse', 'interaction', 'protection', 'finishers'].map((id) => {
-    const jb = b.jobs.find((j) => j.id === id)!;
-    const ja = a.jobs.find((j) => j.id === id)!;
-    return { id, label: JOB_LABELS[id as JobId], before: jb.count, after: ja.count, range: onDeck.has(id === 'impulse' ? 'draw' : id) ? ja.range : null };
+    const jb = b.jobs.find((j) => j.id === id);
+    const ja = a.jobs.find((j) => j.id === id);
+    return { id, label: JOB_LABELS[id as JobId], before: jb?.count ?? 0, after: ja?.count ?? 0, range: onDeck.has(id === 'impulse' ? 'draw' : id) ? ja?.range ?? null : null };
   });
   rows.push({ id: 'lands', label: 'Lands', before: b.lands.have, after: a.lands.have, range: ctx.plan.lands });
   return {
