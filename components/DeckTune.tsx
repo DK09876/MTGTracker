@@ -12,6 +12,7 @@
  * Claude's ideas join the same groups, read against the plan.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
@@ -55,6 +56,8 @@ const remembered = (listId: string): Intent | null => {
 };
 
 export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk, onCard }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [intent, setIntent] = useState<Intent | null>(() => remembered(listId));
   const [symptom, setSymptom] = useState<Symptom>('gas');
   const [state, setState] = useState<api.TuneState | null>(null);
@@ -241,7 +244,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
           onChanged={async () => { await onChanged(); await load(intent, symptom); }}
           showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
-        {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy} job={job} instructions={instructions} onInstructions={setInstructions}
+        {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
           onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
 
         {current === 'cuts' ? (

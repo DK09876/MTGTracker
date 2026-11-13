@@ -5,6 +5,7 @@
  * of it, run on the sample profile so every step shows something real.
  */
 
+import { reached } from '@/lib/reach';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -47,7 +48,7 @@ export default function HelpButton() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${BASE}/api/tour`, { method: 'POST' });
+      const res = await reached(`${BASE}/api/tour`, { method: 'POST' });
       const body = await res.json() as { deckId?: string; error?: string };
       if (!res.ok || !body.deckId) throw new Error(body.error ?? 'Could not start the tour');
       const first = guide.steps[0]?.path?.(body.deckId) ?? path;

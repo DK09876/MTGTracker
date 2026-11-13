@@ -5,6 +5,7 @@
  * and a button to refresh it now. Search still asks Scryfall live.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useState } from 'react';
 
 import * as api from '@/lib/api';
@@ -13,6 +14,8 @@ import type { CardDataStatus } from '@/lib/card-store';
 const when = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 export default function CardData() {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [status, setStatus] = useState<CardDataStatus | null>(null);
   const [started, setStarted] = useState(false);
   const load = useCallback(() => { api.cardData().then((r) => setStatus(r.status)).catch(() => {}); }, []);
@@ -31,7 +34,7 @@ export default function CardData() {
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">Card data</h2>
-        <button onClick={refresh} disabled={started} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50">
+        <button onClick={refresh} disabled={started || updating} title={updating ? UPDATING_TITLE : undefined} className="rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50">
           {started ? 'Refreshing — see the jobs menu' : 'Refresh now'}
         </button>
       </div>

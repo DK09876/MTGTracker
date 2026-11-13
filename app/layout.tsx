@@ -14,6 +14,7 @@ import { SettingsLink, TabBar, TopLinks } from '@/components/Nav';
 import ServiceWorker from '@/components/ServiceWorker';
 import ThemeApplier from '@/components/ThemeApplier';
 import TourOverlay from '@/components/TourOverlay';
+import UpdateBanner from '@/components/UpdateBanner';
 
 import './globals.css';
 
@@ -67,6 +68,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <ProfileSwitcher />
             </div>
           </nav>
+          {/* Inside the sticky header, so it is seen wherever the page is scrolled and covers none of its controls. */}
+          <UpdateBanner />
         </header>
         <ErrorBanner />
         <main className="safe-x mx-auto w-full max-w-[1680px] flex-1 py-6"><ProfileGate>{children}</ProfileGate></main>

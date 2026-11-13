@@ -60,6 +60,15 @@ import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
+import { noteStatus, reached } from './reach';
+
+// Every request in this file goes through reached (lib/reach.ts): it notes whether the server answered, and
+// turns "can't reach it" during a deploy into words instead of "Failed to fetch".
+const fetch = (input: string, init?: RequestInit) => reached(input, init);
+
+/** How the app stands (handoff 9, Part B): its build, and whether a deploy is under way. Noted for the update banner. */
+export const appStatus = () => fetch(`${BASE}/api/status`, { cache: 'no-store' }).then(json<{ build: string; updating: string | null; running: number }>).then((s) => { noteStatus(s); return s; });
+
 /** Told when a request may have spent on a model, so the header's budget is read again. */
 export const AI_SPENT = 'mtg-ai-spent';
 

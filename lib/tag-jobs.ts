@@ -222,6 +222,7 @@ const store = globalThis as unknown as { __tagJobs?: Map<string, AbortController
 const running = (store.__tagJobs ??= new Map());
 
 export const isRunningHere = (listId: string) => running.has(listId);
+export const runningHere = () => running.size;
 
 /** Start a job in the background. The caller has checked none is running. */
 export function launch(job: TagJob, deps: JobDeps): void {

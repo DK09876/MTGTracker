@@ -14,6 +14,7 @@
  * page loses nothing.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import CardName from './CardName';
@@ -58,6 +59,8 @@ const groupOrder = (k: string) => FINISH_GROUPS.indexOf((k.startsWith('theme:') 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export default function DeckFinish({ listId, version, onChanged, onTab, onCard, showFree, onFree }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [view, setView] = useState<FinishView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -228,7 +231,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       </div>
       <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and your settings.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <button className={C.go} disabled={busy || view.noKey} onClick={() => act({ action: 'find' })} data-finish-go>
+        <button className={C.go} disabled={busy || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-finish-go>
           ✦ {isFull ? 'Finish from my collection' : `Find ${plural(wanted, 'card')} in my collection`} · Claude Opus · {cost}
         </button>
         <button type="button" className={LINK} aria-pressed={showFree} onClick={() => onFree(!showFree)}>{showFree ? 'Hide the free picks' : 'Fill from the deck’s numbers · free'}</button>
@@ -353,12 +356,12 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         {(run.short > 0 || run.dropped > 0) && <p className="text-[13px] text-amber-300">{run.short > 0 ? `${plural(run.short, 'pick')} short of what you asked for: Claude found no more it would put in. ` : ''}{run.dropped > 0 ? `${plural(run.dropped, 'name')} Claude gave ${run.dropped === 1 ? 'wasn’t' : 'weren’t'} among your cards on offer and ${run.dropped === 1 ? 'was' : 'were'} left out.` : ''}</p>}
         <label htmlFor="finish-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say what to change <span className="text-[13px] font-normal text-[var(--muted)]">optional{run.round > 1 ? ' · the earlier rounds are part of the conversation' : ''}</span></label>
         <textarea id="finish-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend && !busy && !running) { e.preventDefault(); void act({ action: 'find', rerun: true, message }); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend && !busy && !running && !updating) { e.preventDefault(); void act({ action: 'find', rerun: true, message }); } }}
           placeholder="For example: fewer counterspells, more one-mana cantrips. Or mark cards Rethink or Skip below and say why on their line."
           className={`${C.input} w-full resize-y py-2.5`} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">Add takes the card. Skip leaves it out for good. Rethink asks Claude again with your reason. Hover or focus a name to read the card.</p>
-          <button className={C.aiBtn} disabled={busy || running || !canSend || view.noKey} onClick={() => act({ action: 'find', rerun: true, message })} title={canSend ? undefined : 'Mark a card Rethink or Skip, or type something, first'} data-finish-send>✦ Send · {cost}</button>
+          <button className={C.aiBtn} disabled={busy || running || !canSend || view.noKey || updating} onClick={() => act({ action: 'find', rerun: true, message })} title={updating ? UPDATING_TITLE : canSend ? undefined : 'Mark a card Rethink or Skip, or type something, first'} data-finish-send>✦ Send · {cost}</button>
         </div>
       </div>
 

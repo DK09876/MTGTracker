@@ -12,6 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ManaCost from './ManaCost';
@@ -67,6 +68,8 @@ const addLine = (box: string, line: string) => { const t = box.trim(); return !t
 const names = (xs: string[]) => xs.join('; ');
 
 export default function DeckTrim({ listId, version, sections, onChanged, onTab }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [view, setView] = useState<TrimView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -261,7 +264,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           </div>
           <div className="flex flex-wrap items-center gap-x-4">
             <button type="button" className={LINK} disabled={busy} onClick={() => act({ action: 'approach', draft: true })}>Draft from the deck’s numbers · free</button>
-            <button type="button" className={LINK} disabled={busy || approachRunning || view.noKey} onClick={() => act({ action: 'approach', claude: true, text: box })}>
+            <button type="button" className={LINK} disabled={busy || approachRunning || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'approach', claude: true, text: box })}>
               {approachRunning ? 'Claude is adding to it…' : `✦ Have Claude add to it · ${money(view.costs.approach)}`}
             </button>
             <Tip label="About the two links">The draft is worked out by the app from the deck’s numbers and replaces the box. Claude keeps what you wrote, word for word, and adds its own lines below.</Tip>
@@ -274,7 +277,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             </p>
             <span className="flex flex-wrap items-center gap-3">
               {session && <button type="button" className={LINK} disabled={busy || cutsRunning} onClick={() => act({ action: 'reset' })}>Start a new session</button>}
-              <button className={TRIM_GO} disabled={busy || cutsRunning || view.noKey || over <= 0} onClick={() => act({ action: 'find', rerun: session })} data-tour="trim-find">
+              <button className={TRIM_GO} disabled={busy || cutsRunning || view.noKey || updating || over <= 0} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find', rerun: session })} data-tour="trim-find">
                 {cutsRunning ? 'Claude is ranking…' : `✦ Find ${over} cuts${session ? ' again' : ''} · ${cost}`}
               </button>
             </span>
@@ -324,7 +327,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
               <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={view.run.notes} /></p>
             ) : null}
           <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
-            disabled={busy || cutsRunning || view.noKey} onSend={send} />
+            disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
 
           <div className={`${CARD} flex flex-col gap-1`}>
             {groups.map((g) => (

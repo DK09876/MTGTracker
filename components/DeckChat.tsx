@@ -11,6 +11,7 @@
  * while Claude thinks.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -54,6 +55,8 @@ const PROMPTS = ['Which theme do my cards support best?', 'What should I cut?', 
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 export default function DeckChat({ listId, cards, question = '', onChanged, onCard, commander = null, onGo, planConfirmed = true }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
@@ -88,7 +91,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const send = async (question = text) => {
-    if (!question.trim() || replying || sendingRef.current) return;
+    if (!question.trim() || replying || sendingRef.current || updating) return;
     sendingRef.current = true;
     setSending(true);
     setError(null);
@@ -284,7 +287,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
         {!replying && (
           <div className="flex flex-wrap gap-2">
             {PROMPTS.map((p) => (
-              <button key={p} onClick={() => send(p)} disabled={sending} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
+              <button key={p} onClick={() => send(p)} disabled={sending || updating} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
             ))}
           </div>
         )}
@@ -302,7 +305,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
           <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
-          <button type="submit" disabled={replying || sending || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
+          <button type="submit" disabled={replying || sending || updating || !text.trim()} title={updating ? UPDATING_TITLE : undefined} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
       </section>
     </div>

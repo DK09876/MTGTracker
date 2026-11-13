@@ -13,6 +13,7 @@
  * ways to win and key cards).
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import GameChangerLine from './GameChangerLine';
@@ -146,6 +147,8 @@ interface Props {
 }
 
 export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const { state: s, setState, load, error, setError } = usePlanState(listId, version);
   const [settings, setSettings] = useState<api.DeckPlanState | null>(() => api.peek<api.DeckPlanState>(api.paths.plan(listId)) ?? null);
   // Saves run one after another, and nothing is disabled while one is going: a click right after typing (the box saves as it loses focus) is never lost.
@@ -420,7 +423,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           <p className="text-sm text-[var(--muted)]">AI suggests what’s missing. It never changes what you set, and nothing is added until you accept it.</p>
           {!h && <div className="text-sm"><p>It would suggest:</p><ul className="ml-5 list-disc">{willSuggest.map((w) => <li key={w}>{w}</li>)}</ul></div>}
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={C.aiBtn} disabled={!s.hasKey || pending > 0 || running} onClick={() => act({ action: 'run' })}>
+            <button type="button" className={C.aiBtn} disabled={!s.hasKey || pending > 0 || running || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'run' })}>
               {running ? 'AI is reading the deck…' : `${h ? '✦ Get new AI suggestions' : '✦ Get AI suggestions'} · Claude Opus${cost}`}
             </button>
             {!s.hasKey && <span className="text-[13px] text-[var(--muted)]">Needs a Claude key on the server. Everything else on this page works without one.</span>}

@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 
 import { database } from './db';
 import { recordError, type Level } from './errors';
+import { UPDATING_MESSAGE, updatingSince } from './updating';
 
 export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter' | 'printings' | 'cutreview' | 'tuneideas' | 'planpass' | 'planhelp' | 'tagsai' | 'trim' | 'trimapproach' | 'finish';
 export type JobStatus = 'running' | 'done' | 'failed' | 'interrupted';
@@ -122,6 +123,13 @@ export function startJob(
     status: 'running', detail: '', done: null, total: null, result: null, error: null,
     startedAt: new Date().toISOString(), finishedAt: null,
   };
+  // A deploy is waiting for the running jobs to finish: nothing new starts. The job comes back failed with the
+  // reason, so every page shows it where it shows a job's error, and the work never runs.
+  if (updatingSince()) {
+    Object.assign(job, { status: 'failed', error: UPDATING_MESSAGE, finishedAt: job.startedAt });
+    save(job);
+    return job;
+  }
   running.add(job.id);
   save(job);
   const ctx: JobContext = {
@@ -151,4 +159,10 @@ export function startJob(
     }
   })();
   return job;
+}
+
+/** How many jobs are running in this process (the deploy script waits for none). Rows it lost track of are marked interrupted. */
+export function runningCount(): number {
+  const rows = db().all(`SELECT job FROM jobs WHERE status = 'running'`) as Array<{ job: string }>;
+  return rows.map((r) => revive(r.job)).filter((j) => j.status === 'running').length;
 }
