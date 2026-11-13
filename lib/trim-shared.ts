@@ -110,10 +110,35 @@ export interface TrimDone {
   session?: TrimTurn[];
 }
 
+/**
+ * How many to cut (handoff 8, Part F): a number of cuts ("cut 5") or a size
+ * to reach ("cut to 95"). None set means down to 100.
+ */
+export interface TrimTarget { kind: 'cut' | 'to'; n: number }
+
+export function cleanTarget(v: unknown): TrimTarget | null {
+  const t = v as Partial<TrimTarget> | null;
+  if (!t || (t.kind !== 'cut' && t.kind !== 'to') || !Number.isFinite(t.n)) return null;
+  const n = Math.round(Number(t.n));
+  return n >= 1 && n <= 500 ? { kind: t.kind, n } : null;
+}
+
+/** The cuts a target asks for on a deck of this size; never the whole deck. */
+export const cutsFor = (size: number, t: TrimTarget | null | undefined): number =>
+  Math.max(0, Math.min(Math.max(0, size - 1), !t ? size - 100 : t.kind === 'cut' ? t.n : size - t.n));
+
+/** The target in words, for the owner and for Claude: "cut 5, to 103", "cut to 95". */
+export function targetWords(size: number, t: TrimTarget | null | undefined): string {
+  const n = cutsFor(size, t);
+  return !t || (t.kind === 'to' && t.n === 100) ? `cut ${n} to reach 100` : t.kind === 'to' ? `cut ${n} to reach ${t.n}` : `cut ${n}, taking the deck to ${size - n}`;
+}
+
 export interface TrimView {
-  /** Cards in the deck, the commander included, and how many over 100. */
+  /** Cards in the deck, the commander included, and how many to cut (over 100 unless the owner asked for another number). */
   size: number;
   over: number;
+  /** The number the owner asked for, or null for down to 100. */
+  target: TrimTarget | null;
   /** The plan read later steps use: current, out of date, or none. */
   plan: { state: 'current' | 'stale' | 'none'; text: string | null; at: string | null; confirmed: boolean };
   approach: TrimApproach | null;

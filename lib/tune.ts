@@ -742,8 +742,8 @@ export interface TuneState {
   fix?: { symptom: Symptom; evidence: string[] };
   lands?: { have: number; range: [number, number]; want: number; how: { inputs: string[]; steps: string[] }; mine: boolean; colors: Array<{ color: string; name: string; share: number; sources: number; needed: number | null; neededFor: string | null }> };
   cuts?: { counts: Record<string, number>; type: { type: 'A' | 'B'; why: string }; curve: string | null; settings: unknown; overridden: Record<string, string> };
-  /** Finish the deck: where the picks come from, and whether Claude's are in. */
-  finish?: { picks: 'rules' | 'claude'; showRules: boolean; claudeReady: boolean; claudeEmpty: boolean };
+  /** Finish the deck: whether the free picks from the deck's numbers are shown (Claude's come from lib/finish.ts). */
+  finish?: { showRules: boolean };
 }
 
 export async function tuneState(list: List, profileId: string, opts: { intent?: Intent; symptom?: Symptom } = {}): Promise<TuneState> {
@@ -767,12 +767,10 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
   let groups: SuggestionGroup[] = [];
   const out: Partial<TuneState> = {};
   if (intent === 'finish') {
-    // Rules by default; Claude's picks when chosen for this deck, with the rules' beside them if asked.
-    const picks = ctx.store.finishPicks ?? 'rules';
-    const claude = ctx.store.proposals.finish ?? [];
-    const showRules = picks === 'rules' || !!ctx.store.finishShowRules;
-    groups = picks === 'claude' ? [...claude, ...(showRules ? finishGroups(ctx) : [])] : finishGroups(ctx);
-    out.finish = { picks, showRules: !!ctx.store.finishShowRules, claudeReady: claude.length > 0, claudeEmpty: !claude.length && !!ctx.store.finishEmpty };
+    // Claude's picks are a conversation of their own (lib/finish.ts); the free picks from the deck's numbers show when asked.
+    const showRules = !!ctx.store.finishShowRules;
+    groups = showRules ? finishGroups(ctx) : [];
+    out.finish = { showRules };
   }
   else if (intent === 'find') { const f = await findGroups(ctx); groups = f.groups; out.pile = f.pile; }
   else if (intent === 'swaps') groups = poolSwaps(ctx, 'swaps', 12);

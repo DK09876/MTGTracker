@@ -42,7 +42,7 @@ export interface PlanState {
   commanderNames: string;
   commander: { roles: CommanderRole[]; by: Who };
   bracket: { value: number | null; by: Who };
-  goal: { chips: string[]; text: string };
+  goal: { chips: string[]; text: string; combos: 'first' | 'none' | null };
   goals: string[];
   /** The commander(s), always protected, then the cards the owner marked. */
   neverCut: { commanders: string[]; cards: Array<{ key: string; name: string }> };
@@ -88,7 +88,7 @@ export interface PlanState {
 export type PlanAction =
   | { action: 'commander'; roles: string[] }
   | { action: 'acceptCommander' } | { action: 'skip'; what: string; on?: boolean }
-  | { action: 'goal'; chips: string[]; text: string }
+  | { action: 'goal'; chips?: string[]; text?: string; combos?: 'first' | 'none' | null }
   | { action: 'bracket'; value: number | null }
   | { action: 'acceptBracket' }
   | { action: 'neverCut'; add?: string; remove?: string }

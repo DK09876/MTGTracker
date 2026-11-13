@@ -326,6 +326,15 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             <button type="button" aria-pressed={otherOpen} onClick={() => { if (otherOpen) { setOtherOpen(false); setGoalText(''); if (s.goal.text) void act({ action: 'goal', chips: s.goal.chips, text: '' }); } else setOtherOpen(true); }} className={`${C.pill} ${otherOpen ? C.on : C.off}`}>Other</button>
           </div>
           {otherOpen && <input aria-label="What you want from this deck, in your own words" value={goalText} placeholder="In your own words" onFocus={() => { setTyping(true); }} onChange={(e) => setGoalText(e.target.value)} onBlur={saveGoalText} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} className={`${C.input} w-full`} />}
+          <div className="flex flex-wrap items-center gap-2 pt-1" data-plan-combos>
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold">Combos
+              <Tip label="About combos">Finish the deck reads this. Build around them: the app finds the combos you own every piece of and asks Claude to build them in first. None: it asks Claude to leave a piece of each out, and flags any combo that ends up complete. Not said: nothing about combos is sent.</Tip></span>
+            <div role="radiogroup" aria-label="Combos" className="flex flex-wrap gap-2">
+              {([[null, 'Not said'], ['first', 'Build around them'], ['none', 'None']] as const).map(([v, label]) => (
+                <button key={label} type="button" role="radio" aria-checked={s.goal.combos === v} onClick={() => act({ action: 'goal', combos: v })} className={`${C.pill} ${s.goal.combos === v ? C.on : C.off}`}>{label}</button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className={`${C.box} flex flex-col gap-2`} id="p-bracket">
           <h3 className="flex flex-wrap items-baseline gap-2 text-[15px] font-bold">Bracket you’re aiming for

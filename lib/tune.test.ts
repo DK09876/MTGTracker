@@ -164,56 +164,6 @@ describe('Claude\'s ideas', () => {
   });
 });
 
-describe('Claude finishing the deck', { timeout: 30_000 }, () => {
-  const pool = [
-    card('Rakdos Charm', { color_identity: ['B', 'R'] }),
-    card('Swords to Plowshares', { color_identity: ['W'] }),
-    card('Dockside Extortionist', { color_identity: ['R'], legalities: { commander: 'banned' } }),
-    card('Mountain', { type_line: 'Basic Land — Mountain', cmc: 0, color_identity: [], produced_mana: ['R'] }),
-    card('Spell 3'),
-  ];
-  const answer = { groups: [
-    { group: 'lands', cards: [{ name: 'Mountain', count: 5, why: 'Red sources.' }] },
-    { group: 'interaction', cards: [{ name: 'Rakdos Charm', why: 'Instant and flexible.' }, { name: 'Swords to Plowshares', why: 'Off colour.' }, { name: 'Dockside Extortionist', why: 'Banned.' }, { name: 'Spell 3', why: 'Already in the deck.' }] },
-    { group: 'nonsense', cards: [{ name: 'Rakdos Charm', why: 'x' }] },
-  ] };
-
-  it('keeps picks to what the rules allow, in the same groups, never past the room', async () => {
-    const { parseFinish } = await import('./tune-claude');
-    const ok = new Map([['mountain', pool[3]], ['rakdos charm', pool[0]]]);
-    const item = (key: string, c: ScryfallCard, why: string, count: number): Suggestion => ({ key, add: { id: c.id, name: c.name, cmc: 0, manaCost: '', typeLine: '', image: null, quantity: count }, why });
-    const groups = parseFinish(answer, 4, () => ok, item, 'Sonnet');
-    expect(groups.map((g) => g.title)).toEqual(['✦ Lands · 4']);
-    expect(groups[0].items[0].add?.quantity).toBe(4);
-    const roomy = parseFinish(answer, 20, () => ok, item, 'Sonnet');
-    expect(roomy.map((g) => [g.title, g.items.map((i) => i.add?.name)])).toEqual([['✦ Lands · 5', ['Mountain']], ['✦ Interaction · 1', ['Rakdos Charm']]]);
-    expect(roomy[1].items[0].why).toBe('Instant and flexible.');
-  });
-
-  it('remembers the choice per deck, and shows the rules’ picks beside Claude’s only when asked', async () => {
-    vi.doMock('./card-store', async (orig) => ({ ...(await orig<typeof import('./card-store')>()), localCards: (names: string[]) => pool.filter((c) => names.includes(c.name)), allLocalCards: () => pool }));
-    const { list } = await deck(40);
-    const { finishPicks } = await import('./tune-claude');
-    const tune = await import('./tune');
-    const store = await import('./tune-store');
-    // A fake model: no network, no spend.
-    const model = vi.fn(async () => ({ data: answer, model: 'fake' }));
-    const groups = await finishPicks(model as never, list, 'dk', '');
-    expect(model).toHaveBeenCalledTimes(1);
-    expect(groups.flatMap((g) => g.items.map((i) => i.add?.name))).toEqual(['Mountain', 'Rakdos Charm']);
-    expect(store.tuneStore(list.id).finishPicks).toBe('claude');
-    const s = await tune.tuneState(list, 'dk', { intent: 'finish' });
-    expect(s.finish).toEqual({ picks: 'claude', showRules: false, claudeReady: true, claudeEmpty: false });
-    expect(s.groups.every((g) => g.source === 'claude')).toBe(true);
-    store.updateTune(list.id, (x) => { x.finishShowRules = true; });
-    expect((await tune.tuneState(list, 'dk', { intent: 'finish' })).finish?.showRules).toBe(true);
-    store.updateTune(list.id, (x) => { x.finishPicks = 'rules'; });
-    const rules = await tune.tuneState(list, 'dk', { intent: 'finish' });
-    expect(rules.groups.some((g) => g.source === 'claude')).toBe(false);
-    vi.doUnmock('./card-store');
-  });
-});
-
 describe('fixing a problem', () => {
   it('maps each problem to the job it needs and the cards it must not cut', async () => {
     const { FIX_PLAN } = await import('./tune');

@@ -13,7 +13,7 @@ import { deckIdentity } from './commanders';
 import { cardsInList, type List } from './db';
 import { planContext } from './plan-context';
 import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
-import { addItem, addable, gcRoomOf, ref, tuneContext } from './tune';
+import { ref } from './tune';
 import type { Intent, Suggestion, SuggestionGroup } from './tune-shared';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { tuneStore, updateTune } from './tune-store';
@@ -136,110 +136,4 @@ export async function tuneIdeas(model: JsonModel, list: List, input: { intent: I
   };
   updateTune(list.id, (s) => { s.proposals[input.intent] = [group]; });
   return group;
-}
-
-// --- Finish the deck: Claude's picks ----------------------------------------------
-
-/** The groups Claude's picks arrive in, the same as the rules' ones. */
-export const FINISH_GROUPS = ['lands', 'ramp', 'draw', 'interaction', 'theme', 'wins', 'protection'] as const;
-type FinishGroup = (typeof FINISH_GROUPS)[number];
-const FINISH_TITLE: Record<FinishGroup, string> = { lands: 'Lands', ramp: 'Ramp', draw: 'Card draw', interaction: 'Interaction', theme: 'Theme', wins: 'Ways to win', protection: 'Protection' };
-
-export const FINISH_SYSTEM = `You help a Magic: The Gathering player finish their Commander deck to exactly 100 cards, the commander included.
-You get the deck's plan (each part with who set it), the numbers the app counted, the cards already in the deck, and the room left.
-Pick the cards to add, sorted into groups: lands, ramp, draw (real card draw, not cantrips), interaction (removal, counterspells, board wipes), theme (name the theme), wins (ways to end the game), protection.
-Fill the room exactly: the counts of all your cards, basics included, add up to the room left. Basic lands may have a count above 1.
-Keep to the plan's bracket, budget, "only cards I own" and deck rule. Use exact card names, legal in Commander and in the deck's colours, not already in the deck.
-Give every card one short sentence why, as a player would say it. The default ways to judge a deck are given; you may go against one when it makes sense for this deck.`;
-
-export const FINISH_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    groups: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: {
-          group: { type: 'STRING', enum: [...FINISH_GROUPS] },
-          theme: { type: 'STRING' },
-          cards: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, count: { type: 'INTEGER' }, why: { type: 'STRING' } }, required: ['name', 'why'] } },
-        },
-        required: ['group', 'cards'],
-      },
-    },
-  },
-  required: ['groups'],
-};
-
-export function finishMessage(input: { plan: string; commander: ScryfallCard | null; main: ScryfallCard[]; room: number; instructions: string }): string {
-  return [
-    input.commander ? `Commander: ${input.commander.name} ${manaCostOf(input.commander)} - ${typeLineOf(input.commander)}: ${oracleTextOf(input.commander).replace(/\n+/g, ' | ')}` : 'No commander set.',
-    '',
-    input.plan,
-    '',
-    input.main.length ? `Already in the deck (${input.main.length}): ${input.main.map((c) => c.name).join('; ')}` : 'Nothing else is in the deck yet.',
-    '',
-    `Room left: ${input.room} cards. Pick exactly that many, in groups.`,
-    ...(input.instructions.trim() ? ['', `The owner's instructions - follow them where they apply:\n"""\n${input.instructions.trim()}\n"""`] : []),
-  ].join('\n');
-}
-
-/**
- * Claude's picks as Tune's suggestion groups, kept to what the rules allow:
- * real cards, in the colours, legal, not in the deck, within the bracket,
- * budget, "only mine" and the deck rule; basics by count. Never more than
- * the room left.
- */
-export function parseFinish(data: unknown, room: number, allowed: (names: string[]) => Map<string, ScryfallCard>, item: (key: string, card: ScryfallCard, why: string, count: number) => Suggestion, model: string): SuggestionGroup[] {
-  const raw = ((data as { groups?: unknown[] })?.groups ?? []) as Array<{ group?: string; theme?: string; cards?: Array<{ name?: string; count?: number; why?: string }> }>;
-  const names = raw.flatMap((g) => (g.cards ?? []).map((c) => String(c.name ?? '').trim())).filter(Boolean);
-  const ok = allowed(names);
-  const seen = new Set<string>();
-  const round = new Date().toISOString();
-  let left = room;
-  const groups: SuggestionGroup[] = [];
-  for (const g of raw) {
-    const kind = (FINISH_GROUPS as readonly string[]).includes(String(g.group)) ? g.group as FinishGroup : null;
-    if (!kind) continue;
-    const items: Suggestion[] = [];
-    for (const c of g.cards ?? []) {
-      const card = ok.get(String(c.name ?? '').trim().toLowerCase());
-      if (!card || seen.has(card.name) || left <= 0) continue;
-      const basic = /\bBasic\b/.test(card.type_line ?? '');
-      const count = Math.max(1, Math.min(basic ? left : 1, Math.round(Number(c.count) || 1)));
-      seen.add(card.name);
-      left -= count;
-      items.push(item(`claude:finish:${kind}:${card.name}`, card, String(c.why ?? '').slice(0, 300) || 'Claude’s pick', count));
-    }
-    if (!items.length) continue;
-    const n = items.reduce((m, i) => m + (i.add?.quantity ?? 1), 0);
-    const title = kind === 'theme' && g.theme ? `Theme: ${String(g.theme).slice(0, 40)}` : FINISH_TITLE[kind];
-    groups.push({ key: `claude:finish:${kind}${kind === 'theme' ? `:${String(g.theme ?? '').toLowerCase().slice(0, 40)}` : ''}`, title: `✦ ${title} · ${n}`, why: `Claude’s picks${model ? ` (${model})` : ''}, read against your plan. Each card says why.`, source: 'claude', items, model: model ?? null, promptVersion: PROMPT_VERSIONS.finishPicks, round });
-  }
-  return groups;
-}
-
-/** Ask Claude to pick the cards that finish the deck; its groups replace the last ones and wait in Tune. */
-export async function finishPicks(model: JsonModel, list: List, profileId: string, instructions: string): Promise<SuggestionGroup[]> {
-  const ctx = await tuneContext(list, profileId);
-  const room = Math.max(0, 100 - ctx.size - ctx.store.changes.add.reduce((n, a) => n + a.quantity, 0) + ctx.store.changes.cut.reduce((n, c) => n + c.quantity, 0));
-  const answer = await model({
-    step: 'finish the deck',
-    system: FINISH_SYSTEM,
-    user: finishMessage({ plan: await planContext(list).catch(() => ''), commander: list.commander, main: ctx.main.map((c) => c.card), room, instructions }),
-    schema: FINISH_SCHEMA,
-    thinking: 'medium',
-    timeoutMs: 6 * 60_000,
-  }, { maxBusy: 1 });
-  const allowed = (names: string[]) => {
-    const found = localCards(names);
-    const basics = found.filter((c) => /\bBasic\b/.test(c.type_line ?? '') && (c.color_identity ?? []).every((x) => ctx.identity.has(x)));
-    const rest = addable(ctx, found.filter((c) => !basics.includes(c)), gcRoomOf(ctx));
-    const out = new Map<string, ScryfallCard>();
-    for (const c of [...basics, ...rest]) { out.set(c.name.toLowerCase(), c); out.set(c.name.split(' // ')[0].toLowerCase(), c); }
-    return out;
-  };
-  const groups = parseFinish(answer.data, room, allowed, (key, card, why, count) => addItem(ctx, key, card, why, count), answer.model ?? '');
-  updateTune(list.id, (s) => { s.proposals.finish = groups; s.finishPicks = 'claude'; s.finishEmpty = groups.length === 0; });
-  return groups;
 }

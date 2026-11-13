@@ -52,6 +52,8 @@ export function planText(plan: Plan, roles: RoleCount[] | null, read = false): s
   const lines: string[] = [read ? "The owner's settings for the deck (who set each part in brackets):" : "The deck's plan, as the app holds it (who set each part in brackets):"];
   const goal = plan.goal;
   lines.push(`- What the owner wants from the deck: ${goal.chips.join(', ') || (goal.text ? '' : 'nothing in particular said')}${goal.text ? `${goal.chips.length ? '. ' : ''}In their words: "${goal.text}"` : ''} [${by(s.goal?.by, 'not set')}]`);
+  // Said only when the owner chose it on the Plan tab; nothing about combos otherwise.
+  if (goal.combos) lines.push(`- Combos: ${goal.combos === 'first' ? 'build around them. The owner wants this deck to win with combos' : 'none. The owner never wants every piece of an infinite combo in this deck'} [the owner's own words]`);
   lines.push(`- Bracket aimed for: ${plan.bracket ?? `not set${snap.bracketLooks ? `; the list looks like ${snap.bracketLooks}` : ''}`}`);
   lines.push(`- Budget per card: ${plan.budget ? `$${plan.budget}, cards they own always allowed` : 'any'}. Only cards they own: ${plan.own ? 'yes' : 'no'}.`);
   if (plan.rule.text || plan.rule.filter) lines.push(`- Deck rule: ${plan.rule.text}${plan.rule.filter ? ` (cards must match: ${plan.rule.filter})` : ''} [${by(s.rule?.by)}]`);

@@ -29,7 +29,7 @@ import {
 } from './categories';
 import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
-import { changePlan, GOALS, noteBy, planFor } from './deck-plan';
+import { changePlan, GOALS, isCombosChoice, noteBy, planFor } from './deck-plan';
 import { jobCards, keeps, setKeep } from './deck-roles';
 import { latestJob } from './jobs';
 import { planFacts } from './plan-facts';
@@ -168,7 +168,7 @@ Answer with one JSON object, nothing else:
 /** What the owner has set, as the helper reads it: a field on Not sure says so. */
 export interface HelpInput {
   commanderRoles: CommanderRole[];
-  goal: { chips: string[]; text: string };
+  goal: { chips: string[]; text: string; combos?: 'first' | 'none' };
   bracket: number | null;
   budget: number | null;
   own: boolean;
@@ -187,7 +187,7 @@ export function ownerText(i: HelpInput): string {
   const L = [
     '## What the owner set on the Plan page',
     `- What the commander does for the deck: ${roles.length ? roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)!.label).join(', ') : 'not sure yet (work it out)'}`,
-    `- What they want from the deck: ${goal.length ? goal.join(', ') : 'nothing said'}`,
+    `- What they want from the deck: ${goal.length ? goal.join(', ') : 'nothing said'}${i.goal.combos ? `. Combos: ${i.goal.combos === 'first' ? 'build around them' : 'none'}` : ''}`,
     `- Bracket aimed for: ${i.bracket ?? 'not sure yet (work it out)'}`,
     `- Budget per card: ${i.budget ? `$${i.budget}` : 'any'}. Only cards they own: ${i.own ? 'yes' : 'no'}.${i.rule ? ` Deck rule: ${i.rule}` : ''}`,
     `- Never cut: ${i.neverCut.join(', ') || 'nothing marked'}`,
@@ -277,7 +277,7 @@ async function gather(list: List): Promise<{ input: HelpInput; md: string }> {
   return {
     md,
     input: {
-      commanderRoles: o.commanderRoles, goal: { chips: plan.goal.chips, text: plan.goal.text }, bracket: plan.bracket, budget: plan.budget, own: plan.own, rule: plan.rule.text,
+      commanderRoles: o.commanderRoles, goal: { chips: plan.goal.chips, text: plan.goal.text, ...(plan.goal.combos ? { combos: plan.goal.combos } : {}) }, bracket: plan.bracket, budget: plan.budget, own: plan.own, rule: plan.rule.text,
       neverCut: [...commanders.map((n) => `${n} (the commander)`), ...main.filter((c) => kept.has(tagKey(c.card))).map((c) => c.card.name)],
       plan: o.planText.trim(),
       wins: cats.filter((c) => c.kind === 'win').map((w) => ({ name: w.name, cards: w.cards.map((x) => x.name) })),
@@ -387,7 +387,7 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
     commanderNames: commanders.join(' and ') || 'The commander',
     commander: { roles: o.commanderRoles, by: o.commanderBy },
     bracket: { value: plan.bracket, by: plan.stored.bracket?.by === 'claude' ? 'ai' : 'owner' },
-    goal: { chips: plan.goal.chips, text: plan.goal.text },
+    goal: { chips: plan.goal.chips, text: plan.goal.text, combos: plan.goal.combos ?? null },
     goals: [...GOALS],
     neverCut: { commanders, cards: main.filter((c) => kept.has(tagKey(c.card)) && !commanders.includes(c.card.name)).map((c) => ({ key: tagKey(c.card), name: c.card.name })) },
     notes: plan.notes.filter((n) => noteBy(n) === 'owner').map((n) => ({ id: n.id, text: n.text })),
@@ -482,9 +482,15 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
       else quietly(() => clearOutcome(id, [k]));
       return;
     }
-    case 'goal':
-      changePlan(id, { goal: { chips: (Array.isArray(a.chips) ? a.chips : []).filter((c) => (GOALS as readonly string[]).includes(c)), text: String(a.text ?? '').slice(0, 300) } });
+    case 'goal': {
+      // The combos choice rides with the goal: a chip or text change leaves it as it was; combos: null clears it.
+      const was = plan.goal;
+      const combos = a.combos === null ? undefined : isCombosChoice(a.combos) ? a.combos : was.combos;
+      const chips = Array.isArray(a.chips) ? a.chips.filter((c) => (GOALS as readonly string[]).includes(c)) : was.chips;
+      const text = a.text === undefined ? was.text : String(a.text ?? '').slice(0, 300);
+      changePlan(id, { goal: { chips, text, ...(combos ? { combos } : {}) } });
       return;
+    }
     case 'bracket':
       changePlan(id, { bracket: a.value === null ? null : [1, 2, 3, 4, 5].includes(Number(a.value)) ? Number(a.value) : null });
       return;
