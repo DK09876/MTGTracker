@@ -1,11 +1,14 @@
 /**
  * One chat. GET: the chat, and whether Claude is still replying.
- * PATCH {message, change}: mark a proposed change as applied.
+ * PATCH {message, change, do?}: one proposal. do 'apply' makes it happen
+ * (lib/chat-actions.ts), 'undo' takes it back; with no do, it is marked as
+ * sent to Tune.
  * DELETE: forget the chat.
  */
 
 import { NextResponse } from 'next/server';
 
+import { applyChange, ChatActionRefused, undoChange, type Undo } from '@/lib/chat-actions';
 import { deleteChat, getChat, saveChat } from '@/lib/deck-chat';
 import { latestJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
@@ -36,10 +39,22 @@ export async function PATCH(request: Request, { params }: Ctx) {
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
   const chat = getChat(id, chatId);
-  const body = await request.json().catch(() => ({})) as { message?: number; change?: number };
+  const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo' };
   const change = chat?.messages[body.message ?? -1]?.changes?.[body.change ?? -1];
   if (!chat || !change) return NextResponse.json({ error: 'No such change' }, { status: 404 });
-  change.done = true;
+  try {
+    if (body.do === 'apply') {
+      if (change.applied) return NextResponse.json({ error: 'That is already applied' }, { status: 409 });
+      change.applied = { at: new Date().toISOString(), undo: await applyChange(owned.list, owned.profile, change) };
+    } else if (body.do === 'undo') {
+      if (!change.applied) return NextResponse.json({ error: 'That isn’t applied' }, { status: 409 });
+      await undoChange(owned.list, owned.profile, change.applied.undo as Undo);
+      change.applied = null;
+    } else change.done = true;
+  } catch (e) {
+    if (e instanceof ChatActionRefused) return NextResponse.json({ error: e.message }, { status: 400 });
+    throw e;
+  }
   saveChat(chat);
   return NextResponse.json({ chat });
 }

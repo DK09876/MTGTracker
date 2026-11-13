@@ -626,6 +626,9 @@ export const askDeck = (listId: string, text: string, chatId?: string) =>
   send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
 export const markChange = (listId: string, chatId: string, message: number, change: number) =>
   send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
+/** Apply one of Claude's proposals in a chat, or take it back. The deck's remembered answers are dropped, since it changed. */
+export const chatChange = (listId: string, chatId: string, message: number, change: number, act: 'apply' | 'undo') =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change, do: act }).then(json<{ chat: DeckChat }>).finally(() => forgetDeck(listId));
 export const forgetChat = (listId: string, chatId: string) =>
   fetch(url(`lists/${listId}/chats/${chatId}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 

@@ -674,6 +674,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           question={chatQuestion}
           listId={id}
           cards={cards}
+          commander={list.commander}
+          onCard={setSelected}
+          onChanged={load}
         />
       ) : deck && section === 'check' ? (
         <>

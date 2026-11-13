@@ -3,7 +3,9 @@
  * question and the reply runs as a background job. Server only.
  */
 
-import { deckRoles } from './deck-roles';
+import { categories } from './categories';
+import { deckRoles, jobCards } from './deck-roles';
+import { sectionsOf } from './sections';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
@@ -35,15 +37,12 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     // Both commanders' colours, when the deck has two.
     const identity = [...deckIdentity([list.commander, main.find((c) => c.slot === 'partner')?.card])].join('') || 'c';
     const tags = deckTags(list.id);
-    const names = new Map(tags.tags.filter((t) => t.status === 'accepted').map((t) => [t.id, t.name]));
-    const byKey = new Map(main.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));
+    // Each card's groups, as the Tags tab has them (jobs, card-data tags, ways to win, key cards, the owner's groups).
     const tagsOf = new Map<string, string[]>();
-    for (const ct of tags.cardTags) {
-      const name = byKey.get(ct.key);
-      if (ct.on && name && names.has(ct.tagId)) tagsOf.set(name, [...(tagsOf.get(name) ?? []), names.get(ct.tagId)!]);
-    }
+    for (const c of await categories(list, jobCards).catch(() => [])) for (const x of c.cards) tagsOf.set(x.name, [...(tagsOf.get(x.name) ?? []), c.name]);
     const planText = await planContext(list).catch(() => '');
-    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf }, {
+    const sections = sectionsOf(list.id).map((x) => ({ id: x.id, name: x.name, purpose: x.purpose }));
+    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
