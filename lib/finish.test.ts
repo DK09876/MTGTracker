@@ -318,7 +318,7 @@ describe('the lands on a fill to 100', { timeout: 60_000 }, () => {
     expect(before.duals).toEqual([{ name: 'Sulfur Falls', on: true, why: 'Both colours.' }]);
     expect(before.total).toBe(25);
     // The dual out and 10 Islands typed (this test's card data has no other basic): the typed number stands.
-    finish.setLands(list.id, { skip: ['Sulfur Falls'], basics: { Island: 10 } });
+    await finish.setLands(list, 'dk', { skip: ['Sulfur Falls'], basics: { Island: 10 } });
     const after = (await finish.finishView(list, 'dk')).run!.lands!;
     expect(after.total).toBe(10);
     expect(after.basics.find((b) => b.name === 'Island')).toMatchObject({ n: 10 });
@@ -380,7 +380,7 @@ describe('Claude picks the lands worth playing; the app counts (Part E)', { time
     // A colourless land takes a basic's place: blue has 24 sources of the 25 its share wanted, and the box says so.
     expect(v.short).toEqual([{ colour: 'U', have: 24, want: 25 }]);
     // Unticking a land gives its slot back to a basic.
-    finish.setLands(list.id, { skip: ['Reliquary Tower'] });
+    await finish.setLands(list, 'dk', { skip: ['Reliquary Tower'] });
     const after = (await finish.finishView(list, 'dk')).run!.lands!;
     expect(after.total).toBe(25);
     expect(after.basics.find((b) => b.name === 'Island')!.n).toBe(24);
@@ -437,12 +437,63 @@ describe('Finish review fixes (PR 55, items 11-19)', { timeout: 60_000 }, () => 
     finish.setFinish(list.id, { lands: 30 });
     await fill(list, finish, [{ name: 'Sulfur Falls', why: 'Both colours.' }]);
     const v0 = (await finish.finishView(list, 'dk')).run!.lands!;
-    finish.setLands(list.id, { basics: Object.fromEntries(v0.basics.map((b) => [b.name, b.n])), room: v0.basics.reduce((k, b) => k + b.n, 0) });
+    await finish.setLands(list, 'dk', { basics: Object.fromEntries(v0.basics.map((b) => [b.name, b.n])) });
     expect((await finish.finishView(list, 'dk')).run!.lands!.total).toBe(v0.total);
-    finish.setLands(list.id, { skip: ['Sulfur Falls'] });
+    await finish.setLands(list, 'dk', { skip: ['Sulfur Falls'] });
     const v1 = (await finish.finishView(list, 'dk')).run!.lands!;
     expect(v1.total).toBe(v0.total);
     expect(v1.basics.reduce((k, b) => k + b.n, 0)).toBe(v0.basics.reduce((k, b) => k + b.n, 0) + 1);
+  });
+
+  it('round 2, 1: retyping a basic gives the typed number; the room is worked out on the server', async () => {
+    const { list } = await setup([...owned, dual]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    await fill(list, finish, [{ name: 'Sulfur Falls', why: 'Both colours.' }]);
+    const islands = async () => (await finish.finishView(list, 'dk')).run!.lands!.basics.find((b) => b.name === 'Island')!.n;
+    await finish.setLands(list, 'dk', { basics: { Island: 20 } });
+    expect(await islands()).toBe(20);
+    await finish.setLands(list, 'dk', { basics: { Island: 21 } });
+    expect(await islands()).toBe(21);
+    await finish.setLands(list, 'dk', { basics: { Island: 21 } });
+    expect(await islands()).toBe(21);
+  });
+
+  it('round 2, 3: with every basic typed and no room, a "+" land is refused with the reason', async () => {
+    const lagoon = card('Lonely Lagoon', { type_line: 'Land', mana_cost: '', color_identity: ['U'], produced_mana: ['U'] });
+    const { list } = await setup([...owned, dual, lagoon]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    await fill(list, finish, [{ name: 'Sulfur Falls', why: 'Both colours.' }]);
+    const v = (await finish.finishView(list, 'dk')).run!.lands!;
+    await finish.setLands(list, 'dk', { basics: Object.fromEntries(v.basics.map((b) => [b.name, b.n])) });
+    await expect(finish.setLands(list, 'dk', { add: 'Lonely Lagoon' })).rejects.toThrow(/lower a basic first/);
+  });
+
+  it('round 2, 2: a new land set keeps the owner\'s unticked lands out and "+" lands in, and says the lands changed', async () => {
+    const lagoon = card('Lonely Lagoon', { type_line: 'Land', mana_cost: '', color_identity: ['U'], produced_mana: ['U'] });
+    const fen = card('Blighted Fen', { type_line: 'Land', mana_cost: '', color_identity: ['B'], produced_mana: ['C'] });
+    const estuary = card('Choked Estuary', { type_line: 'Land', mana_cost: '', color_identity: ['U', 'B'], produced_mana: ['U', 'B'] });
+    const { list } = await setup([...owned, dual, lagoon, fen, estuary]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    await fill(list, finish, [{ name: 'Sulfur Falls', why: 'Both colours.' }, { name: 'Lonely Lagoon', why: 'Blue.' }]);
+    await finish.setLands(list, 'dk', { skip: ['Sulfur Falls'] });
+    await finish.setLands(list, 'dk', { add: 'Blighted Fen' });
+    finish.setChoices(list.id, { 'Owned 1': { choice: 'skip', text: '' } });
+    // Claude answers with another set, the land the owner unticked among it: that one stays out.
+    await finish.runFinish(stand([{ search: ['t:land'] }, { picks: { ...pick(['Owned 3']), lands: [{ name: 'Choked Estuary', why: 'Both.' }, { name: 'Sulfur Falls', why: 'Again.' }] } }]).call as never, 'claude-opus-5-5', list, 'dk', { rerun: true, message: 'other lands' });
+    const s = finish.finishStore(list.id);
+    expect(s.landPicks.skip).toEqual(['Sulfur Falls']);
+    expect(s.landPicks.added).toEqual(['Blighted Fen']);
+    expect(s.run!.landPicks!.map((l) => l.name)).toEqual(['Choked Estuary']);
+    expect(s.run!.changes!.lands).toEqual({ in: ['Choked Estuary'], out: ['Lonely Lagoon'] });
+    const v = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(v.duals.find((d) => d.name === 'Blighted Fen')?.on).toBe(true);
+    // The same lands in another order are no change.
+    finish.setChoices(list.id, { 'Owned 2': { choice: 'skip', text: '' } });
+    await finish.runFinish(stand([{ search: ['t:land'] }, { picks: { ...pick(['Owned 5']), lands: [{ name: 'Choked Estuary', why: 'Both.' }] } }]).call as never, 'claude-opus-5-5', list, 'dk', { rerun: true, message: 'same lands' });
+    expect(finish.finishStore(list.id).run!.changes!.lands).toBeUndefined();
   });
 
   it('12: a run stored before Claude chose lands asks for them on its next round', async () => {
@@ -492,13 +543,25 @@ describe('Finish review fixes (PR 55, items 11-19)', { timeout: 60_000 }, () => 
     expect(finish.finishStore(list.id).skippedBefore.map((x) => x.name)).toEqual(['Owned 4']);
   });
 
-  it('15: the measured price counts only calls that answered', async () => {
-    const { measuredRounds } = await import('./finish-shared');
-    const c = (at: string, step: string, cost: number) => ({ at, profileId: 'dk', label: 'A', step, cost });
-    const ok = [c('1', 'finish: first list', 0.3), c('2', 'finish: first list', 0.3), c('3', 'finish: first list', 0.3)];
-    expect(measuredRounds(ok)).toEqual({ first: 0.3, later: null });
-    const lib = await import('./finish');
-    expect(typeof lib.finishView).toBe('function');
+  it('15: the price counts a round only when it ended with picks, priced by its own answered calls', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    const db = await import('./db');
+    const paid = (st: ReturnType<typeof stand>, cost: number, outcome = 'ok') => async (p: never, step: string) => {
+      db.recordAiCall({ profileId: 'dk', feature: 'finish', label: list.name, step, model: 'claude-opus-5-5', answeredBy: '', inputTokens: 1, outputTokens: 1, cost, outcome, detail: '' });
+      return st.call(p);
+    };
+    finish.setFinish(list.id, { want: 1 });
+    // A round that fails (no picks) is not a round, whatever its calls cost.
+    await expect(finish.runFinish(paid(stand([{ search: ['draw'] }, { picks: pick(['Not On Offer']) }]), 0.2) as never, 'claude-opus-5-5', list, 'dk')).rejects.toThrow();
+    for (let i = 0; i < 3; i++) {
+      finish.resetFinish(list.id);
+      await finish.runFinish(paid(stand([{ search: ['draw'] }, { picks: pick([`Owned ${2 * i + 2}`]) }]), 0.1) as never, 'claude-opus-5-5', list, 'dk');
+    }
+    // Each finished first list: two answered calls of 0.1. Blocked or failed calls cost 0 and change nothing.
+    const cost = (await finish.finishView(list, 'dk')).cost.first;
+    expect(cost.measured).toBe(true);
+    expect(cost.usd).toBeCloseTo(0.2);
   });
 
   it('18: a kept card Claude takes out and picks again comes back, and is listed as back', async () => {
@@ -523,7 +586,7 @@ describe('Finish review fixes (PR 55, items 11-19)', { timeout: 60_000 }, () => 
     await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
     expect(JSON.stringify(asked[1].messages.at(-1))).toContain('That search wasn');
     expect(finish.finishStore(list.id).searches.map((x) => x.q)).toEqual(['draw']);
-    expect(() => finish.setLands(list.id, { add: 'Owned 6' })).toThrow(/land search/);
+    await expect(finish.setLands(list, 'dk', { add: 'Owned 6' })).rejects.toThrow(/land search/);
   });
 });
 
@@ -628,21 +691,15 @@ describe('held review fixes (handoff 9, Part D)', { timeout: 60_000 }, () => {
   });
 
   it('Finish’s price: a guess that grows with the cards asked for, then the average of real rounds by round', async () => {
-    const { measuredRounds, roundPrice } = await import('./finish-shared');
+    const { averageRounds, roundPrice } = await import('./finish-shared');
     const guess = { usd: 0.38, measured: false, base: 0.06, perCard: 0.008 };
     expect(roundPrice(guess, 5).usd).toBeCloseTo(0.1);
     expect(roundPrice(guess, 43).usd).toBeCloseTo(0.404);
-    const call = (at: string, step: string, cost: number, label = 'Azula') => ({ at, profileId: 'dk', label, step, cost });
-    const calls = [
-      call('1', 'finish: first list', 0.1), call('2', 'finish: search', 0.05), call('3', 'finish: search', 0.05),
-      call('4', 'finish: later list', 0.03), call('5', 'finish: search', 0.02),
-      call('6', 'finish: first list', 0.3, 'Kratos'), call('7', 'finish: first list', 0.2), call('8', 'finish: search', 0.1, 'Kratos'),
-    ];
-    // A round is its first call and the searches after it on the same deck: 0.2, 0.4 and 0.2. One later round isn't enough.
-    const m = measuredRounds(calls);
+    const r = (kind: 'first' | 'later', cost: number) => ({ kind, cost, at: '2026-11-13T00:00:00Z' });
+    const m = averageRounds([r('first', 0.2), r('first', 0.4), r('first', 0.2), r('later', 0.05)]);
     expect(m.first).toBeCloseTo((0.2 + 0.4 + 0.2) / 3);
     expect(m.later).toBeNull();
-    expect(measuredRounds(calls.slice(0, 5))).toEqual({ first: null, later: null });
+    expect(averageRounds([r('first', 0.2), r('first', 0.4)])).toEqual({ first: null, later: null });
     expect(roundPrice({ usd: 0.27, measured: true }, 5)).toEqual({ usd: 0.27, measured: true });
   });
 

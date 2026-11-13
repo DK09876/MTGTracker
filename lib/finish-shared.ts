@@ -253,6 +253,8 @@ export interface FinishChanges {
   out: Array<{ name: string; because: 'skipped' | 'rethink' | 'message' | 'gone' }>;
   in: Array<{ name: string; group: string }>;
   back: string[];
+  /** The lands Claude chose this round that differ from the last list's (kept as sets: order is no change). */
+  lands?: { in: string[]; out: string[] };
 }
 
 const COLOUR_WORD: Record<string, string> = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
@@ -270,25 +272,11 @@ export interface RoundCost { usd: number; measured: boolean; base?: number; perC
 /** The price of a first list of `want` cards: the measured average, or the guess for that many. */
 export const roundPrice = (c: RoundCost, want: number) => (c.measured || c.perCard === undefined ? c : { usd: (c.base ?? 0) + c.perCard * want, measured: false });
 
-/**
- * Finish's rounds from the calls log, oldest first: a round starts with its first call ("finish: first list" or
- * "finish: later list") and takes the searches after it from the same profile and deck. Averaged when there
- * are at least `min` of a kind.
- */
-export function measuredRounds(calls: Array<{ at: string; profileId: string; label: string; step: string; cost: number }>, min = 3): { first: number | null; later: number | null } {
-  const rounds: Array<{ kind: 'first' | 'later'; key: string; cost: number }> = [];
-  const open = new Map<string, { kind: 'first' | 'later'; key: string; cost: number }>();
-  for (const c of [...calls].sort((a, b) => a.at.localeCompare(b.at))) {
-    const key = `${c.profileId}|${c.label}`;
-    if (c.step === 'finish: first list' || c.step === 'finish: later list') {
-      const r = { kind: c.step === 'finish: first list' ? 'first' as const : 'later' as const, key, cost: c.cost };
-      rounds.push(r);
-      open.set(key, r);
-    } else if (c.step === 'finish: search') {
-      const r = open.get(key);
-      if (r) r.cost += c.cost;
-    }
-  }
+/** A finished round's cost, kept when the round ended with picks (round 2, item 5). */
+export interface MeasuredRound { kind: 'first' | 'later'; cost: number; at: string }
+
+/** The average cost of finished rounds of each kind, once there are `min` of them. */
+export function averageRounds(rounds: MeasuredRound[], min = 3): { first: number | null; later: number | null } {
   const avg = (k: 'first' | 'later') => { const x = rounds.filter((r) => r.kind === k); return x.length >= min ? x.reduce((n, r) => n + r.cost, 0) / x.length : null; };
   return { first: avg('first'), later: avg('later') };
 }

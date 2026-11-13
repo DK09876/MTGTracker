@@ -30,14 +30,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 import { ModelError } from './ai';
 import type { ClaudeParams } from './ai-claude';
-import { addCardToList, aiCalls, cardsInList, database, setQuantity, updateListCard, type CardBefore, type List } from './db';
+import { addCardToList, aiCalls, cardsInList, database, getSetting, setQuantity, setSetting, updateListCard, type CardBefore, type List } from './db';
 import { planFor } from './deck-plan';
 import { latestJob } from './jobs';
 import { ownedCombos } from './finish-combos';
 import { BASIC, dualCandidates, finishLands, finishPool, splitBasics, heldCards, isLand, nonbasicLimit, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
 import { localCards } from './card-store';
 import {
-  chosenAdds, colourWords, finishCount, FINISH_GROUPS, measuredRounds, parseQuery, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
+  averageRounds, chosenAdds, colourWords, finishCount, FINISH_GROUPS, parseQuery, type MeasuredRound, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
   type Copies, type FinishChanges, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
 } from './finish-shared';
 import { planContext } from './plan-context';
@@ -486,7 +486,10 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     : Array.isArray(given) && (!rerun || legacyLands || given.length) ? checkLands(given, pool, seen, landLimit)
       : legacyLands ? undefined : rerun ? prevLands : [];
   // A new set of lands starts the owner's land changes over: the basics typed for the old set don't carry (review 11).
-  const landsChanged = !!landPicks && rerun && JSON.stringify(landPicks.map((l) => l.name)) !== JSON.stringify(prevLands.map((l) => l.name));
+  // Compared as sets: the same lands in another order are no change (round 2, item 2).
+  const setOf = (ls: StoredLand[]) => new Set(ls.map((l) => front(l.name)));
+  const landsOut = rerun && landPicks ? prevLands.filter((l) => !setOf(landPicks).has(front(l.name))).map((l) => l.name) : [];
+  const landsIn = rerun && landPicks ? landPicks.filter((l) => !setOf(prevLands).has(front(l.name))).map((l) => l.name) : [];
   // What changed since the last list, by the app from the two lists, not from Claude's reply.
   let changes: FinishChanges | undefined;
   if (rerun) {
@@ -501,6 +504,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
       out: before.run!.items.filter((i) => !now2.has(front(i.name))).map((i) => ({ name: i.name, because: because(i.name) })),
       in: fresh.filter((i) => !was.has(front(i.name))).map((i) => ({ name: i.name, group: i.group === 'theme' && i.theme ? `theme:${i.theme}` : i.group })),
       back: fresh.filter((i) => i.mark === 'back').map((i) => i.name),
+      ...(landsIn.length || landsOut.length ? { lands: { in: landsIn, out: landsOut } } : {}),
     };
   }
   const found = await combosFound(ctx, items.map((i) => i.name));
@@ -513,12 +517,13 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     s.run = run;
     s.choices = {};
     s.skippedBefore = [...s.skippedBefore, ...newSkips.filter((x) => !s.skippedBefore.some((y) => front(y.name) === front(x.name)))];
-    if (!rerun || landsChanged) s.landPicks = { skip: [], basics: {}, added: [] };
+    if (!rerun) s.landPicks = { skip: [], basics: {}, added: [] };
     s.skipped = rerun ? [...new Set([...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)])] : [];
     s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: checked.short, searches: used, reply: checked.reply, at: run.at }];
     s.done = null;
     s.pending = null;
   });
+  recordRound(round === 1 ? 'first' : 'later', at, profileId, list.name);
   return { runId: run.id, picks: items.length };
 }
 
@@ -591,6 +596,8 @@ export async function takeCard(list: List, profileId: string, name: string, grou
  */
 export function landsFor(ctx: Context, held: Map<string, Held>, s: Pick<FinishStore, 'copies' | 'lands' | 'landPicks' | 'run'>, lp: { have: number; range: [number, number] }, adds: number, costs: string[]): {
   suggested: LandPick[]; chosen: LandPick[]; short: Array<{ colour: string; have: number; want: number }>; byClaude: boolean;
+  /** The slots the basics fill: the land number less the nonbasic lands that are on. */
+  room: number;
 } {
   const target = s.run?.landsTarget ?? s.lands ?? lp.range[0];
   const n = Math.max(0, Math.min(100 - ctx.size - adds, landsToAdd(lp, target)));
@@ -629,13 +636,32 @@ export function landsFor(ctx: Context, held: Map<string, Held>, s: Pick<FinishSt
     }
   }
   const chosen = [...on, ...auto.map((l) => ({ ...l, n: counts.get(l.card.name) ?? 0 })).filter((l) => l.n > 0)];
-  return { suggested: [...all, ...basics.values()], chosen, short, byClaude };
+  return { suggested: [...all, ...basics.values()], chosen, short, byClaude, room: n - on.length };
 }
 
 /** The owner's changes to the lands: a nonbasic in or out, a basic's count, and "+" for another of their lands a land search found. */
-export function setLands(listId: string, input: { skip?: unknown; basics?: unknown; add?: unknown; room?: unknown }): void {
+export async function setLands(list: List, profileId: string, input: { skip?: unknown; basics?: unknown; add?: unknown }): Promise<void> {
+  const listId = list.id;
+  // The basics' room now, from the land number and the nonbasic lands that are on (round 2, items 1 and 3): never
+  // from the page, whose sum of basics is only right while the total is on target.
+  const s0 = finishStore(listId);
+  // The room as it will be once this change is in: an untick in the same call gives its slot to the basics.
+  const s1 = structuredClone(s0);
+  if (Array.isArray(input.skip)) s1.landPicks.skip = input.skip.filter((x): x is string => typeof x === 'string');
+  if (typeof input.add === 'string') s1.landPicks.added = [...(s1.landPicks.added ?? []), input.add];
+  const now = s0.run?.full ? await (async () => {
+    const ctx = await tuneContext(list, profileId);
+    return landsFor(ctx, heldCards(profileId, listId), s1, landPlan(ctx), chosenAdds(s0.run!.items, s0.choices).length, []);
+  })() : null;
+  if (now && typeof input.add === 'string') {
+    const basics = now.suggested.filter((l) => /\bBasic\b/.test(l.card.type_line ?? ''));
+    const allTyped = basics.length > 0 && basics.every((b) => s0.landPicks.basics[b.card.name] !== undefined);
+    if (allTyped && now.room < basics.reduce((k, b) => k + s0.landPicks.basics[b.card.name], 0)) {
+      throw new Error('Every basic count is one you set, so another land has no basic to replace: lower a basic first');
+    }
+  }
   update(listId, (s) => {
-    if (input.basics && typeof input.room === 'number' && Number.isFinite(input.room)) s.landPicks.typedFor = Math.max(0, Math.round(input.room));
+    if (input.basics && now) s.landPicks.typedFor = now.room;
     if (Array.isArray(input.skip)) s.landPicks.skip = input.skip.filter((x): x is string => typeof x === 'string').slice(0, 100);
     if (input.basics && typeof input.basics === 'object') {
       for (const [k, v] of Object.entries(input.basics as Record<string, unknown>)) {
@@ -718,16 +744,26 @@ export function undoFinish(list: List): { moved: number } {
 
 /**
  * What a round costs. Measured: the average of the app's own rounds this week
- * (lib/finish-shared.ts measuredRounds; a round is several calls, mostly
+ * (recordRound; a round is several calls, mostly
  * searches, so one call's average would not say it). Until there are three of
  * a kind, a guess from the one real Opus run (2026-11-13: a first list of 43
  * picks $0.41, a later round $0.05) that grows with the cards asked for, so
  * 5 cards no longer show the price of a fill.
  */
 const GUESS = { first: { base: 0.06, perCard: 0.008 }, later: { base: 0.04, perCard: 0.004 } };
+const ROUNDS_KEY = 'finish.rounds';
+const measured = (): MeasuredRound[] => { try { return JSON.parse(getSetting(ROUNDS_KEY) ?? '[]') as MeasuredRound[]; } catch { return []; } };
+
+/** A round that ended with picks: what its own calls cost (answered calls only), kept for the price (round 2, item 5). */
+function recordRound(kind: 'first' | 'later', since: string, profileId: string, label: string): void {
+  const cost = aiCalls(since, 500).filter((c) => c.profileId === profileId && c.label === label && c.step.startsWith('finish:') && c.outcome === 'ok').reduce((n, c) => n + c.cost, 0);
+  if (cost <= 0) return;
+  setSetting(ROUNDS_KEY, JSON.stringify([...measured(), { kind, cost, at: new Date().toISOString() }].slice(-60)));
+}
+
 function roundCosts(): FinishView['cost'] {
-  // Only calls that answered: a blocked or failed call costs nothing and isn't a round (review 15).
-  const m = measuredRounds(aiCalls(new Date(Date.now() - 7 * 86400_000).toISOString(), 5000).filter((c) => c.step.startsWith('finish:') && c.outcome === 'ok'));
+  // Only rounds that ended with picks, each priced by its own answered calls: a round whose search failed isn't one.
+  const m = averageRounds(measured().filter((r) => Date.parse(r.at) > Date.now() - 30 * 86400_000));
   const one = (k: 'first' | 'later') => (m[k] !== null ? { usd: m[k]!, measured: true } : { usd: GUESS[k].base + GUESS[k].perCard * 40, measured: false, ...GUESS[k] });
   return { first: one('first'), later: one('later') };
 }

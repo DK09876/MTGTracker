@@ -485,14 +485,19 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           {lands.byClaude && !lands.duals.length && <span className="text-[13px] text-[var(--muted)]">None: Claude found none worth a basic’s slot.</span>}
           <div className="flex flex-wrap gap-1.5">
             {lands.duals.map((d) => (
-              <button key={d.name} type="button" aria-pressed={d.on} disabled={busy} title={d.why} onMouseEnter={() => tell(d)} onFocus={() => tell(d)} onClick={() => { tell(d); onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) }); }} data-land={d.name}
-                className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] disabled:opacity-60 ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
-                <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}{d.deck && <span className="text-[11px] text-amber-300">in {d.deck}</span>}
-              </button>
+              <span key={d.name} className="inline-flex items-stretch">
+                <button type="button" aria-pressed={d.on} disabled={busy} title={d.why} onMouseEnter={() => tell(d)} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
+                  className={`inline-flex min-h-10 items-center gap-1.5 border px-2.5 text-[13px] disabled:opacity-60 ${d.why ? 'rounded-l-lg' : 'rounded-lg'} ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
+                  <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}{d.deck && <span className="text-[11px] text-amber-300">in {d.deck}</span>}
+                </button>
+                {/* The reason has its own control: a tap here reads it, and never unticks the land (round 2, item 4). */}
+                {d.why && <button type="button" aria-label={`Why ${d.name}`} aria-pressed={why?.name === d.name} onClick={() => tell(d)} data-land-why-for={d.name}
+                  className={`min-h-10 min-w-9 rounded-r-lg border border-l-0 px-2 text-[13px] ${why?.name === d.name ? 'border-[#c4a6f5]/60 text-[#c4a6f5]' : 'border-[var(--border)] text-[var(--muted)]'} hover:text-[var(--foreground)]`}>?</button>}
+              </span>
             ))}
           </div>
           {lands.byClaude && lands.duals.length > 0 && (
-            <p className="min-h-5 text-[13px] text-[var(--muted)]" data-land-why>{why ? <><b className="text-[var(--foreground)]">{why.name}:</b> {why.why}</> : 'Point at or tap a land to read why Claude chose it.'}</p>
+            <p className="line-clamp-2 min-h-10 text-[13px] text-[var(--muted)]" title={why ? `${why.name}: ${why.why}` : undefined} data-land-why>{why ? <><b className="text-[var(--foreground)]">{why.name}:</b> {why.why}</> : 'Point at a land, or tap its ?, to read why Claude chose it.'}</p>
           )}
           {lands.more.length > 0 && (
             <details className="rounded-xl border border-[var(--border)] bg-[var(--background)]" data-finish-more-lands>
@@ -534,13 +539,14 @@ function Changes({ changes, items, onShow }: { changes: NonNullable<NonNullable<
   const link = (n: string) => <button key={n} type="button" className="underline decoration-dotted underline-offset-[3px] hover:text-[var(--foreground)]" onClick={() => onShow(n)}>{n}</button>;
   const list = (names: React.ReactNode[]) => names.map((x, k) => <span key={k}>{k ? '; ' : ''}{x}</span>);
   const groupOf = (n: string) => { const i = items.find((x) => x.name === n); return i ? groupTitle(groupKey(i)) : ''; };
-  if (!changes.out.length && !changes.in.length && !changes.back.length) return <p className={`${CARD} text-[13px] text-[var(--muted)]`} data-finish-changes>Nothing changed in round {changes.round}: the list is the one you sent.</p>;
+  if (!changes.out.length && !changes.in.length && !changes.back.length && !changes.lands) return <p className={`${CARD} text-[13px] text-[var(--muted)]`} data-finish-changes>Nothing changed in round {changes.round}: the list is the one you sent.</p>;
   return (
     <div className={`${CARD} flex scroll-mt-48 flex-col gap-1.5 text-[13px]`} data-finish-changes>
       <h4 className={H3}>What changed in round {changes.round}</h4>
       {changes.out.length > 0 && <p><b className="text-[#f0714f]">Out · {changes.out.length}:</b> <span className="text-[var(--muted)]">{changes.out.map((x, k) => <span key={x.name}>{k ? '; ' : ''}{x.name} ({BECAUSE[x.because]})</span>)}</span></p>}
       {changes.in.length > 0 && <p><b className="text-[#c4a6f5]">In · {changes.in.length}:</b> <span className="text-[var(--muted)]">{list(changes.in.map((x) => <span key={x.name}>{link(x.name)} <span className="text-[var(--faint)]">({groupOf(x.name)})</span></span>))}</span></p>}
       {changes.back.length > 0 && <p><b className="text-[#e8c558]">Came back after a rethink, with a new reason · {changes.back.length}:</b> <span className="text-[var(--muted)]">{list(changes.back.map(link))}</span></p>}
+      {changes.lands && <p data-finish-changes-lands><b>Lands changed:</b> <span className="text-[var(--muted)]">{[changes.lands.in.length ? `in ${changes.lands.in.join('; ')}` : '', changes.lands.out.length ? `out ${changes.lands.out.join('; ')}` : ''].filter(Boolean).join(' · ')}. Your unticked lands stay out, your added ones stay in, and your basic counts stay where the total allows.</span></p>}
       <p className="text-xs text-[var(--faint)]">Everything else is unchanged since the list you sent.</p>
     </div>
   );

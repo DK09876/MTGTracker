@@ -29,7 +29,7 @@ import { localCards } from '@/lib/card-store';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish, unskip } from '@/lib/finish';
-import { startJob } from '@/lib/jobs';
+import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
 
@@ -63,6 +63,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
+  // While Claude works on a round, the list it will replace can't be changed from another tab (round 2, item 6).
+  if ((b.action === 'take' || b.action === 'lands' || b.action === 'unskip') && latestJob('finish', id)?.status === 'running') {
+    return NextResponse.json({ error: 'Claude is working on this list: wait for the round to finish' }, { status: 409 });
+  }
   try {
     switch (b.action) {
       case 'settings':
@@ -81,7 +85,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         setChoices(id, b.choices);
         break;
       case 'lands':
-        setLands(id, { skip: b.skip, basics: b.basics, add: b.add, room: b.room });
+        await setLands(list, profile, { skip: b.skip, basics: b.basics, add: b.add });
         break;
       case 'unskip':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
