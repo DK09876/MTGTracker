@@ -229,5 +229,11 @@ describe('Chat opens a page for the full job (Part C)', { timeout: 60_000 }, () 
     expect(goLabel({ page: 'finish', why: '', add: 42 }, true)).toBe('Open Finish · add 42');
     expect(goLabel({ page: 'trim', why: '', cut: 12 }, false)).toBe('Confirm the plan first · Open Plan');
     expect(goLabel({ page: 'tags', why: '' }, false)).toBe('Open Tags');
+    // "add 99" on a commander-only deck is a fill to 100, where the app adds the lands.
+    const { finishWant } = await import('./chat-pages');
+    expect(finishWant(99, 1)).toBeNull();
+    expect(finishWant(5, 1)).toBe(5);
+    expect(goLabel({ page: 'finish', why: '', add: 99 }, true, 1)).toBe('Open Finish · fill to 100');
+    expect(goLabel({ page: 'finish', why: '', add: 5 }, true, 60)).toBe('Open Finish · add 5');
   });
 });

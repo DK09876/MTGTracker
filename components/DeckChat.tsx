@@ -169,6 +169,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const nm = (n: string) => <CardName name={n} card={byName(n)} onOpen={onCard} />;
 
   const inDeck = new Set(cards.map((c) => c.card.id));
+  const size = cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (commander ? 1 : 0);
 
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
@@ -265,7 +266,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
               )}
               {m.go && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={m.go.page}>
-                  <button onClick={() => go(m.go!)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(m.go, planConfirmed)}</button>
+                  <button onClick={() => go(m.go!)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(m.go, planConfirmed, size)}</button>
                   {m.go.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(m.go.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{m.go.why}</span>}
                 </div>
               )}
