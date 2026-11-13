@@ -32,6 +32,7 @@ export default function JobTray() {
   const [jobs, setJobs] = useState<api.JobSummary[]>([]);
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
+  const wasBusy = useRef(false);
 
   useEffect(() => {
     if (!profile || !ready) return;
@@ -43,6 +44,11 @@ export default function JobTray() {
         .then(({ jobs: found }) => {
           if (stopped) return;
           setJobs(found);
+          // A background job spends after its request has answered: while one runs, and once more when it ends,
+          // the header's budget is read again.
+          const busyNow = found.some((j) => j.status === 'running');
+          if (busyNow || wasBusy.current) window.dispatchEvent(new Event(api.AI_SPENT));
+          wasBusy.current = busyNow;
           timer = setTimeout(look, found.some((j) => j.status === 'running') ? BUSY_MS : IDLE_MS);
         })
         .catch(() => { if (!stopped) timer = setTimeout(look, IDLE_MS); });

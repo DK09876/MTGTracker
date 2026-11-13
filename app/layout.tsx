@@ -6,6 +6,7 @@ import Link from 'next/link';
 import CommandPalette, { PaletteButton } from '@/components/CommandPalette';
 import ErrorBanner from '@/components/ErrorBanner';
 import HelpButton from '@/components/HelpButton';
+import AiSpend from '@/components/AiSpend';
 import JobTray from '@/components/JobTray';
 import ProfileGate from '@/components/ProfileGate';
 import ProfileSwitcher from '@/components/ProfileSwitcher';
@@ -60,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="ml-auto flex items-center gap-1 text-sm">
               <PaletteButton />
               <JobTray />
+              <AiSpend />
               <HelpButton />
               <SettingsLink />
               <ProfileSwitcher />
