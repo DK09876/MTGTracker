@@ -8,7 +8,6 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 import AddCardsPanel from '@/components/AddCardsPanel';
 import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
-import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
@@ -650,7 +649,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         />
       ) : null}
       {deck && section === 'tags' ? (
-        <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+        <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          cardOf={(name) => { const f = name.split(' // ')[0].toLowerCase(); return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (list.commander && list.commander.name.split(' // ')[0].toLowerCase() === f ? list.commander : undefined); }}
+          onCard={setSelected} />
       ) : deck && section === 'tune' && !planConfirmed ? (
         <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
@@ -672,6 +673,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           question={chatQuestion}
           listId={id}
           cards={cards}
+          commander={list.commander}
+          onCard={setSelected}
+          onChanged={load}
         />
       ) : deck && section === 'check' ? (
         <>
@@ -759,14 +763,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <CardModal
         card={selected}
         onClose={() => setSelected(null)}
-        actions={(selectedEntry || (deck && selectedInDeck && tags) || (deck && !!list.commander && selected?.id === list.commander.id)) && (
+        actions={(selectedEntry || (deck && selectedInDeck) || (deck && !!list.commander && selected?.id === list.commander.id)) && (
           <>
-            {deck && selectedInDeck && tags && selected && (
-              <CardTags listId={id} card={selected} tags={tags} onChange={setTags} />
-            )}
             {deck && selectedInDeck && selected && (
-              <CardRoles key={`roles-${selected.id}`} listId={id} card={selected} />
+              <CardTags listId={id} card={selected} onChange={setTags} />
             )}
+            {/* The card's jobs and groups live in one place, CardTags above: the old built-in tags panel said otherwise. */}
             {selectedEntry && (
               <CardEditor
                 key={`editor-${selectedEntry.card.id}`}

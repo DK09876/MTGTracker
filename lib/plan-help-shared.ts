@@ -97,8 +97,8 @@ export type PlanAction =
   | { action: 'acceptPlan' } | { action: 'acceptFuller' }
   | { action: 'direction'; name: string }
   | { action: 'addWin'; name: string }
-  | { action: 'acceptWin'; name: string } | { action: 'acceptAllWins' }
-  | { action: 'acceptKey'; name: string } | { action: 'acceptAllKeys' }
+  | { action: 'acceptWin'; name: string } | { action: 'acceptAllWins' } | { action: 'skipAllWins' }
+  | { action: 'acceptKey'; name: string } | { action: 'acceptAllKeys' } | { action: 'skipAllKeys' }
   | { action: 'addKey'; name: string }
   | { action: 'acceptAll' } | { action: 'skipAll' }
   | { action: 'answer'; id: string; text?: string; skip?: boolean }

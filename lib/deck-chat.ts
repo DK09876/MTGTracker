@@ -2,10 +2,13 @@
  * Chatting about a deck: questions, suggestions, cuts. Every conversation is
  * saved as it goes.
  *
- * Claude gets the deck (commander, brief, cards and their roles) and tools
- * to look things up - Scryfall, the owner's collection, the cards
- * that would fill a role. It never changes the deck itself: what it
- * suggests comes back as changes the owner applies with a button.
+ * Claude gets the deck (commander, the plan, cards and their roles, the
+ * sections and groups) and tools to look things up - Scryfall, the owner's
+ * collection, the cards that would fill a role. It never changes the deck
+ * itself: anything it suggests comes back as proposals the owner applies
+ * one by one with a button (lib/chat-actions.ts): cut, add, swap, move to a
+ * section, group or ungroup a card, never cut, a note, a way to win, a key
+ * card.
  *
  * Each reply runs as a background job (lib/jobs.ts), so the page can be
  * left while Claude thinks. Server only.
@@ -22,16 +25,28 @@ import type { GapCard } from './gap-cards';
 import { ROLES, type RoleCount } from './roles';
 import type { ScryfallCard } from './scryfall';
 
+/** One proposal from Claude, applied with its own button. */
 export interface Change {
-  kind: 'add' | 'cut';
+  kind: 'add' | 'cut' | 'swap' | 'move' | 'group' | 'ungroup' | 'never' | 'note' | 'win' | 'key';
+  /** The card (the one coming in, for a swap); the note's text; the way to win's name. */
   name: string;
   why: string;
-  /** A printing to add (add), or the deck's copy to cut. */
+  /** A printing to add (add, swap), or the deck's copy (the others). */
   cardId: string | null;
   held: string | null;
   price: string | null;
-  /** Set once the owner has applied it. */
+  /** swap: the card going out. */
+  out?: { name: string; cardId: string | null };
+  /** add, cut, move: the section; group, ungroup: the group. */
+  to?: string;
+  /** way to win: its cards. */
+  cards?: string[];
+  /** Sent to Tune (adds and cuts, the older way). */
   done?: boolean;
+  /** Why Apply would refuse it (an add or swap into the main deck that fails Tune's checks), shown on the row. */
+  blocked?: string;
+  /** Applied here, with what Undo needs; null once undone. */
+  applied?: { at: string; undo: unknown } | null;
 }
 
 export interface ChatMessage {
@@ -87,6 +102,11 @@ export function chatsFor(listId: string): Array<Pick<DeckChat, 'id' | 'title' | 
   });
 }
 
+/** A profile's newest chats on a deck, whole (for spotting a question sent twice). */
+export function recentChats(listId: string, profileId: string, limit = 5): DeckChat[] {
+  return (db().all('SELECT chat FROM deck_chats WHERE listId = ? AND profileId = ? ORDER BY updatedAt DESC LIMIT ?', [listId, profileId, limit]) as Array<{ chat: string }>).map((r) => JSON.parse(r.chat) as DeckChat);
+}
+
 export function deleteChat(listId: string, id: string): boolean {
   return db().run('DELETE FROM deck_chats WHERE id = ? AND listId = ?', [id, listId]).changes > 0;
 }
@@ -106,6 +126,8 @@ export interface ChatTools {
   held: (names: string[]) => Record<string, string | null>;
   /** Cards to fill a role. */
   gaps: (role: string, owned: boolean, max: number | null) => Promise<GapCard[]>;
+  /** Why a card can't go into the main deck (Tune's checks), or null; `leaving` goes out in the same swap. */
+  check?: (card: ScryfallCard, leaving?: ScryfallCard | null) => string | null;
 }
 
 export interface ChatDeck {
@@ -117,6 +139,8 @@ export interface ChatDeck {
   plan?: string;
   /** The owner's tags on each card, by card name. */
   tagsOf?: Map<string, string[]>;
+  /** The deck's sections besides the main deck, for cuts, adds and moves. */
+  sections?: Array<{ id: string; name: string; purpose: string }>;
 }
 
 const MAX_ROUNDS = 8;
@@ -138,10 +162,20 @@ How to help:
   prefer what they own.
 - Cantrips are not card draw. A deck needs ways to actually win.
 - Count: the deck must stay at 100 cards with the commander. When you
-  suggest adding cards, suggest as many cuts, and the reverse.
-- Every add or cut you recommend goes through propose_changes, once per
-  reply, so the owner gets a button for each. You cannot change the deck
-  yourself; never say you have.`;
+  suggest adding cards, suggest as many cuts, and the reverse. A swap is one
+  card out and one in. One copy of each card, except basic lands: never
+  propose adding a card the deck already runs.
+- You can propose anything the deck's pages can do, one card or one item at
+  a time: cut a card (to one of the deck's sections), add a card (to the deck
+  or a section), swap one card for another, move a card between the deck and
+  its sections, put a card in a group or take it out (a job, a tag, a way to
+  win or one of the owner's groups; a new group name makes a new group), mark
+  a card never cut, add a note to the plan, add a way to win with its cards,
+  or add a key card. Never cut the commander or a card marked never cut.
+- Every change you recommend goes through propose_changes, once per reply,
+  so the owner gets a button for each and applies the ones they want. You
+  cannot change the deck yourself; never say you have. When the owner asks
+  for one specific change ("cut X"), propose just that one.`;
 
 export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -165,12 +199,20 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: 'propose_changes',
-    description: 'The adds and cuts you recommend, each with a one-sentence reason. The owner gets a button for each. Call at most once per reply, after looking things up.',
+    description: 'Every change you recommend, each with a one-sentence reason; the owner gets a button for each and applies the ones they want. Use only the lists you need. "to" for a cut, add or move is a section of the deck (its name, or "main"); for group/ungroup it is the group\'s name. Call at most once per reply, after looking things up.',
     input_schema: {
       type: 'object',
       properties: {
-        add: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] } },
-        cut: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] } },
+        add: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' }, to: { type: 'string' } }, required: ['name', 'why'] } },
+        cut: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' }, to: { type: 'string' } }, required: ['name', 'why'] } },
+        swap: { type: 'array', items: { type: 'object', properties: { out: { type: 'string' }, in: { type: 'string' }, why: { type: 'string' } }, required: ['out', 'in', 'why'] } },
+        move: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, to: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'to', 'why'] } },
+        group: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, to: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'to', 'why'] } },
+        ungroup: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, to: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'to', 'why'] } },
+        never_cut: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] } },
+        note: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
+        way_to_win: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, how: { type: 'string' }, cards: { type: 'array', items: { type: 'string' } } }, required: ['name', 'how'] } },
+        key_card: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] } },
       },
     },
   },
@@ -199,7 +241,8 @@ export function deckText(deck: ChatDeck): string {
       const tags = [...(rolesOf.get(x.card.name) ?? []), ...(deck.tagsOf?.get(x.card.name) ?? []).map((t) => `#${t}`)];
       return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
     }),
-    ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'Maybeboard and sideboard:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}`)] : []),
+    ...(deck.sections?.length ? ['', `Sections besides the main deck: ${deck.sections.map((x) => `${x.name} (${x.purpose === 'out' ? 'cards that came out' : x.purpose === 'in' ? 'cards to bring in' : x.purpose})`).join('; ')}`] : []),
+    ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'In the sections:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}${deck.sections ? ` (${deck.sections.find((s) => s.id === x.board)?.name ?? x.board})` : ''}`)] : []),
   ].filter((l) => l !== undefined).join('\n');
 }
 
@@ -231,23 +274,41 @@ async function runTool(name: string, input: Record<string, unknown>, deck: ChatD
   }
 }
 
-/** The proposed changes, matched to real cards: printings to add, the deck's copies to cut. */
-export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, held: ChatTools['held']): Change[] {
-  const list = (key: 'add' | 'cut') => ((input[key] as Array<{ name?: unknown; why?: unknown }> | undefined) ?? [])
-    .map((x) => ({ name: String(x.name ?? '').trim(), why: String(x.why ?? '').trim() })).filter((x) => x.name);
-  const inDeck = new Map(deck.cards.map((c) => [front(c.card.name).toLowerCase(), c]));
-  const adds = list('add');
-  const known = new Map(localCards(adds.map((a) => a.name)).map((c) => [front(c.name).toLowerCase(), c]));
-  const where = held(adds.map((a) => a.name));
+/** The proposals, matched to real cards: printings to add, the deck's copies for the rest. */
+export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, held: ChatTools['held'], check?: ChatTools['check']): Change[] {
+  const str = (x: unknown, n = 300) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
+  const rows = (key: string) => (Array.isArray(input[key]) ? input[key] as Array<Record<string, unknown>> : []).filter((x) => !!x && typeof x === 'object').slice(0, 30);
+  const inDeck = new Map([...deck.cards.map((c) => [front(c.card.name).toLowerCase(), c.card] as const), ...(deck.list.commander ? [[front(deck.list.commander.name).toLowerCase(), deck.list.commander] as const] : [])]);
+  const incoming = [...rows('add').map((x) => str(x.name, 150)), ...rows('swap').map((x) => str(x.in, 150))].filter(Boolean);
+  const known = new Map(localCards(incoming).map((c) => [front(c.name).toLowerCase(), c]));
+  // A card the bulk card data doesn't have yet may still be one the app has stored for a deck.
+  for (const n of incoming) {
+    if (known.has(front(n).toLowerCase())) continue;
+    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? LIMIT 1`, [n]) as { data: string } | null;
+    if (r) known.set(front(n).toLowerCase(), JSON.parse(r.data) as ScryfallCard);
+  }
+  const where = held(incoming);
+  const mine = (name: string) => inDeck.get(front(name).toLowerCase());
+  const base = (kind: Change['kind'], name: string, why: string, extra: Partial<Change> = {}): Change => ({ kind, name: mine(name)?.name ?? name, why, cardId: mine(name)?.id ?? null, held: null, price: null, ...extra });
+  const add = (name: string) => { const card = known.get(front(name).toLowerCase()); return { name: card?.name ?? name, cardId: card?.id ?? null, held: where[name] ?? null, price: card?.prices?.usd ?? null }; };
+  // Into the main deck only: an add to a section just has to exist.
+  const toMain = (to: string) => !to || /^(main|deck|main deck)$/i.test(to);
+  const blocked = (name: string, leaving?: string) => {
+    const card = known.get(front(name).toLowerCase());
+    const why = card && check ? check(card, leaving ? mine(leaving) ?? null : null) : null;
+    return why ? { blocked: why } : {};
+  };
   return [
-    ...adds.map((a) => {
-      const card = known.get(front(a.name).toLowerCase());
-      return { kind: 'add' as const, name: card?.name ?? a.name, why: a.why, cardId: card?.id ?? null, held: where[a.name] ?? null, price: card?.prices?.usd ?? null };
-    }),
-    ...list('cut').map((c) => {
-      const copy = inDeck.get(front(c.name).toLowerCase());
-      return { kind: 'cut' as const, name: copy?.card.name ?? c.name, why: c.why, cardId: copy?.card.id ?? null, held: null, price: null };
-    }),
+    ...rows('add').map((x) => ({ kind: 'add' as const, ...add(str(x.name, 150)), why: str(x.why), ...(str(x.to, 60) ? { to: str(x.to, 60) } : {}), ...(toMain(str(x.to, 60)) ? blocked(str(x.name, 150)) : {}) })).filter((c) => c.name),
+    ...rows('cut').map((x) => base('cut', str(x.name, 150), str(x.why), str(x.to, 60) ? { to: str(x.to, 60) } : {})).filter((c) => c.name),
+    ...rows('swap').map((x) => ({ kind: 'swap' as const, ...add(str(x.in, 150)), why: str(x.why), out: { name: mine(str(x.out, 150))?.name ?? str(x.out, 150), cardId: mine(str(x.out, 150))?.id ?? null }, ...blocked(str(x.in, 150), str(x.out, 150)) })).filter((c) => c.name && c.out.name),
+    ...rows('move').map((x) => base('move', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
+    ...rows('group').map((x) => base('group', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
+    ...rows('ungroup').map((x) => base('ungroup', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
+    ...rows('never_cut').map((x) => base('never', str(x.name, 150), str(x.why))).filter((c) => c.name),
+    ...rows('note').map((x) => ({ kind: 'note' as const, name: str(x.text, 600), why: '', cardId: null, held: null, price: null })).filter((c) => c.name),
+    ...rows('way_to_win').map((x) => ({ kind: 'win' as const, name: str(x.name, 80), why: str(x.how), cardId: null, held: null, price: null, cards: (Array.isArray(x.cards) ? x.cards : []).map((n) => mine(String(n))?.name).filter((n): n is string => !!n).slice(0, 20) })).filter((c) => c.name),
+    ...rows('key_card').map((x) => base('key', str(x.name, 150), str(x.why))).filter((c) => c.name),
   ];
 }
 
@@ -265,11 +326,13 @@ export async function reply(
   const history: Anthropic.Beta.BetaMessageParam[] = chat.messages.map((m) => ({
     role: m.role,
     content: m.role === 'assistant' && m.changes?.length
-      ? `${m.text}\n\n(Proposed: ${m.changes.map((c) => `${c.kind} ${c.name}${c.done ? ' - applied' : ''}`).join('; ')})`
+      ? `${m.text}\n\n(Proposed: ${m.changes.map((c) => `${c.kind} ${c.kind === 'swap' ? `${c.out?.name} for ` : ''}${c.name}${c.to ? ` (${c.to})` : ''}${c.applied ? ' - applied by the owner' : c.done ? ' - sent to Tune' : ''}`).join('; ')})`
       : m.text,
   }));
   const lookups: string[] = [];
   let changes: Change[] = [];
+  // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
+  const said: string[] = [];
   const messages = [...history];
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const answer = await call({
@@ -286,16 +349,18 @@ export async function reply(
 
     const uses = answer.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
     const text = answer.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+    if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
-      return { role: 'assistant', text: text || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, model: answer.model };
+      return { role: 'assistant', text: said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, model: answer.model };
     }
     messages.push({ role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const use of uses) {
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
-        changes = resolveChanges(input, deck, tools.held);
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.` });
+        changes = resolveChanges(input, deck, tools.held, tools.check);
+        const refused = changes.filter((x) => x.blocked);
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}` });
         continue;
       }
       try {
@@ -308,5 +373,5 @@ export async function reply(
     }
     messages.push({ role: 'user', content: results });
   }
-  return { role: 'assistant', text: 'I looked up a lot and ran out of steps before answering - ask again, more narrowly.', at: new Date().toISOString(), lookups, changes };
+  return { role: 'assistant', text: [...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'), at: new Date().toISOString(), lookups, changes };
 }

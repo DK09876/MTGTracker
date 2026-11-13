@@ -22,6 +22,7 @@ import { startJob } from '@/lib/jobs';
 import { isConfirmed } from '@/lib/plan-help';
 import { requireList } from '@/lib/profile-route';
 import { runTagsAi, TAGS_MODEL, tagsAct, tagsTab, TagsRefused } from '@/lib/tags-tab';
+import { cleanFocus } from '@/lib/tags-tab-shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const model = modelById(TAGS_MODEL, [], { profile, feature: 'tagging', label: list.name });
     if (!model) return NextResponse.json({ error: 'No Claude key is set on the server. Step 1 works without one.' }, { status: 503 });
     startJob({ kind: 'tagsai', label: 'Refining tags with AI', subject: list.name, profileId: profile, listId: id, errorLevel: (e) => (e instanceof ModelError ? 'warn' : 'error') },
-      async ({ progress }) => { const run = await runTagsAi(model, list, profile, progress); return { runId: run.id }; });
+      async ({ progress }) => { const run = await runTagsAi(model, list, profile, progress, cleanFocus(b.focus)); return { runId: run.id }; });
     return NextResponse.json(await tagsTab(list, profile));
   }
   try {

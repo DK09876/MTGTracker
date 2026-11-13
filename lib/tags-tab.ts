@@ -9,7 +9,7 @@
  * the rest behind "Show more"), and, folded, the combos the combo lookup
  * finds and the cards several of them share.
  *
- * Refine with AI: one Opus call (prompt "tags-3") that works with what is on
+ * Refine with AI: one Opus call (prompt "tags-4") that works with what is on
  * the deck first - cards to add to a category or take out - and only then
  * suggests new categories. The model returns its whole answer; the code
  * compares it with the deck and shows only the differences.
@@ -41,7 +41,7 @@ import { combosInDeck } from './spellbook';
 import { logOutcome, logShown, quietly } from './suggestion-log';
 import { SHOWN, standoutTags } from './tag-suggest';
 import { tagKey } from './tags';
-import type { TagsView, TagRow, AiRow } from './tags-tab-shared';
+import type { TagsView, TagRow, AiRow, TagsFocus } from './tags-tab-shared';
 
 export type { TagsView } from './tags-tab-shared';
 
@@ -135,9 +135,11 @@ async function fromCards(list: Pick<List, 'id' | 'commander'>, cats: Category[],
 
 export const TAGS_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app. The owner pressed "Refine with AI" on the deck's Tags page, after confirming the deck's plan.
 
-A deck starts with no tags. Everything on it now is there because the owner accepted or created it: jobs (ramp, card draw and so on), tags from the card data, ways to win, key cards and their own categories. Work with those, in this order:
+A deck starts with no tags. Everything on it now is there because the owner accepted or created it: jobs (ramp, card draw and so on), tags from the card data, ways to win, key cards and their own categories. Unless the task for this run says otherwise, work with those in this order:
 1. Improve what is there. For each category on the deck, say which cards are missing from it and which do not belong, judged against this deck and its confirmed plan.
 2. Only then suggest new categories, where the plan depends on a group of cards that nothing on the deck covers.
+
+The owner can narrow a run to one kind of change ("## This run" at the end of the message). Then do only that, and leave every other field empty.
 
 You get the confirmed plan (with who set each part), every category on the deck with its cards and who added each, what the owner removed or skipped before, and the deck's facts.
 
@@ -145,6 +147,9 @@ Return only these fields:
 - addTo: cards to add to a category that exists. Each has the category, the card and one sentence why.
 - removeFrom: cards to take out of a category that exists, where a card-data tag or an earlier suggestion is wrong for this deck. Each has the category, the card and one sentence why. Never for ways to win or key cards: those are the owner's intent, so only add there.
 - categories: new groups, at most 4, only where nothing on the deck already covers them. Consider "Engines" (repeatable advantage central to the plan) unless an existing category already is that. Each has a name a player would say, one sentence why, and its cards.
+- merge: only when the task asks to tidy. Two categories that cover the same cards, the first merged into the second. Each has from, into and one sentence why. Never merge away a job, a way to win or the key cards.
+- drop: only when the task asks to tidy. A category that adds nothing for this deck. Each has the category and one sentence why. Never a job, a way to win or the key cards.
+- describe: only when the task asks for descriptions. One line on what the category is for in THIS deck, for categories with no description or a thin one. Each has the category and the text.
 - notes: at most 2 sentences for the owner.
 
 Rules:
@@ -161,19 +166,39 @@ Answer with one JSON object, nothing else:
 {"addTo": [{"category": "...", "card": "...", "why": "..."}],
  "removeFrom": [{"category": "...", "card": "...", "why": "..."}],
  "categories": [{"name": "...", "why": "...", "cards": ["..."]}],
+ "merge": [{"from": "...", "into": "...", "why": "..."}],
+ "drop": [{"category": "...", "why": "..."}],
+ "describe": [{"category": "...", "text": "..."}],
  "notes": "..."}`;
+
+/** The task for a narrowed run, at the end of the message. */
+export function focusLines(f: TagsFocus): string[] {
+  switch (f.kind) {
+    case 'all': return [];
+    case 'fix': return ['## This run', 'Only fix the categories already on the deck: addTo and removeFrom. No new categories, merges, drops or descriptions.'];
+    case 'one': return ['## This run', `Only the category "${f.category}": cards to add to it (addTo) and cards to take out of it (removeFrom). Nothing for any other category.`];
+    case 'find': return ['## This run', `The owner wants a category for this kind of card: "${f.text}". Return it under categories with every card in the deck that fits, and a name a player would say. If a category on the deck already is that, return addTo for it instead. Nothing else.`];
+    case 'tidy': return ['## This run', 'Only tidy the categories as a whole: new categories the plan needs (categories), two that overlap merged into one (merge), and ones that add nothing removed (drop). No card-by-card changes to existing categories, no descriptions.'];
+    case 'describe': return ['## This run', 'Only describe: one line for each category with no description or a thin one, saying what it is for in this deck (describe). Change nothing else.'];
+  }
+}
 
 export interface TagsAnswer {
   addTo: Array<{ category: string; card: string; why: string }>;
   removeFrom: Array<{ category: string; card: string; why: string }>;
   categories: Array<{ name: string; why: string; cards: string[] }>;
+  merge?: Array<{ from: string; into: string; why: string }>;
+  drop?: Array<{ category: string; why: string }>;
+  describe?: Array<{ category: string; text: string }>;
   notes: string;
+  /** What the run looked for (runs before focus existed looked for everything). */
+  focus?: TagsFocus;
 }
 
 /** The answer kept to the deck: card and category names that exist, never a removal from ways to win or key cards, at most 4 new groups. */
-export function parseTags(data: unknown, deckNames: string[], catNames: Array<{ name: string; kind: string }>): TagsAnswer {
+export function parseTags(data: unknown, deckNames: string[], catNames: Array<{ name: string; kind: string }>, focus: TagsFocus = { kind: 'all' }): TagsAnswer {
   const d = (data ?? {}) as Record<string, unknown>;
-  if (!d || typeof d !== 'object' || (!Array.isArray(d.addTo) && !Array.isArray(d.removeFrom) && !Array.isArray(d.categories))) throw new ModelError('The AI answer came back unusable. Nothing was saved; try again.');
+  if (!d || typeof d !== 'object' || !['addTo', 'removeFrom', 'categories', 'merge', 'drop', 'describe'].some((k) => Array.isArray(d[k]))) throw new ModelError('The AI answer came back unusable. Nothing was saved; try again.');
   const byFront = new Map(deckNames.map((n) => [front(n), n]));
   const cat = new Map(catNames.map((c) => [low(c.name), c]));
   const str = (x: unknown, max: number) => (typeof x === 'string' ? x.trim().slice(0, max) : '');
@@ -184,7 +209,25 @@ export function parseTags(data: unknown, deckNames: string[], catNames: Array<{ 
   const groups = (Array.isArray(d.categories) ? d.categories : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
     .map((x) => ({ name: str(x.name, 60), why: str(x.why, 300), cards: [...new Set((Array.isArray(x.cards) ? x.cards : []).map((n) => byFront.get(front(String(n)))).filter((n): n is string => !!n))].slice(0, 30) }))
     .filter((x) => x.name && x.cards.length).slice(0, 4);
-  return { addTo: items(d.addTo, false), removeFrom: items(d.removeFrom, true), categories: groups, notes: str(d.notes, 400) };
+  const objs = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+  // Never a job, a way to win or the key cards merged away or removed.
+  const whole = (name: string) => { const c = cat.get(low(name)); return c && c.kind !== 'job' && c.kind !== 'win' && c.kind !== 'key' ? c.name : ''; };
+  const merge = objs(d.merge).map((x) => ({ from: whole(str(x.from, 80)), into: cat.get(low(str(x.into, 80)))?.name ?? '', why: str(x.why, 300) }))
+    .filter((x) => x.from && x.into && low(x.from) !== low(x.into) && cat.get(low(x.into))?.kind !== 'key').slice(0, 6);
+  const drop = objs(d.drop).map((x) => ({ category: whole(str(x.category, 80)), why: str(x.why, 300) })).filter((x) => x.category).slice(0, 6);
+  const describe = objs(d.describe).map((x) => ({ category: cat.get(low(str(x.category, 80)))?.name ?? '', text: str(x.text, 300) })).filter((x) => x.category && x.text).slice(0, 30);
+  const out: TagsAnswer = { addTo: items(d.addTo, false), removeFrom: items(d.removeFrom, true), categories: groups, merge, drop, describe, notes: str(d.notes, 400), focus };
+  // A narrowed run keeps only what it asked for, whatever came back.
+  const none = <T,>(xs: T[], keep: boolean) => (keep ? xs : []);
+  const k = focus.kind;
+  const one = k === 'one' ? low(focus.category) : null;
+  out.addTo = none(out.addTo, k === 'all' || k === 'fix' || k === 'one' || k === 'find').filter((x) => !one || low(x.category) === one);
+  out.removeFrom = none(out.removeFrom, k === 'all' || k === 'fix' || k === 'one').filter((x) => !one || low(x.category) === one);
+  out.categories = none(out.categories, k === 'all' || k === 'find' || k === 'tidy').slice(0, k === 'find' ? 1 : 4);
+  out.merge = none(merge, k === 'tidy');
+  out.drop = none(drop, k === 'tidy');
+  out.describe = none(describe, k === 'describe');
+  return out;
 }
 
 interface Run { id: string; at: string; model: string; output: TagsAnswer }
@@ -202,12 +245,13 @@ function removedText(listId: string, cats: Category[], nameByKey: Map<string, st
     else if (g.startsWith('tag:')) out.push(`- the card-data tag ${tidyTag(g.slice(4))} (removed)`);
     else out.push(`- ${g.replace(/^(own|win):/, (_, k) => (k === 'win' ? 'way to win ' : 'category '))} (removed)`);
   }
-  for (const k of skippedKeys(listId, 'ai')) out.push(`- ${k.replace(/^ai:(add|rm|new):/, (_, w) => (w === 'add' ? 'add ' : w === 'rm' ? 'take out ' : 'new category '))} (skipped)`);
+  const WORD: Record<string, string> = { add: 'add ', rm: 'take out ', new: 'new category ', merge: 'merge ', drop: 'remove category ', desc: 'description for ' };
+  for (const k of skippedKeys(listId, 'ai')) out.push(`- ${k.replace(/^ai:(add|rm|new|merge|drop|desc):/, (_, w) => WORD[w])} (skipped)`);
   return out;
 }
 
 /** Ask AI to refine the deck's categories; the answer is stored and the differences shown. */
-export async function runTagsAi(model: JsonModel, list: List, profileId: string | null, progress: (s: string) => void = () => {}): Promise<Run> {
+export async function runTagsAi(model: JsonModel, list: List, profileId: string | null, progress: (s: string) => void = () => {}, focus: TagsFocus = { kind: 'all' }): Promise<Run> {
   if (!isConfirmed(list.id)) throw new ModelError('Confirm the plan first: AI reads it.');
   progress('Gathering the deck');
   const deck = deckOf(list);
@@ -215,11 +259,12 @@ export async function runTagsAi(model: JsonModel, list: List, profileId: string 
   const context = await deckContext(list, { allCards: true });
   const { md } = await planFacts(list, list.id, list.name, deck.commanders);
   const removed = removedText(list.id, cats, deck.nameByKey);
-  const user = `${context}\n\nRemoved or skipped by the owner (do not bring back):\n${removed.join('\n') || '- nothing'}\n\n${md}\n`;
+  const task = focusLines(focus);
+  const user = `${context}\n\nRemoved or skipped by the owner (do not bring back):\n${removed.join('\n') || '- nothing'}\n\n${md}\n${task.length ? `\n${task.join('\n')}\n` : ''}`;
   progress('AI is reading the deck');
   const answer = await model({ step: 'refine tags', system: TAGS_SYSTEM, user, schema: { type: 'OBJECT' }, promptOnly: true, thinking: 'high', timeoutMs: 6 * 60_000 }, { maxBusy: 1 });
   const deckNames = [...deck.nameByKey.values()];
-  const output = parseTags(answer.data, deckNames, cats.map((c) => ({ name: c.name, kind: c.kind })));
+  const output = parseTags(answer.data, deckNames, cats.map((c) => ({ name: c.name, kind: c.kind })), focus);
   const run: Run = { id: randomUUID(), at: new Date().toISOString(), model: answer.model, output };
   db().run('INSERT INTO tags_ai_runs (id, listId, profileId, at, model, promptVersion, deckHash, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [run.id, list.id, profileId, run.at, run.model, PROMPT_VERSIONS.tagsAi, deckHash(list.commander, deck.main), JSON.stringify(output)]);
@@ -274,6 +319,26 @@ function aiRows(listId: string, run: Run | null, cats: Category[], deck: ReturnT
     if (overlaps || gone.has(identity('own', g.name)) || skip.has(k)) continue;
     rows.push({ key: k, kind: 'new', category: g.name, categoryId: null, why: g.why, cards: g.cards });
   }
+  // Whole categories: merge one into another, remove one, or describe one. Never a job, a way to win or the key cards merged or removed.
+  const whole = (c: Category | undefined) => !!c && c.kind !== 'job' && c.kind !== 'win' && c.kind !== 'key';
+  for (const m of run.output.merge ?? []) {
+    const from = catOf(m.from); const into = catOf(m.into);
+    if (!whole(from) || !into || from!.id === into.id || into.kind === 'key') continue;
+    const k = `ai:merge:${identOf(from!)}|${identOf(into)}`;
+    if (!skip.has(k)) rows.push({ key: k, kind: 'merge', category: from!.name, categoryId: from!.id, into: into.name, intoId: into.id, why: m.why });
+  }
+  for (const x of run.output.drop ?? []) {
+    const c = catOf(x.category);
+    if (!whole(c)) continue;
+    const k = `ai:drop:${identOf(c!)}`;
+    if (!skip.has(k)) rows.push({ key: k, kind: 'drop', category: c!.name, categoryId: c!.id, why: x.why });
+  }
+  for (const x of run.output.describe ?? []) {
+    const c = catOf(x.category);
+    if (!c || c.how.trim() === x.text.trim()) continue;
+    const k = `ai:desc:${identOf(c)}`;
+    if (!skip.has(k)) rows.push({ key: k, kind: 'describe', category: c.name, categoryId: c.id, text: x.text, why: c.how.trim() ? `Now: ${c.how.trim()}` : 'No description yet.' });
+  }
   return rows;
 }
 
@@ -308,7 +373,7 @@ export async function tagsTab(list: Pick<List, 'id' | 'commander'>, profileId?: 
     confirmed: isConfirmed(list.id),
     hasKey: !!process.env.ANTHROPIC_API_KEY,
     step1: { jobs: jobsRow, tags: visible, more, combos, comboKeys, open: (jobsRow && !jobsRow.skipped ? 1 : 0) + visible.length, comboCount: s1.combos.length },
-    ai: { ran: !!run, at: run?.at ?? null, notes: run?.output.notes ?? '', rows, job: running, cost: estimateCost(list.id, 'refine tags') },
+    ai: { ran: !!run, at: run?.at ?? null, notes: run?.output.notes ?? '', rows, job: running, focus: run?.output.focus ?? { kind: 'all' }, cost: estimateCost(list.id, 'refine tags') },
   };
   if (profileId) quietly(() => logShown(profileId, list.id, 'tags:', [
     { key: 'tags:cards', task: 'tags', method: 'code', deckHash: deckHash(list.commander, deck.main), items: [
@@ -366,9 +431,10 @@ export async function tagsAct(list: Pick<List, 'id' | 'commander'>, _profileId: 
       return;
     }
     case 'skip': {
-      const key = str(b.key);
-      markSkipped(id, key.startsWith('ai:') ? 'ai' : 'cards', key, b.on !== false);
-      quietly(() => logOutcome(id, [key], 'refused'));
+      // One key, or several at once ("Skip all").
+      const keys = Array.isArray(b.keys) ? b.keys.filter((k): k is string => typeof k === 'string').slice(0, 60) : [str(b.key)];
+      for (const key of keys) markSkipped(id, key.startsWith('ai:') ? 'ai' : 'cards', key, b.on !== false);
+      quietly(() => logOutcome(id, keys, 'refused'));
       return;
     }
     case 'refresh':
@@ -403,6 +469,9 @@ export async function tagsAct(list: Pick<List, 'id' | 'commander'>, _profileId: 
           if (r.kind === 'add' && r.categoryId) setCategoryCard(id, r.categoryId, { key: deck.keyByName.get(front(r.card!))!, name: r.card! }, true, 'ai');
           else if (r.kind === 'remove' && r.categoryId) setCategoryCard(id, r.categoryId, { key: deck.keyByName.get(front(r.card!))!, name: r.card! }, false, 'owner');
           else if (r.kind === 'new') addCategory(id, { kind: 'own', name: r.category, by: 'ai', how: r.why, cards: (r.cards ?? []).map((n) => ({ key: deck.keyByName.get(front(n)) ?? '', name: n, by: 'ai' as const })).filter((x) => x.key) });
+          else if (r.kind === 'merge' && r.categoryId && r.intoId) { const from = cats.find((c) => c.id === r.categoryId); if (from) mergeCategory(id, from, r.intoId); }
+          else if (r.kind === 'drop' && r.categoryId) removeCategory(id, r.categoryId);
+          else if (r.kind === 'describe' && r.categoryId && r.text) editCategory(id, r.categoryId, { how: r.text });
         }
       }
       quietly(() => logOutcome(id, keys, 'accepted'));

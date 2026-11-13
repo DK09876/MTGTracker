@@ -3,14 +3,17 @@
  * question and the reply runs as a background job. Server only.
  */
 
-import { deckRoles } from './deck-roles';
+import { categories } from './categories';
+import { deckRoles, jobCards } from './deck-roles';
+import { sectionsOf } from './sections';
+import { tuneContext, whyNotAddable } from './tune';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
-import { startJob, type Job } from './jobs';
-import { newChat, reply, saveChat, type DeckChat } from './deck-chat';
+import { latestJob, startJob, type Job } from './jobs';
+import { newChat, recentChats, reply, saveChat, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
 import { searchCards, ScryfallError } from './scryfall';
 
@@ -20,6 +23,16 @@ export class ChatError extends Error {}
 export async function ask(list: List, profile: string, text: string, chat: DeckChat | null): Promise<{ chat: DeckChat; job: Job }> {
   const model = modelFor(profile, 'chat');
   if (providerOf(model) !== 'anthropic' || !appModel(profile, 'chat')) throw new ChatError('Deck chat needs Claude: no Anthropic key is set on the server');
+  // The same question twice in a row (a double tap, or a phone resending) is one question.
+  const running = latestJob('chat', list.id);
+  if (chat && chat.messages.at(-1)?.role === 'user' && running?.status === 'running') {
+    if (chat.messages.at(-1)!.text === text.trim()) return { chat, job: running };
+    throw new ChatError('Claude is still answering the last question in this chat');
+  }
+  if (!chat) {
+    const again = recentChats(list.id, profile).find((c) => c.messages.length && c.messages[0].role === 'user' && c.messages[0].text === text.trim() && Date.now() - Date.parse(c.createdAt) < 30_000);
+    if (again && running) return { chat: again, job: running };
+  }
   const current = chat ?? newChat(list.id, profile, text);
   current.messages.push({ role: 'user', text: text.trim(), at: new Date().toISOString() });
   saveChat(current);
@@ -35,18 +48,18 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     // Both commanders' colours, when the deck has two.
     const identity = [...deckIdentity([list.commander, main.find((c) => c.slot === 'partner')?.card])].join('') || 'c';
     const tags = deckTags(list.id);
-    const names = new Map(tags.tags.filter((t) => t.status === 'accepted').map((t) => [t.id, t.name]));
-    const byKey = new Map(main.map((c) => [c.card.oracle_id ?? c.card.id, c.card.name]));
+    // Each card's groups, as the Tags tab has them (jobs, card-data tags, ways to win, key cards, the owner's groups).
     const tagsOf = new Map<string, string[]>();
-    for (const ct of tags.cardTags) {
-      const name = byKey.get(ct.key);
-      if (ct.on && name && names.has(ct.tagId)) tagsOf.set(name, [...(tagsOf.get(name) ?? []), names.get(ct.tagId)!]);
-    }
+    for (const c of await categories(list, jobCards).catch(() => [])) for (const x of c.cards) tagsOf.set(x.name, [...(tagsOf.get(x.name) ?? []), c.name]);
     const planText = await planContext(list).catch(() => '');
-    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf }, {
+    const sections = sectionsOf(list.id).map((x) => ({ id: x.id, name: x.name, purpose: x.purpose }));
+    // Tune's checks for a card going into the main deck, so a proposal that Apply would refuse says why up front.
+    const tune = await tuneContext(list, profile).catch(() => null);
+    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
+      check: tune ? (card, leaving) => whyNotAddable(tune, card, leaving) : undefined,
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     current.messages.push(message);
     saveChat(current);

@@ -49,7 +49,7 @@ const WEIGH = ['speed', 'card advantage', 'my theme', 'staying on budget', 'inte
 
 const money = price;
 const TIER_TITLE: Record<TrimTier, (n: number) => [string, string]> = {
-  cut: (n) => [`Claude would cut these ${n}`, 'Agree by leaving them. Press Keep to overrule one.'],
+  cut: (n) => [`Claude would cut these ${n}`, 'Leave a card to agree. Keep settles it. Rethink asks Claude again.'],
   maybe: (n) => [`Closer calls · ${n}`, 'Claude would keep these, most cuttable first. Press Cut to take one.'],
   kept: (n) => [`Kept on purpose · ${n}`, 'Cards a quick look would cut, and why Claude left them in. Press Cut to take one anyway.'],
   yours: (n) => [`Kept by you · ${n}`, 'Every card you’ve kept on this deck. Claude doesn’t list them again. Press Cut to take a keep back.'],
@@ -184,7 +184,10 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
     });
   };
   // Keep or Cut: nothing opens and nothing moves; a reason already typed stays.
-  const set = (item: TrimItem, choice: 'cut' | 'keep') => { if ((cuts.includes(item.name) ? 'cut' : 'keep') !== choice) choose(item, { choice }); };
+  const set = (item: TrimItem, choice: 'cut' | 'keep' | 'ask') => {
+    const now = choices[item.name]?.choice === 'ask' ? 'ask' : cuts.includes(item.name) ? 'cut' : 'keep';
+    if (now !== choice) choose(item, { choice });
+  };
   const star = (item: TrimItem) => {
     void act({ action: 'never', name: item.name, on: !item.star });
     if (!item.star) set(item, 'keep');
@@ -302,6 +305,14 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
               <div className="flex flex-col gap-1.5 rounded-xl border border-[#3f6b4a] bg-[#141210] p-3 text-[13px]" data-trim-changed>
                 <h4 className="text-[15px] font-bold text-[#9bdcae]">What changed, and why</h4>
                 {ch.kept.length > 0 && <p><b>Kept, as you said:</b> {names(ch.kept)}.</p>}
+                {(() => {
+                  // What the owner sent back to rethink, and where each card is now.
+                  const last = [...view.turns].reverse().find((t) => t.kind === 'owner-reply');
+                  const asked = last && last.kind === 'owner-reply' ? last.marks.filter((m) => m.choice === 'ask').map((m) => m.name) : [];
+                  if (!asked.length) return null;
+                  const where = (n: string) => { const i = items.find((x) => x.name === n); return !i ? 'off the list' : i.tier === 'cut' ? 'still a cut' : i.tier === 'maybe' ? 'now a closer call' : 'kept'; };
+                  return <p data-rethink><b>You asked Claude to rethink:</b> {asked.map((n) => `${n} (${where(n)})`).join('; ')}.</p>;
+                })()}
                 {ch.dropped.length > 0 && <p><b>No longer cuts, though you didn’t name them:</b> {names(ch.dropped)}.</p>}
                 <p><b>{ch.fresh ? `${ch.fresh} new cut${ch.fresh === 1 ? '' : 's'}` : 'No new cuts'}.</b> {ch.same + ch.yours} the same as before{ch.yours ? `, ${ch.yours} of them confirmed by you` : ''}.</p>
                 {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “<SymbolText text={view.run.reply} />”</p>}
@@ -449,6 +460,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
               <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU</span>
                 {t.approach !== undefined && <p>Changed what matters to: “{t.approach || 'nothing'}”</p>}
                 {t.marks.filter((m) => m.choice === 'keep').map((m) => <p key={m.name}>Kept <b>{m.name}</b>{reasonWords(m) ? `: “${reasonWords(m)}”` : ''}</p>)}
+                {t.marks.filter((m) => m.choice === 'ask').map((m) => <p key={m.name}>Asked to rethink <b>{m.name}</b>{reasonWords(m) ? `: “${reasonWords(m)}”` : ''}</p>)}
                 {t.marks.some((m) => m.choice === 'cut') && <p>Confirmed {t.marks.filter((m) => m.choice === 'cut').length} cut{t.marks.filter((m) => m.choice === 'cut').length === 1 ? '' : 's'}: {t.marks.filter((m) => m.choice === 'cut').map((m) => `${m.name}${reasonWords(m) ? ` (${reasonWords(m)})` : ''}`).join(', ')}</p>}
                 {t.message && <p className="whitespace-pre-line">“{t.message}”</p>}
                 {!t.marks.length && !t.message && t.approach === undefined && <p className="text-[var(--muted)]">Asked for the list again, with nothing changed.</p>}</>
@@ -470,34 +482,42 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
  */
 function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, onReason, onStar }: {
   item: TrimItem; cut: boolean; choice?: TrimChoice; marks: boolean; mark: CutMark | null; showCard: boolean; busy: boolean;
-  onSet: (c: 'cut' | 'keep') => void; onCard: (v: boolean) => void; onReason: (text: string) => void; onStar: () => void;
+  onSet: (c: 'cut' | 'keep' | 'ask') => void; onCard: (v: boolean) => void; onReason: (text: string) => void; onStar: () => void;
 }) {
   // A ★ card needs no reason: it is never cut, whatever Claude said.
-  const changed = (cut ? 'cut' : 'keep') !== callOf(item.tier) && !(item.star && !cut);
+  // Rethink: the reason goes to Claude to weigh, nothing settled.
+  const ask = choice?.choice === 'ask';
+  const changed = !ask && (cut ? 'cut' : 'keep') !== callOf(item.tier) && !(item.star && !cut);
   const badge = mark ? <span className={`inline-block rounded-lg px-2 py-0.5 text-center text-[11px] font-bold ${MARK_LABEL[mark][1]}`}>{MARK_LABEL[mark][0]}</span> : null;
-  const seg = (v: 'keep' | 'cut') => {
-    const on = (v === 'cut') === cut;
+  const LABEL = { keep: 'Keep', ask: 'Rethink', cut: 'Cut' } as const;
+  const LIT = { keep: 'bg-[#16301f] text-[#7fd6a0]', ask: 'bg-[#241d2e] text-[#c4a6f5]', cut: 'bg-[#3a211b] text-[#f0714f]' } as const;
+  const seg = (v: 'keep' | 'ask' | 'cut') => {
+    const on = v === 'ask' ? ask : !ask && (v === 'cut') === cut;
     return (
-      <button type="button" aria-pressed={on} onClick={() => onSet(v)} aria-label={`${v === 'cut' ? 'Cut' : 'Keep'} ${item.name}`}
-        className={`min-h-10 min-w-[3.6rem] px-3 text-sm font-bold ${on ? (v === 'cut' ? 'bg-[#3a211b] text-[#f0714f]' : 'bg-[#16301f] text-[#7fd6a0]') : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>
-        {v === 'cut' ? 'Cut' : 'Keep'}
+      <button type="button" aria-pressed={on} onClick={() => onSet(v)} aria-label={v === 'ask' ? `Ask Claude to rethink ${item.name}` : `${LABEL[v]} ${item.name}`}
+        title={v === 'ask' ? 'Not sure? Give your reason and Claude weighs it on the next list. Nothing is settled or remembered.' : v === 'keep' ? 'Settled: kept, and not suggested again on this deck.' : undefined}
+        className={`min-h-10 min-w-[3.6rem] px-3 text-sm font-bold ${on ? LIT[v] : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>
+        {LABEL[v]}
       </button>
     );
   };
+  // The columns open by the row's own width (a container query), not the window's: with the rail beside it a
+  // row is far narrower than the window, and Claude's reason was left a column 0px wide.
   return (
-    <div className="border-t border-[var(--border)] py-2.5" data-trim-card={item.name}>
-      <div className={`grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 ${marks ? 'min-[821px]:grid-cols-[auto_4.75rem_15rem_minmax(0,1fr)_17rem]' : 'min-[821px]:grid-cols-[auto_15rem_minmax(0,1fr)_17rem]'}`} data-trim-row>
-        <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">{seg('keep')}{seg('cut')}</span>
-        {marks && <span className="hidden min-[821px]:block" data-col="mark">{badge}</span>}
-        <span className="flex min-w-0 items-center gap-2" data-col="name">
-          {marks && <span className="min-[821px]:hidden">{badge}</span>}
+    <div className="@container border-t border-[var(--border)] py-2.5" data-trim-card={item.name}>
+      <div className={`grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 ${marks ? '@[66rem]:grid-cols-[auto_4.75rem_15rem_minmax(0,1fr)_17rem]' : '@[66rem]:grid-cols-[auto_15rem_minmax(0,1fr)_17rem]'}`} data-trim-row>
+        <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">{seg('keep')}{seg('ask')}{seg('cut')}</span>
+        {marks && <span className="hidden @[66rem]:block" data-col="mark">{badge}</span>}
+        {/* Phone width: the name gets its own line above the three buttons, so it never breaks mid-word beside them. */}
+        <span className="order-first col-span-2 flex min-w-0 items-center gap-2 @[66rem]:order-none @[66rem]:col-span-1" data-col="name">
+          {marks && <span className="@[66rem]:hidden">{badge}</span>}
           <button type="button" onClick={() => onCard(!showCard)} aria-expanded={showCard} className="inline-flex min-w-0 items-baseline gap-1.5 text-left font-bold hover:underline">
             <span aria-hidden="true" className={`shrink-0 text-[11px] text-[var(--faint)] transition-transform ${showCard ? 'rotate-90' : ''}`}>▶</span>
             <span className="min-w-0 break-words">{item.name}{item.star && <span className="text-[#e2b93b]" title="Never cut"> ★</span>}</span>
           </button>
           {item.flag && <span className="shrink-0 rounded-full border border-amber-300/60 px-1.5 text-[11px] font-semibold text-amber-300">{item.flag.split(':')[0]}</span>}
         </span>
-        <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] min-[821px]:col-span-1" data-col="why">
+        <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] @[66rem]:col-span-1" data-col="why">
           {item.tier === 'yours'
             ? <><span className={`font-semibold ${C.yours}`}>You:</span> {item.mine || 'kept, no reason given'}</>
             : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={item.why} /></>}
@@ -505,9 +525,9 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
         <input value={choice?.text ?? ''} onChange={(e) => onReason(e.target.value)} maxLength={300} data-col="reason"
           // One line high: the start shows with an ellipsis when not being typed in, the whole reason on hover.
           title={choice?.text?.trim() || undefined} onBlur={(e) => { e.currentTarget.scrollLeft = 0; }}
-          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' && cut ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
+          placeholder={ask ? 'what should Claude weigh?' : changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' && cut ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
           aria-label={`Your reason for ${item.name}`}
-          className={`col-span-2 min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
+          className={`col-span-2 min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] @[66rem]:col-span-1 ${changed || ask ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
       </div>
       {showCard && (
         <div className="mt-2.5 flex flex-wrap gap-3.5 rounded-xl border border-[var(--border)] bg-[#221e1a] p-3" data-trim-card-open>

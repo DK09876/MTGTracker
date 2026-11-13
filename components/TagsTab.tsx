@@ -9,21 +9,29 @@
  * lib/tags-tab.ts holds the rules.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { C, CardChip, CardPick, MARK, RemoveButton, useUndo } from './PlanTab';
+import CardName, { CardNames } from './CardName';
 import Tip from './Tip';
 import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
 import { price } from '@/lib/price';
 import type { Category } from '@/lib/categories-shared';
-import type { AiRow, TagRow, TagsView } from '@/lib/tags-tab-shared';
+import type { ScryfallCard } from '@/lib/scryfall';
+import { FOCUS_LABELS, FOCUS_TIPS, type AiRow, type TagRow, type TagsFocus, type TagsView } from '@/lib/tags-tab-shared';
 
 interface Props {
   listId: string;
   version: string;
   onTab: (tab: 'plan' | 'tune') => void;
+  /** The deck's cards by name, so a name in a suggestion shows the card on hover and opens it on a click. */
+  cardOf?: (name: string) => ScryfallCard | undefined;
+  onCard?: (card: ScryfallCard) => void;
 }
+
+/** How a suggestion's card names find their cards (CardName). */
+const Cards = createContext<{ cardOf: (name: string) => ScryfallCard | undefined; onOpen?: (card: ScryfallCard) => void }>({ cardOf: () => undefined });
 
 const H2 = ({ n, children, extra }: { n?: number; children: React.ReactNode; extra?: React.ReactNode }) => (
   <h2 className="break-words font-display text-[19px] font-bold">
@@ -33,7 +41,7 @@ const H2 = ({ n, children, extra }: { n?: number; children: React.ReactNode; ext
   </h2>
 );
 
-export default function TagsTab({ listId, version, onTab }: Props) {
+export default function TagsTab({ listId, version, onTab, cardOf, onCard }: Props) {
   const [v, setV] = useState<TagsView | null>(() => api.peek<TagsView>(api.categoriesPath(listId)) ?? null);
   const [error, setError] = useState<string | null>(null);
   // Saves run one after another and nothing is disabled meanwhile (see PlanTab): a double tap on the same thing is dropped.
@@ -53,6 +61,8 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   const [job, setJob] = useState<string | null>(null);
   // The two optional parts sit folded; a deck with nothing on it opens "More from your cards".
   const [fold, setFold] = useState<{ cards?: boolean; ai?: boolean }>({});
+  // What the next Refine with AI run looks for.
+  const [focus, setFocus] = useState<TagsFocus>({ kind: 'all' });
 
   const load = useCallback(() => api.tagsTab(listId).then(setV).catch((e) => setError(e instanceof Error ? e.message : 'Could not read the tags')), [listId]);
   useEffect(() => { void load(); }, [load, version]);
@@ -113,6 +123,7 @@ export default function TagsTab({ listId, version, onTab }: Props) {
   };
 
   return (
+    <Cards.Provider value={{ cardOf: cardOf ?? (() => undefined), onOpen: onCard }}>
     <div className="mt-4 flex flex-col gap-4 pb-4">
       <p className="flex flex-wrap items-center gap-2 text-[var(--muted)]">{shown.length ? 'Groups of cards in this deck. Optional: Tune works without them.' : 'Nothing is grouped on this deck yet. Optional: Tune works without it.'}
         <Tip label="About this tab">Jobs are counted and checked against a usual range. Your groups are ways to win, key cards, groups you or AI named, and tags from the card data. A card can be in several. Open any one to see its cards, take one out, or add one.</Tip></p>
@@ -232,8 +243,31 @@ export default function TagsTab({ listId, version, onTab }: Props) {
       {aiOpen && <section id="t-ai" data-section="✦ Refine with AI" className={`${C.sec} flex flex-col gap-2`}>
         <div className="flex items-start justify-between gap-2"><H2 extra="optional">Refine with AI</H2><button type="button" aria-expanded className={C.btn} onClick={() => setFold({ ...fold, ai: false })}>Fold</button></div>
         <p className="text-sm text-[var(--muted)]">AI suggests cards to add to your groups or take out of them, then anything new the plan depends on. Tune’s ranking of cuts doesn’t use groups; Tune’s AI reads them as a description of the deck, never as a reason to keep a card.</p>
+        <div className="flex flex-col gap-2" data-tags-focus>
+          <div role="radiogroup" aria-label="What AI looks for" className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] text-[var(--muted)]">Look for:</span>
+            {(Object.keys(FOCUS_LABELS) as Array<TagsFocus['kind']>).map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={focus.kind === k} title={FOCUS_TIPS[k]}
+                onClick={() => setFocus(k === 'one' ? { kind: 'one', category: focus.kind === 'one' ? focus.category : '' } : k === 'find' ? { kind: 'find', text: focus.kind === 'find' ? focus.text : '' } : { kind: k } as TagsFocus)}
+                className={`${C.pill} ${focus.kind === k ? C.on : C.off}`}>{FOCUS_LABELS[k]}</button>
+            ))}
+          </div>
+          {focus.kind === 'one' && (
+            <label className="flex flex-wrap items-center gap-2 text-[13px]">Which group?
+              <select value={focus.category} onChange={(e) => setFocus({ kind: 'one', category: e.target.value })} className={`${C.input} min-w-[12rem]`}>
+                <option value="">Pick one</option>
+                {v.categories.filter((c) => c.kind !== 'key').map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </label>
+          )}
+          {focus.kind === 'find' && (
+            <input value={focus.text} onChange={(e) => setFocus({ kind: 'find', text: e.target.value })} maxLength={120} aria-label="The kind of card to look for"
+              placeholder="A kind of card, e.g. wheels, sac outlets, things that untap" className={`${C.input} w-full max-w-md`} />
+          )}
+          <p className="text-[13px] text-[var(--muted)]">{FOCUS_TIPS[focus.kind]}</p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={step1Open === 0 ? C.aiBtn : C.btn} disabled={aiOff} onClick={() => act({ action: 'ai' })}>
+          <button type="button" className={step1Open === 0 ? C.aiBtn : C.btn} disabled={aiOff || (focus.kind === 'one' && !focus.category) || (focus.kind === 'find' && !focus.text.trim())} onClick={() => act({ action: 'ai', focus })}>
             {running ? 'AI is reading the deck…' : `${v.ai.ran ? '✦ Ask AI again' : '✦ Refine with AI'} · Claude Opus · ${price(v.ai.cost)}`}
           </button>
           <Tip label="What AI reads">The plan as you confirmed it, with who set each part; every category on this deck with its cards and who added each; what you removed or skipped before; and the deck’s facts (every card with its rules text). One call to Claude Opus.</Tip>
@@ -245,8 +279,12 @@ export default function TagsTab({ listId, version, onTab }: Props) {
           <div className={`${C.aiBox} flex flex-col gap-2`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className={`font-bold ${C.ai}`}>✦ Suggested by AI</span>
-              {v.ai.rows.length > 1 && <button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'accept', keys: v.ai.rows.map((r) => r.key) })}>Accept all</button>}
+              {v.ai.rows.length > 1 && <span className="flex gap-2">
+                <button type="button" className={C.btn} disabled={busy} onClick={() => act({ action: 'accept', keys: v.ai.rows.map((r) => r.key) })}>Accept all</button>
+                <button type="button" className={C.btn} disabled={busy} aria-label="Skip all AI suggestions" onClick={() => act({ action: 'skip', keys: v.ai.rows.map((r) => r.key) })}>Skip all</button>
+              </span>}
             </div>
+            {v.ai.focus.kind !== 'all' && <p className="text-[13px] text-[var(--muted)]">This run looked for: {FOCUS_LABELS[v.ai.focus.kind]}{v.ai.focus.kind === 'one' ? ` · ${v.ai.focus.category}` : v.ai.focus.kind === 'find' ? ` · “${v.ai.focus.text}”` : ''}</p>}
             {v.ai.notes && <p className="text-[13px] text-[var(--muted)]"><SymbolText text={v.ai.notes} /></p>}
             {v.ai.rows.map((r) => <AiSug key={r.key} r={r} busy={busy} act={act} />)}
           </div>
@@ -278,14 +316,15 @@ export default function TagsTab({ listId, version, onTab }: Props) {
       </div>
       {undoBar}
     </div>
+    </Cards.Provider>
   );
 }
 
-function SugRow({ title, meta, why, busy, onAccept, onSkip, children }: { title: string; meta?: string; why?: string; busy: boolean; onAccept: () => void; onSkip: () => void; children?: React.ReactNode }) {
+function SugRow({ title, head, meta, why, busy, onAccept, onSkip, children }: { title: string; head?: React.ReactNode; meta?: string; why?: string; busy: boolean; onAccept: () => void; onSkip: () => void; children?: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t border-[var(--border)] pt-2" data-suggestion>
       <div className="min-w-0 flex-[1_1_18rem]">
-        <b className="break-words">{title}</b> {meta && <span className="text-[13px] text-[var(--muted)]">{meta}</span>}
+        <b className="break-words">{head ?? title}</b> {meta && <span className="text-[13px] text-[var(--muted)]">{meta}</span>}
         {why && <p className="text-sm text-[var(--muted)]"><SymbolText text={why} /></p>}
         {children}
       </div>
@@ -298,22 +337,28 @@ function SugRow({ title, meta, why, busy, onAccept, onSkip, children }: { title:
 }
 
 function TagSug({ t, open, onToggle, busy, act }: { t: TagRow; open: boolean; onToggle: () => void; busy: boolean; act: (a: Record<string, unknown>) => void }) {
+  const { cardOf, onOpen } = useContext(Cards);
   return (
     <SugRow title={t.name} meta={`${t.cards.length} cards`} busy={busy} onAccept={() => act({ action: 'accept', keys: [t.key] })} onSkip={() => act({ action: 'skip', key: t.key })}>
-      {!open && <p className="text-[13px] text-[var(--muted)]">{t.cards.slice(0, 3).join(', ')}{t.cards.length > 3 ? ', …' : ''}</p>}
+      {!open && <p className="text-[13px] text-[var(--muted)]"><CardNames names={t.cards.slice(0, 3)} cardOf={cardOf} onOpen={onOpen} />{t.cards.length > 3 ? ', …' : ''}</p>}
       <button type="button" aria-expanded={open} onClick={onToggle} className="flex min-h-11 items-center gap-1.5 text-[13px] font-semibold text-[var(--muted)] hover:text-[var(--foreground)]">
         <span aria-hidden className={C.cards}>{open ? '▾' : '▸'}</span> {open ? 'Hide the cards' : `See all ${t.cards.length} cards`}
       </button>
-      {open && <p className="text-sm text-[var(--muted)]">{t.cards.join('  ·  ')}</p>}
+      {open && <p className="text-sm text-[var(--muted)]"><CardNames names={t.cards} cardOf={cardOf} onOpen={onOpen} sep="  ·  " /></p>}
     </SugRow>
   );
 }
 
 function AiSug({ r, busy, act }: { r: AiRow; busy: boolean; act: (a: Record<string, unknown>) => void }) {
-  const title = r.kind === 'new' ? r.category : `${r.category}: ${r.kind === 'add' ? 'add' : 'remove'} ${r.card}`;
+  const { cardOf, onOpen } = useContext(Cards);
+  const title = r.kind === 'new' ? r.category : r.kind === 'merge' ? `Merge ${r.category} into ${r.into}` : r.kind === 'drop' ? `Remove the group ${r.category}` : r.kind === 'describe' ? `Describe ${r.category}` : `${r.category}: ${r.kind === 'add' ? 'add' : 'remove'} ${r.card}`;
+  // The card's name shows the card on hover and opens it on a click, as in the card view.
+  const head = (r.kind === 'add' || r.kind === 'remove') && r.card ? <>{r.category}: {r.kind === 'add' ? 'add' : 'remove'} <CardName name={r.card} card={cardOf(r.card)} onOpen={onOpen} /></> : undefined;
+  const meta = r.kind === 'new' ? 'New category' : r.kind === 'merge' || r.kind === 'drop' ? 'Whole group' : r.kind === 'describe' ? 'Description' : undefined;
   return (
-    <SugRow title={title} meta={r.kind === 'new' ? 'New category' : undefined} why={r.why} busy={busy} onAccept={() => act({ action: 'accept', keys: [r.key] })} onSkip={() => act({ action: 'skip', key: r.key })}>
-      {r.kind === 'new' && r.cards && <p className="text-[13px] text-[var(--muted)]">{r.cards.slice(0, 8).join(', ')}{r.cards.length > 8 ? `, and ${r.cards.length - 8} more` : ''}</p>}
+    <SugRow title={title} head={head} meta={meta} why={r.why} busy={busy} onAccept={() => act({ action: 'accept', keys: [r.key] })} onSkip={() => act({ action: 'skip', key: r.key })}>
+      {r.kind === 'describe' && r.text && <p className="text-sm">“<SymbolText text={r.text} />”</p>}
+      {r.kind === 'new' && r.cards && <p className="text-[13px] text-[var(--muted)]"><CardNames names={r.cards.slice(0, 8)} cardOf={cardOf} onOpen={onOpen} />{r.cards.length > 8 ? `, and ${r.cards.length - 8} more` : ''}</p>}
     </SugRow>
   );
 }

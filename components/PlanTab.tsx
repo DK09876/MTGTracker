@@ -474,7 +474,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </form>
           {h && h.wins.length > 0 && (
             <div className={`${C.aiBox} flex flex-col gap-2`} data-suggestion>
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · ways to win' : '✦ Suggested ways to win'}</span>{h.wins.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · ways to win' : '✦ Suggested ways to win'}</span>{h.wins.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested ways to win" onClick={() => act({ action: 'skipAllWins' })}>Skip all</button></span>}</div>
               {h.wins.map((w) => (
                 <div key={w.name} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
                   <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]"><SymbolText text={w.how} /></p><p className="text-[13px] text-[var(--muted)]">{w.cards.join(', ')}</p></div>
@@ -495,7 +495,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           </div>
           {h && h.keys.length > 0 && (
             <div className={`${C.aiBox} flex flex-col gap-2`} data-suggestion>
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · key cards' : '✦ Suggested key cards'}</span>{h.keys.length > 1 && <button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button>}</div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · key cards' : '✦ Suggested key cards'}</span>{h.keys.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested key cards" onClick={() => act({ action: 'skipAllKeys' })}>Skip all</button></span>}</div>
               {h.keys.map((k) => (
                 <div key={k.key} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
                   <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words">{k.name}</b>{k.why && <p className="text-sm text-[var(--muted)]"><SymbolText text={k.why} /></p>}</div>

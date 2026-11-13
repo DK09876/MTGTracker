@@ -215,6 +215,7 @@ On every list after the first:
 - Where the owner gave a reason, apply it to similar cards and name them in the reply.
 - When the owner asks a question, answer it in the reply. The list may stay the same.
 - When two things the owner said conflict, follow the later one and say which you followed. Ask at most one question, and only when you cannot tell.
+- When the owner asked you to rethink a card, nothing about it is settled: weigh their reason, then keep it a cut, make it a closer call, or leave it off the list, and say in the reply which you did and why. A kept card they ask you to rethink may be listed again.
 
 How to rank:
 - Use your own judgement: what the commander and the owner want, the deck's plan and its combos, the curve, and the jobs every deck needs.
@@ -273,6 +274,7 @@ function ownerLine(t: Extract<TrimTurn, { kind: 'owner-reply' }>): string {
   const parts = [
     ...(t.approach !== undefined ? [`changed what matters for these cuts to: ${t.approach.trim() ? quote(t.approach) : 'nothing'}`] : []),
     ...t.marks.filter((m) => m.choice === 'keep').map((m) => `kept ${m.name}${why(m)}`),
+    ...t.marks.filter((m) => m.choice === 'ask').map((m) => `asked you to rethink ${m.name}${why(m) || ' (no reason given)'}`),
     ...(t.marks.some((m) => m.choice === 'cut') ? [`confirmed cuts: ${t.marks.filter((m) => m.choice === 'cut').map((m) => `${m.name}${why(m)}`).join(NAMES)}`] : []),
     ...(t.message.trim() ? [`said: ${quote(t.message)}`] : []),
   ];
@@ -354,8 +356,10 @@ export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: numbe
   // when the owner took the keep back (pressed Cut on it), or their latest message names it.
   const back = takenBack(s);
   const cutNow = new Set(Object.entries(s.choices).filter(([, c]) => c.choice === 'cut').map(([n]) => n));
+  // A kept card the owner asked Claude to rethink may come back too.
+  const rethink = new Set(Object.entries(s.choices).filter(([, c]) => c.choice === 'ask').map(([n]) => n));
   const keptByOwner = new Set([...Object.entries(s.choices).filter(([, c]) => c.choice === 'keep').map(([n]) => n), ...Object.entries(s.said).filter(([, v]) => v.choice === 'keep').map(([n]) => n)]
-    .filter((n) => !back.has(n) && !cutNow.has(n)));
+    .filter((n) => !back.has(n) && !cutNow.has(n) && !rethink.has(n)));
   const fixed = Object.entries(s.choices).filter(([n, c]) => c.choice === 'cut' && byFront.has(front(n))).map(([n]) => n);
   const ranked = rows(d.ranked).filter((r) => !keptByOwner.has(r.card.name));
   const guarded = guardCuts(ranked.map((r) => ({ name: r.card.name, land: isLand(r.card), row: r })), { count: null, lands: { have: ctx.plan.landNumber.have, floor: landFloor(ctx) }, never: ctx.protectedWhy }).kept.map((k) => k.row);
@@ -406,7 +410,8 @@ function remember(list: Pick<List, 'id'>, s: TrimStore): void {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
   for (const [name, c] of Object.entries(s.choices)) {
     const item = byName.get(name);
-    if (!item || !saidSomething(item as TrimItem, c)) continue;
+    // A card sent back to rethink settles nothing, so nothing about it is remembered.
+    if (!item || c.choice === 'ask' || !saidSomething(item as TrimItem, c)) continue;
     s.said[name] = { choice: c.choice, chip: c.chip ?? null, text: c.text?.trim().slice(0, 300) ?? '', at: now() };
     // An old "Pet card" choice still means never cut (the ★ now lives in the opened card).
     if (c.choice === 'keep' && c.chip === 'pet_card') {
@@ -526,7 +531,7 @@ function logRun(list: Pick<List, 'id' | 'commander'>, profileId: string, run: Ru
 
 const cleanChoice = (v: unknown): TrimChoice | null => {
   const c = v as Partial<TrimChoice> | null;
-  if (!c || (c.choice !== 'cut' && c.choice !== 'keep')) return null;
+  if (!c || (c.choice !== 'cut' && c.choice !== 'keep' && c.choice !== 'ask')) return null;
   return { choice: c.choice, chip: isTrimChip(c.chip) ? c.chip : null, text: typeof c.text === 'string' ? c.text.slice(0, 300) : '' };
 };
 

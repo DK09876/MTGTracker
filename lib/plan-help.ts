@@ -533,6 +533,13 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
     case 'acceptAllWins':
       open.wins.forEach(acceptWin);
       return;
+    case 'skipAllWins': {
+      // Every suggested way to win still waiting, skipped at once; each stays under "Show N skipped".
+      const what = open.wins.map((w) => `win:${low(w.name)}`);
+      for (const w of what) markSkipped(id, 'plan', w);
+      outcome(id, what.map((w) => `plan:${w}`), 'refused');
+      return;
+    }
     case 'acceptKey': {
       const k = open.keys.find((x) => x.name === a.name);
       if (!k) throw new PlanRefused('Nothing to accept');
@@ -542,6 +549,12 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
     case 'acceptAllKeys':
       open.keys.forEach(acceptKey);
       return;
+    case 'skipAllKeys': {
+      const what = open.keys.map((k) => `key:${k.key}`);
+      for (const w of what) markSkipped(id, 'plan', w);
+      outcome(id, what.map((w) => `plan:${w}`), 'refused');
+      return;
+    }
     case 'addKey':
       setCategoryCard(id, keyCategoryId(id), { key: keyOf(a.name), name: a.name }, true, 'owner');
       return;

@@ -7,12 +7,12 @@ export const PROMPT_VERSIONS = {
   tuneIdeas: 'tune-ideas-1',
   finishPicks: 'finish-picks-1',
   cutReview: 'cut-review-1',
-  chat: 'chat-1',
+  chat: 'chat-2',
   planRead: 'plan-read-1',
   planPass: 'plan-pass-2',
   planHelp: 'plan-help-3',
-  tagsAi: 'tags-3',
-  trim: 'trim-2',
+  tagsAi: 'tags-4',
+  trim: 'trim-3',
   trimApproach: 'trim-approach-2',
 } as const;
 
