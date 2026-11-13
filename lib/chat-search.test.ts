@@ -390,3 +390,68 @@ describe('review item 31: answer in words, and replaced proposals; item 30: mark
     expect(text).toContain('Deck Spell 3 - Instant (Finish: A Zombie that comes back by itself.)');
   });
 });
+
+describe('review round 2: Chat items 7-13', { timeout: 60_000 }, () => {
+  it('7: the words check catches only answers about their buttons, not short real answers', async () => {
+    const { onlyButtons } = await import('./deck-chat');
+    expect(onlyButtons("I've put up six buttons for you to apply.", 6)).toBe(true);
+    expect(onlyButtons("That's two buttons.", 2)).toBe(true);
+    expect(onlyButtons('Here you go.', 4)).toBe(true);
+    expect(onlyButtons('Cut it.', 1)).toBe(false);
+    expect(onlyButtons('Zombies: about 44 (42 spare, 2 in other decks), from t:zombie; standouts A, B, C\nAristocrats: about 30, from sacrifice; standouts D, E\nPick: Zombies, because the commander counts them.\nMissing: a finisher.', 1)).toBe(false);
+  });
+
+  it('9: only a newer row that can apply replaces one, and undoing it gives the earlier one back', async () => {
+    const { markReplaced, unreplace } = await import('./deck-chat');
+    const row = (over: Record<string, unknown>) => ({ kind: 'swap', name: 'In', why: '', cardId: 'x', held: null, price: null, out: { name: 'Out', cardId: 'o' }, ...over });
+    const chat = { messages: [{ role: 'assistant', text: '', at: '', changes: [row({})] }] } as never as import('./deck-chat').DeckChat;
+    markReplaced(chat, [row({ blocked: 'off-colour' })] as never, 1);
+    expect(chat.messages[0].changes![0].replaced).toBeUndefined();
+    markReplaced(chat, [row({ name: 'Other' })] as never, 1);
+    expect(chat.messages[0].changes![0]).toMatchObject({ replaced: true, replacedBy: [1, 0] });
+    unreplace(chat, 1, 0);
+    expect(chat.messages[0].changes![0].replaced).toBe(false);
+  });
+
+  it('10: asked to fill a commander-only deck, the Finish button stays a fill however many adds are shown', async () => {
+    const { pageButtons } = await import('./deck-chat');
+    const adds = [1, 2, 3].map((i) => ({ kind: 'add', name: `A${i}`, why: '', cardId: `a${i}`, held: null, price: null }));
+    expect(pageButtons(adds as never, [], { page: 'finish', why: 'Fill it.', add: 99 }, 1)).toEqual([{ page: 'finish', why: 'Fill it.', fill: true }]);
+    expect(pageButtons(adds as never, [], { page: 'finish', why: '', add: 10 }, 60)).toEqual([{ page: 'finish', why: '', add: 7 }]);
+    const { goLabel } = await import('./chat-pages');
+    expect(goLabel({ page: 'finish', why: '', fill: true }, true)).toBe('Open Finish · fill to 100');
+  });
+
+  it('11: a card counts as named only as a whole word', async () => {
+    const { list } = await setup();
+    const db = await import('./db');
+    for (let i = 1; i <= 7; i++) db.addCardToList(list.id, card(`Opt ${i}`));
+    const cuts = Array.from({ length: 7 }, (_, i) => ({ name: `Opt ${i + 1}`, why: '.' }));
+    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { cut: cuts } }], 'Cut these.'], 'what options do I have? optimise it');
+    expect(answer.changes).toHaveLength(5);
+  });
+
+  it('12: stray brackets never show; headings and numbered lists render', async () => {
+    const { splitMarked, blocksOf } = await import('./chat-text');
+    expect(splitMarked('Play [[[[Opt]]]] now [[ and').map((p) => p.text).join('')).toBe('Play Opt now  and');
+    expect(splitMarked('Play [[[[Opt]]]]').find((p) => p.name)?.name).toBe('Opt');
+    expect(blocksOf('## Picks\n1. A\n2. B').map((b) => [b.list, b.lines])).toEqual([[false, ['**Picks**']], [true, ['A', 'B']]]);
+  });
+
+  it('8, 13: marked names always resolve past the cap, and deck cards keep their ids', async () => {
+    const { list } = await setup();
+    const db = await import('./db');
+    const main = db.cardsInList(list.id);
+    const { reply, newChat } = await import('./deck-chat');
+    const chat = newChat(list.id, 'dk', 'q');
+    chat.messages.push({ role: 'user', text: 'q', at: '' });
+    // 21 searches of 15 different cards each: 315 cards, past the 300 kept from tool results.
+    let k = 0;
+    const t = { ...(await tools(list)), search: async () => Array.from({ length: 15 }, () => { k += 1; return { ...card(`Found ${k}`), id: `f${k}` }; }) as never };
+    const st = stand([Array.from({ length: 21 }, (_, i) => ({ name: 'search_cards', input: { query: `q${i}` } })), 'Keep [[Deck Spell 2]] and add [[Spare Draw]].']);
+    const answer = await reply(chat, { list, cards: main, brief: '', roles: null } as never, t as never, st.call as never, 'claude-opus-5-5');
+    expect(answer.cards!.length).toBeGreaterThan(300);
+    expect(answer.cards?.find((c) => c.name === 'Spare Draw')).toBeTruthy();
+    expect(answer.cards?.find((c) => c.name === 'Deck Spell 2')?.id).toBe('Deck Spell 2');
+  });
+});

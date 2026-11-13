@@ -28,26 +28,32 @@ export function splitNames(text: string, names: string[]): Array<{ text: string;
  * never show.
  */
 export function splitMarked(text: string): Array<{ text: string; name?: string }> {
+  // Extra or unmatched brackets never show (round 2, item 12): "[[[[Opt]]]]" is Opt, a lone "[[" is dropped.
+  const clean = (t: string) => t.replace(/\[\[+|\]\]+/g, '');
   const out: Array<{ text: string; name?: string }> = [];
   let at = 0;
-  for (const m of text.matchAll(/\[\[([^\]]{1,80})\]\]/g)) {
-    if (m.index! > at) out.push({ text: text.slice(at, m.index) });
+  for (const m of text.matchAll(/\[\[+([^[\]]{1,120})\]\]+/g)) {
+    if (m.index! > at) out.push({ text: clean(text.slice(at, m.index)) });
     out.push({ text: m[1], name: m[1].trim() });
     at = m.index! + m[0].length;
   }
-  if (at < text.length) out.push({ text: text.slice(at) });
-  return out;
+  if (at < text.length) out.push({ text: clean(text.slice(at)) });
+  return out.filter((p) => p.text);
 }
 
 /** Whether the answer marks its card names (newer answers); older ones are matched against known names. */
 export const marksNames = (text: string) => /\[\[[^\]]+\]\]/.test(text);
 
-/** Lines grouped into paragraphs and lists ("- ", "* " or "• " at the start). */
+/**
+ * Lines grouped into paragraphs and lists ("- ", "* ", "• " or "1." at the start). A heading ("## Picks") reads
+ * as a bold line, never with its hashes.
+ */
 export function blocksOf(text: string): Array<{ list: boolean; lines: string[] }> {
   const out: Array<{ list: boolean; lines: string[] }> = [];
-  for (const l of text.split('\n')) {
-    const item = /^\s*[-*•]\s+/.test(l);
-    const line = item ? l.replace(/^\s*[-*•]\s+/, '') : l;
+  for (const raw of text.split('\n')) {
+    const l = raw.replace(/^\s*#{1,6}\s+(.+?)\s*#*\s*$/, (_, h: string) => `**${h.replace(/\*\*/g, '')}**`);
+    const item = /^\s*([-*•]|\d+[.)])\s+/.test(l);
+    const line = item ? l.replace(/^\s*([-*•]|\d+[.)])\s+/, '') : l;
     const last = out.at(-1);
     if (last && last.list === item) last.lines.push(line);
     else out.push({ list: item, lines: [line] });

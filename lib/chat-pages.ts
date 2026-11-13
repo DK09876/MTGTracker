@@ -18,6 +18,8 @@ export interface ChatGo {
   cutTo?: number;
   /** Finish: add this many. */
   add?: number;
+  /** Finish: fill to 100 (the app adds the lands), however many cards that is when pressed. */
+  fill?: boolean;
 }
 
 export const PAGE_LABEL: Record<ChatPage, string> = { trim: 'Trim', finish: 'Finish', tags: 'Tags', check: 'Check', plan: 'Plan' };
@@ -58,7 +60,7 @@ export const finishWant = (add: number | undefined, size: number | null): number
 /** What the button says: where it goes, with its number. `size`: the deck's cards with the commander, when known. */
 export function goLabel(go: ChatGo, planConfirmed: boolean, size: number | null = null): string {
   if (!planConfirmed && LOCKED_UNTIL_PLAN.includes(go.page)) return `Confirm the plan first · Open Plan`;
-  const fill = go.page === 'finish' && finishWant(go.add, size) === null;
+  const fill = go.page === 'finish' && (go.fill || finishWant(go.add, size) === null);
   const n = go.page === 'trim' ? (go.cut ? ` · cut ${go.cut}` : go.cutTo ? ` · cut to ${go.cutTo}` : '') : fill ? ' · fill to 100' : go.page === 'finish' && go.add ? ` · add ${go.add}` : '';
   return `Open ${PAGE_LABEL[go.page]}${n}`;
 }

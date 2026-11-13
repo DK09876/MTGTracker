@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 
 import { applyChange, ChatActionRefused, undoChange, type Undo } from '@/lib/chat-actions';
-import { deleteChat, getChat, saveChat } from '@/lib/deck-chat';
+import { deleteChat, getChat, saveChat, unreplace } from '@/lib/deck-chat';
 import { latestJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
 
@@ -54,6 +54,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
       if (!change.applied) return NextResponse.json({ error: 'That isn’t applied' }, { status: 409 });
       await undoChange(owned.list, owned.profile, change.applied.undo as Undo);
       change.applied = null;
+      unreplace(chat, body.message!, body.change!);
     } else change.done = true;
     // Applied now: a reason it couldn't be, written when Claude answered, no longer holds.
     if (change.applied) delete change.blocked;

@@ -53,6 +53,8 @@ export interface Change {
   blocked?: string;
   /** A later answer proposed something else for the same card: no longer applied from here (review item 31). */
   replaced?: boolean;
+  /** The row that replaced it: [message, change]. */
+  replacedBy?: [number, number];
   /** Applied here, with what Undo needs; null once undone. */
   applied?: { at: string; undo: unknown } | null;
 }
@@ -373,11 +375,13 @@ export function capChanges(changes: Change[], opts: { inChat: boolean; named?: S
  * button for each page whose kind was held back, carrying the number held back. A count that comes to nothing
  * drops the button.
  */
-export function pageButtons(changes: Change[], held: Array<{ kind: Change['kind']; n: number }>, asked: ChatGo | null): ChatGo[] {
+export function pageButtons(changes: Change[], held: Array<{ kind: Change['kind']; n: number }>, asked: ChatGo | null, size: number | null = null): ChatGo[] {
   const shown = (kind: Change['kind']) => changes.filter((c) => c.kind === kind && usable(c)).length;
   const out: ChatGo[] = [];
   if (asked) {
     if (asked.page === 'trim' && asked.cut) { const left = asked.cut - shown('cut'); if (left > 0) out.push({ ...asked, cut: left }); }
+    // An add that brings the deck to 100 is a fill: it stays one however many adds are shown here (round 2, item 10).
+    else if (asked.page === 'finish' && asked.add && size !== null && size + asked.add >= 100) out.push({ page: 'finish', why: asked.why, fill: true });
     else if (asked.page === 'finish' && asked.add) { const left = asked.add - shown('add'); if (left > 0) out.push({ ...asked, add: left }); }
     else out.push(asked);
   }
@@ -490,27 +494,46 @@ export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, h
 export const WORDS_FIRST = 'Before the buttons: answer my question itself in words - your judgement, your reasons, and any count I asked for, taken from the deck. Don\'t describe the buttons again.';
 
 /**
- * An answer whose words only talk about its buttons (review item 31): under three sentences, or about the
- * buttons ("I've put up six buttons", "That's two buttons") and little else.
+ * An answer whose words only talk about its buttons (review item 31, round 2 item 7): it opens with or is mostly
+ * "I've put up / that's N buttons / see below", or it is under about 15 words while more than two proposals wait.
+ * Lines and list items count as sentences, so a short theme answer in lines, or "Cut it." with one proposal, is
+ * an answer and never asked again.
  */
-export function onlyButtons(text: string): boolean {
+export function onlyButtons(text: string, proposals: number): boolean {
   const t = text.trim();
-  const sentences = t.split(/(?<=[.!?])\s+/).filter((x) => x.trim().length > 3);
-  const aboutButtons = /\b(buttons?|apply|proposals?|I'?ve (put|proposed|added)|below)\b/i;
-  return sentences.length < 3 || (sentences.length < 5 && sentences.filter((x) => aboutButtons.test(x)).length >= sentences.length / 2);
+  const units = t.split(/\n+|(?<=[.!?])\s+/).map((x) => x.replace(/^\s*([-*•]|\d+[.)])\s+/, '').trim()).filter((x) => x.length > 2);
+  const about = /\b(buttons?|proposals?|see (them )?below|below|I'?ve (put|proposed|added|queued)|that'?s (one|two|three|four|five|six|seven|eight|\d+))\b/i;
+  const opens = /^(I'?ve (put|proposed|added|queued)|I have (put|proposed|added)|That'?s (one|two|three|four|five|six|seven|eight|\d+) (button|proposal|change)|See (the )?(buttons|below)|Here are (the|your|some) (buttons|proposals|changes))/i;
+  const words = t.split(/\s+/).filter(Boolean).length;
+  if (!units.length) return proposals > 0;
+  const aboutShare = units.filter((u) => about.test(u)).length / units.length;
+  return (opens.test(units[0]) && units.length - units.filter((u) => about.test(u)).length <= 1) || aboutShare >= 0.6 || (words < 15 && proposals > 2);
 }
 
 /** The card a change takes out or acts on, for spotting a later proposal that replaces an earlier one. */
 const outOf = (c: Change) => (c.kind === 'swap' ? c.out?.name : c.kind === 'cut' || c.kind === 'move' || c.kind === 'add' ? c.name : null);
 
-/** A new answer's proposals replace earlier unapplied ones on the same card: those are marked and can't also be applied. */
-export function markReplaced(chat: DeckChat, now: Change[]): void {
-  const touched = new Set(now.map(outOf).filter((n): n is string => !!n).map((n) => front(n).toLowerCase()));
-  if (!touched.size) return;
+/**
+ * A new answer's proposals replace earlier unapplied ones on the same card: those are marked and can't also be
+ * applied. Only a newer row that can apply replaces one (round 2, item 9), and each marked row says which row
+ * replaced it, so undoing that one gives it back. `at` is the new answer's place in the chat.
+ */
+export function markReplaced(chat: DeckChat, now: Change[], at: number): void {
+  const by = new Map<string, number>();
+  now.forEach((c, j) => { const k = outOf(c); if (k && usable(c)) by.set(front(k).toLowerCase(), j); });
+  if (!by.size) return;
   for (const m of chat.messages) for (const c of m.changes ?? []) {
     if (now.includes(c) || c.applied || c.done) continue;
     const k = outOf(c);
-    if (k && touched.has(front(k).toLowerCase())) c.replaced = true;
+    const j = k ? by.get(front(k).toLowerCase()) : undefined;
+    if (j !== undefined) { c.replaced = true; c.replacedBy = [at, j]; }
+  }
+}
+
+/** Undoing a proposal gives back the earlier ones it replaced. */
+export function unreplace(chat: DeckChat, message: number, change: number): void {
+  for (const m of chat.messages) for (const c of m.changes ?? []) {
+    if (c.replacedBy?.[0] === message && c.replacedBy?.[1] === change) { c.replaced = false; delete c.replacedBy; }
   }
 }
 
@@ -535,7 +558,8 @@ export async function reply(
   let changes: Change[] = [];
   // Cards the look-ups returned, for linking names in the answer.
   const seenCards = new Map<string, ChatCard>();
-  const note = (cs: ChatCard[] | undefined) => { for (const c of cs ?? []) if (c.id && seenCards.size < 300 && !seenCards.has(c.name)) seenCards.set(c.name, c); };
+  // Cards from tool results are capped; a name the answer itself marks is always kept (round 2, item 8).
+  const note = (cs: ChatCard[] | undefined, always = false) => { for (const c of cs ?? []) if (c.id && (always || seenCards.size < 300) && !seenCards.has(c.name)) seenCards.set(c.name, c); };
   const cardsNow = () => {
     note(changes.filter((c) => c.cardId && (c.kind === 'add' || c.kind === 'swap')).map((c) => ({ name: c.name, id: c.cardId!, image: c.image ?? null })));
     return seenCards.size ? { cards: [...seenCards.values()] } : {};
@@ -547,21 +571,26 @@ export async function reply(
   // The owner's newest message: cards they named themselves are never held back, and their words can say "do it here".
   const ownerText = [...chat.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
   const ownerSays = ownerText.toLowerCase();
-  const pagesNow = () => { const p = pageButtons(changes, held, asked); return p.length ? { pages: p } : {}; };
+  const deckSize = deck.cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (deck.list.commander ? 1 : 0);
+  const pagesNow = () => { const p = pageButtons(changes, held, asked, deckSize); return p.length ? { pages: p } : {}; };
   // The answer, stored: [[names]] resolved to cards (kept with the message, so an old chat still links them), and
   // earlier proposals this answer replaces marked so they can't also be applied.
   const finish = (text: string, model?: string): ChatMessage => {
-    const marked = [...new Set([...text.matchAll(/\[\[([^\]]{2,80})\]\]/g)].map((m) => m[1].trim()))];
+    const marked = [...new Set([...text.matchAll(/\[\[+([^[\]]{2,120})\]\]+/g)].map((m) => m[1].trim()))];
     let unresolved = 0;
     if (marked.length) {
-      const known = new Set([...deck.cards.map((c) => front(c.card.name).toLowerCase()), ...(deck.list.commander ? [front(deck.list.commander.name).toLowerCase()] : []), ...[...seenCards.keys()].map((n) => front(n).toLowerCase())]);
-      const want = marked.filter((n) => !known.has(front(n).toLowerCase()));
+      // The deck's own cards keep their ids too, so the link lives on after a card leaves the deck (round 2, item 13).
+      const deckCards = new Map([...deck.cards.map((c) => c.card), ...(deck.list.commander ? [deck.list.commander] : [])].map((c) => [front(c.name).toLowerCase(), c]));
+      const seen = new Set([...seenCards.keys()].map((n) => front(n).toLowerCase()));
+      const fromDeck = marked.map((n) => deckCards.get(front(n).toLowerCase())).filter((c): c is ScryfallCard => !!c);
+      note(fromDeck.map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })), true);
+      const want = marked.filter((n) => !deckCards.has(front(n).toLowerCase()) && !seen.has(front(n).toLowerCase()));
       const found = want.length && tools.resolve ? tools.resolve(want) : [];
-      note(found);
+      note(found, true);
       const got = new Set(found.map((c) => front(c.name).toLowerCase()));
       unresolved = want.filter((n) => !got.has(front(n).toLowerCase())).length;
     }
-    markReplaced(chat, changes);
+    markReplaced(chat, changes, chat.messages.length);
     return { role: 'assistant', text, at: new Date().toISOString(), lookups, changes, ...pagesNow(), ...cardsNow(), ...(unresolved ? { unresolved } : {}), ...(model ? { model } : {}) };
   };
   // Searching one at a time can use more rounds than an answer usually takes: an answer that searches gets more.
@@ -587,7 +616,7 @@ export async function reply(
     if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
       // Buttons with no answer in words (review item 31): ask once for the answer itself, and put it first.
-      if (changes.length && answer.stop_reason !== 'refusal' && onlyButtons(said.join('\n\n'))) {
+      if (changes.length && answer.stop_reason !== 'refusal' && onlyButtons(said.join('\n\n'), changes.length)) {
         const more = await call({
           model, max_tokens: 4_000,
           system: [{ type: 'text', text: CHAT_SYSTEM }, { type: 'text', text: deckText(deck), cache_control: { type: 'ephemeral' } }],
@@ -605,7 +634,8 @@ export async function reply(
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
         const all = resolveChanges(input, deck, tools.held, tools.check);
-        const named = new Set(all.map((c) => front(c.name).toLowerCase()).filter((n) => n.length >= 3 && ownerSays.includes(n)));
+        // Whole names on word boundaries: "Opt" isn't named in "option" (round 2, item 11).
+        const named = new Set(all.map((c) => front(c.name).toLowerCase()).filter((n) => n.length >= 3 && new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu').test(ownerSays)));
         const capped = capChanges(all, { inChat: input.in_chat === true || saysHere(ownerText), named });
         // A later propose_changes replaces the earlier one whole: its proposals and what it held back.
         changes = capped.changes;
