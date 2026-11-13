@@ -12,6 +12,7 @@ import AiUsage from '@/components/AiUsage';
 import { People } from '@/components/AdminSettings';
 import CardData from '@/components/CardData';
 import MyProfile from '@/components/MyProfile';
+import { ShareSwitch, SuggestionStats } from '@/components/SuggestionLog';
 import ErrorLog from '@/components/ErrorLog';
 import { Budget } from '@/components/AiBits';
 import * as api from '@/lib/api';
@@ -19,10 +20,10 @@ import type { AiState } from '@/lib/ai';
 import { useMe } from '@/lib/use-me';
 
 
-type Tab = 'profile' | 'ai' | 'people' | 'health';
+type Tab = 'profile' | 'ai' | 'people' | 'suggestions' | 'health';
 const fromHash = (hash: string): Tab => {
   const h = hash.replace('#', '');
-  return h === 'errors' || h === 'health' ? 'health' : h === 'ai' || h === 'people' ? h : 'profile';
+  return h === 'errors' || h === 'health' ? 'health' : h === 'ai' || h === 'people' || h === 'suggestions' ? h : 'profile';
 };
 
 export default function SettingsPage() {
@@ -49,7 +50,7 @@ export default function SettingsPage() {
   if (!state) return <p className="text-sm text-[var(--muted)]">{error ?? 'Loading…'}</p>;
   const admin = !!me?.isAdmin;
 
-  const tabs: Array<[Tab, string]> = [['profile', 'Profile'], ['ai', 'AI'], ...(admin ? [['people', 'People'], ['health', 'App health']] as Array<[Tab, string]> : [])];
+  const tabs: Array<[Tab, string]> = [['profile', 'Profile'], ['ai', 'AI'], ...(admin ? [['people', 'People'], ['suggestions', 'Suggestions'], ['health', 'App health']] as Array<[Tab, string]> : [])];
   const shown: Tab = tabs.some(([t]) => t === tab) ? tab : 'profile';
 
   return (
@@ -71,7 +72,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {shown === 'profile' && <MyProfile />}
+      {shown === 'profile' && <><MyProfile /><ShareSwitch /></>}
+      {shown === 'suggestions' && <SuggestionStats />}
 
       {shown === 'ai' && (
         <>

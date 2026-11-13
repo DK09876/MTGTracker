@@ -9,6 +9,8 @@ import { NextResponse } from 'next/server';
 import { duplicateList, getList } from '@/lib/db';
 import { copyPlacement } from '@/lib/deck-folders';
 import { copyPlan } from '@/lib/deck-plan';
+import { copyCategoryMarks } from '@/lib/categories';
+import { copyPlanOwner } from '@/lib/plan-help';
 import { copyDeckRoles } from '@/lib/deck-roles';
 import { copySections } from '@/lib/sections';
 import { copyTune } from '@/lib/tune-store';
@@ -26,7 +28,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const copy = duplicateList(id, owned.profile, name.slice(0, 120));
   if (!copy) return NextResponse.json({ error: 'No such list' }, { status: 404 });
   copyDeckRoles(id, copy);
+  copyCategoryMarks(id, copy);
   copyPlan(id, copy);
+  copyPlanOwner(id, copy);
   copyPlacement(id, copy);
   copySections(id, copy);
   copyTune(id, copy);

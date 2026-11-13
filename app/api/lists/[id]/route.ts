@@ -5,6 +5,8 @@
 
 import { NextResponse } from 'next/server';
 
+import type { ScryfallCard } from '@/lib/scryfall';
+
 import { forgetHistory, recorded } from '@/lib/deck-history';
 import { cardsInList, deleteList, getList, promoteToCommander, renameList, setCommander, slotQuestions } from '@/lib/db';
 import { planConfirmed, planProgress } from '@/lib/deck-plan';
@@ -13,9 +15,26 @@ import { isPublic, setPublic } from '@/lib/profile-style';
 import { type Finish, getCard, ScryfallError } from '@/lib/scryfall';
 import { dropSections, sectionsOf } from '@/lib/sections';
 import { dropTune } from '@/lib/tune-store';
+import { dropTrim } from '@/lib/trim';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/**
+ * A deck row's card without the links and image sizes no page reads: the
+ * response was 703 kB for a 131-card deck, mostly Scryfall's own URLs.
+ * Cards are always added and changed by id, so nothing sends these back.
+ */
+const DROP = ['related_uris', 'purchase_uris', 'prints_search_uri', 'rulings_uri', 'set_search_uri', 'scryfall_set_uri', 'uri', 'preview'] as const;
+const SIZES = ['small', 'normal', 'large', 'art_crop'] as const;
+const images = (u?: Record<string, string>) => (u ? Object.fromEntries(SIZES.filter((k) => u[k]).map((k) => [k, u[k]])) : u);
+function lean<T extends { card: ScryfallCard }>(row: T): T {
+  const c = { ...row.card } as Record<string, unknown>;
+  for (const k of DROP) delete c[k];
+  if (c.image_uris) c.image_uris = images(c.image_uris as Record<string, string>);
+  if (Array.isArray(c.card_faces)) c.card_faces = (c.card_faces as Array<Record<string, unknown>>).map((f) => (f.image_uris ? { ...f, image_uris: images(f.image_uris as Record<string, string>) } : f));
+  return { ...row, card: c as unknown as ScryfallCard };
+}
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,7 +43,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (owned instanceof NextResponse) return owned;
     const deck = owned.list.kind === 'deck';
     return NextResponse.json({
-      list: owned.list, cards: cardsInList(id), public: isPublic(id), planConfirmed: planConfirmed(id), planProgress: deck ? planProgress(id) : null,
+      list: owned.list, cards: cardsInList(id).map(lean), public: isPublic(id), planConfirmed: planConfirmed(id), planProgress: deck ? planProgress(id) : null,
       // A deck's sections beyond Main, and what to ask about its second commander or companion.
       sections: deck ? sectionsOf(id) : [], slotQuestions: deck ? slotQuestions(id) : [],
     });
@@ -86,6 +105,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // The deck's own sections and Tune state go with it.
     dropSections(id);
     dropTune(id);
+    dropTrim(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('[list] delete failed', error);

@@ -13,7 +13,9 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
-import DeckPlan from '@/components/DeckPlan';
+import PlanTab from '@/components/PlanTab';
+import TagsTab from '@/components/TagsTab';
+import { TuneLocked } from '@/components/TuneLock';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
 import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
@@ -23,7 +25,6 @@ import Tip from '@/components/Tip';
 import { useDeckCopies } from '@/components/useDeckCopies';
 import DeckHealth from '@/components/DeckHealth';
 import DeckTune from '@/components/DeckTune';
-import DeckTags from '@/components/DeckTags';
 import FlaggedZone from '@/components/FlaggedZone';
 import GameChangerLine from '@/components/GameChangerLine';
 import SlotQuestions from '@/components/SlotQuestions';
@@ -101,16 +102,13 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the address on arrival
     if (tab) setSection(tab);
   }, [setSection]);
-  // Whether the deck's plan is confirmed: Chat and the AI steps wait for it.
+  // Whether the owner has confirmed the deck's plan: only the rail's "start here" hint reads it; nothing is locked.
   const [planConfirmed, setPlanConfirmed] = useState(seen?.planConfirmed !== false);
-  // How many parts of the plan are left to confirm, for the locked screens.
-  const [planLeft, setPlanLeft] = useState<number | null>(seen?.planProgress ? seen.planProgress.total - seen.planProgress.done : null);
   // A deck's sections beyond Main, and what an import left to ask about its second commander or companion.
   const [sections, setSections] = useState<DeckSection[]>(seen?.sections?.length ? seen.sections : DEFAULT_SECTIONS);
   const [questions, setQuestions] = useState<SlotQuestion[]>(seen?.slotQuestions ?? []);
   // The bracket the plan aims for, which the Cards tab checks the Game Changers against.
   const [bracket, setBracket] = useState<number | null>(() => api.peek<api.DeckPlanState>(api.paths.plan(id))?.bracket ?? null);
-  const onPlan = useCallback((p: api.DeckPlanState) => { setPlanConfirmed(p.confirmed); setBracket(p.bracket ?? null); setPlanLeft(p.progress.total - p.progress.done); }, []);
   // A question from Tune, waiting in a new chat.
   const [chatQuestion, setChatQuestion] = useState('');
 
@@ -156,7 +154,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     setDraftName(data.list.name);
     setShown(!!data.public);
     setPlanConfirmed(data.planConfirmed !== false);
-    if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
     if (data.sections?.length) setSections(data.sections);
     setQuestions(data.slotQuestions ?? []);
   }, [id]);
@@ -224,8 +221,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         setDraftName(data.list.name);
         setShown(!!data.public);
         setPlanConfirmed(data.planConfirmed !== false);
-        if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
-    if (data.planProgress) setPlanLeft(data.planProgress.total - data.planProgress.done);
         if (data.sections?.length) setSections(data.sections);
         setQuestions(data.slotQuestions ?? []);
         // Read the other tabs now, side by side, so opening one is instant.
@@ -635,25 +630,29 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       <div className={deck ? 'mt-5 pb-20 lg:grid lg:grid-cols-[12.5rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:pb-0' : ''}>
       {deck && <DeckRail section={section} onSection={setSection} planConfirmed={planConfirmed} deck={{ name: list.name, art: heroArt, size: deckSize, onAdd: () => setAddOpen(true) }} />}
       <div className="min-w-0">
+      {/* One line on every tab: where the deck stands against 100, whether Tune is open, and the step that comes next. */}
+      {/* Nothing to say once the plan is confirmed and the deck is exactly 100. */}
+      {deck && deckSize > 0 && !(planConfirmed && deckSize === 100) && (
+        <p data-tour="deck-state" data-plan-line className={`flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-[var(--surface)] py-1.5 pl-3.5 pr-1.5 text-sm ${planConfirmed ? 'border-[#3f6b4a]' : 'border-[#d6aa2e]/70'}`}>
+          <b className="tabular-nums">{deckSize} of 100{deckSize > 100 ? ` · ${deckSize - 100} over` : deckSize < 100 ? ` · ${100 - deckSize} short` : ''}</b>
+          <span className="min-w-0 flex-1 text-[var(--muted)]">{planConfirmed ? 'Tune is open.' : 'Tune is locked until you confirm the plan.'}</span>
+          {!planConfirmed && section !== 'plan' && section !== 'tune' && <button onClick={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">Go to Plan</button>}
+          {planConfirmed && section !== 'tune' && deckSize !== 100 && <button onClick={() => { setSection('tune'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110">{deckSize > 100 ? `Trim ${deckSize - 100} in Tune` : `Fill ${100 - deckSize} in Tune`}</button>}
+        </p>
+      )}
       {deck && section === 'plan' ? (
-        tags ? (
-          <DeckPlan
-            listId={id}
-            tags={tags}
-            onTags={setTags}
-            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-            onPlan={onPlan}
-            onTab={(tab) => setSection(tab)}
-            cardNames={[...new Set(cards.map((c) => c.card.name))].sort()}
-          />
-        ) : <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>
+        <PlanTab
+          listId={id}
+          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          onConfirmed={setPlanConfirmed}
+          onBracket={setBracket}
+        />
       ) : null}
-      {deck && section === 'plan' && tags ? (
-        <section id="plan-tags" data-section="Tags" className="mt-10 scroll-mt-24 border-t border-[var(--border)] pt-6">
-          <DeckTags listId={id} entries={entries} tags={tags} onTags={setTags} onSelect={setSelected} onPlan={() => window.scrollTo({ top: 0, behavior: 'smooth' })} sections={sections} />
-        </section>
-      ) : deck && (section === 'tune' || section === 'chat') && !planConfirmed ? (
-        <PlanLock what={section === 'tune' ? 'Tune' : 'Chat'} left={planLeft} onPlan={() => setSection('plan')} />
+      {deck && section === 'tags' ? (
+        <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
+      ) : deck && section === 'tune' && !planConfirmed ? (
+        <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
         <>
           <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />
@@ -661,7 +660,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             listId={id}
             version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
             sections={sections}
-            brief={tags?.brief ?? ''}
             tagNames={(tags?.tags ?? []).filter((t) => t.status === 'accepted').map((t) => t.name)}
             onChanged={load}
             onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
@@ -692,7 +690,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
             />}
         </>
-      ) : deck && section === 'plan' ? null : (
+      ) : deck && (section === 'plan' || section === 'tags') ? null : (
         <>
         {deck && <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />}
         {deck && <GameChangerLine names={entries.filter((e) => e.board === 'main' && e.card.game_changer).map((e) => e.card.name)} bracket={bracket} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0 }); }} />}
@@ -844,16 +842,3 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   );
 }
 
-/** Tune and Chat wait for the plan: everything they do is built on what the deck is for. */
-function PlanLock({ what, left, onPlan }: { what: 'Tune' | 'Chat'; left: number | null; onPlan: () => void }) {
-  return (
-    <div data-tour={what === 'Chat' ? 'chat-locked' : 'tune-locked'} className="mt-5 flex max-w-2xl flex-col items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-      <h3 className="font-display text-lg font-semibold">{what} starts with the plan</h3>
-      <p className="text-sm text-[var(--muted)]">
-        {what === 'Tune' ? 'Cuts, swaps, finding cards and fixes are all built on what the deck is for.' : 'Claude answers better when it knows what the deck is for.'}
-        {' '}{left ? `${left} part${left === 1 ? '' : 's'} of the plan still to confirm. Most are filled in already.` : 'The plan is drafted from the cards: read it, change anything, and confirm it.'}
-      </p>
-      <button onClick={onPlan} className="btn-go rounded-full px-4 py-1.5 text-sm font-semibold">Go to Plan</button>
-    </div>
-  );
-}

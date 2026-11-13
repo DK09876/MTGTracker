@@ -87,8 +87,14 @@ export interface ScryfallCard {
   scryfall_uri?: string;
   image_uris?: { small?: string; normal?: string; large?: string; art_crop?: string };
   // Double-faced cards carry their images and text on the faces instead.
+  /** Scryfall's layout: normal, transform, modal_dfc, reversible_card... */
+  layout?: string;
   card_faces?: Array<{
     name: string;
+    /** Reversible cards keep their oracle id and mana value on the faces. */
+    oracle_id?: string;
+    cmc?: number;
+    colors?: string[];
     mana_cost?: string;
     type_line?: string;
     oracle_text?: string;
@@ -107,6 +113,36 @@ export interface ScryfallCard {
   finishes?: string[];
   prices?: { usd?: string | null; usd_foil?: string | null; usd_etched?: string | null; eur?: string | null; tix?: string | null };
   legalities?: Record<string, string>;
+}
+
+/**
+ * A reversible card (Steam Vents // Steam Vents, a land printed on both
+ * sides) keeps its type line, text, cost and oracle id only on its faces,
+ * so every check that reads the card's own type line saw no land. Its
+ * front is copied up, the way Scryfall gives them for every other card.
+ * Anything else is returned as it is.
+ */
+export function normalizeCard<T extends ScryfallCard>(card: T): T {
+  const face = card?.card_faces?.[0];
+  if (!face || card.type_line) return card;
+  return {
+    ...card,
+    type_line: face.type_line,
+    oracle_text: card.oracle_text ?? face.oracle_text,
+    mana_cost: card.mana_cost ?? face.mana_cost,
+    cmc: card.cmc ?? face.cmc,
+    oracle_id: card.oracle_id ?? face.oracle_id,
+    colors: card.colors ?? face.colors,
+  };
+}
+
+/** Every card in a Scryfall answer, normalized: a card, a list of them, or a collection lookup. */
+function normalizeAnswer(body: unknown): unknown {
+  const b = body as { object?: string; data?: unknown[] } | null;
+  if (!b || typeof b !== 'object') return body;
+  if (b.object === 'card') return normalizeCard(b as unknown as ScryfallCard);
+  if (Array.isArray(b.data)) return { ...b, data: b.data.map((x) => ((x as { object?: string })?.object === 'card' ? normalizeCard(x as ScryfallCard) : x)) };
+  return body;
 }
 
 export class ScryfallError extends Error {
@@ -155,7 +191,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
     } catch { /* non-JSON error body */ }
     throw new ScryfallError(detail || `Scryfall returned ${response.status}`, response.status);
   }
-  return response.json() as Promise<T>;
+  return normalizeAnswer(await response.json()) as T;
 }
 
 export interface SearchResult {

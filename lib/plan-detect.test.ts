@@ -127,3 +127,43 @@ describe('how it wins, and how much it leans on the commander', () => {
     expect(detectArchetype(deck(many(40, 'x', { type_line: 'Sorcery', cmc: 4 })), [job('interaction', 10)], []).value).toBe('Midrange');
   });
 });
+
+describe('creature types as themes', () => {
+  const wizard = (i: number) => card(`Wizard ${i}`, 'Flying', { type_line: 'Creature — Human Wizard' });
+  const bear = (i: number) => card(`Bear ${i}`, '', { type_line: 'Creature — Bear' });
+  const spell = (i: number) => card(`Spell ${i}`, 'Draw a card.', { type_line: 'Instant' });
+  const plainCommander = card('Plain Leader', 'Vigilance', { type_line: 'Legendary Creature — Human Wizard' });
+
+  it('shows a dominant creature type as a theme, even when the commander never names it', () => {
+    const cards = deck([...Array.from({ length: 18 }, (_, i) => wizard(i)), ...Array.from({ length: 6 }, (_, i) => bear(i)), ...Array.from({ length: 30 }, (_, i) => spell(i))]);
+    const t = detectThemes(plainCommander, cards);
+    const wizards = t.value.find((x) => x.id === 'type:wizard');
+    expect(wizards).toMatchObject({ name: 'Wizards', commander: false });
+    expect(wizards!.cards).toHaveLength(18);
+    // Humans are as many here: both are types the deck runs on.
+    expect(t.value.some((x) => x.id === 'type:human')).toBe(true);
+  });
+
+  it('leaves out a type that is only incidental', () => {
+    const cards = deck([...Array.from({ length: 10 }, (_, i) => wizard(i)), ...Array.from({ length: 20 }, (_, i) => bear(i))]);
+    expect(detectThemes(plainCommander, cards).value.some((x) => x.id === 'type:wizard')).toBe(false);
+  });
+
+  it('needs fewer when the commander’s text asks for the type', () => {
+    const lord = card('Dino Lord', 'Whenever a Dinosaur you control enters, draw a card.', { type_line: 'Legendary Creature — Human' });
+    const dinos = Array.from({ length: 9 }, (_, i) => card(`Dino ${i}`, 'Trample', { type_line: 'Creature — Dinosaur' }));
+    const cards = deck([...dinos, ...Array.from({ length: 25 }, (_, i) => bear(i))]);
+    expect(detectThemes(lord, cards).value.find((x) => x.id === 'type:dinosaur')).toMatchObject({ name: 'Dinosaurs', commander: true });
+  });
+});
+
+describe('creature type names', () => {
+  it('uses the right plural and skips subtypes that are not creature types', () => {
+    const lord = card('Eldrazi Lord', 'Whenever you cast an Eldrazi spell, draw a card. Equipment you control cost {1} less.', { type_line: 'Legendary Creature — Eldrazi' });
+    const spawn = Array.from({ length: 10 }, (_, i) => card(`Spawn ${i}`, '', { type_line: 'Creature — Eldrazi' }));
+    const kit = Array.from({ length: 10 }, (_, i) => card(`Kit ${i}`, 'Reconfigure {2}', { type_line: 'Artifact Creature — Equipment Cat' }));
+    const t = detectThemes(lord, deck([...spawn, ...kit]));
+    expect(t.value.find((x) => x.id === 'type:eldrazi')?.name).toBe('Eldrazi');
+    expect(t.value.some((x) => x.id === 'type:equipment')).toBe(false);
+  });
+});

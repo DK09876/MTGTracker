@@ -4,6 +4,10 @@
  */
 
 export async function register() {
+  // Decks that exist when the Plan and Tags redesign ships are reset to a fresh import once (lib/deck-reset.ts), before anything else runs.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try { (await import('./lib/categories')).startCategories(); } catch (e) { console.error('[categories] start failed', e); }
+  }
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.MTG_SCHEDULER !== 'off') {
     const { nightly, startScheduler, weekly } = await import('./lib/scheduler');
     const { cleanUp } = await import('./lib/cleanup');

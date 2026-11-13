@@ -94,6 +94,12 @@ export interface JsonRequest {
   timeoutMs?: number;
   /** The most the answer may be, thinking included (OpenAI-style providers). */
   maxOutputTokens?: number;
+  /**
+   * Claude: give the schema in the prompt and read the answer back leniently,
+   * rather than enforcing it as a structured output. For large answers (the
+   * plan read): big schemas have failed as structured outputs in this app.
+   */
+  promptOnly?: boolean;
 }
 
 export interface Answer {

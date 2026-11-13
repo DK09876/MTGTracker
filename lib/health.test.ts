@@ -48,7 +48,7 @@ describe('analyse', () => {
     expect(h.hand.distribution.reduce((a, b) => a + b, 0)).toBeCloseTo(1);
   });
 
-  it('warns about size, colours, copies, bans and Game Changers', () => {
+  it('warns only about what makes the deck not legal: colours, copies, bans', () => {
     const h = analyse({
       commander: hull,
       cards: [
@@ -62,16 +62,20 @@ describe('analyse', () => {
       ],
     });
     const byTitle = Object.fromEntries(h.warnings.map((w) => [w.title, w]));
-    expect(byTitle['29 cards, not 100']).toBeDefined();
+    // The size is the deck's state, not a warning (lib/hard-checks.ts).
+    expect(byTitle['29 cards, not 100']).toBeUndefined();
     expect(byTitle["2 cards outside Hearthhull's colours"].cards).toEqual(['Counterspell', 'Rhystic Study']);
     expect(byTitle['More than one copy of a card'].cards).toEqual(['2× Lightning Bolt']);
     expect(byTitle['Banned in Commander'].cards).toEqual(['Mana Crypt']);
-    expect(byTitle['1 Game Changer']).toMatchObject({ level: 'info', cards: ['Rhystic Study'] });
+    // Game Changers are counted with the bracket, not warned about.
+    expect(byTitle['1 Game Changer']).toBeUndefined();
+    expect(h.gameChangers).toEqual(['Rhystic Study']);
+    expect(h.warnings.every((w) => w.level === 'critical')).toBe(true);
   });
 
   it('asks for a commander when there is none, and does not count basics as duplicates', () => {
     const h = analyse({ commander: null, cards: deck });
-    expect(h.warnings.map((w) => w.title)).toEqual(['No commander', '11 cards, not 100']);
+    expect(h.warnings.map((w) => w.title)).toEqual(['No commander']);
   });
 });
 

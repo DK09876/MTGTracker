@@ -86,6 +86,8 @@ export interface PlanState {
   rules: RuleLine[];
   changes: ChangeLine[];
   proposals: ProposalLine[];
+  /** The model of the read the proposals came from, for the suggestion log. */
+  proposalsModel: string | null;
   notes: Plan['notes'];
   styles: Array<{ id: string; label: string; note: string; cards: number }>;
   goals: readonly string[];
@@ -104,7 +106,7 @@ export interface PlanState {
 }
 
 const short = (name: string) => name.split(',')[0];
-const PET = /^(pets?|pet cards?|fun|favou?rites?)$/i;
+const PET = /^(pets?|pet cards?|fun|favou?rites?)$/i; // pet tags are not theme packages
 const JOB_IDS = new Set(['ramp', 'draw', 'impulse', 'interaction', 'wipe', 'protection', 'finishers']);
 const rows = (roles: RoleCount[]): Job[] => roles.filter((r) => JOB_IDS.has(r.id))
   .map((r) => ({ id: r.id as JobId, label: r.label, group: r.group, count: r.count, cards: r.cards, range: r.target, how: (r as RoleCount & { how?: Job['how'] }).how ?? { inputs: [], steps: [] } }));
@@ -189,20 +191,11 @@ export async function planState(list: List): Promise<PlanState> {
     })),
   ];
 
-  // Never cut: key cards, cards of the ways to win, pets, ★ keeps, cards tagged as a win condition.
+  // Never cut: the commanders and the owner's ★ list, nothing else (the owner's call, 2026-11-10; the read's engines and key cards are flagged, not blocked).
   const starred = keeps(list.id);
-  const petTags = new Set(tags.tags.filter((t) => t.status === 'accepted' && PET.test(t.name)).map((t) => t.id));
-  const winTags = new Set(tags.tags.filter((t) => t.status === 'accepted' && t.kind === 'wincon').map((t) => t.id));
   const protectedList = new Map<string, string>();
-  for (const n of keyCards) protectedList.set(n, commanders.some((c) => c.name === n) ? 'commander' : 'key card');
-  for (const r of kept) for (const n of r.cards) if (!protectedList.has(n) && main.some((c) => c.card.name === n)) protectedList.set(n, `way to win: ${r.label.toLowerCase()}`);
-  for (const c of main) {
-    const k = tagKey(c.card);
-    const on = tags.cardTags.filter((ct) => ct.on && ct.key === k);
-    if (on.some((ct) => petTags.has(ct.tagId))) protectedList.set(c.card.name, 'pet card');
-    else if (on.some((ct) => winTags.has(ct.tagId)) && !protectedList.has(c.card.name)) protectedList.set(c.card.name, 'tagged as a win condition');
-    if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedList.has(c.card.name)) protectedList.set(c.card.name, '★ you kept it');
-  }
+  for (const c of commanders) protectedList.set(c.name, 'commander');
+  for (const c of main) if (starred.has(c.card.oracle_id ?? c.card.id) && !protectedList.has(c.card.name)) protectedList.set(c.card.name, '★ never cut');
 
   // Keep the detection for the pages that only read the plan.
   saveSnapshot(list.id, {
@@ -225,8 +218,8 @@ export async function planState(list: List): Promise<PlanState> {
   const parts: Record<string, PlanPart> = {
     goal: part('goal', plan.goal, s.goal ? who(s.goal.by) : 'unset', null, {
       inputs: [`Chips: ${plan.goal.chips.join(', ') || 'none'}`, ...(plan.goal.text ? [`In your words: ${plan.goal.text}`] : [])],
-      steps: ['“Faster” and “Win more often” lower the curve the cut list aims for and favour cheap ramp. “More fun, keep my pets” protects pet and theme cards harder. “Spend less” keeps suggestions inside your budget. “Stay on theme” keeps suggestions inside your themes and deck rule. “Fit my table” keeps suggestions inside your bracket.', 'Claude reads the chips and your words, and may propose changes to the usual rules that serve them.'],
-      idea: 'The usual guidelines fit most decks; what you are optimizing for decides when to step away from them.',
+      steps: ['“Do its thing more often” makes the rules’ cut list offer off-plan cards first and keep theme cards. “Faster” and “Win more often” lower the curve it aims for and favour cheap ramp. “More fun, keep my pets” protects pet and theme cards harder. “Spend less” keeps suggestions inside your budget. “Fit my table” keeps suggestions inside your bracket.', 'Claude reads the chips and your words, and may propose changes to the usual rules that serve them.'],
+      idea: 'The usual guidelines fit most decks; what you want from this one decides when to step away from them.',
     }),
     commanders: part('commanders', { commander: commander?.name ?? null, partner: partner?.name ?? null, companion: companion?.name ?? null }, 'detected', 'clear', {
       inputs: [commander ? `Commander: ${commander.name}` : 'No commander set', partner ? `Second commander: ${partner.name}` : 'No second commander', companion ? `Companion: ${companion.name}` : 'No companion'],
@@ -272,10 +265,10 @@ export async function planState(list: List): Promise<PlanState> {
       steps: ['Base ranges: ramp 11–13, card draw 10–12, interaction 10–12 (board wipes 1–2 inside it), ways to finish 3–5.', `Ramp: 12 at a flip turn of 4, one more or fewer per mana → ${plan.targets.find((t) => t.role === 'ramp')?.range.join('–')}. Ramp costing the flip turn or more counts half; a commander that ramps counts.`, `Protection: low 1–2, medium 2–3, high 3–5 → ${PROTECTION_BY_LEAN[plan.lean].join('–')}.`, 'Styles move some ranges (a discard deck runs more draw). Your own ranges win, then changes to the usual rules.', 'Interaction counts removal, counterspells and wipes; removal you can use again counts twice. Impulse draw is counted apart.'],
       idea: 'Counts are ranges tied to the commander and the curve, never pass or fail.',
     }, changedBy((o) => o.kind === 'range')),
-    protected: part('protected', [...protectedList.entries()].map(([name, why]) => ({ name, why })), 'detected', 'clear', {
-      inputs: [`Key cards: ${keyCards.length}`, `Cards of the ways to win: ${new Set(kept.flatMap((r) => r.cards)).size}`, `Pet cards and ★ keeps: ${[...protectedList.values()].filter((w) => w === 'pet card' || w.startsWith('★')).length}`],
-      steps: ['Key cards, the cards of every way to win you keep, cards tagged Pet, cards tagged as a win condition and ★ keeps are never offered as cuts.'],
-      idea: 'Don’t cut the cards that are why you play the deck, or the ones that win it.',
+    protected: part('protected', [...protectedList.entries()].map(([name, why]) => ({ name, why })), 'yours', 'clear', {
+      inputs: [`★ never cut: ${[...protectedList.values()].filter((w) => w.startsWith('★')).length}`],
+      steps: ['The commanders and the cards you mark ★ never cut are never offered as cuts.', 'The plan’s engines and key cards can be cut, with a warning beside them: owners cut them about half as often as other cards.'],
+      idea: 'Don’t cut the cards that are why you play the deck.',
     }),
     archetype: part('archetype', archetypeD.value, 'detected', archetypeD.strength, archetypeD.how),
   };
@@ -307,7 +300,7 @@ export async function planState(list: List): Promise<PlanState> {
     { group: 'The plan', name: 'Flip turn', rule: 'The commander’s mana value, or a key card’s when it costs more.', setting: String(plan.flip.value), changed: null },
     { group: 'The plan', name: 'Archetype', rule: 'Combo if the main way to win is a combo; control with 15+ interaction, 14+ draw and under 15 creatures; aggro with 30+ cheap creatures; else midrange.', setting: archetypeD.value, changed: null },
     { group: 'The plan', name: 'Bracket', rule: 'Suggestions never add more Game Changers than the bracket allows (none in 1–2, three in 3), nor extra turns or mass land destruction below 4.', setting: plan.bracket ? String(plan.bracket) : `not set (looks like ${bracketD.value})`, changed: null },
-    { group: 'Never cut', name: 'Protected cards', rule: 'Key cards, cards of the ways to win you keep, pet cards, cards tagged as a win condition and ★ keeps.', setting: `${protectedList.size} cards`, changed: null },
+    { group: 'Never cut', name: 'Never cut', rule: 'The commanders and the cards you mark ★ never cut.', setting: `${protectedList.size} cards`, changed: null },
     ...CUT_RULES.map((r) => ({
       group: 'The cut list', name: r.label, rule: r.why,
       setting: !ruleOn(eff.settings, r.id) ? 'off' : r.protects ? 'on' : `on, weight ${weightOf(eff.settings, r.id)}${mineCut.rules[r.id] ? ' (yours)' : ''}`,
@@ -339,7 +332,7 @@ export async function planState(list: List): Promise<PlanState> {
   return {
     confirmed: plan.confirmed,
     progress: { done: PARTS.filter((id) => ok[id]).length, total },
-    parts, lookFirst: lookFirst.slice(0, 4), rules, changes, proposals, notes: plan.notes,
+    parts, lookFirst: lookFirst.slice(0, 4), rules, changes, proposals, proposalsModel: latest?.model ?? null, notes: plan.notes,
     styles: [...STYLES, VALUE].map((x) => ({ id: x.id, label: x.label, note: x.note, cards: plan.detected.support[x.id] ?? 0 })),
     goals: GOALS, roles: COMMANDER_ROLES,
     small: mainCount < 10, pile,

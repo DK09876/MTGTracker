@@ -152,7 +152,7 @@ export async function callClaude(
   let message: Anthropic.Beta.BetaMessage;
   try {
     try {
-      message = await send(!tooLarge.has(key));
+      message = await send(!tooLarge.has(key) && !request.promptOnly);
     } catch (error) {
       if (!(error instanceof Anthropic.BadRequestError) || !/grammar is too large|schema is too complex/i.test(error.message)) throw error;
       tooLarge.add(key);

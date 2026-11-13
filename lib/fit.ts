@@ -35,7 +35,9 @@ export const THEMES: Array<{ name: string; commander: RegExp; card: RegExp }> = 
 const textOf = (c: ScryfallCard) => [c.type_line, c.oracle_text, ...(c.card_faces ?? []).flatMap((f) => [f.type_line, f.oracle_text])]
   .filter(Boolean).join('\n').replace(/\([^)]*\)/g, '');
 
-// Creature types worth matching: the ones on the commander's type line or named in its text.
+// Creature types worth matching: the ones named in the commander's rules text.
+// Not its own type line: a Human Wizard commander that never mentions Humans
+// filled "fits the commander" with random Humans.
 const TYPE_WORDS = /\b(Dragon|Elf|Elves|Goblin|Zombie|Vampire|Wizard|Merfolk|Angel|Demon|Eldrazi|Dinosaur|Cat|Dog|Knight|Soldier|Warrior|Rogue|Cleric|Spirit|Sliver|Human|Faerie|Elemental|Giant|Pirate|Ninja|Samurai|Artificer|Construct|Thopter|Treefolk|Hydra|Beast|Snake|Rat|Squirrel|Bird|Insect|Spider|Horror)s?\b/g;
 
 export interface FitProfile {
@@ -47,7 +49,10 @@ export interface FitProfile {
 export function fitProfile(commander: ScryfallCard | null): FitProfile | null {
   if (!commander) return null;
   const text = textOf(commander);
-  const own = [...new Set([...text.matchAll(TYPE_WORDS)].map((m) => m[1].replace(/ves$/, 'f')))];
+  const rules = [commander.oracle_text, ...(commander.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n').replace(/\([^)]*\)/g, '')
+    // Its own name in its text ("Whenever Old Gnawbone...") is not a type it cares about.
+    .split(commander.name.split(' // ')[0]).join('').split(commander.name.split(',')[0]).join('');
+  const own = [...new Set([...rules.matchAll(TYPE_WORDS)].map((m) => m[1].replace(/ves$/, 'f')))];
   let themes = THEMES.filter((t) => t.commander.test(text));
   // A commander whose text names nothing here still has a style.
   if (!themes.length) {
@@ -68,7 +73,8 @@ export function fitOf(card: ScryfallCard, profile: FitProfile | null): Fit {
   if (!profile) return { score: 0, matches: [] };
   const text = textOf(card);
   const matches = profile.themes.filter((t) => t.card.test(text)).map((t) => t.name);
-  for (const type of profile.types) if (new RegExp(`\\b${type}s?\\b`, 'i').test(text)) matches.push(type);
+  // Elf → Elves, Wolf → Wolves: "Elfs?" never matched "Elves".
+  for (const type of profile.types) if (new RegExp(`\\b(${type}s?${type.endsWith('f') ? `|${type.slice(0, -1)}ves` : ''})\\b`, 'i').test(text)) matches.push(type);
   return { score: Math.min(1, matches.length / 2), matches };
 }
 

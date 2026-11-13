@@ -16,6 +16,10 @@
  *   finishPicks {choice?, showRules?}  Finish the deck: picks from the rules or Claude, remembered per deck
  *   verdict {id, verdict}  how a fix went; "worse" stages undoing it
  *   propose {intent, title, why, items}  Claude's changes from Chat, waiting in Tune
+ *   reason {key, chip?, text?}  why a dismissed suggestion was refused (the suggestion log)
+ *
+ * Every suggestion shown, and what became of it, goes to the suggestion log
+ * (lib/suggestion-log.ts) when the profile shares it.
  */
 
 import { NextResponse } from 'next/server';
@@ -28,7 +32,10 @@ import { hasBoard } from '@/lib/sections';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { applyChanges, ref, stage, tuneState, undoApply, unstage, type UndoMoves } from '@/lib/tune';
 import { INTENTS, SYMPTOMS, type Intent, type Suggestion, type Symptom } from '@/lib/tune-shared';
-import { newKey, updateTune } from '@/lib/tune-store';
+import { PROMPT_VERSIONS } from '@/lib/prompt-versions';
+import { newKey, tuneStore, updateTune } from '@/lib/tune-store';
+import { clearOutcome, closeAll, logOutcome, logReason, quietly, REASON_CHIPS, type ReasonChip } from '@/lib/suggestion-log';
+import { logTuneView } from '@/lib/tune-log';
 import { localCards } from '@/lib/card-store';
 
 export const runtime = 'nodejs';
@@ -46,30 +53,56 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const locked = requirePlan(id);
   if (locked) return locked;
   const q = new URL(request.url).searchParams;
-  return NextResponse.json(await tuneState(owned.list, owned.profile, { intent: intentOf(q.get('intent')), symptom: symptomOf(q.get('symptom')) }));
+  const state = await tuneState(owned.list, owned.profile, { intent: intentOf(q.get('intent')), symptom: symptomOf(q.get('symptom')) });
+  // What was shown, for the suggestion log: written once per distinct group.
+  logTuneView(owned.list, owned.profile, state.intent, state.groups);
+  return NextResponse.json(state);
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const locked = requirePlan(id);
-  if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
+  // Chat can hand Tune a proposal at any time; everything else in Tune waits for the confirmed plan.
+  const locked = b.action === 'propose' ? null : requirePlan(id);
+  if (locked) return locked;
   switch (b.action) {
     case 'stage': {
-      const done = await stage(list, profile, itemsOf(b.items));
+      const items = itemsOf(b.items);
+      const done = await stage(list, profile, items);
+      // Accepted: the suggestions that made it into Your changes.
+      const now = tuneStore(id).changes;
+      const staged = new Set([...now.add, ...now.cut].map((x) => x.from).filter((x): x is string => !!x));
+      quietly(() => logOutcome(id, items.map((i) => i.key).filter((k) => staged.has(k)), 'accepted'));
       return NextResponse.json(done);
     }
-    case 'unstage':
-      unstage(id, keysOf(b.keys));
+    case 'unstage': {
+      const keys = keysOf(b.keys);
+      // The keys may be staged entries' own keys: the suggestions they came from are open again.
+      const was = tuneStore(id).changes;
+      const from = [...was.add, ...was.cut].filter((x) => keys.includes(x.key) || (!!x.from && keys.includes(x.from))).map((x) => x.from).filter((x): x is string => !!x);
+      unstage(id, keys);
+      quietly(() => clearOutcome(id, [...new Set([...keys, ...from])]));
       return NextResponse.json({ ok: true });
+    }
     case 'dismiss':
     case 'undismiss': {
       const keys = keysOf(b.keys);
       updateTune(id, (s) => { s.dismissed = b.action === 'dismiss' ? [...new Set([...s.dismissed, ...keys])] : s.dismissed.filter((k) => !keys.includes(k)); });
+      quietly(() => (b.action === 'dismiss' ? logOutcome(id, keys, 'refused') : clearOutcome(id, keys)));
       return NextResponse.json({ ok: true });
+    }
+    case 'reason': {
+      // An optional reason for a refusal: one tap, or a line in the owner's words (kept on the Pi, never exported).
+      const key = typeof b.key === 'string' ? b.key : '';
+      const chip = REASON_CHIPS.includes(b.chip as ReasonChip) ? b.chip as ReasonChip : null;
+      const text = typeof b.text === 'string' ? b.text.slice(0, 600) : null;
+      if (!key || (!chip && !text)) return NextResponse.json({ error: 'Pick a reason or write one' }, { status: 400 });
+      let saved = false;
+      quietly(() => { saved = logReason(id, key, chip, text); });
+      return NextResponse.json({ ok: true, saved });
     }
     case 'save': {
       const section = typeof b.section === 'string' ? b.section : '';
@@ -83,6 +116,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         addCardToList(id, card, item.add.quantity ?? 1, 'nonfoil', section);
         have.add(card.name);
         saved += 1;
+        quietly(() => logOutcome(id, [item.key], 'accepted'));
       }
       return NextResponse.json({ saved });
     }
@@ -94,6 +128,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // A snapshot first: applying Tune's changes is a bulk change.
       takeSnapshot(id, 'Before applying Tune changes', { profile: owned.profile }, true);
       const { result } = await recorded(id, { profile: owned.profile }, 'tune', 'Applied Tune changes', () => applyChanges(list, cutsTo as Parameters<typeof applyChanges>[1]));
+      // The deck moved on: whatever was shown and left untouched was ignored.
+      quietly(() => closeAll(id, 'tune:'));
       return NextResponse.json(result);
     }
     case 'undo': {
@@ -106,6 +142,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const card = cardsInList(id).find((c) => c.card.id === b.cardId)?.card;
       if (!card) return NextResponse.json({ error: 'No such card in the deck' }, { status: 400 });
       setKeep(id, card.oracle_id ?? card.id, b.keep !== false);
+      // Claude's "keep this", accepted.
+      if (typeof b.key === 'string' && b.keep !== false) quietly(() => logOutcome(id, [b.key as string], 'accepted'));
       return NextResponse.json({ ok: true });
     }
     case 'finishPicks':
@@ -148,7 +186,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const items = itemsOf(b.items).map((i) => ({ ...i, key: `chat:${i.key}`, add: full(i.add), cut: full(i.cut) })).filter((i) => i.add || i.cut);
       if (!items.length) return NextResponse.json({ error: 'Nothing to send' }, { status: 400 });
       updateTune(id, (s) => {
-        const group = { key: newKey('chat'), title: typeof b.title === 'string' ? b.title.slice(0, 120) : `From Chat · ${items.length}`, why: typeof b.why === 'string' ? b.why.slice(0, 300) : 'Claude proposed these in Chat.', source: 'claude' as const, items };
+        const group = { key: newKey('chat'), title: typeof b.title === 'string' ? b.title.slice(0, 120) : `From Chat · ${items.length}`, why: typeof b.why === 'string' ? b.why.slice(0, 300) : 'Claude proposed these in Chat.', source: 'claude' as const, items, model: null, promptVersion: PROMPT_VERSIONS.chat, round: new Date().toISOString() };
         // Chat's groups stack up to three; the latest Tune ideas stay first.
         s.proposals[intent] = [...(s.proposals[intent] ?? []).filter((g) => !g.key.startsWith('chat-')).slice(0, 1), group, ...(s.proposals[intent] ?? []).filter((g) => g.key.startsWith('chat-')).slice(0, 2)];
       });

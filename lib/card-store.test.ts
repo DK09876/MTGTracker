@@ -61,3 +61,12 @@ describe('every tag on every card', () => {
     d.close();
   });
 });
+
+describe('the copy of every card', () => {
+  it('keeps a land front for a reversible card sent with its faces only', async () => {
+    const { slim } = await import('./card-store');
+    const face = { name: 'Steam Vents', oracle_id: 'o-sv', cmc: 0, type_line: 'Land — Island Mountain', oracle_text: '({T}: Add {U} or {R}.)' };
+    const out = slim({ id: 'sv', name: 'Steam Vents // Steam Vents', layout: 'reversible_card', card_faces: [face, face] });
+    expect(out).toMatchObject({ type_line: 'Land — Island Mountain', oracle_id: 'o-sv', cmc: 0 });
+  });
+});

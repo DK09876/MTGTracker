@@ -222,6 +222,7 @@ export function detectThemes(commander: ScryfallCard | null, pool: Cards, tagsOf
       strength: asks && names.length >= 8 ? 'clear' : names.length >= 8 ? 'likely' : 'guess',
     });
   }
+  found.push(...creatureTypeThemes(commander, spells));
   found.sort((a, b) => Number(b.commander) - Number(a.commander) || b.cards.length - a.cards.length);
   const main = found.find((t) => t.commander) ?? found[0];
   if (main) main.size = 16;
@@ -233,6 +234,7 @@ export function detectThemes(commander: ScryfallCard | null, pool: Cards, tagsOf
       inputs: [commander ? `${short(commander.name)}’s text asks for: ${found.filter((t) => t.commander).map((t) => t.name.toLowerCase()).join(', ') || 'no one theme'}` : 'No commander', `Cards read: ${count(spells)} spells`],
       steps: [
         'A card is in a theme when its rules text or its Scryfall tags say it does that thing.',
+        `A creature type is a theme when ${TYPE_THEME.cards} or more cards are that type or name it, and they are at least half the creatures; ${TYPE_THEME.asked} or more when the commander's text names the type.`,
         'Shown: themes the commander asks for, and any other with 8 or more cards.',
         main ? `The biggest theme the commander asks for (${main.name}) is the main one, sized 16; the rest 8.` : 'No theme yet.',
         'Members are split into enablers (make it happen), payoffs (reward it) and multipliers (double it).',
@@ -240,6 +242,56 @@ export function detectThemes(commander: ScryfallCard | null, pool: Cards, tagsOf
       idea: 'A theme is a package of cards doing one thing. Eight cards give about a 62% chance of seeing one by turn 4, sixteen about 87%. An engine wants 12 or more enablers, about half as many payoffs, and about three multipliers.',
     },
   };
+}
+
+/** When a creature type is a theme: this many cards, half the creatures - or fewer when the commander's text asks for it. */
+export const TYPE_THEME = { cards: 15, share: 0.5, asked: 8 };
+
+// Plurals: "Eldrazi", "Merfolk" and "Ninja" stay as they are; Elf → Elves; a few irregulars.
+const SAME_PLURAL = /^(Eldrazi|Kor|Sheep|Fish|Ninja|Samurai|Kithkin)$|folk$/;
+const IRREGULAR: Record<string, string> = { Mouse: 'Mice', Fungus: 'Fungi', Ox: 'Oxen', Cyclops: 'Cyclopes' };
+const plural = (t: string) => {
+  if (IRREGULAR[t]) return IRREGULAR[t];
+  if (SAME_PLURAL.test(t)) return t;
+  if (/(f|fe)$/.test(t) && !/ff$/.test(t)) return t.replace(/(f|fe)$/, 'ves');
+  return /(s|x|ch|sh)$/.test(t) ? `${t}es` : `${t}s`;
+};
+// Subtypes that sit on a creature's type line but are not creature types (an Equipment creature with reconfigure, a Vehicle).
+const NOT_CREATURE_TYPES = new Set(['Equipment', 'Vehicle', 'Fortification', 'Aura', 'Food', 'Treasure', 'Clue', 'Blood', 'Gold', 'Powerstone', 'Map', 'Incubator', 'Contraption', 'Attraction', 'Saga', 'Class', 'Role', 'Shard', 'Background']);
+// The front face's subtypes, for a creature.
+const creatureTypes = (c: ScryfallCard): string[] => {
+  const line = (c.card_faces?.[0]?.type_line ?? c.type_line ?? '').split(' // ')[0];
+  if (!/\bCreature\b/.test(line)) return [];
+  return (line.split(/\s+[—-]\s+/)[1] ?? '').split(/\s+/).filter((t) => t && !NOT_CREATURE_TYPES.has(t));
+};
+
+/**
+ * Creature types the deck is built on: Humans, Wizards, Dinosaurs. Read from
+ * the type lines and from rules text naming the type ("Wizards you control",
+ * "Dinosaur spells"). The commander's own type line does not count as asking
+ * for its type; only its text does.
+ */
+function creatureTypeThemes(commander: ScryfallCard | null, spells: Cards): ThemeFound[] {
+  const creatures = spells.filter((c) => creatureTypes(c.card).length);
+  const types = new Map<string, Set<string>>();
+  for (const c of creatures) for (const t of creatureTypes(c.card)) (types.get(t) ?? types.set(t, new Set()).get(t)!).add(c.card.name);
+  const cmdText = commander ? textOf(commander) : '';
+  const out: ThemeFound[] = [];
+  for (const [type, ofType] of types) {
+    const word = new RegExp(`\\b(${type}|${plural(type)})\\b`);
+    const naming = spells.filter((c) => word.test(textOf(c.card))).map((c) => c.card.name);
+    const names = [...new Set([...ofType, ...naming])].sort();
+    const asks = word.test(cmdText);
+    const enough = asks ? names.length >= TYPE_THEME.asked : names.length >= TYPE_THEME.cards && ofType.size >= creatures.length * TYPE_THEME.share;
+    if (!enough) continue;
+    const payoffs = naming.length;
+    out.push({
+      id: `type:${type.toLowerCase()}`, name: plural(type), cards: names, commander: asks, size: 8,
+      multipliers: 0, payoffs, enablers: names.length - payoffs,
+      strength: asks || ofType.size >= creatures.length * 0.65 ? 'clear' : 'likely',
+    });
+  }
+  return out;
 }
 
 // --- win routes and how much the deck leans on its commander -------------------------------

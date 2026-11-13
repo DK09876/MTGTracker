@@ -31,7 +31,7 @@ import { recentJobs, startJob, type Job } from './jobs';
 import { canLead } from './import';
 import { rankNames } from './quick-names';
 import { ROLES, ROLES_VERSION, tagSets } from './roles';
-import { collection, type ScryfallCard } from './scryfall';
+import { collection, normalizeCard, type ScryfallCard } from './scryfall';
 
 const HEADERS = { 'User-Agent': 'MTGTracker/0.1 (https://github.com/DK09876/MTGTracker)', Accept: 'application/json' };
 
@@ -116,8 +116,14 @@ export async function rolesFromTags(rows: AsyncIterable<Record<string, unknown>>
   return found;
 }
 
-/** The parts of a card the app reads, so the copy of every card stays small. */
-function slim(c: Record<string, unknown>): Partial<ScryfallCard> {
+/**
+ * The parts of a card the app reads, so the copy of every card stays small.
+ * Normalized like every other card (normalizeCard): today's oracle file gives
+ * reversible cards a normal record, but if it ever sends the faces only, the
+ * copy still has a type line.
+ */
+export function slim(raw: Record<string, unknown>): Partial<ScryfallCard> {
+  const c = normalizeCard(raw as unknown as ScryfallCard) as unknown as Record<string, unknown>;
   const keep = ['id', 'oracle_id', 'name', 'mana_cost', 'cmc', 'type_line', 'oracle_text', 'colors', 'color_identity',
     'keywords', 'power', 'toughness', 'loyalty', 'rarity', 'set', 'set_name', 'collector_number', 'image_uris', 'card_faces',
     'prices', 'game_changer', 'scryfall_uri', 'layout', 'produced_mana'] as const;
@@ -169,6 +175,7 @@ export function saveTags(file: TagFile, d: Database = table()): { tags: number; 
     throw error;
   }
   tagIndex = null;
+  tagTotals.clear();
   return { tags: ids.length, cards: byCard.size };
 }
 
@@ -215,6 +222,72 @@ export function cardTags(oracleIds: string[], d: Database = table()): Map<string
       out.set(r.oracleId, [...seen].map((n) => t.slug.get(n)).filter((x): x is string => !!x).sort());
     }
   }
+  return out;
+}
+
+// How many cards carry each tag, folded by families (see foldedTags), across every tagged card: read once per family list and kept.
+const tagTotals = new Map<string, { cards: number; bySlug: Map<string, number> }>();
+
+/** A card's tags, folded: a tag inside a family counts as the family; any other tag as itself. */
+function fold(own: number[], t: ReturnType<typeof tags>, families: Set<string>): string[] {
+  const out = new Set<string>();
+  for (const id of own) {
+    const seen = new Set<number>();
+    const stack = [id];
+    let inFamily = false;
+    while (stack.length) {
+      const n = stack.pop()!;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      const slug = t.slug.get(n);
+      if (slug && families.has(slug)) { out.add(slug); inFamily = true; }
+      stack.push(...(t.parents.get(n) ?? []));
+    }
+    const slug = t.slug.get(id);
+    if (slug && !inFamily) out.add(slug);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Each card's tags for the Tags tab's suggestions, by oracle id. The tags the
+ * app already reads as a whole family (\`families\`: ramp, counterspell...)
+ * count with every tag under them, and the tags inside them are not listed
+ * on their own; every other tag is the card's own.
+ */
+export function foldedTags(oracleIds: string[], families: Set<string>, d: Database = table()): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const t = tags(d);
+  for (let i = 0; i < oracleIds.length; i += 500) {
+    const part = oracleIds.slice(i, i + 500);
+    if (!part.length) continue;
+    for (const r of d.all(`SELECT oracleId, tags FROM oracle_card_tags WHERE oracleId IN (${part.map(() => '?').join(',')})`, part) as Array<{ oracleId: string; tags: string }>) {
+      out.set(r.oracleId, fold(r.tags.split(',').map(Number), t, families));
+    }
+  }
+  return out;
+}
+
+/**
+ * Across every card the card data tags: how many cards there are, and how
+ * many carry each tag, folded as foldedTags folds them. For telling which
+ * tags stand out in a deck (lib/tag-suggest.ts).
+ */
+export function tagCounts(families: Set<string>, d: Database = table()): { cards: number; bySlug: Map<string, number> } {
+  const key = [...families].sort().join(',');
+  const hit = tagTotals.get(key);
+  if (hit) return hit;
+  const t = tags(d);
+  const counts = new Map<string, number>();
+  let cards = 0;
+  for (const r of d.all('SELECT tags FROM oracle_card_tags') as Array<{ tags: string }>) {
+    cards++;
+    for (const s of fold(r.tags.split(',').map(Number), t, families)) counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  const out = { cards, bySlug: counts };
+  // Two family lists are asked for per Tags load (lib/tag-suggest.ts): keep a few.
+  if (tagTotals.size > 8) tagTotals.clear();
+  tagTotals.set(key, out);
   return out;
 }
 

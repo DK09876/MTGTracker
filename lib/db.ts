@@ -24,7 +24,7 @@ import { Database } from 'node-sqlite3-wasm';
 import { giveBack, settle } from './collection';
 import type { Slot, SlotQuestion } from './commanders';
 import type { Board } from './decklist';
-import type { Finish, ScryfallCard } from './scryfall';
+import { normalizeCard, type Finish, type ScryfallCard } from './scryfall';
 import type { RecentSearch, Replay, SavedSearch, Session } from './recent';
 import type { Turn } from './rules/answer';
 import type { TagJob } from './tag-jobs';
@@ -38,6 +38,8 @@ function open(): Database {
   if (db) return db;
   mkdirSync(dirname(DB_PATH), { recursive: true });
   db = new Database(DB_PATH);
+  // A database made just now has no older decks for the one-time reset (lib/deck-reset.ts) to clear.
+  const brandNew = !db.get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'lists'`);
   db.run(`
     CREATE TABLE IF NOT EXISTS lists (
       id TEXT PRIMARY KEY,
@@ -155,6 +157,14 @@ function open(): Database {
       PRIMARY KEY (listId, cardKey, tagId)
     );
   `);
+  // The one category store (lib/categories.ts): a tag is a category of the
+  // deck - a job it tracks, a tag from the card data, a way to win, its key
+  // cards or the owner's own - with who added it. Rows from before these
+  // columns are the owner's or the tagger's tags, sorted out by the migration.
+  const tagColumns = db.all('PRAGMA table_info(deck_tags)') as Array<{ name: string }>;
+  for (const [col, def] of [['cat', 'TEXT'], ['addedBy', 'TEXT'], ['jobId', 'TEXT'], ['slugs', "TEXT NOT NULL DEFAULT '[]'"], ['madeOf', "TEXT NOT NULL DEFAULT '[]'"]] as const) {
+    if (!tagColumns.some((c) => c.name === col)) db.run(`ALTER TABLE deck_tags ADD COLUMN ${col} ${def}`);
+  }
   // Requests sent to each model per quota day - see modelUsage.
   db.run(`
     CREATE TABLE IF NOT EXISTS model_usage (
@@ -266,6 +276,7 @@ function open(): Database {
   `);
   // Settings: each profile's model per feature, the AI spending caps - see ai.ts.
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  if (brandNew) db.run(`INSERT OR IGNORE INTO settings (key, value) VALUES ('decks.reset', ?)`, [`new database ${new Date().toISOString()}`]);
   // What each paid (Claude) request cost, by day, profile, model and feature -
   // see spend.ts. The app's own daily caps are checked against it.
   db.run(`
@@ -337,6 +348,7 @@ function open(): Database {
   if (!columns.some((c) => c.name === 'tagOverview')) {
     db.run(`ALTER TABLE lists ADD COLUMN tagOverview TEXT NOT NULL DEFAULT ''`);
   }
+  normalizeStoredCards(db);
   return db;
 }
 
@@ -430,7 +442,7 @@ export function listLists(profileId: string, kind?: ListKind): List[] {
   `, [profileId, kind ?? null, kind ?? null]) as unknown as Array<Omit<List, 'commander'> & { commanderData: string | null }>;
   return rows.map(({ commanderData, ...row }) => ({
     ...row,
-    commander: commanderData ? (JSON.parse(commanderData) as ScryfallCard) : null,
+    commander: commanderData ? normalizeCard(JSON.parse(commanderData) as ScryfallCard) : null,
   }));
 }
 
@@ -483,9 +495,9 @@ export function duplicateList(listId: string, profileId: string, name: string): 
       const tagId = randomUUID();
       newId.set(String(t.id), tagId);
       database.run(
-        `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [tagId, id, t.name, t.description, t.color, t.kind, t.status, t.origin, t.position, t.examples, stamp],
+        `INSERT INTO deck_tags (id, listId, name, description, color, kind, status, origin, position, examples, createdAt, cat, addedBy, jobId, slugs, madeOf)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [tagId, id, t.name, t.description, t.color, t.kind, t.status, t.origin, t.position, t.examples, stamp, t.cat ?? null, t.addedBy ?? null, t.jobId ?? null, t.slugs ?? '[]', t.madeOf ?? '[]'],
       );
     }
     const cardTags = database.all('SELECT * FROM deck_card_tags WHERE listId = ?', [listId]) as Array<Record<string, string | number>>;
@@ -592,7 +604,19 @@ export interface ListedCard {
 export const database = (): Database => open();
 
 /** Store (or refresh) a card's whole Scryfall record. */
-export function storeCard(card: ScryfallCard): void {
+/**
+ * Cards stored before normalizeCard existed: reversible printings with no
+ * type line of their own. Reversible printings are few (a handful of lands
+ * and Secret Lair cards), so finding them by text on each start is cheap.
+ */
+function normalizeStoredCards(database: Database): void {
+  const rows = database.all(`SELECT id, data FROM cards WHERE data LIKE '%"reversible_card"%'`) as Array<{ id: string; data: string }>;
+  const fixable = rows.map((r) => ({ id: r.id, card: JSON.parse(r.data) as ScryfallCard })).filter((r) => !r.card.type_line && r.card.card_faces?.[0]?.type_line);
+  for (const r of fixable) database.run('UPDATE cards SET data = ? WHERE id = ?', [JSON.stringify(normalizeCard(r.card)), r.id]);
+}
+
+export function storeCard(given: ScryfallCard): void {
+  const card = normalizeCard(given);
   const usd = card.prices?.usd ?? card.prices?.usd_foil ?? null;
   open().run(
     `INSERT INTO cards (id, name, setCode, rarity, usd, data, fetchedAt)
@@ -803,21 +827,27 @@ export function listsHolding(cardIds: string[], profileId: string | null): Recor
 // --- card roles ----------------------------------------------------------
 
 /** Roles already known for these cards, and which were looked up since `since` under this `version` of the roles. */
+/** How many ids go in one `IN (...)`: well under SQLite's limit on variables. */
+export const IN_CHUNK = 500;
+
 export function cachedRoles(oracleIds: string[], since: string, version: number): { roles: Map<string, string[]>; checked: Set<string> } {
   const roles = new Map<string, string[]>();
   const checked = new Set<string>();
   if (!oracleIds.length) return { roles, checked };
   const database = open();
-  const marks = oracleIds.map(() => '?').join(',');
-  const current = database.all(
-    `SELECT oracleId FROM card_roles_checked WHERE checkedAt >= ? AND version = ? AND oracleId IN (${marks})`,
-    [since, version, ...oracleIds],
-  ) as Array<{ oracleId: string }>;
-  for (const row of current) {
-    checked.add(row.oracleId);
-  }
-  for (const row of database.all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${marks})`, oracleIds) as Array<{ oracleId: string; role: string }>) {
-    roles.set(row.oracleId, [...(roles.get(row.oracleId) ?? []), row.role]);
+  // In parts: every card in five colours is tens of thousands of ids, past
+  // what one SQLite statement takes ("too many SQL variables").
+  for (let i = 0; i < oracleIds.length; i += IN_CHUNK) {
+    const part = oracleIds.slice(i, i + IN_CHUNK);
+    const marks = part.map(() => '?').join(',');
+    const current = database.all(
+      `SELECT oracleId FROM card_roles_checked WHERE checkedAt >= ? AND version = ? AND oracleId IN (${marks})`,
+      [since, version, ...part],
+    ) as Array<{ oracleId: string }>;
+    for (const row of current) checked.add(row.oracleId);
+    for (const row of database.all(`SELECT oracleId, role FROM card_roles WHERE oracleId IN (${marks})`, part) as Array<{ oracleId: string; role: string }>) {
+      roles.set(row.oracleId, [...(roles.get(row.oracleId) ?? []), row.role]);
+    }
   }
   return { roles, checked };
 }
@@ -853,11 +883,14 @@ export function deckTags(listId: string): DeckTags {
   const list = database.get('SELECT tagBrief, tagOverview FROM lists WHERE id = ?', [listId]) as { tagBrief: string; tagOverview: string } | null;
   const tags = (database.all(
     `SELECT id, name, description, color, kind, status, origin, position, examples
-     FROM deck_tags WHERE listId = ? ORDER BY position, createdAt`, [listId],
+     FROM deck_tags WHERE listId = ? AND (cat IS NULL OR cat = 'own') ORDER BY position, createdAt`, [listId],
   ) as unknown as TagRow[]).map((t) => ({ ...t, examples: JSON.parse(t.examples) as string[] }));
+  // Jobs, card-data tags, ways to win and key cards are categories too, read
+  // with their live members through lib/categories.ts; this is the owner's own.
+  const own = new Set(tags.map((t) => t.id));
   const cardTags = (database.all(
     'SELECT cardKey, tagId, source, isOn, reason FROM deck_card_tags WHERE listId = ?', [listId],
-  ) as Array<{ cardKey: string; tagId: string; source: CardTag['source']; isOn: number; reason: string }>)
+  ).filter((r) => own.has(String(r.tagId))) as Array<{ cardKey: string; tagId: string; source: CardTag['source']; isOn: number; reason: string }>)
     .map((r) => ({ key: r.cardKey, tagId: r.tagId, source: r.source, on: r.isOn === 1, reason: r.reason }));
   return { brief: list?.tagBrief ?? '', overview: list?.tagOverview ?? '', tags, cardTags };
 }

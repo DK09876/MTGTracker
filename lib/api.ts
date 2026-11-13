@@ -36,10 +36,9 @@ import type { RoleCount } from './roles';
 import type { Combo } from './spellbook';
 import type { WinGuess } from './wincons';
 import type { Finish } from './scryfall';
-import type { JobParams, TagJob } from './tag-jobs';
 import type { DeckTags, Tag, TagKind } from './tags';
 import type { CardDataStatus } from './card-store';
-import type { CutReview, ReviewItem, ReviewMode, Tier as CardTier } from './cut-review-shared';
+import type { CutReview } from './cut-review-shared';
 import type { GoldfishSettings } from './goldfish';
 import type { CutSettings } from './cut-rules';
 import type { CutCandidate, DeckType } from './cut-score';
@@ -76,10 +75,24 @@ function spending<T>(work: Promise<T>): Promise<T> {
 // A deck's answers are dropped as soon as the deck itself has changed.
 
 const memo = new Map<string, unknown>();
+const inFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * One request at a time per URL: several parts of a page asking for the same
+ * thing while it loads share one answer (the deck page asked for the plan,
+ * health, jobs and who is signed in two to four times on one load).
+ */
+function shared<T>(key: string, ask: () => Promise<T>): Promise<T> {
+  const was = inFlight.get(key) as Promise<T> | undefined;
+  if (was) return was;
+  const p = ask().finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
 
 function get<T>(path: string): Promise<T> {
   const u = url(path);
-  return fetch(u).then(json<T>).then((v) => { memo.set(u, v); return v; });
+  return shared(u, () => fetch(u).then(json<T>).then((v) => { memo.set(u, v); return v; }));
 }
 
 /** What a GET answered last time this visit, if anything: to show at once while it is asked again. */
@@ -90,6 +103,8 @@ export function peek<T>(path: string): T | undefined {
 /** Forget a deck's remembered answers (it changed). */
 function forgetDeck(listId: string) {
   for (const k of memo.keys()) if (k.includes(`/lists/${listId}/`)) memo.delete(k);
+  // A read already on its way may carry the deck from before the change: the next ask starts a new one.
+  for (const k of inFlight.keys()) if (k.includes(`/lists/${listId}/`)) inFlight.delete(k);
 }
 
 /** The paths the deck pages read, for peek. */
@@ -438,7 +453,7 @@ export const removeCard = (listId: string, cardId: string) =>
     .then(json<{ ok: true; change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
 
 export const fetchProfiles = () =>
-  fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles);
+  shared(url('profiles'), () => fetch(url('profiles')).then(json<{ profiles: Profile[] }>).then((b) => b.profiles));
 
 // --- signing in and admins -------------------------------------------------
 
@@ -455,13 +470,27 @@ export interface Me {
 /** Told when sign-in changes, so everything that shows admin parts looks again. */
 export const ME_CHANGED = 'mtg-me-changed';
 const meChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(ME_CHANGED)); };
-export const me = (profile: string) => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>);
+export const me = (profile: string) => shared(`me:${profile}`, () => fetch(`${BASE}/api/auth/me?profile=${encodeURIComponent(profile)}`).then(json<Me>));
 export const signIn = (profile: string, password: string) =>
   fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile, password }) })
     .then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
 export const signOut = () => fetch(`${BASE}/api/auth/logout`, { method: 'POST' }).then(json<{ ok: true }>).then((r) => { meChanged(); return r; });
 export const changePassword = (current: string, next: string) =>
   send('auth/password', 'POST', { current, next }).then(json<{ access: Me }>).then((r) => { meChanged(); return r; });
+export interface SuggestionRate { value: string; shown: number; accepted: number; refused: number; ignored: number; open: number; regretted: number; acceptRate: number | null }
+export interface SuggestionLog {
+  share: boolean;
+  admin?: {
+    method: 'all' | 'ai' | 'code';
+    totals: { events: number; batches: number; conversations: number; sharing: Array<{ id: string; name: string; on: boolean }> };
+    rates: Record<'task' | 'method' | 'model' | 'promptVersion' | 'rank', SuggestionRate[]>;
+    reasons: Array<{ chip: string; count: number; typed: number }>;
+  };
+}
+/** Your sharing setting; for an admin, the suggestion log's rates too. */
+export const suggestionLog = (method?: 'ai' | 'code') => fetch(url(`suggestions${method ? `?method=${method}` : ''}`)).then(json<SuggestionLog>);
+export const setSuggestionShare = (share: boolean) => send('suggestions', 'POST', { share }).then(json<{ share: boolean }>);
+export const suggestionExportUrl = () => url('suggestions?export=1');
 export interface Person { id: string; name: string; isAdmin: boolean; hasPassword: boolean; lists: number }
 export const people = () => fetch(url('admin/people')).then(json<{ people: Person[] }>);
 export const changePerson = (id: string, action: 'admin' | 'unadmin' | 'reset' | 'remove') =>
@@ -503,6 +532,8 @@ export const createProfile = (name: string) =>
 export interface DeckHealth {
   health: Health;
   landTarget: [number, number];
+  /** The six jobs not on this deck: no counts or warnings for them (the Tags tab adds them). */
+  untracked?: string[];
   /** Lands as the plan counts them: a land on the back of a double-faced card is part of one. */
   landCount?: number;
 }
@@ -548,7 +579,7 @@ export const JOBS_CHANGED = 'mtg-jobs-changed';
 export const jobsChanged = () => { if (typeof window !== 'undefined') window.dispatchEvent(new Event(JOBS_CHANGED)); };
 
 export type JobSummary = Omit<Job, 'result'>;
-export const jobs = () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>);
+export const jobs = () => shared(url('jobs'), () => fetch(url('jobs')).then(json<{ jobs: JobSummary[] }>));
 
 /** Told when errors may have been acknowledged, so the banner looks again. */
 export const ERRORS_CHANGED = 'mtg-errors-changed';
@@ -639,17 +670,6 @@ export const deleteTag = (listId: string, tagId: string) =>
 export const setCardTag = (listId: string, cardKey: string, tagId: string, on: boolean) =>
   fetch(url(`lists/${listId}/tags/cards`), { method: 'PATCH', headers: editHeaders(), body: JSON.stringify({ cardKey, tagId, on }) })
     .then(json<DeckTags & { change?: DeckChange | null }>).then((r) => { deckChanged(listId, r.change); return r; });
-
-export interface TagJobState { job: TagJob | null; tags: DeckTags; budget: Budget }
-
-/** The deck's latest tagging job, its tags and today's budget. */
-export const tagJob = (listId: string) => fetch(url(`lists/${listId}/tags/job`)).then(json<TagJobState>);
-
-export const startTagJob = (listId: string, params: JobParams) =>
-  send(`lists/${listId}/tags/job`, 'POST', params).then(json<TagJobState>);
-
-export const stopTagJob = (listId: string) =>
-  fetch(url(`lists/${listId}/tags/job`), { method: 'DELETE' }).then(json<TagJobState>);
 
 /** Today's requests left on the tagging model - and, for Claude, today's spending. */
 export const aiBudget = () => fetch(url('ai/budget')).then(json<Budget & { configured: boolean }>);
@@ -822,14 +842,10 @@ export type PlanChange = PlanChangeCore & {
 export const deckPlan = (listId: string) => get<DeckPlanState>(paths.plan(listId));
 export const changePlan = (listId: string, change: PlanChange) => send(`lists/${listId}/plan`, 'PUT', change).then(json<DeckPlanState>);
 
+
 /** Claude's last review of the cut list, what the owner has done about it since, and the job if one is running. */
 export interface CutReviewState { review: CutReview | null; settled?: { cut: string[]; kept: string[] }; job: Job | null }
 export const cutReview = (listId: string) => get<CutReviewState>(paths.review(listId));
-export const startCutReview = (listId: string, instructions: string, mode: ReviewMode = 'top') =>
-  spending(send(`lists/${listId}/cuts/review`, 'POST', { instructions, mode }).then(json<{ job: Job }>).finally(jobsChanged));
-/** Disagree with a card's rating: Claude re-rates it with the reason. S or A also stars it to keep. */
-export const rerateCut = (listId: string, name: string, tier: CardTier | null, reason: string) =>
-  spending(send(`lists/${listId}/cuts/review/rerate`, 'POST', { name, tier, reason }).then(json<{ item: ReviewItem; kept: boolean }>));
 
 /** A deck's playtest settings, presets, and each card's tags by name. */
 export interface PlaytestState {
@@ -845,6 +861,26 @@ export const savePlaytest = (listId: string, change: { settings?: GoldfishSettin
 
 // --- Tune ----------------------------------------------------------------------
 
+/** Trim: the cut flow for a deck over 100 (lib/trim.ts). */
+export type TrimView = import('./trim-shared').TrimView;
+export type TrimAction =
+  | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
+  | { action: 'find'; rerun?: boolean; message?: string }
+  | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
+  | { action: 'never'; name: string; on: boolean }
+  | { action: 'apply'; cutsTo?: string; keepNotes?: string[] }
+  | { action: 'undo' }
+  | { action: 'reset' };
+export const trim = (listId: string) => get<TrimView>(`lists/${listId}/trim`);
+export const trimAct = (listId: string, act: TrimAction) => {
+  const paid = act.action === 'find' || (act.action === 'approach' && act.claude === true);
+  const work = send(`lists/${listId}/trim`, 'POST', act).then(json<TrimView>).finally(() => {
+    if (paid) jobsChanged();
+    if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
+  });
+  return paid ? spending(work) : work;
+};
+
 export type TuneState = import('./tune').TuneState;
 type TuneAction =
   | { action: 'stage'; items: import('./tune-shared').Suggestion[] }
@@ -854,7 +890,8 @@ type TuneAction =
   | { action: 'clear' }
   | { action: 'apply'; cutsTo?: string }
   | { action: 'undo'; undo: unknown }
-  | { action: 'keep'; cardId: string; keep: boolean }
+  | { action: 'keep'; cardId: string; keep: boolean; key?: string }
+  | { action: 'reason'; key: string; chip?: import('./suggestion-shared').ReasonChip; text?: string }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
   | { action: 'finishPicks'; choice?: 'rules' | 'claude'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
@@ -906,3 +943,22 @@ export const finishGame = (id: string, winner: number | null, events: GameEvent[
 export const editGame = (id: string, change: { winner?: number | null; note?: string; layout?: string; seat?: { seat: number; deckId: string | null; deckName: string } }) =>
   send(`games/${id}`, 'PATCH', change).then(json<{ game: Game }>);
 export const deleteGame = (id: string) => fetch(url(`games/${id}`), { method: 'DELETE' }).then(json<{ ok: true }>);
+
+// --- the Plan and Tags tabs (lib/plan-help.ts, lib/tags-tab.ts) ----------------------------
+
+export const planHelpPath = (listId: string) => `lists/${listId}/plan/help`;
+export const categoriesPath = (listId: string) => `lists/${listId}/categories`;
+/** The Plan tab: settings, how the deck wins, ways to win and key cards, open AI suggestions, confirmation. */
+export const planHelp = (listId: string) => get<import('./plan-help-shared').PlanState>(planHelpPath(listId));
+export const planHelpAct = (listId: string, a: import('./plan-help-shared').PlanAction) => {
+  const work = send(planHelpPath(listId), 'POST', a).then(json<import('./plan-help-shared').PlanState>)
+    .then((v) => { memo.set(url(planHelpPath(listId)), v); return v; });
+  return a.action === 'run' ? spending(work.finally(jobsChanged)) : work;
+};
+/** The Tags tab: what is on the deck, and the suggestions from the cards and from AI. */
+export const tagsTab = (listId: string) => get<import('./tags-tab-shared').TagsView>(categoriesPath(listId));
+export const tagsTabAct = (listId: string, a: Record<string, unknown>) => {
+  const work = send(categoriesPath(listId), 'POST', a).then(json<import('./tags-tab-shared').TagsView>)
+    .then((v) => { memo.set(url(categoriesPath(listId)), v); return v; });
+  return a.action === 'ai' ? spending(work.finally(jobsChanged)) : work;
+};

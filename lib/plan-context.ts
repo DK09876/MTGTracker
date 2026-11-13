@@ -8,8 +8,10 @@
  * count. Server only.
  */
 
-import { cardsInList, deckTags, type List } from './db';
-import { planFor, type Plan } from './deck-plan';
+import { cardsInList, type List } from './db';
+import { noteBy, planFor, type Plan } from './deck-plan';
+import { jobsOnDeck } from './categories';
+import { deckContext } from './deck-context';
 import { deckRolesKnown } from './deck-roles';
 import type { RoleCount } from './roles';
 
@@ -36,26 +38,36 @@ one, say which and why.
 
 const by = (who: 'yours' | 'claude' | undefined, detected = 'detected') => (who === 'claude' ? "Claude's, accepted by the owner" : who === 'yours' ? "the owner's" : detected);
 
-/** The plan in words, from what is stored and the last detection. */
-export function planText(plan: Plan, roles: RoleCount[] | null): string {
+/**
+ * The plan in words, from what is stored and the last detection. With a
+ * current plan read (`read`), the parts the code detected - what the
+ * commander does, how the deck is built, how much it leans on the commander,
+ * key cards, themes, ways to win and the game plan - are left out: the read
+ * says them, and two versions could disagree. The owner's settings, the
+ * numbers and their notes stay.
+ */
+export function planText(plan: Plan, roles: RoleCount[] | null, read = false): string {
   const s = plan.stored;
   const snap = plan.snapshot;
-  const lines: string[] = ["The deck's plan, as the app holds it (who set each part in brackets):"];
+  const lines: string[] = [read ? "The owner's settings for the deck (who set each part in brackets):" : "The deck's plan, as the app holds it (who set each part in brackets):"];
   const goal = plan.goal;
-  lines.push(`- Optimizing for: ${goal.chips.join(', ') || 'the usual guidelines'}${goal.text ? `. In their words: "${goal.text}"` : ''} [${by(s.goal?.by, 'not set')}]`);
+  lines.push(`- What the owner wants from the deck: ${goal.chips.join(', ') || (goal.text ? '' : 'nothing in particular said')}${goal.text ? `${goal.chips.length ? '. ' : ''}In their words: "${goal.text}"` : ''} [${by(s.goal?.by, 'not set')}]`);
   lines.push(`- Bracket aimed for: ${plan.bracket ?? `not set${snap.bracketLooks ? `; the list looks like ${snap.bracketLooks}` : ''}`}`);
   lines.push(`- Budget per card: ${plan.budget ? `$${plan.budget}, cards they own always allowed` : 'any'}. Only cards they own: ${plan.own ? 'yes' : 'no'}.`);
   if (plan.rule.text || plan.rule.filter) lines.push(`- Deck rule: ${plan.rule.text}${plan.rule.filter ? ` (cards must match: ${plan.rule.filter})` : ''} [${by(s.rule?.by)}]`);
-  lines.push(`- Style: ${plan.style.label}${plan.style2 ? ` + ${plan.style2.label}` : ''} [${by(s.style?.by ?? (plan.chosen.style ? 'yours' : undefined))}]`);
-  if (s.role?.v ?? snap.role) lines.push(`- What the commander does for the deck: ${s.role?.v ?? snap.role} [${by(s.role?.by)}]`);
-  if (s.build?.v ?? snap.build) lines.push(`- How the deck is built: ${s.build?.v ?? snap.build} [${by(s.build?.by)}]`);
-  lines.push(`- Leans on the commander: ${plan.lean} [${by(s.lean?.by)}]`);
-  const key = s.key?.v ?? snap.keyCards ?? [];
-  if (key.length) lines.push(`- Key cards (built around, never cut): ${key.join(', ')}`);
-  if (snap.themes?.length) lines.push(`- Themes: ${snap.themes.map((t) => `${t.name} (${t.cards.length} of ${t.size})`).join('; ')}`);
-  if (snap.routes?.length) lines.push(`- Ways to win: ${snap.routes.map((r) => `${r.label}${r.main ? ' (main)' : ''}: ${r.cards.slice(0, 6).join(', ')}${r.needsCommander ? ' - needs the commander' : ''}`).join('; ')}`);
-  const stages = s.stages?.v ?? snap.stages;
-  if (stages) lines.push(`- Game plan: early - ${stages.early} Middle - ${stages.mid} Close - ${stages.close}`);
+  if (!read) {
+    lines.push(`- Style: ${plan.style.label}${plan.style2 ? ` + ${plan.style2.label}` : ''} [${by(s.style?.by ?? (plan.chosen.style ? 'yours' : undefined))}]`);
+    if (s.role?.v ?? snap.role) lines.push(`- What the commander does for the deck: ${s.role?.v ?? snap.role} [${by(s.role?.by)}]`);
+    if (s.build?.v ?? snap.build) lines.push(`- How the deck is built: ${s.build?.v ?? snap.build} [${by(s.build?.by)}]`);
+    lines.push(`- Leans on the commander: ${plan.lean} [${by(s.lean?.by)}]`);
+    const key = s.key?.v ?? snap.keyCards ?? [];
+    // Key cards are not protected from cuts by code; only the commanders and the ★ never-cut list are.
+    if (key.length) lines.push(`- Key cards (built around): ${key.join('; ')}`);
+    if (snap.themes?.length) lines.push(`- Themes: ${snap.themes.map((t) => `${t.name} (${t.cards.length} of ${t.size})`).join('; ')}`);
+    if (snap.routes?.length) lines.push(`- Ways to win: ${snap.routes.map((r) => `${r.label}${r.main ? ' (main)' : ''}: ${r.cards.slice(0, 6).join('; ')}${r.needsCommander ? ' - needs the commander' : ''}`).join(' | ')}`);
+    const stages = s.stages?.v ?? snap.stages;
+    if (stages) lines.push(`- Game plan: early - ${stages.early} Middle - ${stages.mid} Close - ${stages.close}`);
+  }
   lines.push(`- Flip turn (mana needed to get going): ${plan.flip.value}`);
   lines.push('', 'The numbers, as the app counted them:');
   lines.push(`- Lands: ${plan.landNumber.have}, the plan wants ${plan.lands[0]}-${plan.lands[1]}`);
@@ -64,16 +76,30 @@ export function planText(plan: Plan, roles: RoleCount[] | null): string {
   }
   const on = plan.overrides.filter((o) => o.on);
   if (on.length) lines.push('', 'Changes to the usual rules for this deck:', ...on.map((o) => `- ${o.what}: ${o.why} [${by(o.by)}]`));
-  if (plan.notes.length) lines.push('', 'Notes kept from earlier reads:', ...plan.notes.map((n) => `- ${n.text}`));
+  // Only the owner's notes, in their words. Notes Claude wrote in earlier reads are left out: read back as
+  // the owner's view, "the easiest cuts are..." steered later answers (deck flow evaluation, 2026-11-10).
+  const owners = plan.notes.filter((n) => noteBy(n) === 'owner');
+  if (owners.length) lines.push('', "The owner's notes on this deck, in their words:", ...owners.map((n) => `- ${n.text}`));
   lines.push('', AI_RULES);
   return lines.join('\n');
 }
 
-/** The plan in words for one deck, reading what it needs. */
+/**
+ * What every AI step on the deck pages reads (Tune, Trim, chat, the tags
+ * read): the block from lib/deck-context.ts - the plan with who set each
+ * part, never-cut, ways to win and key cards with who added each, the
+ * owner's notes and every category - then the numbers the app counted (only
+ * for the jobs on the deck) and the default ways to judge a deck.
+ */
 export async function planContext(list: Pick<List, 'id' | 'commander'>): Promise<string> {
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
-  const tags = deckTags(list.id);
-  const plan = planFor(list.id, tags.brief, list.commander, main);
+  const plan = planFor(list.id, '', list.commander, main);
   const roles = await deckRolesKnown(list.id, main).catch(() => null);
-  return planText(plan, roles);
+  const on = jobsOnDeck(list.id);
+  const L = [await deckContext(list), '', 'The numbers, as the app counted them:', `- Lands: ${plan.landNumber.have}, the plan wants ${plan.lands[0]}-${plan.lands[1]}`];
+  for (const r of (roles ?? []).filter((x) => on.has(x.id) || (x.id === 'impulse' && on.has('draw')))) L.push(`- ${r.label}: ${r.count}${r.target ? ` (range ${r.target[0]}-${r.target[1]})` : ''}`);
+  const changed = plan.overrides.filter((o) => o.on);
+  if (changed.length) L.push('', 'Changes to the usual rules for this deck:', ...changed.map((o) => `- ${o.what}: ${o.why} [${by(o.by)}]`));
+  L.push('', AI_RULES);
+  return L.join('\n');
 }

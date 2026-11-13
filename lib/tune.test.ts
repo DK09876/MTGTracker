@@ -58,7 +58,7 @@ describe('staging', { timeout: 30_000 }, () => {
     const { list } = await deck(64); // 1 + 37 + 64 = 102
     const tune = await import('./tune');
     const first = await tune.stage(list, 'dk', [cutOf('Spell 1'), cutOf('Spell 2'), cutOf('Spell 3')]);
-    expect(first).toEqual({ staged: 2, capped: 1 });
+    expect(first).toEqual({ staged: 2, capped: 1, blocked: 0 });
     // A swap doesn't change the size, so it is still allowed at 100.
     const swap = await tune.stage(list, 'dk', [{ ...cutOf('Spell 4', 'k:swap'), add: { id: 'Spell 9', name: 'Spell 9', cmc: 2, manaCost: '', typeLine: '', image: null, quantity: 1 } }]);
     expect(swap.staged).toBe(1);
@@ -120,12 +120,13 @@ describe('applying', { timeout: 30_000 }, () => {
 
   it('cuts one copy of a basic by lowering the count', async () => {
     const { db, list } = await deck(63);
+    db.setQuantity(list.id, 'Swamp', 39);
     const tune = await import('./tune');
     await tune.stage(list, 'dk', [cutOf('Swamp')]);
     await tune.applyChanges(list);
     const swamps = db.cardsInList(list.id).filter((c) => c.card.name === 'Swamp');
     expect(swamps).toHaveLength(1);
-    expect(swamps[0]).toMatchObject({ board: 'main', quantity: 36 });
+    expect(swamps[0]).toMatchObject({ board: 'main', quantity: 38 });
   });
 });
 
@@ -239,6 +240,75 @@ describe('lands', { timeout: 30_000 }, () => {
     const total = items.reduce((n, i) => n + (i.add?.quantity ?? 0), 0);
     expect(total).toBe(Math.ceil(s.lands!.range[0] - s.lands!.have));
     expect(items[0].add?.name).toBe('Swamp');
-    expect(s.badges.lands).toMatch(/short/);
+    // Seven under the low end: far enough under for a badge.
+    expect(s.badges.lands).toMatch(/under/);
+  });
+});
+
+describe('the Swaps tab and the cut guards', { timeout: 30_000 }, () => {
+  it('opens for a five-colour deck: a same-job lookup, no upgrades, nothing ranked', async () => {
+    const db = await import('./db');
+    const plan = await import('./deck-plan');
+    const five = card('Five Leader', { type_line: 'Legendary Creature — Human', cmc: 5, color_identity: ['W', 'U', 'B', 'R', 'G'] });
+    const list = db.createList('dk', 'El Daddy', '', { kind: 'deck', commander: five });
+    db.addCardToList(list.id, swamp, 37);
+    for (let i = 0; i < 62; i++) db.addCardToList(list.id, card(`Spell ${i}`));
+    db.addCardToList(list.id, card('Waiting Rock'), 1, 'nonfoil', 'maybe');
+    plan.changePlan(list.id, { confirm: true });
+    const tune = await import('./tune');
+    const s = await tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent: 'swaps' });
+    expect(s.groups.some((g) => g.key === 'swaps:upgrades')).toBe(false);
+    expect(JSON.stringify(s.groups)).not.toMatch(/upgrade|better/i);
+    for (const intent of ['cuts', 'find', 'lands'] as const) await expect(tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent })).resolves.toBeTruthy();
+  });
+
+  it('never stages a cut of a never-cut card, or a land under the floor', async () => {
+    const { db, list } = await deck(70);
+    // 33 lands against the formula's 37: at the far-under line, so no land may go.
+    db.setQuantity(list.id, 'Swamp', 33);
+    const roles = await import('./deck-roles');
+    roles.setKeep(list.id, 'o-Spell 1', true);
+    const tune = await import('./tune');
+    const done = await tune.stage(list, 'dk', [cutOf('Spell 1'), cutOf('Swamp'), cutOf('Spell 2')]);
+    expect(done).toMatchObject({ staged: 1, blocked: 2 });
+    const { tuneStore } = await import('./tune-store');
+    expect(tuneStore(list.id).changes.cut.map((c) => c.card.name)).toEqual(['Spell 2']);
+    void db;
+  });
+
+  it('lets a land go from a deliberately low deck, unless the owner’s own range says no', async () => {
+    const { db, list } = await deck(70);
+    db.setQuantity(list.id, 'Swamp', 35);
+    const tune = await import('./tune');
+    // The formula wants 37: 35 is low but not far under, so a land may go.
+    expect(await tune.stage(list, 'dk', [cutOf('Swamp')])).toMatchObject({ staged: 1, blocked: 0 });
+    const plan = await import('./deck-plan');
+    const store = await import('./tune-store');
+    store.updateTune(list.id, (s) => { s.changes = { add: [], cut: [] }; });
+    // The owner's own range is theirs: at 35–36, none may go.
+    plan.changePlan(list.id, { targets: { lands: [35, 36] } });
+    expect(await tune.stage(list, 'dk', [cutOf('Swamp')])).toMatchObject({ staged: 0, blocked: 1 });
+  });
+
+  it('clamps Claude’s review to the count, and drops never-cut cards and lands', async () => {
+    const { db, list } = await deck(68);
+    db.setQuantity(list.id, 'Swamp', 33); // 102: two to cut, lands at the far-under line
+    const roles = await import('./deck-roles');
+    roles.setKeep(list.id, 'o-Spell 5', true);
+    const review = await import('./cut-review');
+    review.saveReview(list.id, { at: new Date().toISOString(), model: 'fake', instructions: '', over: 2, mode: 'top', items: [
+      { name: 'Spell 5', verdict: 'cut', why: 'kept by the owner' },
+      { name: 'Swamp', verdict: 'cut', why: 'too many lands' },
+      { name: 'Spell 1', verdict: 'cut', why: 'a' },
+      { name: 'Spell 2', verdict: 'cut', why: 'b' },
+      { name: 'Spell 3', verdict: 'cut', why: 'c' },
+    ] });
+    const tune = await import('./tune');
+    const s = await tune.tuneState(list, 'dk', { intent: 'cuts' });
+    const claude = s.groups.find((g) => g.key === 'cuts:claude')!;
+    const sure = claude.items.filter((i) => !i.warn).map((i) => i.cut!.name);
+    expect(sure).toEqual(['Spell 1', 'Spell 2']);
+    expect(claude.items.find((i) => i.cut!.name === 'Spell 3')?.warn).toMatch(/past the 2/);
+    expect(claude.items.some((i) => i.cut!.name === 'Spell 5' || i.cut!.name === 'Swamp')).toBe(false);
   });
 });

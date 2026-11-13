@@ -91,7 +91,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const read = addRead({ listId: id, profileId: profile, mode, model: found.model, winConditions: found.winConditions, missing: found.missing, brief: found.brief, cards: mainNames(id), suggestions });
     // Claude's notes that fit no part are kept with the plan, for every later step to read.
     const notes = suggestions.filter((s) => s.kind === 'note').map((s) => s.value);
-    if (notes.length) changePlan(id, { notes: { add: notes } });
+    if (notes.length) changePlan(id, { notes: { add: notes, by: 'ai' } });
     return { readId: read.id };
   });
   return NextResponse.json({ job });

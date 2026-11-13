@@ -50,17 +50,19 @@ describe('the plan', () => {
     expect([p.style.id, p.targets.find((t) => t.role === 'ramp')?.mine]).toEqual(['landfall', false]);
   });
 
-  it('is confirmed by confirming, or by a brief written before plans existed', async () => {
+  it('is confirmed only when the owner confirms the plan (lib/plan-help.ts)', async () => {
     const db = await import('./db');
     const plan = await import('./deck-plan');
+    const help = await import('./plan-help');
     db.addProfile('dk', 'DK');
     const old = db.createList('dk', 'Old', '', { kind: 'deck' });
     db.setTagBrief(old.id, 'Win with landfall.');
     const fresh = db.createList('dk', 'New', '', { kind: 'deck' });
-    expect([plan.planConfirmed(old.id), plan.planConfirmed(fresh.id)]).toEqual([true, false]);
-    plan.changePlan(fresh.id, { style: 'landfall' });
-    expect(plan.planConfirmed(fresh.id)).toBe(false);
+    expect([plan.planConfirmed(old.id), plan.planConfirmed(fresh.id)]).toEqual([false, false]);
+    // The old whole-plan confirm no longer counts.
     plan.changePlan(fresh.id, { confirm: true });
+    expect(plan.planConfirmed(fresh.id)).toBe(false);
+    await help.act({ id: fresh.id, commander: null }, 'dk', { action: 'confirm' });
     expect(plan.planConfirmed(fresh.id)).toBe(true);
   });
 
@@ -86,13 +88,13 @@ describe('the plan', () => {
     expect(plan.planProgress(deck.id)).toEqual({ done: 2, total: plan.PARTS.length });
 
     plan.changePlan(deck.id, { confirm: true });
-    expect(plan.planConfirmed(deck.id)).toBe(true);
+    expect(plan.planFor(deck.id, '', lands, cards).confirmed).toBe(true);
     plan.changePlan(deck.id, { unconfirmPart: 'lands' });
     p = plan.planFor(deck.id, '', lands, cards);
     expect([p.confirmed, p.confirmedParts.lands, p.confirmedParts.style]).toEqual([false, false, true]);
     // Confirming the last part confirms the plan again.
     plan.changePlan(deck.id, { confirmPart: 'lands' });
-    expect(plan.planConfirmed(deck.id)).toBe(true);
+    expect(plan.planFor(deck.id, '', lands, cards).confirmed).toBe(true);
   });
 
   it('treats a plan confirmed before parts existed as confirmed in every part', async () => {

@@ -2,7 +2,7 @@
 
 /**
  * The Tune tab: change the deck toward its plan. Pick what you want to do -
- * finish the deck, find cards, swaps and upgrades, cuts, fix a problem,
+ * finish the deck, find cards, swaps, cuts, fix a problem,
  * lands; the deck's state picks one for you. Suggestions wait in groups
  * until you accept a group or a single card, save it to a section, or
  * dismiss it. Accepted cards go to Your changes, which shows what they
@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CutRules from './CutRules';
+import DeckTrim from './DeckTrim';
 import ManaCost from './ManaCost';
 import PlanLine from './PlanLine';
 import Tip from './Tip';
@@ -26,13 +27,13 @@ import { capToHundred, CUT_FILTERS, INTENTS, SYMPTOMS, type CutFilter, type Inte
 import type { DeckSection } from '@/lib/sections-shared';
 import type { DeckTab } from '@/lib/deck-tabs';
 import type { Job } from '@/lib/jobs';
+import { REASON_LABELS, WHY_NOT_CHIPS, type ReasonChip } from '@/lib/suggestion-shared';
 
 interface Props {
   listId: string;
   /** Changes when the deck does, to read Tune again. */
   version: string;
   sections: DeckSection[];
-  brief: string;
   styleLabel?: string | null;
   tagNames: string[];
   /** After applying, the deck page reads the deck again. */
@@ -50,20 +51,29 @@ const remembered = (listId: string): Intent | null => {
   try { const v = sessionStorage.getItem(`mtg-tune:${listId}`); return INTENTS.some((i) => i.id === v) ? v as Intent : null; } catch { return null; }
 };
 
-export default function DeckTune({ listId, version, sections, brief, styleLabel, tagNames, onChanged, onTab, onAsk }: Props) {
+export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk }: Props) {
   const [intent, setIntent] = useState<Intent | null>(() => remembered(listId));
   const [symptom, setSymptom] = useState<Symptom>('gas');
   const [state, setState] = useState<api.TuneState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
+  // The suggestion just dismissed, asking (optionally) why.
+  const [asking, setAsking] = useState<string | null>(null);
   const [filter, setFilter] = useState<CutFilter | 'all'>('all');
   const [showDismissed, setShowDismissed] = useState(false);
   const [rules, setRules] = useState(false);
   const [instructions, setInstructions] = useState('');
   const [job, setJob] = useState<Job | null>(null);
-  const [reviewJob, setReviewJob] = useState<Job | null>(null);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
+  // How the deck wins, from the Plan tab only. The old tag brief is not the plan: falling back to it
+  // showed a paragraph here while the Plan and the locked summary said "Not sure".
+  const [planText, setPlanText] = useState<string | null>(null);
+  useEffect(() => {
+    let stop = false;
+    api.planHelp(listId).then((v) => { if (!stop) setPlanText(v.plan.text.trim() || null); }).catch(() => {});
+    return () => { stop = true; };
+  }, [listId, version]);
   const loadId = useRef(0);
 
   const load = useCallback(async (next?: Intent | null, sym?: Symptom) => {
@@ -86,30 +96,24 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
       .catch((e) => { if (id === loadId.current) setError(e instanceof Error ? e.message : 'Couldn’t read the deck just now'); });
   }, [listId, intent, symptom, version]);
 
-  // Claude's ideas and the cut review run in the background: look until they finish, then read Tune again.
+  // Claude's ideas run in the background: look until they finish, then read Tune again.
   useEffect(() => {
     let stop = false;
-    const look = async () => {
-      const [ideas, review] = await Promise.all([api.tuneIdeasJob(listId).catch(() => ({ job: null })), api.cutReview(listId).catch(() => null)]);
-      if (stop) return;
-      setJob(ideas.job?.status === 'running' ? ideas.job : ideas.job?.status === 'failed' ? ideas.job : null);
-      setReviewJob(review?.job ?? null);
-    };
-    void look();
+    void api.tuneIdeasJob(listId).catch(() => ({ job: null })).then((ideas) => {
+      if (!stop) setJob(ideas.job?.status === 'running' ? ideas.job : ideas.job?.status === 'failed' ? ideas.job : null);
+    });
     return () => { stop = true; };
   }, [listId]);
   useEffect(() => {
-    if (job?.status !== 'running' && reviewJob?.status !== 'running') return;
+    if (job?.status !== 'running') return;
     const timer = setInterval(async () => {
-      const [ideas, review] = await Promise.all([api.tuneIdeasJob(listId).catch(() => ({ job: null })), api.cutReview(listId).catch(() => null)]);
-      const ideasDone = job?.status === 'running' && ideas.job?.status !== 'running';
-      const reviewDone = reviewJob?.status === 'running' && review?.job?.status !== 'running';
+      const ideas = await api.tuneIdeasJob(listId).catch(() => ({ job: null }));
+      const done = ideas.job?.status !== 'running';
       setJob(ideas.job?.status === 'running' || ideas.job?.status === 'failed' ? ideas.job : null);
-      setReviewJob(review?.job ?? null);
-      if (ideasDone || reviewDone) void load(intent, symptom);
+      if (done) void load(intent, symptom);
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [job, reviewJob, listId, load, intent, symptom]);
+  }, [job, listId, load, intent, symptom]);
 
   const pick = (next: Intent) => {
     setIntent(next);
@@ -137,19 +141,30 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
   if (!state) return <p className="mt-8 text-center text-[var(--muted)]">Reading the deck…</p>;
 
   const current = intent ?? state.intent;
+  // The step the deck's size points to; over 100 that is Trim.
+  const lead = state.suggested;
+  const trimming = state.size > 100;
   const sizeAfter = state.impact.size.after;
   const stage = (items: Suggestion[]) => act(async () => {
-    const r = await api.tuneAct<{ staged: number; capped: number }>(listId, { action: 'stage', items });
-    if (r.capped) setNote({ text: `${r.staged} staged. ${r.capped} more would take the deck under 100: a cut now needs an add.` });
+    const r = await api.tuneAct<{ staged: number; capped: number; blocked?: number }>(listId, { action: 'stage', items });
+    if (r.capped || r.blocked) setNote({ text: [`${r.staged} staged.`, r.capped ? `${r.capped} more would take the deck under 100: a cut now needs an add.` : '', r.blocked ? `${r.blocked} left out: a card that is never cut, or a land that would take the deck under its land range.` : ''].filter(Boolean).join(' ') });
   });
   const unstage = (keys: string[]) => act(() => api.tuneAct(listId, { action: 'unstage', keys }));
-  const dismiss = (keys: string[], on = true) => act(() => api.tuneAct(listId, { action: on ? 'dismiss' : 'undismiss', keys }));
+  const dismiss = (keys: string[], on = true) => act(async () => {
+    await api.tuneAct(listId, { action: on ? 'dismiss' : 'undismiss', keys });
+    // One dismissed suggestion stays in view, asking (optionally) why.
+    setAsking(on && keys.length === 1 ? keys[0] : null);
+  });
+  const reason = (key: string, chip: ReasonChip | null, text?: string) => {
+    setAsking(null);
+    if (chip || text?.trim()) void api.tuneAct(listId, { action: 'reason', key, ...(chip ? { chip } : {}), ...(text?.trim() ? { text: text.trim() } : {}) }).catch(() => {});
+  };
   const save = (section: string, items: Suggestion[]) => act(async () => {
     const r = await api.tuneAct<{ saved: number }>(listId, { action: 'save', section, items });
     await onChanged();
     setNote({ text: `${r.saved} saved to ${sections.find((s) => s.id === section)?.name ?? 'the section'}.` });
   });
-  const keep = (cardId: string) => act(async () => { await api.tuneAct(listId, { action: 'keep', cardId, keep: true }); await onChanged(); }, '★ Kept: never offered as a cut again.');
+  const keep = (cardId: string, key?: string) => act(async () => { await api.tuneAct(listId, { action: 'keep', cardId, keep: true, key }); await onChanged(); }, '★ Kept: never offered as a cut again.');
   const apply = () => act(async () => {
     const r = await api.tuneAct<{ added: number; cut: number; undo: unknown }>(listId, { action: 'apply', cutsTo: cutsTo ?? undefined });
     await onChanged();
@@ -163,35 +178,39 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
     });
   });
   const ask = () => act(async () => setJob((await api.startTuneIdeas(listId, current, instructions, current === 'fix' ? symptom : undefined)).job));
-  const startReview = (mode: 'top' | 'whole') => act(async () => setReviewJob((await api.startCutReview(listId, instructions, mode)).job));
 
   // Cuts on their own stop at 100; a cut paired with an add doesn't move the size.
   const cutRoom = Math.max(0, sizeAfter - 100);
   const groups = state.groups.filter((g) => current !== 'cuts' || filter === 'all' || g.filter === filter);
-  const visible = (g: SuggestionGroup) => (showDismissed ? g.items : g.items.filter((i) => !dismissed.has(i.key)));
+  const visible = (g: SuggestionGroup) => (showDismissed ? g.items : g.items.filter((i) => !dismissed.has(i.key) || i.key === asking));
   const hiddenCount = state.groups.reduce((n, g) => n + g.items.filter((i) => dismissed.has(i.key)).length, 0);
 
   return (
     <div className="mt-5 flex flex-col gap-5" data-tour="tune">
-      <PlanLine data-tour="tune-plan" brief={brief} note={styleLabel ?? undefined} action="Edit" onAction={() => onTab('plan')} />
+      <PlanLine data-tour="tune-plan" brief={planText ?? ''} note={styleLabel ?? undefined} action="Edit" onAction={() => onTab('plan')} />
 
-      <div role="tablist" aria-label="What do you want to do?" data-tour="tune-intents" className="flex flex-wrap gap-1.5">
-        {INTENTS.map((i) => {
+      {/* The deck's next step leads; everything else Tune does sits beside it, out of the way. */}
+      <div role="tablist" aria-label="What do you want to do?" data-tour="tune-intents" className="flex flex-wrap items-center gap-1.5">
+        {[...INTENTS].sort((a, b) => Number(b.id === lead) - Number(a.id === lead)).map((i, n) => {
           const on = i.id === current;
           const badge = state.badges[i.id];
+          const label = i.id === 'cuts' && trimming ? 'Trim to 100' : i.label;
           return (
-            <button key={i.id} role="tab" aria-selected={on} data-intent={i.id} onClick={() => pick(i.id)} title={i.why}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm ${on ? 'id-grad border-transparent font-semibold text-[#15110a]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
-              {i.label}
-              {badge && <span className={`rounded-full px-1.5 text-[11px] font-bold ${on ? 'bg-black/25 text-[#15110a]' : 'bg-[#ffb4a8] text-[#1c0d06]'}`}>{badge}</span>}
-              {i.id === state.suggested && <span className="text-[10px] uppercase tracking-wide opacity-70">suggested</span>}
-            </button>
+            <span key={i.id} className="contents">
+              {n === 1 && <span className="mx-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--faint)]">Other tools</span>}
+              <button role="tab" aria-selected={on} data-intent={i.id} onClick={() => pick(i.id)} title={i.why}
+                className={`inline-flex items-center gap-1.5 rounded-full border ${n === 0 ? 'px-4 py-2 text-base' : 'px-3 py-1 text-sm'} ${on ? 'id-grad border-transparent font-semibold text-[#15110a]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+                {n === 0 && <span className="text-[10px] uppercase tracking-wide opacity-70">Next</span>}
+                {label}
+                {badge && <span className={`rounded-full px-1.5 text-[11px] font-bold ${on ? 'bg-black/25 text-[#15110a]' : 'bg-[#ffb4a8] text-[#1c0d06]'}`}>{badge}</span>}
+              </button>
+            </span>
           );
         })}
       </div>
 
-      <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
-        onUnstage={(k) => unstage([k])} onClear={() => act(() => api.tuneAct(listId, { action: 'clear' }))} onApply={apply} />
+      {!(current === 'cuts' && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
+        onUnstage={(k) => unstage([k])} onClear={() => act(() => api.tuneAct(listId, { action: 'clear' }))} onApply={apply} />}
 
       {note && (
         <p role="status" className="flex max-w-3xl flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-sm">
@@ -203,14 +222,13 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
 
       <section className="flex flex-col gap-4" data-section={INTENTS.find((i) => i.id === current)!.label}>
-        <p className="flex max-w-3xl items-start gap-2 text-sm text-[var(--muted)]">
-          <span>{INTENTS.find((i) => i.id === current)!.why}</span>
-        </p>
-
-        {current === 'cuts' && <CutsBar state={state} filter={filter} onFilter={setFilter} rules={rules} onRules={() => setRules((r) => !r)} />}
-        {current === 'cuts' && rules && state.cuts && (
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><CutRules listId={listId} settings={state.cuts.settings as CutSettings} tagNames={tagNames} onSaved={() => void load(intent, symptom)} /></div>
+        {current !== 'cuts' && (
+          <p className="flex max-w-3xl items-start gap-2 text-sm text-[var(--muted)]">
+            <span>{INTENTS.find((i) => i.id === current)!.why}</span>
+          </p>
         )}
+
+        {current === 'cuts' && <DeckTrim listId={listId} version={version} sections={sections} onChanged={async () => { await onChanged(); await load(intent, symptom); }} onTab={onTab} />}
         {current === 'fix' && <FixBar state={state} symptom={symptom} onSymptom={setSymptom} busy={busy}
           onVerdict={(id, verdict) => act(() => api.tuneAct(listId, { action: 'verdict', id, verdict }), verdict === 'worse' ? 'The fix is staged to be undone in Your changes.' : 'Noted.')} />}
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
@@ -221,25 +239,43 @@ export default function DeckTune({ listId, version, sections, brief, styleLabel,
           onShowRules={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))}
           onPick={ask} />}
 
-        {current !== 'finish' && <AskClaude intent={current} busy={busy} job={current === 'cuts' ? reviewJob : job} instructions={instructions} onInstructions={setInstructions}
-          onAsk={current === 'cuts' ? undefined : ask} onReview={current === 'cuts' ? startReview : undefined} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
+        {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy} job={job} instructions={instructions} onInstructions={setInstructions}
+          onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
 
+        {current === 'cuts' ? (
+          <details className="rounded-2xl border border-[var(--border)]" data-tour="cut-rules">
+            <summary className="cursor-pointer px-4 py-3 text-sm"><b className="font-semibold">Cuts by rule, no AI</b>{state.cuts?.counts.all ? ` · ${state.cuts.counts.all}` : ''} <span className="text-[var(--muted)]">The rules’ own list, for when there is no Claude key or you want to browse.</span></summary>
+            <div className="flex flex-col gap-4 border-t border-[var(--border)] p-4">
+              <CutsBar state={state} filter={filter} onFilter={setFilter} rules={rules} onRules={() => setRules((r) => !r)} />
+              {rules && state.cuts && (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"><CutRules listId={listId} settings={state.cuts.settings as CutSettings} tagNames={tagNames} onSaved={() => void load(intent, symptom)} /></div>
+              )}
+              {groups.length === 0 && <p className="text-sm text-[var(--muted)]">Nothing on the rules’ list right now.</p>}
+              <div className="flex flex-col gap-3">
+                {groups.map((g) => (
+                  <Group key={g.key} group={g} items={visible(g)} staged={staged} dismissed={dismissed} busy={busy} cutRoom={cutRoom}
+                    sections={sections} onStage={stage} onUnstage={unstage} onDismiss={dismiss} onSave={save} onKeep={keep} asking={asking} onReason={reason} />
+                ))}
+              </div>
+            </div>
+          </details>
+        ) : (<>
         {groups.length === 0 && !(current === 'find' && state.pile && !state.pile.choice) && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">
-            {current === 'cuts' && state.impact.size.before <= 100 ? 'The deck is at 100 or under: nothing needs to come out. Swaps & upgrades pairs a cut with an add.'
-              : current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”, and no upgrade beats what the deck has. Find cards can save some to your Maybeboard.'
+            {current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”. Find cards can save some to your Maybeboard, or ask Claude for swaps.'
                 : 'Nothing to suggest here right now.'}
           </p>
         )}
         <div className="flex flex-col gap-3" data-tour="tune-groups">
           {groups.map((g) => (
             <Group key={g.key} group={g} items={visible(g)} staged={staged} dismissed={dismissed} busy={busy} cutRoom={cutRoom}
-              sections={sections} onStage={stage} onUnstage={unstage} onDismiss={dismiss} onSave={save} onKeep={keep} />
+              sections={sections} onStage={stage} onUnstage={unstage} onDismiss={dismiss} onSave={save} onKeep={keep} asking={asking} onReason={reason} />
           ))}
         </div>
         {hiddenCount > 0 && (
           <button className={`${GHOST} self-start`} onClick={() => setShowDismissed((v) => !v)}>{showDismissed ? 'Hide dismissed' : `Show ${hiddenCount} dismissed`}</button>
         )}
+        </>)}
       </section>
     </div>
   );
@@ -303,11 +339,10 @@ function Impact({ impact }: { impact: api.TuneState['impact'] }) {
   return (
     <div className="flex flex-wrap gap-1.5" aria-label="What your changes do to the deck">
       {impact.rows.map((r) => {
-        const inRange = r.range ? r.after >= r.range[0] && r.after <= r.range[1] : true;
         const moved = r.after !== r.before;
         return (
-          <span key={r.id} className={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-xs tabular-nums ${r.range ? (inRange ? 'border-emerald-500/40' : 'border-[#ffb4a8]/60') : 'border-[var(--border)]'}`}>
-            {r.label} {moved ? <><span className="text-[var(--muted)]">{n(r.before)} →</span> <b className={r.range ? (inRange ? 'text-emerald-300' : 'text-[#ffb4a8]') : 'text-amber-300'}>{n(r.after)}</b></> : <b>{n(r.after)}</b>}
+          <span key={r.id} className={`inline-flex items-baseline gap-1 rounded-lg border px-2 py-0.5 text-xs tabular-nums border-[var(--border)]`} title={r.range ? `Range ${r.range[0]}–${r.range[1]}` : undefined}>
+            {r.label} {moved ? <><span className="text-[var(--muted)]">{n(r.before)} →</span> <b>{n(r.after)}</b></> : <b>{n(r.after)}</b>}
             {r.range && <span className="text-[10px] text-[var(--faint)]">{r.range[0]}–{r.range[1]}</span>}
             {r.id === 'impulse' && <Tip label="About impulse draw">Exile-and-play cards. They dig but don’t refill your hand, so they are counted apart from card draw everywhere.</Tip>}
           </span>
@@ -476,23 +511,17 @@ function FinishPicks({ finish, busy, job, instructions, onInstructions, onChoose
   );
 }
 
-function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onReview, onChat }: {
+function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onChat }: {
   intent: Intent; busy: boolean; job: Job | null; instructions: string; onInstructions: (v: string) => void;
-  onAsk?: () => void; onReview?: (mode: 'top' | 'whole') => void; onChat: () => void;
+  onAsk: () => void; onChat: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const running = job?.status === 'running';
   return (
     <div className="flex flex-col gap-2" data-tour="tune-claude">
       <div className="flex flex-wrap items-center gap-2">
-        {onReview ? (<>
-          <button className={BUTTON} disabled={busy || running} onClick={() => onReview('top')} data-tour="cut-review">✦ Ask Claude to check the cuts</button>
-          <button className={BUTTON} disabled={busy || running} onClick={() => onReview('whole')}>✦ Rate the whole deck</button>
-          <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.cutReview.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
-        </>) : (<>
-          <button className={BUTTON} disabled={busy || running} onClick={onAsk}>✦ Ideas from Claude</button>
-          <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.tuneIdeas.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
-        </>)}
+        <button className={BUTTON} disabled={busy || running} onClick={onAsk}>✦ Ideas from Claude</button>
+        <Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.tuneIdeas.map((x) => <li key={x}>{x}</li>)}</ul></Tip>
         <button className={GHOST} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{open ? 'Hide instructions' : 'Add instructions'}</button>
         <button className={GHOST} onClick={onChat}>Talk it through in Chat</button>
         <AiModelPicker area="deck" />
@@ -532,10 +561,11 @@ function CardLine({ card, tone }: { card: NonNullable<Suggestion['add']>; tone: 
   );
 }
 
-function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onStage, onUnstage, onDismiss, onSave, onKeep }: {
+function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onStage, onUnstage, onDismiss, onSave, onKeep, asking, onReason }: {
   group: SuggestionGroup; items: Suggestion[]; staged: Set<string>; dismissed: Set<string>; busy: boolean; cutRoom: number; sections: DeckSection[];
+  asking: string | null; onReason: (key: string, chip: ReasonChip | null, text?: string) => void;
   onStage: (items: Suggestion[]) => void; onUnstage: (keys: string[]) => void; onDismiss: (keys: string[], on?: boolean) => void;
-  onSave: (section: string, items: Suggestion[]) => void; onKeep: (cardId: string) => void;
+  onSave: (section: string, items: Suggestion[]) => void; onKeep: (cardId: string, key?: string) => void;
 }) {
   const [how, setHow] = useState<string | null>(null);
   const open = items.filter((i) => !staged.has(i.key) && !dismissed.has(i.key) && !i.keep);
@@ -594,7 +624,7 @@ function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onSta
                   {i.how && <button className={GHOST} onClick={() => setHow(how === i.key ? null : i.key)} aria-expanded={how === i.key}>How?</button>}
                   {isStaged ? (<><span className="text-xs text-emerald-300">In your changes</span><button className={GHOST} disabled={busy} onClick={() => onUnstage([i.key])}>Undo</button></>)
                     : isDismissed ? <button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key], false)}>Bring back</button>
-                      : i.keep ? (<><button className={BUTTON} disabled={busy} onClick={() => onKeep(i.cut!.id)}>★ Keep</button><button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key])} aria-label="Dismiss">✕</button></>)
+                      : i.keep ? (<><button className={BUTTON} disabled={busy} onClick={() => onKeep(i.cut!.id, i.key)}>★ Keep</button><button className={GHOST} disabled={busy} onClick={() => onDismiss([i.key])} aria-label="Dismiss">✕</button></>)
                         : (<>
                           <button className={BUTTON} disabled={busy || blocked || (group.pickOne && pickedOne)} onClick={() => onStage([i])} title={blocked ? 'At 100: a cut on its own would take the deck under. Pair it with an add.' : undefined}>
                             {group.pickOne ? 'Swap' : i.add && i.cut ? 'Stage swap' : 'Accept'}
@@ -604,10 +634,36 @@ function Group({ group, items, staged, dismissed, busy, cutRoom, sections, onSta
                 </span>
               </div>
               {how === i.key && i.how && <HowBox how={i.how} />}
+              {asking === i.key && isDismissed && <WhyNot onDone={(chip, text) => onReason(i.key, chip, text)} />}
             </li>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** Why a suggestion was turned down: one optional tap, or a line in your words. Kept on the Pi; the words are never exported. */
+function WhyNot({ onDone }: { onDone: (chip: ReasonChip | null, text?: string) => void }) {
+  const [other, setOther] = useState<string | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs" role="group" aria-label="Why not? (optional)">
+      <span className="flex items-center gap-1 text-[var(--muted)]">Why not?<Tip label="About this question">Optional. Your answer helps tell which suggestions are worth showing. It stays in this app; typed reasons are never shared.</Tip></span>
+      {other === null ? (
+        <>
+          {WHY_NOT_CHIPS.map((c) => (
+            <button key={c} className="rounded-full border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]" onClick={() => (c === 'other' ? setOther('') : onDone(c))}>{REASON_LABELS[c]}</button>
+          ))}
+          <button className="px-1 text-[var(--muted)] underline hover:text-[var(--foreground)]" onClick={() => onDone(null)}>Skip</button>
+        </>
+      ) : (
+        <form className="flex min-w-0 flex-1 items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); onDone('other', other); }}>
+          <input autoFocus value={other} onChange={(e) => setOther(e.target.value)} maxLength={300} placeholder="In a few words" aria-label="Why not, in your words"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-transparent px-2 py-0.5" />
+          <button type="submit" className="rounded-full border border-[var(--border)] px-2 py-0.5 hover:border-[var(--accent)]">Save</button>
+          <button type="button" className="px-1 text-[var(--muted)] underline" onClick={() => onDone(null)}>Skip</button>
+        </form>
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ import { planContext } from './plan-context';
 import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
 import { addItem, addable, gcRoomOf, ref, tuneContext } from './tune';
 import type { Intent, Suggestion, SuggestionGroup } from './tune-shared';
+import { PROMPT_VERSIONS } from './prompt-versions';
 import { tuneStore, updateTune } from './tune-store';
 
 const ASK: Record<Intent, string> = {
@@ -129,6 +130,9 @@ export async function tuneIdeas(model: JsonModel, list: List, input: { intent: I
     why: `${answer.model ? `From ${answer.model}` : 'From Claude'}${input.instructions.trim() ? `, with your instructions: “${input.instructions.trim().slice(0, 120)}”` : ''}. Read against your plan; nothing changes until you accept one.`,
     source: 'claude',
     items,
+    model: answer.model ?? null,
+    promptVersion: PROMPT_VERSIONS.tuneIdeas,
+    round: new Date().toISOString(),
   };
   updateTune(list.id, (s) => { s.proposals[input.intent] = [group]; });
   return group;
@@ -191,6 +195,7 @@ export function parseFinish(data: unknown, room: number, allowed: (names: string
   const names = raw.flatMap((g) => (g.cards ?? []).map((c) => String(c.name ?? '').trim())).filter(Boolean);
   const ok = allowed(names);
   const seen = new Set<string>();
+  const round = new Date().toISOString();
   let left = room;
   const groups: SuggestionGroup[] = [];
   for (const g of raw) {
@@ -209,7 +214,7 @@ export function parseFinish(data: unknown, room: number, allowed: (names: string
     if (!items.length) continue;
     const n = items.reduce((m, i) => m + (i.add?.quantity ?? 1), 0);
     const title = kind === 'theme' && g.theme ? `Theme: ${String(g.theme).slice(0, 40)}` : FINISH_TITLE[kind];
-    groups.push({ key: `claude:finish:${kind}${kind === 'theme' ? `:${String(g.theme ?? '').toLowerCase().slice(0, 40)}` : ''}`, title: `✦ ${title} · ${n}`, why: `Claude’s picks${model ? ` (${model})` : ''}, read against your plan. Each card says why.`, source: 'claude', items });
+    groups.push({ key: `claude:finish:${kind}${kind === 'theme' ? `:${String(g.theme ?? '').toLowerCase().slice(0, 40)}` : ''}`, title: `✦ ${title} · ${n}`, why: `Claude’s picks${model ? ` (${model})` : ''}, read against your plan. Each card says why.`, source: 'claude', items, model: model ?? null, promptVersion: PROMPT_VERSIONS.finishPicks, round });
   }
   return groups;
 }

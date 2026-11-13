@@ -15,7 +15,7 @@ import { sourcesNeeded } from './health';
 import { database } from './db';
 import { fitOf, fitProfile, quality } from './fit';
 import { holdings } from './gap-cards';
-import { ROLES } from './roles';
+import { fixRoles, ROLES } from './roles';
 import type { ScryfallCard } from './scryfall';
 
 const COLORS = ['W', 'U', 'B', 'R', 'G'] as const;
@@ -76,7 +76,7 @@ export function starterList(commander: ScryfallCard, profileId: string, ownedFir
   // Roles read from text (finishers) are not saved with the others.
   const textRoles = ROLES.filter((r) => r.text);
   const textOf = (c: ScryfallCard) => [c.oracle_text, ...(c.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
-  const rolesFor = (c: ScryfallCard) => [...(rolesOf.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(textOf(c))).map((r) => r.id)];
+  const rolesFor = (c: ScryfallCard) => [...fixRoles(c, rolesOf.get(c.oracle_id ?? '') ?? []), ...textRoles.filter((r) => r.text!.test(textOf(c))).map((r) => r.id)];
   const ownedBonus = (c: ScryfallCard) => (owned.has(c.oracle_id ?? '') ? 0.25 : 0);
   // The plan's cards by fit; the role slots and lands by how good they are at the job.
   const score = (c: ScryfallCard) => fitOf(c, fit).score * 0.55 + quality(c, rolesFor(c)).score * 0.45 + ownedBonus(c);

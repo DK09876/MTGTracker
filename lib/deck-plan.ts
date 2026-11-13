@@ -28,7 +28,7 @@ import { cachedRoles, database } from './db';
 import { BASE_RANGES, JOB_LABELS, landNumber, rampRange, type JobId, type LandNumber } from './deck-numbers';
 import { cleanGoldfishSettings, DEFAULT_SETTINGS, startingChecks, type GoldfishSettings } from './goldfish';
 import { COMMANDER_ROLES, PROTECTION_BY_LEAN, type CommanderRole, type DeckBuild, type Lean, type Stages } from './plan-detect';
-import { ROLES_VERSION } from './roles';
+import { fixRoles, ROLES_VERSION } from './roles';
 import type { ScryfallCard } from './scryfall';
 import { detectStyles, styleById, styleTargets, type Detected, type Style } from './styles';
 
@@ -77,8 +77,15 @@ export const PARTS: PartId[] = ['goal', 'commanders', 'bracket', 'budget', 'own'
 
 export type Source = 'detected' | 'claude' | 'yours' | 'unset';
 
-/** What the owner is optimizing for: the chips the rules read, and their own words for Claude. */
-export const GOALS = ['The usual guidelines', 'Win more often', 'Faster', 'More fun, keep my pets', 'Fit my table', 'Stay on theme', 'Spend less'] as const;
+/**
+ * What the owner wants from the deck: their own words first (Claude reads
+ * them, and so does every AI step after the plan), and chips for the common
+ * aims. No chip means no particular aim. "Do its thing more often" is the
+ * usual reason to tune: cut what gets in the way of what the deck is for.
+ */
+export const GOALS = ['Do its thing more often', 'Win more often', 'Faster', 'More fun, keep my pets', 'Fit my table', 'Spend less'] as const;
+/** Chips from before the list changed, as they read now. */
+const goalChips = (chips: string[]) => [...new Set(chips.map((c) => (c === 'Stay on theme' ? 'Do its thing more often' : c)))].filter((c) => (GOALS as readonly string[]).includes(c));
 export interface Goal { chips: string[]; text: string }
 
 export interface DeckRule { text: string; filter: string }
@@ -123,7 +130,17 @@ export interface Override {
   at: string;
 }
 
-export interface Note { id: string; text: string; at: string }
+/**
+ * A note kept with the plan. `by` says whose words it is: the owner's, or
+ * Claude's from an earlier read. Notes from before `by` existed all came
+ * from Claude's reads. Only the owner's notes go to later AI calls: an AI
+ * note ("the easiest cuts are...") read back as the owner's view steered
+ * later answers.
+ */
+export interface Note { id: string; text: string; at: string; by?: 'owner' | 'ai' }
+
+/** Whose words a note is; notes saved before `by` existed are Claude's. */
+export const noteBy = (n: Note): 'owner' | 'ai' => n.by ?? 'ai';
 
 /** The last detection, kept so pages that do not detect still read it. */
 export interface DetectedSnapshot {
@@ -189,7 +206,7 @@ export interface Plan {
 function knownRoles(cards: Array<{ card: ScryfallCard; quantity: number }>): (card: ScryfallCard) => string[] {
   const ids = [...new Set(cards.map((c) => c.card.oracle_id).filter((x): x is string => !!x))];
   const { roles } = cachedRoles(ids, '1970-01-01', ROLES_VERSION);
-  return (card) => roles.get(card.oracle_id ?? '') ?? [];
+  return (card) => fixRoles(card, roles.get(card.oracle_id ?? '') ?? []);
 }
 
 /** The owner's own style: a name and the ranges they want. */
@@ -248,7 +265,7 @@ export function planFor(listId: string, brief: string, commander: ScryfallCard |
     landsSource: mine.lands ? 'yours' : landOverride ? landOverride.by : 'detected',
     packages,
     bracket: extra.bracket ?? null,
-    goal: stored.goal?.v ?? { chips: ['The usual guidelines'], text: '' },
+    goal: stored.goal ? { chips: goalChips(stored.goal.v.chips ?? []), text: stored.goal.v.text ?? '' } : { chips: [], text: '' },
     budget: stored.budget?.v ?? null,
     own: stored.own?.v ?? false,
     rule: stored.rule?.v ?? { text: '', filter: '' },
@@ -322,7 +339,7 @@ export interface PlanChange {
   /** Who made this change: the owner, or Claude with the owner accepting it. */
   by?: 'yours' | 'claude';
   overrides?: { add?: Omit<Override, 'id' | 'at' | 'on'>; toggle?: { id: string; on: boolean }; remove?: string };
-  notes?: { add?: string[]; remove?: string };
+  notes?: { add?: string[]; remove?: string; by?: 'owner' | 'ai'; edit?: { id: string; text: string } };
   proposal?: { key: string; status: 'accepted' | 'skipped' };
 }
 
@@ -385,7 +402,7 @@ export function changePlan(listId: string, change: PlanChange): void {
   }
   // The other parts, kept as JSON with who set them; null goes back to detected or not set.
   const set = <K extends keyof StoredParts>(k: K, v: StoredParts[K] | undefined) => { if (v === undefined) delete stored[k]; else stored[k] = v; };
-  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: (change.goal.chips ?? []).filter((g) => (GOALS as readonly string[]).includes(g)).slice(0, 7), text: text(change.goal.text, 500) }, by } || undefined);
+  if (change.goal !== undefined) set('goal', change.goal && { v: { chips: goalChips(change.goal.chips ?? []).slice(0, 7), text: text(change.goal.text, 500) }, by } || undefined);
   if (change.budget !== undefined) set('budget', change.budget === null ? undefined : Number.isFinite(change.budget) && change.budget > 0 ? { v: Math.round(change.budget * 100) / 100, by } : undefined);
   if (change.own !== undefined) set('own', change.own === null ? undefined : { v: !!change.own, by });
   if (change.rule !== undefined) set('rule', change.rule && (text(change.rule.text, 300) || text(change.rule.filter, 300)) ? { v: { text: text(change.rule.text, 300), filter: text(change.rule.filter, 300) }, by } : undefined);
@@ -449,9 +466,14 @@ export function changePlan(listId: string, change: PlanChange): void {
   if (change.notes) {
     let notes = parse<Note[]>(r?.notes, []);
     for (const n of (change.notes.add ?? []).map((x) => text(x, 600)).filter(Boolean)) {
-      if (!notes.some((x) => x.text === n)) notes.push({ id: randomUUID(), text: n, at: new Date().toISOString() });
+      if (!notes.some((x) => x.text === n)) notes.push({ id: randomUUID(), text: n, at: new Date().toISOString(), by: change.notes.by ?? 'ai' });
     }
     if (change.notes.remove) notes = notes.filter((x) => x.id !== change.notes!.remove);
+    const edited = change.notes.edit;
+    if (edited) {
+      const t = text(edited.text, 600);
+      notes = t ? notes.map((x) => (x.id === edited.id ? { ...x, text: t, at: new Date().toISOString() } : x)) : notes.filter((x) => x.id !== edited.id);
+    }
     patch.notes = JSON.stringify(notes.slice(-30));
   }
   if (change.proposal) {
@@ -514,11 +536,15 @@ export function draftFromCards(commander: ScryfallCard | null, style: Style, sty
 }
 
 /** Whether Tune, Chat and the paid Claude steps may run for this deck: its plan is confirmed. */
+/**
+ * Whether the owner has confirmed the deck's plan (lib/plan-pass.ts). Only
+ * the deck page's "start here" hint reads it now: nothing is locked behind it.
+ */
 export function planConfirmed(listId: string): boolean {
-  const r = row(listId);
-  if (r) return !!r.confirmedAt;
-  const b = database().get('SELECT tagBrief FROM lists WHERE id = ?', [listId]) as { tagBrief: string } | null;
-  return !!b?.tagBrief.trim();
+  const has = database().get(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_owner'`);
+  if (!has) return false;
+  const r = database().get('SELECT confirmedAt FROM plan_owner WHERE listId = ?', [listId]) as { confirmedAt: string | null } | null;
+  return !!r?.confirmedAt;
 }
 
 /** How many parts are confirmed, from the stored plan alone (for a lock screen). */

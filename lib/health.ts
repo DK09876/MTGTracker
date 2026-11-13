@@ -174,8 +174,6 @@ export function sourcesNeeded(pipCount: number, manaValue: number, gold = false)
   return (row[col] ?? 36) + (gold ? 1 : 0);
 }
 
-const COLOR_NAME: Record<Color, string> = { W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green' };
-
 export function analyse(input: HealthInput): Health {
   const { commander } = input;
   const count = (list: typeof cards) => list.reduce((n, c) => n + c.quantity, 0);
@@ -216,7 +214,6 @@ export function analyse(input: HealthInput): Health {
   const landColors = colorsOf(lands);
   const makes = (card: ScryfallCard, color: Color) =>
     !!card.produced_mana?.includes(color) || fetchedColors(card, basics, landColors).has(color);
-  const warnings_: Warning[] = [];
   const casts = [...spells, ...[commander, partner].filter((c): c is ScryfallCard => !!c).map((card) => ({ card, quantity: 1 }))];
   const colors = shown.map((color) => {
     const landSources = count(lands.filter((c) => makes(c.card, color)));
@@ -249,28 +246,15 @@ export function analyse(input: HealthInput): Health {
     };
   });
 
-  // Only once the deck is nearly built: a half-made deck is short of everything.
-  const short = size >= 90 ? colors.filter((c) => c.needed !== null && c.sources < c.needed - 1) : [];
-  for (const c of short) {
-    warnings_.push({
-      level: 'warning',
-      title: `Short on ${COLOR_NAME[c.color]} sources: ${c.sources} of ${c.needed}`,
-      detail: `${c.neededFor} wants ${c.needed} to be castable on curve about 90% of the time. Add lands or rocks that make ${COLOR_NAME[c.color].toLowerCase()}.`,
-    });
-  }
+  // Colour sources are a number with what the hungriest spell wants (the
+  // Colours section), not a warning: hard-checks.ts says why.
 
   const gameChangers = [commander, partner, ...cards.map((c) => c.card)]
     .filter((c): c is ScryfallCard => !!c && c.game_changer === true).map((c) => c.name);
 
   const warnings: Warning[] = [];
   if (!commander) warnings.push({ level: 'warning', title: 'No commander', detail: 'Pick one above to check colours and legality.' });
-  if (size !== 100) {
-    warnings.push({
-      level: 'warning',
-      title: `${size} cards, not 100`,
-      detail: size > 100 ? `${size - 100} to cut.` : `${100 - size} to add.`,
-    });
-  }
+  // The size is the deck's state (trim, tune or fill), shown as a number, not a warning.
   // The cards the deck can't have as it stands (the flagged zone on Cards and Tune), grouped.
   const flags = deckFlags(input);
   const flagged = (kind: Flag['kind'], title: (n: number) => string, detail?: string) => {
@@ -281,16 +265,7 @@ export function analyse(input: HealthInput): Health {
   flagged('copies', () => 'More than one copy of a card', 'Commander is singleton.');
   flagged('banned', () => 'Banned in Commander');
   flagged('not-legal', () => 'Not legal in Commander');
-  if (gameChangers.length) {
-    warnings.push({
-      level: 'info',
-      title: `${gameChangers.length} Game Changer${gameChangers.length === 1 ? '' : 's'}`,
-      detail: gameChangers.length > 3
-        ? 'More than three puts the deck in bracket 4 or higher.'
-        : 'Brackets 1 and 2 allow none; bracket 3 allows up to three.',
-      cards: gameChangers,
-    });
-  }
+  // Game Changers are counted with the bracket, not warned about.
 
   // Opening hands: seven from the library - the deck without its commander.
   const library = count(cards);
@@ -304,7 +279,7 @@ export function analyse(input: HealthInput): Health {
     types,
     colors,
     gameChangers,
-    warnings: [...warnings, ...warnings_],
+    warnings,
     hand: {
       library,
       lands: landCount,
