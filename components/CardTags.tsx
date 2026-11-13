@@ -32,6 +32,8 @@ export default function CardTags({ listId, card, onChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
+  // Groups made here in this visit: one emptied again in the same visit goes too, rather than sitting empty on the Tags tab.
+  const [madeHere, setMadeHere] = useState<string[]>([]);
 
   useEffect(() => {
     let stop = false;
@@ -62,7 +64,8 @@ export default function CardTags({ listId, card, onChange }: Props) {
       setBusy(false);
     }
   };
-  const put = (id: string, yes: boolean) => run({ action: 'card', id, name: card.name, on: yes });
+  const put = (id: string, yes: boolean) => run({ action: 'card', id, name: card.name, on: yes },
+    (v) => (!yes && madeHere.includes(id) && !(v.categories.find((c) => c.id === id)?.cards.length) ? { action: 'remove', id } : null));
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +73,7 @@ export default function CardTags({ listId, card, onChange }: Props) {
     if (!name) return;
     await run({ action: 'add', name }, (v) => {
       const made = v.categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      if (made) setMadeHere((m) => [...m, made.id]);
       return made ? { action: 'card', id: made.id, name: card.name, on: true } : null;
     });
     setNewName('');

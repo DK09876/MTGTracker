@@ -235,25 +235,59 @@ function planOf(ctx: Context, card: ScryfallCard): string[] {
   return [...ctx.styles.filter((s) => s.test.test(text)).map((s) => s.label), ...themes.map((t) => t.name)];
 }
 
-/** Cards that may be suggested to add: in the colours, legal, not in the deck, within the bracket, budget, "only mine" and deck rule. */
-export function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | null): ScryfallCard[] {
+/**
+ * Why a card may not go into the main deck, in a sentence, or null when it
+ * may: in the colours, legal, not already in the deck, "only cards I own",
+ * the budget (a card the owner has is never over it), and the deck rule.
+ * The bracket's Game Changer room is checked by the callers, which count it
+ * across a whole list (addable) or for one card (whyNotAddable). Tune's
+ * suggestions and Chat's Apply read the same checks.
+ */
+function addReason(ctx: Context, c: ScryfallCard, inDeck: Set<string>): string | null {
+  if (!(c.color_identity ?? []).every((x) => ctx.identity.has(x))) return `${c.name} is outside this deck's colours`;
+  if (c.legalities?.commander !== 'legal') return `${c.name} isn't legal in Commander`;
+  if (inDeck.has(front(c.name))) return `${c.name} is already in the deck`;
+  const owned = ctx.where.has(c.oracle_id ?? '') || ctx.pool.some((p) => p.card.name === c.name);
+  if (ctx.plan.own && !owned) return `${c.name} isn't in your collection, and this deck is set to only cards you own`;
+  const budget = ctx.plan.budget;
+  if (budget !== null && !ctx.where.has(c.oracle_id ?? '') && Number(c.prices?.usd ?? 0) > budget) return `${c.name} is over your $${budget} budget`;
+  return null;
+}
+const inDeckOf = (ctx: Context) => {
   const inDeck = new Set(ctx.all.filter((c) => c.board === 'main').map((c) => front(c.card.name)));
   for (const c of ctx.commanders) inDeck.add(front(c.name));
-  const budget = ctx.plan.budget;
+  return inDeck;
+};
+const ruleKeeps = (ctx: Context, cards: ScryfallCard[]) => (ctx.plan.rule.filter?.trim() ? filterCards(cards.map((card) => ({ card })), ctx.plan.rule.filter).results.map((x) => x.card) : cards);
+
+/** Cards that may be suggested to add: in the colours, legal, not in the deck, within the bracket, budget, "only mine" and deck rule. */
+export function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | null): ScryfallCard[] {
+  const inDeck = inDeckOf(ctx);
   let gcs = 0;
-  let out = cards.filter((c) => (c.color_identity ?? []).every((x) => ctx.identity.has(x))
-    && c.legalities?.commander === 'legal'
-    && !inDeck.has(front(c.name))
-    && (!ctx.plan.own || ctx.where.has(c.oracle_id ?? '') || ctx.pool.some((p) => p.card.name === c.name))
-    && (budget === null || ctx.where.has(c.oracle_id ?? '') || Number(c.prices?.usd ?? 0) <= budget));
-  if (ctx.plan.rule.filter?.trim()) out = filterCards(out.map((card) => ({ card })), ctx.plan.rule.filter).results.map((x) => x.card);
-  out = out.filter((c) => {
+  return ruleKeeps(ctx, cards.filter((c) => !addReason(ctx, c, inDeck))).filter((c) => {
     if (!c.game_changer) return true;
     if (gcRoom === null) return true;
     if (gcs < gcRoom) { gcs += 1; return true; }
     return false;
   });
-  return out;
+}
+
+/**
+ * Why one card may not go into the main deck (Chat's Apply), by the same
+ * checks as addable, or null when it may. `leaving`: a card going out in the
+ * same move (a swap), which frees its place and any Game Changer room.
+ */
+export function whyNotAddable(ctx: Context, card: ScryfallCard, leaving?: ScryfallCard | null): string | null {
+  const inDeck = inDeckOf(ctx);
+  if (leaving) inDeck.delete(front(leaving.name));
+  const basic = /\bBasic\b/.test(card.type_line ?? '') || /any number of cards named/i.test(card.oracle_text ?? '');
+  if (basic) inDeck.delete(front(card.name));
+  const why = addReason(ctx, card, inDeck);
+  if (why) return why;
+  if (!ruleKeeps(ctx, [card]).length) return `${card.name} doesn't fit this deck's rule${ctx.plan.rule.text?.trim() ? `: ${ctx.plan.rule.text.trim()}` : ''}`;
+  const room = gcRoomOf(ctx);
+  if (card.game_changer && room !== null && room + (leaving?.game_changer ? 1 : 0) <= 0) return `${card.name} would put the deck past bracket ${ctx.plan.bracket}`;
+  return null;
 }
 
 export const gcRoomOf = (ctx: Context) => (ctx.gcLimit === null ? null : Math.max(0, ctx.gcLimit - [...ctx.commanders, ...ctx.main.map((c) => c.card)].filter((c) => c.game_changer === true).length));

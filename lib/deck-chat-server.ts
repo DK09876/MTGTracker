@@ -6,6 +6,7 @@
 import { categories } from './categories';
 import { deckRoles, jobCards } from './deck-roles';
 import { sectionsOf } from './sections';
+import { tuneContext, whyNotAddable } from './tune';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
@@ -52,10 +53,13 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     for (const c of await categories(list, jobCards).catch(() => [])) for (const x of c.cards) tagsOf.set(x.name, [...(tagsOf.get(x.name) ?? []), c.name]);
     const planText = await planContext(list).catch(() => '');
     const sections = sectionsOf(list.id).map((x) => ({ id: x.id, name: x.name, purpose: x.purpose }));
+    // Tune's checks for a card going into the main deck, so a proposal that Apply would refuse says why up front.
+    const tune = await tuneContext(list, profile).catch(() => null);
     const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
+      check: tune ? (card, leaving) => whyNotAddable(tune, card, leaving) : undefined,
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     current.messages.push(message);
     saveChat(current);

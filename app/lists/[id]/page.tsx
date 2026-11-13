@@ -8,7 +8,6 @@ import { use, useCallback, useEffect, useRef, useState } from 'react';
 import AddCardsPanel from '@/components/AddCardsPanel';
 import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
-import CardRoles from '@/components/CardRoles';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
@@ -769,9 +768,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             {deck && selectedInDeck && selected && (
               <CardTags listId={id} card={selected} onChange={setTags} />
             )}
-            {deck && selectedInDeck && selected && (
-              <CardRoles key={`roles-${selected.id}`} listId={id} card={selected} />
-            )}
+            {/* The card's jobs and groups live in one place, CardTags above: the old built-in tags panel said otherwise. */}
             {selectedEntry && (
               <CardEditor
                 key={`editor-${selectedEntry.card.id}`}

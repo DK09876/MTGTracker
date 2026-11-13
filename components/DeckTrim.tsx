@@ -49,7 +49,7 @@ const WEIGH = ['speed', 'card advantage', 'my theme', 'staying on budget', 'inte
 
 const money = price;
 const TIER_TITLE: Record<TrimTier, (n: number) => [string, string]> = {
-  cut: (n) => [`Claude would cut these ${n}`, 'Agree by leaving them. Keep overrules one for good; Rethink sends your reason for Claude to weigh.'],
+  cut: (n) => [`Claude would cut these ${n}`, 'Leave a card to agree. Keep settles it. Rethink asks Claude again.'],
   maybe: (n) => [`Closer calls · ${n}`, 'Claude would keep these, most cuttable first. Press Cut to take one.'],
   kept: (n) => [`Kept on purpose · ${n}`, 'Cards a quick look would cut, and why Claude left them in. Press Cut to take one anyway.'],
   yours: (n) => [`Kept by you · ${n}`, 'Every card you’ve kept on this deck. Claude doesn’t list them again. Press Cut to take a keep back.'],

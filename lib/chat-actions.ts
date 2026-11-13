@@ -11,7 +11,7 @@
 
 import { addCategory, categories, keyCategoryId, removeCategory, setCategoryCard } from './categories';
 import { localCards } from './card-store';
-import { addCardToList, cardsInList, database, setQuantity, updateListCard, type List } from './db';
+import { addCardToList, cardsInList, database, setQuantity, updateListCard, type CardBefore, type List } from './db';
 import { recorded } from './deck-history';
 import { changePlan, planFor } from './deck-plan';
 import { jobCards, keeps, setKeep } from './deck-roles';
@@ -20,7 +20,7 @@ import type { Change } from './deck-chat';
 import { cutBoard } from './sections-shared';
 import { sectionsOf } from './sections';
 import type { ScryfallCard } from './scryfall';
-import { applyCuts, undoApply, type UndoMoves } from './tune';
+import { applyCuts, tuneContext, undoApply, whyNotAddable, type UndoMoves } from './tune';
 
 export class ChatActionRefused extends Error {}
 
@@ -30,8 +30,9 @@ const keyOf = (c: ScryfallCard) => c.oracle_id ?? c.id;
 /** What Undo needs, kept on the change once applied. */
 export type Undo =
   | { kind: 'cut'; moves: UndoMoves }
-  | { kind: 'add'; cardId: string }
-  | { kind: 'swap'; moves: UndoMoves; cardId: string }
+  // before: where the incoming card was (its section and copies), or null when it wasn't on the deck at all.
+  | { kind: 'add'; cardId: string; before?: CardBefore }
+  | { kind: 'swap'; moves: UndoMoves; cardId: string; before?: CardBefore }
   | { kind: 'move'; cardId: string; from: Board; to: Board }
   | { kind: 'group'; catId: string; key: string; name: string; on: boolean; made: boolean }
   | { kind: 'never'; key: string; was: boolean }
@@ -69,12 +70,24 @@ const cardFor = (name: string, cardId: string | null): ScryfallCard => {
   return c;
 };
 
-/** One copy of each card in a Commander deck, but basics and "any number of" cards. */
-const anyNumber = (c: ScryfallCard) => /\bBasic\b/.test(c.type_line ?? '') || /any number of cards named/i.test(c.oracle_text ?? '');
-function oneCopy(listId: string, card: ScryfallCard): void {
-  if (anyNumber(card)) return;
-  const there = inMain(listId, card.name);
-  if (there) throw new ChatActionRefused(`${there.card.name} is already in the deck`);
+/**
+ * A card going into the main deck gets Tune's checks (whyNotAddable): the
+ * colours, Commander-legal, one copy, "only cards I own", the budget, the deck
+ * rule and the bracket. A card going to another section only has to exist.
+ */
+async function mayGoIn(list: List, profile: string, card: ScryfallCard, leaving?: ScryfallCard | null): Promise<void> {
+  const why = whyNotAddable(await tuneContext(list, profile), card, leaving);
+  if (why) throw new ChatActionRefused(why);
+}
+
+/** Put a card back where it was before an add moved it or added a copy. */
+function putBack(listId: string, cardId: string, before: CardBefore | undefined): void {
+  const row = cardsInList(listId).find((c) => c.card.id === cardId);
+  if (!row) return;
+  if (before === undefined) { setQuantity(listId, cardId, row.quantity - 1); return; }
+  if (before === null) { setQuantity(listId, cardId, 0); return; }
+  if (row.board !== before.board) updateListCard(listId, cardId, { board: before.board });
+  setQuantity(listId, cardId, before.quantity);
 }
 
 /** Do one proposal. Returns what Undo needs. */
@@ -98,20 +111,20 @@ export async function applyChange(list: List, profile: string, c: Change): Promi
     case 'add': {
       const card = cardFor(c.name, c.cardId);
       const to = boardOf(id, c.to);
-      if (to === 'main') oneCopy(id, card);
-      await recorded(id, who, 'chat', `From Chat: add ${card.name}`, () => addCardToList(id, card, 1, 'nonfoil', to));
-      return { kind: 'add', cardId: card.id };
+      if (to === 'main') await mayGoIn(list, profile, card);
+      const { result: before } = await recorded(id, who, 'chat', `From Chat: add ${card.name}`, () => addCardToList(id, card, 1, 'nonfoil', to));
+      return { kind: 'add', cardId: card.id, before };
     }
     case 'swap': {
       const out = guardCut(c.out?.name ?? '');
       const card = cardFor(c.name, c.cardId);
-      oneCopy(id, card);
+      await mayGoIn(list, profile, card, out.card);
       const { result } = await recorded(id, who, 'chat', `From Chat: ${out.card.name} out, ${card.name} in`, async () => {
         const moved = await applyCuts(list, [{ name: out.card.name, why: c.why }]);
-        addCardToList(id, card, 1, 'nonfoil', 'main');
-        return moved;
+        const before = addCardToList(id, card, 1, 'nonfoil', 'main');
+        return { moved, before };
       });
-      return { kind: 'swap', moves: result.undo, cardId: card.id };
+      return { kind: 'swap', moves: result.moved.undo, cardId: card.id, before: result.before };
     }
     case 'move': {
       const row = anywhere(id, c.name);
@@ -119,7 +132,7 @@ export async function applyChange(list: List, profile: string, c: Change): Promi
       const to = boardOf(id, c.to);
       if (row.board === to) throw new ChatActionRefused(`${row.card.name} is already there`);
       if (to !== 'main' && row.board === 'main') guardCut(row.card.name);
-      if (to === 'main') oneCopy(id, row.card);
+      if (to === 'main') await mayGoIn(list, profile, row.card);
       await recorded(id, who, 'chat', `From Chat: move ${row.card.name}`, () => updateListCard(id, row.card.id, { board: to }));
       return { kind: 'move', cardId: row.card.id, from: row.board as Board, to };
     }
@@ -184,15 +197,11 @@ export async function undoChange(list: List, profile: string, u: Undo): Promise<
       await recorded(id, who, 'undo', 'Undid a change from Chat', () => undoApply(list, u.moves));
       return;
     case 'add':
-      await recorded(id, who, 'undo', 'Undid a change from Chat', () => {
-        const row = cardsInList(id).find((c) => c.card.id === u.cardId);
-        if (row) setQuantity(id, row.card.id, row.quantity - 1);
-      });
+      await recorded(id, who, 'undo', 'Undid a change from Chat', () => putBack(id, u.cardId, u.before));
       return;
     case 'swap':
       await recorded(id, who, 'undo', 'Undid a swap from Chat', () => {
-        const row = cardsInList(id).find((c) => c.card.id === u.cardId && c.board === 'main');
-        if (row) setQuantity(id, row.card.id, row.quantity - 1);
+        putBack(id, u.cardId, u.before);
         undoApply(list, u.moves);
       });
       return;

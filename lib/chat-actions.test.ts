@@ -91,6 +91,71 @@ describe('chat proposals', { timeout: 60_000 }, () => {
     expect(where(db, list.id, 'Opt')).toBe('main:1');
   });
 
+  it('an add into the main deck gets Tune’s checks, and says why it is refused', async () => {
+    const { db, list } = await deck();
+    const a = await import('./chat-actions');
+    const { changePlan } = await import('./deck-plan');
+    db.storeCard(card('Chain Lightning', { color_identity: ['R'] }));
+    db.storeCard(card('Pricey', { prices: { usd: '9.99' } } as never));
+    db.storeCard(card('Unowned'));
+    // Off-colour: refused into the deck, fine to the Maybeboard.
+    await expect(a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Chain Lightning', cardId: 'id-Chain Lightning' }))).rejects.toThrow("Chain Lightning is outside this deck's colours");
+    await expect(a.applyChange(list, 'dk', ch({ kind: 'swap', name: 'Chain Lightning', cardId: 'id-Chain Lightning', out: { name: 'Opt', cardId: 'id-Opt' } }))).rejects.toThrow(/outside this deck's colours/);
+    const maybe = await a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Chain Lightning', cardId: 'id-Chain Lightning', to: 'Maybeboard' }));
+    expect(where(db, list.id, 'Chain Lightning')).toBe('maybe:1');
+    await a.undoChange(list, 'dk', maybe);
+    // Over budget.
+    changePlan(list.id, { budget: 5 });
+    await expect(a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Pricey', cardId: 'id-Pricey' }))).rejects.toThrow('Pricey is over your $5 budget');
+    changePlan(list.id, { budget: null });
+    // Only cards I own: refused when set, allowed when not.
+    changePlan(list.id, { own: true });
+    await expect(a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Unowned', cardId: 'id-Unowned' }))).rejects.toThrow("Unowned isn't in your collection, and this deck is set to only cards you own");
+    changePlan(list.id, { own: false });
+    const u = await a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Unowned', cardId: 'id-Unowned' }));
+    expect(where(db, list.id, 'Unowned')).toBe('main:1');
+    await a.undoChange(list, 'dk', u);
+  });
+
+  it('marks a proposal Apply would refuse, with the reason, before it is pressed', async () => {
+    const { db, list } = await deck();
+    db.storeCard(card('Chain Lightning', { color_identity: ['R'] }));
+    const { resolveChanges } = await import('./deck-chat');
+    const tune = await import('./tune');
+    const ctx = await tune.tuneContext(list, 'dk');
+    const d = { list, cards: db.cardsInList(list.id), brief: '', roles: null };
+    const out = resolveChanges({ add: [{ name: 'Chain Lightning', why: 'x' }, { name: 'Chain Lightning', why: 'x', to: 'Maybeboard' }] }, d as never, () => ({}), (c, l) => tune.whyNotAddable(ctx, c, l));
+    expect(out.map((c) => [c.to ?? 'main', c.blocked ?? null])).toEqual([['main', "Chain Lightning is outside this deck's colours"], ['Maybeboard', null]]);
+  });
+
+  it('undo puts an added card back where it was', async () => {
+    const { db, list } = await deck();
+    const a = await import('./chat-actions');
+    db.addCardToList(list.id, card('Grapeshot'), 1, 'nonfoil', 'maybe');
+    // From the Maybeboard into the deck, then undo: back in the Maybeboard, one copy.
+    let u = await a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Grapeshot', cardId: 'id-Grapeshot' }));
+    expect(where(db, list.id, 'Grapeshot')).toBe('main:1');
+    await a.undoChange(list, 'dk', u);
+    expect(where(db, list.id, 'Grapeshot')).toBe('maybe:1');
+    // The same through a swap.
+    u = await a.applyChange(list, 'dk', ch({ kind: 'swap', name: 'Grapeshot', cardId: 'id-Grapeshot', out: { name: 'Opt', cardId: 'id-Opt' } }));
+    expect([where(db, list.id, 'Grapeshot'), where(db, list.id, 'Opt').includes('main')]).toEqual(['main:1', false]);
+    await a.undoChange(list, 'dk', u);
+    expect([where(db, list.id, 'Grapeshot'), where(db, list.id, 'Opt')]).toEqual(['maybe:1', 'main:1']);
+    // A new card: undo removes it.
+    db.storeCard(card('Fresh'));
+    u = await a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Fresh', cardId: 'id-Fresh' }));
+    await a.undoChange(list, 'dk', u);
+    expect(where(db, list.id, 'Fresh')).toBe('');
+    // A second basic: undo leaves the first.
+    const island = card('Island', { type_line: 'Basic Land — Island' });
+    db.addCardToList(list.id, island, 1);
+    u = await a.applyChange(list, 'dk', ch({ kind: 'add', name: 'Island', cardId: 'id-Island' }));
+    expect(where(db, list.id, 'Island')).toBe('main:2');
+    await a.undoChange(list, 'dk', u);
+    expect(where(db, list.id, 'Island')).toBe('main:1');
+  });
+
   it('never cuts the commander or a never-cut card', async () => {
     const { list } = await deck();
     const a = await import('./chat-actions');

@@ -143,7 +143,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
     }
   };
   const applyAll = async (m: number) => {
-    const open = (chat?.messages[m]?.changes ?? []).map((c, j) => ({ c, j })).filter(({ c }) => !c.applied && !c.done);
+    const open = (chat?.messages[m]?.changes ?? []).map((c, j) => ({ c, j })).filter(({ c }) => !c.applied && !c.done && !c.blocked && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId));
     for (const { j } of open) await change(m, j, 'apply');
   };
   const byName = (n: string) => { const f = n.split(' // ')[0].toLowerCase(); return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (commander && commander.name.split(' // ')[0].toLowerCase() === f ? commander : undefined); };
@@ -220,10 +220,15 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                       <span className="text-xs text-emerald-400">In Tune</span>
                     ) : unknown ? (
                       <span className="text-xs text-[var(--muted)]">Card not found</span>
+                    ) : c.blocked ? (
+                      <span className="flex max-w-[18rem] items-center gap-2" data-blocked>
+                        <span className="text-xs text-amber-300">{c.blocked}</span>
+                        <button disabled className="rounded-full border border-[var(--border)] px-3 py-1 text-sm opacity-40">Apply</button>
+                      </span>
                     ) : (
                       <span className="flex items-center gap-2">
                         <button onClick={() => change(i, j, 'apply')} disabled={busy} aria-label={`Apply: ${KIND_LABEL[c.kind][0]} ${c.kind === 'swap' ? `${c.out?.name} for ${c.name}` : c.name}`}
-                          className="rounded-full bg-[var(--accent)] px-3 py-1 text-sm font-semibold text-[#221c08] disabled:opacity-50">{busy ? 'Applying…' : 'Apply'}</button>
+                          className="rounded-full border border-[var(--border)] px-3 py-1 text-sm font-semibold hover:bg-[var(--surface-hover)] disabled:opacity-50">{busy ? 'Applying…' : 'Apply'}</button>
                         {(c.kind === 'add' || (c.kind === 'cut' && !!c.cardId && inDeck.has(c.cardId))) && (
                           <button onClick={() => sendToTune(i, j)} className="text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]">or send to Tune</button>
                         )}
@@ -232,9 +237,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   </div>
                 );
               })}
-              {(m.changes?.filter((c) => !c.done && !c.applied).length ?? 0) > 1 && (
+              {(m.changes?.filter((c) => !c.done && !c.applied && !c.blocked).length ?? 0) > 1 && (
                 <button onClick={() => applyAll(i)} disabled={!!doing} className="self-start rounded-full bg-[var(--accent)] px-3.5 py-1 text-sm font-semibold text-[#221c08] disabled:opacity-50">
-                  Apply all {m.changes!.filter((c) => !c.done && !c.applied).length}
+                  Apply all {m.changes!.filter((c) => !c.done && !c.applied && !c.blocked).length}
                 </button>
               )}
               {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
@@ -249,7 +254,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
           </div>
         )}
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <div ref={end} />
+        {/* Room between the last answer and the message box. */}
+        <div ref={end} className="h-6 shrink-0" />
 
         {!replying && (
           <div className="flex flex-wrap gap-2">

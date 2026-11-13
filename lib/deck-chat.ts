@@ -43,6 +43,8 @@ export interface Change {
   cards?: string[];
   /** Sent to Tune (adds and cuts, the older way). */
   done?: boolean;
+  /** Why Apply would refuse it (an add or swap into the main deck that fails Tune's checks), shown on the row. */
+  blocked?: string;
   /** Applied here, with what Undo needs; null once undone. */
   applied?: { at: string; undo: unknown } | null;
 }
@@ -124,6 +126,8 @@ export interface ChatTools {
   held: (names: string[]) => Record<string, string | null>;
   /** Cards to fill a role. */
   gaps: (role: string, owned: boolean, max: number | null) => Promise<GapCard[]>;
+  /** Why a card can't go into the main deck (Tune's checks), or null; `leaving` goes out in the same swap. */
+  check?: (card: ScryfallCard, leaving?: ScryfallCard | null) => string | null;
 }
 
 export interface ChatDeck {
@@ -271,20 +275,33 @@ async function runTool(name: string, input: Record<string, unknown>, deck: ChatD
 }
 
 /** The proposals, matched to real cards: printings to add, the deck's copies for the rest. */
-export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, held: ChatTools['held']): Change[] {
+export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, held: ChatTools['held'], check?: ChatTools['check']): Change[] {
   const str = (x: unknown, n = 300) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
   const rows = (key: string) => (Array.isArray(input[key]) ? input[key] as Array<Record<string, unknown>> : []).filter((x) => !!x && typeof x === 'object').slice(0, 30);
   const inDeck = new Map([...deck.cards.map((c) => [front(c.card.name).toLowerCase(), c.card] as const), ...(deck.list.commander ? [[front(deck.list.commander.name).toLowerCase(), deck.list.commander] as const] : [])]);
   const incoming = [...rows('add').map((x) => str(x.name, 150)), ...rows('swap').map((x) => str(x.in, 150))].filter(Boolean);
   const known = new Map(localCards(incoming).map((c) => [front(c.name).toLowerCase(), c]));
+  // A card the bulk card data doesn't have yet may still be one the app has stored for a deck.
+  for (const n of incoming) {
+    if (known.has(front(n).toLowerCase())) continue;
+    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? LIMIT 1`, [n]) as { data: string } | null;
+    if (r) known.set(front(n).toLowerCase(), JSON.parse(r.data) as ScryfallCard);
+  }
   const where = held(incoming);
   const mine = (name: string) => inDeck.get(front(name).toLowerCase());
   const base = (kind: Change['kind'], name: string, why: string, extra: Partial<Change> = {}): Change => ({ kind, name: mine(name)?.name ?? name, why, cardId: mine(name)?.id ?? null, held: null, price: null, ...extra });
   const add = (name: string) => { const card = known.get(front(name).toLowerCase()); return { name: card?.name ?? name, cardId: card?.id ?? null, held: where[name] ?? null, price: card?.prices?.usd ?? null }; };
+  // Into the main deck only: an add to a section just has to exist.
+  const toMain = (to: string) => !to || /^(main|deck|main deck)$/i.test(to);
+  const blocked = (name: string, leaving?: string) => {
+    const card = known.get(front(name).toLowerCase());
+    const why = card && check ? check(card, leaving ? mine(leaving) ?? null : null) : null;
+    return why ? { blocked: why } : {};
+  };
   return [
-    ...rows('add').map((x) => ({ kind: 'add' as const, ...add(str(x.name, 150)), why: str(x.why), ...(str(x.to, 60) ? { to: str(x.to, 60) } : {}) })).filter((c) => c.name),
+    ...rows('add').map((x) => ({ kind: 'add' as const, ...add(str(x.name, 150)), why: str(x.why), ...(str(x.to, 60) ? { to: str(x.to, 60) } : {}), ...(toMain(str(x.to, 60)) ? blocked(str(x.name, 150)) : {}) })).filter((c) => c.name),
     ...rows('cut').map((x) => base('cut', str(x.name, 150), str(x.why), str(x.to, 60) ? { to: str(x.to, 60) } : {})).filter((c) => c.name),
-    ...rows('swap').map((x) => ({ kind: 'swap' as const, ...add(str(x.in, 150)), why: str(x.why), out: { name: mine(str(x.out, 150))?.name ?? str(x.out, 150), cardId: mine(str(x.out, 150))?.id ?? null } })).filter((c) => c.name && c.out.name),
+    ...rows('swap').map((x) => ({ kind: 'swap' as const, ...add(str(x.in, 150)), why: str(x.why), out: { name: mine(str(x.out, 150))?.name ?? str(x.out, 150), cardId: mine(str(x.out, 150))?.id ?? null }, ...blocked(str(x.in, 150), str(x.out, 150)) })).filter((c) => c.name && c.out.name),
     ...rows('move').map((x) => base('move', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
     ...rows('group').map((x) => base('group', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
     ...rows('ungroup').map((x) => base('ungroup', str(x.name, 150), str(x.why), { to: str(x.to, 60) })).filter((c) => c.name && c.to),
@@ -341,8 +358,9 @@ export async function reply(
     for (const use of uses) {
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
-        changes = resolveChanges(input, deck, tools.held);
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.` });
+        changes = resolveChanges(input, deck, tools.held, tools.check);
+        const refused = changes.filter((x) => x.blocked);
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}` });
         continue;
       }
       try {

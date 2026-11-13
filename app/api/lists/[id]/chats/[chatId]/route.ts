@@ -43,6 +43,9 @@ export async function PATCH(request: Request, { params }: Ctx) {
   const change = chat?.messages[body.message ?? -1]?.changes?.[body.change ?? -1];
   if (!chat || !change) return NextResponse.json({ error: 'No such change' }, { status: 404 });
   try {
+    // Chat's Apply stays open when the plan isn't confirmed, unlike Tune and Trim (requirePlan). The owner's
+    // decision, 2026-11-12: "i would leave chat open because its like a direct question to the user who has to
+    // accept it." Don't add the Tune lock here.
     if (body.do === 'apply') {
       if (change.applied) return NextResponse.json({ error: 'That is already applied' }, { status: 409 });
       change.applied = { at: new Date().toISOString(), undo: await applyChange(owned.list, owned.profile, change) };
