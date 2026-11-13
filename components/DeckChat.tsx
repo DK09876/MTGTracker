@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CardName from './CardName';
+import ChatText from './ChatText';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Change, DeckChat as Chat } from '@/lib/deck-chat';
@@ -42,7 +43,7 @@ interface Props {
 }
 
 /** A proposal Apply can act on now: not done, not refused, and a card the app found. */
-const canApply = (c: Change) => !c.applied && !c.done && !c.blocked && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId);
+const canApply = (c: Change) => !c.applied && !c.done && !c.blocked && !c.replaced && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId);
 
 const KIND_LABEL: Record<Change['kind'], [string, string]> = {
   add: ['add', 'text-emerald-400'], cut: ['cut', 'text-red-300'], swap: ['swap', 'text-amber-300'], move: ['move', 'text-sky-300'],
@@ -166,7 +167,27 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
     try { await onGo(!planConfirmed && LOCKED_UNTIL_PLAN.includes(to.page) ? { page: 'plan', why: to.why } : to); } finally { setGoing(false); }
   };
   const byName = (n: string) => { const f = n.split(' // ')[0].toLowerCase(); return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (commander && commander.name.split(' // ')[0].toLowerCase() === f ? commander : undefined); };
-  const nm = (n: string) => <CardName name={n} card={byName(n)} onOpen={onCard} />;
+  // Every card an answer mentions is a link (review item 29): the deck's own cards, and the cards its look-ups and
+  // proposals named, known by id and picture. One the deck doesn't hold is read in full when opened.
+  const partial = (c: { name: string; id: string; image: string | null }) => ({ id: c.id, name: c.name, ...(c.image ? { image_uris: { normal: c.image } } : {}) }) as unknown as ScryfallCard;
+  const cardIn = (m: Chat['messages'][number]) => (n: string): ScryfallCard | undefined => {
+    const own = byName(n);
+    if (own) return own;
+    const f = n.split(' // ')[0].toLowerCase();
+    const c = m.cards?.find((x) => x.name.split(' // ')[0].toLowerCase() === f)
+      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => x.name.split(' // ')[0].toLowerCase() === f);
+    return c ? partial(c) : undefined;
+  };
+  const openCard = (card: ScryfallCard) => {
+    if (!onCard) return;
+    if (card.type_line) { onCard(card); return; }
+    void api.finishCard(listId, card.id, card.name).then(onCard).catch(() => {});
+  };
+  const namesIn = (m: Chat['messages'][number]) => [
+    ...cards.map((c) => c.card.name), ...(commander ? [commander.name] : []),
+    ...(m.cards ?? []).map((c) => c.name), ...(m.changes ?? []).flatMap((c) => [c.name, c.out?.name ?? '']).filter(Boolean),
+  ];
+  const nm = (n: string, m?: Chat['messages'][number]) => <CardName name={n} card={m ? cardIn(m)(n) : byName(n)} onOpen={openCard} />;
 
   const inDeck = new Set(cards.map((c) => c.card.id));
   const size = cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (commander ? 1 : 0);
@@ -212,16 +233,17 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p>
+              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} />
+              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the card data, so {m.unresolved === 1 ? 'it isn’t a link' : 'they aren’t links'}.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;
-                const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '')} out, {nm(c.name)} in</>
-                  : c.kind === 'move' ? <>{nm(c.name)} to {c.to}</>
-                  : c.kind === 'group' ? <>{nm(c.name)} into {c.to}</>
-                  : c.kind === 'ungroup' ? <>{nm(c.name)} out of {c.to}</>
+                const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '', m)} out, {nm(c.name, m)} in</>
+                  : c.kind === 'move' ? <>{nm(c.name, m)} to {c.to}</>
+                  : c.kind === 'group' ? <>{nm(c.name, m)} into {c.to}</>
+                  : c.kind === 'ungroup' ? <>{nm(c.name, m)} out of {c.to}</>
                   : c.kind === 'note' ? <span className="font-normal">“{c.name}”</span>
-                  : c.kind === 'win' ? <>{c.name}{c.cards?.length ? <span className="font-normal text-[var(--muted)]"> · {c.cards.map((x, k) => <span key={x}>{k ? ', ' : ''}{nm(x)}</span>)}</span> : null}</>
-                  : <>{nm(c.name)}{(c.kind === 'cut' || c.kind === 'add') && c.to ? <span className="font-normal text-[var(--muted)]"> to {c.to}</span> : null}</>;
+                  : c.kind === 'win' ? <>{c.name}{c.cards?.length ? <span className="font-normal text-[var(--muted)]"> · {c.cards.map((x, k) => <span key={x}>{k ? ', ' : ''}{nm(x, m)}</span>)}</span> : null}</>
+                  : <>{nm(c.name, m)}{(c.kind === 'cut' || c.kind === 'add') && c.to ? <span className="font-normal text-[var(--muted)]"> to {c.to}</span> : null}</>;
                 const unknown = (c.kind === 'add' || c.kind === 'swap') && !c.cardId;
                 return (
                   <div key={j} className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2" data-chat-change={c.kind}>
@@ -238,6 +260,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                         <button onClick={() => change(i, j, 'undo')} disabled={busy} className="rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50">Undo</button></span>
                     ) : c.done ? (
                       <span className="text-xs text-emerald-400">In Tune</span>
+                    ) : c.replaced ? (
+                      <span className="text-xs text-[var(--muted)]" data-replaced>Replaced by a later answer</span>
                     ) : unknown ? (
                       <span className="text-xs text-[var(--muted)]">Card not found</span>
                     ) : c.blocked ? (
@@ -264,12 +288,12 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   Apply all {m.changes!.filter(canApply).length}
                 </button>
               )}
-              {m.go && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={m.go.page}>
-                  <button onClick={() => go(m.go!)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(m.go, planConfirmed, size)}</button>
-                  {m.go.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(m.go.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{m.go.why}</span>}
+              {(m.pages ?? (m.go ? [m.go] : [])).map((g) => (
+                <div key={g.page} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={g.page}>
+                  <button onClick={() => go(g)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(g, planConfirmed, size)}</button>
+                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{g.why}</span>}
                 </div>
-              )}
+              ))}
               {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>

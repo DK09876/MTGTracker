@@ -39,8 +39,8 @@ export default function CardData() {
         </button>
       </div>
       <p className="text-sm text-[var(--muted)]">
-        Every card&apos;s text, images and roles are kept on the Pi and refreshed from Scryfall&apos;s daily files around 3 AM,
-        with today&apos;s prices for the cards in your lists. Decks, roles and the AI never wait on Scryfall; search still asks it live.
+        Every card&apos;s text, images and roles are kept on the Pi and refreshed from Scryfall&apos;s files once a week, early on Sunday,
+        with that day&apos;s prices for the cards in your lists. Press Refresh now on a set&apos;s release day. Decks, roles and the AI never wait on Scryfall; search still asks it live.
       </p>
       {status && (
         <div className="grid gap-2 sm:grid-cols-3">

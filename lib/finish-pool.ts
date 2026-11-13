@@ -16,7 +16,7 @@
 
 import { database } from './db';
 import { addable, gcRoomOf, type Context } from './tune';
-import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
+import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
 import type { Copies, PoolLine, Source } from './finish-shared';
 import { localCards } from './card-store';
 import { sectionsOf } from './sections';
@@ -105,6 +105,7 @@ export function poolLine(card: ScryfallCard, src: Source, deck?: string, opts: {
     name: card.name,
     line: `${card.name} ${manaCostOf(card)} - ${typeLineOf(card)} - ${text || '(no rules text)'}${end}`,
     cmc: card.cmc ?? 0, typeLine: typeLineOf(card), src, ...(deck ? { deck } : {}), ...(opts.section ? { section: opts.section } : {}),
+    id: card.id, image: imageOf(card, 'normal'),
   };
 }
 
@@ -133,6 +134,8 @@ export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.pr
   // Cards skipped on this deck before (Part D 14) are never on offer again.
   const out = (h: Held) => !!opts.leaveOut?.has(front(h.card.name));
   const ok = new Set(addable(ctx, fit.filter((h) => (opts.chat || !isLand(h.card)) && !out(h)).map((h) => h.card), room === 0 ? 0 : null).map(keyOf));
+  // Chat: a basic is never "already in the deck" (any number may go in), so the owner's basics stay searchable.
+  if (opts.chat) for (const h of fit) if (isBasic(h.card) && !out(h)) ok.add(keyOf(h.card));
   const offered = (c: Copies) => fit.filter((h) => ok.has(keyOf(h.card)) && sourceOf(h, c));
   const spare = offered('spare');
   const any = offered('any');

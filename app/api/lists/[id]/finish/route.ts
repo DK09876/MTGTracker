@@ -25,6 +25,7 @@
 import { NextResponse } from 'next/server';
 
 import { claudeCall, ModelError } from '@/lib/ai';
+import { localCards } from '@/lib/card-store';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish, unskip } from '@/lib/finish';
@@ -41,11 +42,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  // ?card=<id>: one card's full data, to open it from its name.
-  const cardId = new URL(request.url).searchParams.get('card');
+  // ?card=<id>[&name=<name>]: one card's full data, to open it from its name. A card the app hasn't stored (one
+  // Chat found by searching all cards) comes from the card data by its name.
+  const q = new URL(request.url).searchParams;
+  const cardId = q.get('card');
   if (cardId) {
     const r = database().get('SELECT data FROM cards WHERE id = ?', [cardId]) as { data: string } | null;
-    return r ? NextResponse.json(JSON.parse(r.data)) : NextResponse.json({ error: 'No such card' }, { status: 404 });
+    if (r) return NextResponse.json(JSON.parse(r.data));
+    const byName = q.get('name') ? localCards([q.get('name')!])[0] : undefined;
+    return byName ? NextResponse.json(byName) : NextResponse.json({ error: 'No such card' }, { status: 404 });
   }
   return NextResponse.json(await finishView(owned.list, owned.profile));
 }

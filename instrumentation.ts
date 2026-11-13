@@ -9,11 +9,13 @@ export async function register() {
     try { (await import('./lib/categories')).startCategories(); } catch (e) { console.error('[categories] start failed', e); }
   }
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.MTG_SCHEDULER !== 'off') {
-    const { nightly, startScheduler, weekly } = await import('./lib/scheduler');
+    const { startScheduler, weekly } = await import('./lib/scheduler');
     const { cleanUp } = await import('./lib/cleanup');
     const { startCardRefresh } = await import('./lib/card-store');
     const { getSetting } = await import('./lib/db');
-    nightly('cards', async () => { startCardRefresh(); });
+    // Card data once a week, early on Sunday (the owner's call, 2026-11-13: card text changes rarely; new cards come with
+    // set releases, and Settings has Refresh now for those days).
+    weekly('cards', async () => { startCardRefresh(); });
     weekly('clean up', async () => { cleanUp(); });
     startScheduler();
     // A server that has never refreshed its card data does so soon after starting.

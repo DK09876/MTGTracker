@@ -44,6 +44,9 @@ export interface PoolLine {
   deck?: string;
   /** The section of this deck it waits in (the Maybeboard, a Sideboard, one of the owner's), for a card from there. */
   section?: string;
+  /** The card's id and picture, for linking its name on the page (never sent to the model). */
+  id?: string;
+  image?: string | null;
 }
 
 export interface Query {

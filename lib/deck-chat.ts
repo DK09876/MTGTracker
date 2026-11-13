@@ -27,7 +27,7 @@ import { CHAT_SEARCH_LIMIT, searchText, type PoolLine, type Source } from './fin
 import { database, type List, type ListedCard } from './db';
 import type { GapCard } from './gap-cards';
 import { ROLES, type RoleCount } from './roles';
-import type { ScryfallCard } from './scryfall';
+import { imageOf, type ScryfallCard } from './scryfall';
 
 /** One proposal from Claude, applied with its own button. */
 export interface Change {
@@ -47,8 +47,12 @@ export interface Change {
   cards?: string[];
   /** Sent to Tune (adds and cuts, the older way). */
   done?: boolean;
+  /** The incoming card's picture (add, swap), for its hover. */
+  image?: string | null;
   /** Why Apply would refuse it (an add or swap into the main deck that fails Tune's checks), shown on the row. */
   blocked?: string;
+  /** A later answer proposed something else for the same card: no longer applied from here (review item 31). */
+  replaced?: boolean;
   /** Applied here, with what Undo needs; null once undone. */
   applied?: { at: string; undo: unknown } | null;
 }
@@ -60,10 +64,21 @@ export interface ChatMessage {
   /** What it looked at to answer, in words. */
   lookups?: string[];
   changes?: Change[];
-  /** A page to open for the rest of the job (Part C), as a button under the answer. */
+  /**
+   * The cards this answer's look-ups returned and its proposals name, with id and picture, so the page can link
+   * each name in the text (review item 29). The deck's own cards the page knows already.
+   */
+  cards?: ChatCard[];
+  /** Card names the answer marked [[like this]] that matched no card: shown plain, counted. */
+  unresolved?: number;
+  /** Pages to open for the rest of the job (Part C), as buttons under the answer. */
+  pages?: ChatGo[];
+  /** One page button, as answers stored before pages were a list had it. */
   go?: ChatGo;
   model?: string;
 }
+
+export interface ChatCard { name: string; id: string; image: string | null }
 
 export interface DeckChat {
   id: string;
@@ -136,6 +151,8 @@ export interface ChatTools {
   check?: (card: ScryfallCard, leaving?: ScryfallCard | null) => string | null;
   /** A search over the owner's cards that may go in this deck, or why it can't run (no commander, no Tune context). */
   mine?: (query: string) => MineResult | { error: string };
+  /** Cards by name (stored first, then the full card data), for the names an answer marks [[like this]]. */
+  resolve?: (names: string[]) => ChatCard[];
   /** Why each named card can't go in this deck, or null; my_collection says so beside "owned". */
   fits?: (names: string[]) => Record<string, string | null>;
 }
@@ -153,6 +170,8 @@ export interface ChatDeck {
   tagsOf?: Map<string, string[]>;
   /** The deck's sections besides the main deck, for cuts, adds and moves. */
   sections?: Array<{ id: string; name: string; purpose: string }>;
+  /** Claude's reason for each card Finish picked on this deck, by name (review item 31). */
+  finishWhy?: Map<string, string>;
 }
 
 const MAX_ROUNDS = 8;
@@ -162,6 +181,26 @@ export const CHAT_SYSTEM = `\
 You are an experienced Commander player helping a friend with their deck in
 MTG Tracker. Be direct and specific, and talk like a player: name cards,
 say why in a sentence. Keep answers short unless asked for depth.
+
+Answering:
+- Answer the owner's question in words first, in the reply itself: your
+  judgement and your reasons, and for a "how many / enough / too many"
+  question the count, taken from the deck in front of you (name what you
+  counted). Proposals come after, and are optional. A reply that only
+  describes its buttons has not answered.
+- A judgement question ("is my theme solid?", "am I using the commander
+  well?") gets at most two proposals unless the owner asks for changes.
+- Never say the owner asked for something that isn't in their messages,
+  the plan or their notes.
+- When you change your mind about something you proposed earlier in this
+  chat, say so in words ("I was wrong about X: ...") and propose the
+  replacement; the app marks the earlier one replaced.
+- When you propose a combo, name its cost or risk in one clause.
+- A card Finish picked shows Claude's reason in the deck list ("Finish:
+  ..."). Read it before calling the card weak; if you still disagree, say
+  why.
+- Write every card name as [[Card Name]], as printed, so the page can link
+  it. Otherwise plain text: no bold, no headings.
 
 How to help:
 - Start from what the deck is trying to do (its brief and how it wins).
@@ -300,31 +339,54 @@ export function mineText(r: MineResult): string {
   return searchText(r).replace(/^[^\n]*/, (first) => `${first} (${split})`).replace('The search takes plain words, -word, t:<type>, -t:<type>, mv<=N, mv>=N and mv=N only.', 'The search takes plain words, -word, t:<type>, -t:<type>, o:word, mv<=N, mv>=N and mv=N only.');
 }
 
+/** A proposal Apply can act on: not refused by Tune's checks, and (an add or swap) a card the app found. */
+export const usable = (c: Change) => !c.blocked && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId);
+
+/** The owner said to do it here, in their own words (the model's in_chat is the other way). */
+export const saysHere = (text: string) => /\b(just do it here|do it here|do it in (the )?chat|here in (the )?chat|don'?t send me|no need to (go|send)|not in trim)\b/i.test(text);
+
 /**
- * More than CHAT_CHANGE_LIMIT changes of a kind that has a page: the first ones stay and that page gets the
- * button, so the rule holds even when the model ignores the prompt. Not when the owner asked for it here.
+ * More than CHAT_CHANGE_LIMIT usable changes of one kind that has a page: the first ones that can apply stay,
+ * and the rest are held back for that page's button (pageButtons). Each kind has its own count. Rows that can
+ * never apply (refused, card not found) are kept to say why, and don't count. Cards the owner named in their
+ * own message are never held back, and nothing is when they asked for it here.
  */
-export function capChanges(changes: Change[], inChat: boolean): { changes: Change[]; go: ChatGo | null; held: Array<{ kind: Change['kind']; n: number }> } {
-  if (inChat) return { changes, go: null, held: [] };
-  const seen = new Map<string, number>();
+export function capChanges(changes: Change[], opts: { inChat: boolean; named?: Set<string> } = { inChat: false }): { changes: Change[]; held: Array<{ kind: Change['kind']; n: number }> } {
+  if (opts.inChat) return { changes, held: [] };
+  const named = opts.named ?? new Set<string>();
+  const counts = new Map<Change['kind'], number>();
   const held = new Map<Change['kind'], number>();
   const kept = changes.filter((c) => {
-    const page = PAGE_FOR[c.kind as keyof typeof PAGE_FOR];
-    if (!page) return true;
-    const key = page;
-    const n = (seen.get(key) ?? 0) + 1;
-    seen.set(key, n);
+    if (!PAGE_FOR[c.kind as keyof typeof PAGE_FOR] || !usable(c) || named.has(front(c.name).toLowerCase())) return true;
+    const n = (counts.get(c.kind) ?? 0) + 1;
+    counts.set(c.kind, n);
     if (n <= CHAT_CHANGE_LIMIT) return true;
     held.set(c.kind, (held.get(c.kind) ?? 0) + 1);
     return false;
   });
-  if (!held.size) return { changes, go: null, held: [] };
-  // The kind with the most held back names the page; its number is everything proposed of that kind.
-  const [kind] = [...held.entries()].sort((a, b) => b[1] - a[1])[0];
-  const page = PAGE_FOR[kind as keyof typeof PAGE_FOR]!;
-  const total = changes.filter((c) => c.kind === kind).length;
-  const go: ChatGo = { page, why: `More than ${CHAT_CHANGE_LIMIT} at once: ${PAGE_LABEL[page]} does the full job.`, ...(page === 'trim' ? { cut: total } : page === 'finish' ? { add: total } : {}) };
-  return { changes: kept, go, held: [...held.entries()].map(([k, n]) => ({ kind: k, n })) };
+  return { changes: kept, held: [...held.entries()].map(([kind, n]) => ({ kind, n })) };
+}
+
+/**
+ * The page buttons under an answer, worked out once from the final proposals: Claude's own open_page (its
+ * number less the shown proposals of that kind that can apply, since those are applied here first), and one
+ * button for each page whose kind was held back, carrying the number held back. A count that comes to nothing
+ * drops the button.
+ */
+export function pageButtons(changes: Change[], held: Array<{ kind: Change['kind']; n: number }>, asked: ChatGo | null): ChatGo[] {
+  const shown = (kind: Change['kind']) => changes.filter((c) => c.kind === kind && usable(c)).length;
+  const out: ChatGo[] = [];
+  if (asked) {
+    if (asked.page === 'trim' && asked.cut) { const left = asked.cut - shown('cut'); if (left > 0) out.push({ ...asked, cut: left }); }
+    else if (asked.page === 'finish' && asked.add) { const left = asked.add - shown('add'); if (left > 0) out.push({ ...asked, add: left }); }
+    else out.push(asked);
+  }
+  for (const h of held) {
+    const page = PAGE_FOR[h.kind as keyof typeof PAGE_FOR];
+    if (!page || out.some((g) => g.page === page)) continue;
+    out.push({ page, why: `More than ${CHAT_CHANGE_LIMIT} at once: ${PAGE_LABEL[page]} does the rest.`, ...(page === 'trim' ? { cut: h.n } : page === 'finish' ? { add: h.n } : {}) });
+  }
+  return out;
 }
 
 /** The deck as Claude reads it: commander, brief, every card with its roles. */
@@ -348,7 +410,8 @@ export function deckText(deck: ChatDeck): string {
     `Main deck (${main.reduce((n, x) => n + x.quantity, 0) + (c ? 1 : 0)} cards with the commander):`,
     ...main.map((x) => {
       const tags = [...(rolesOf.get(x.card.name) ?? []), ...(deck.tagsOf?.get(x.card.name) ?? []).map((t) => `#${t}`)];
-      return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
+      const why = deck.finishWhy?.get(x.card.name);
+      return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}${why ? ` (Finish: ${why})` : ''}`;
     }),
     ...(deck.sections?.length ? ['', `Sections besides the main deck: ${deck.sections.map((x) => `${x.name} (${x.purpose === 'out' ? 'cards that came out' : x.purpose === 'in' ? 'cards to bring in' : x.purpose})`).join('; ')}`] : []),
     ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'In the sections:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}${deck.sections ? ` (${deck.sections.find((s) => s.id === x.board)?.name ?? x.board})` : ''}`)] : []),
@@ -358,12 +421,12 @@ export function deckText(deck: ChatDeck): string {
 const cardLine = (c: ScryfallCard) => `${c.name} ${c.mana_cost ?? ''} - ${c.type_line ?? ''}: ${(c.oracle_text ?? (c.card_faces ?? []).map((f) => f.oracle_text).join(' // ')).replace(/\n/g, ' ').slice(0, 220)}${c.prices?.usd ? ` ($${c.prices.usd})` : ''}`;
 
 /** Runs one tool, answering with text for Claude and a line for the owner. */
-async function runTool(name: string, input: Record<string, unknown>, deck: ChatDeck, tools: ChatTools): Promise<{ result: string; lookup: string }> {
+async function runTool(name: string, input: Record<string, unknown>, deck: ChatDeck, tools: ChatTools): Promise<{ result: string; lookup: string; cards?: ChatCard[] }> {
   switch (name) {
     case 'search_cards': {
       const query = String(input.query ?? '');
       const cards = (await tools.search(query)).slice(0, 15);
-      return { result: cards.length ? cards.map(cardLine).join('\n') : 'No cards found.', lookup: `Searched all cards: ${query}` };
+      return { result: cards.length ? cards.map(cardLine).join('\n') : 'No cards found.', lookup: `Searched all cards: ${query}`, cards: cards.map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })) };
     }
     case 'my_collection': {
       const names = (input.names as string[] | undefined ?? []).slice(0, 40);
@@ -377,6 +440,7 @@ async function runTool(name: string, input: Record<string, unknown>, deck: ChatD
       return {
         result: cards.length ? cards.map((c) => `${c.name} - ${c.typeLine}; ${c.held ? `owned (${c.held})` : `not owned${c.price ? `, $${c.price}` : ''}`}; ${c.why}`).join('\n') : 'Nothing fits.',
         lookup: `Cards for ${ROLES.find((r) => r.id === role)?.label.toLowerCase() ?? role}`,
+        cards: cards.map((c) => ({ name: c.name, id: c.id, image: c.image })),
       };
     }
     default:
@@ -400,7 +464,7 @@ export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, h
   const where = held(incoming);
   const mine = (name: string) => inDeck.get(front(name).toLowerCase());
   const base = (kind: Change['kind'], name: string, why: string, extra: Partial<Change> = {}): Change => ({ kind, name: mine(name)?.name ?? name, why, cardId: mine(name)?.id ?? null, held: null, price: null, ...extra });
-  const add = (name: string) => { const card = known.get(front(name).toLowerCase()); return { name: card?.name ?? name, cardId: card?.id ?? null, held: where[name] ?? null, price: card?.prices?.usd ?? null }; };
+  const add = (name: string) => { const card = known.get(front(name).toLowerCase()); return { name: card?.name ?? name, cardId: card?.id ?? null, held: where[name] ?? null, price: card?.prices?.usd ?? null, ...(card ? { image: imageOf(card, 'normal') } : {}) }; };
   // Into the main deck only: an add to a section just has to exist.
   const toMain = (to: string) => !to || /^(main|deck|main deck)$/i.test(to);
   const blocked = (name: string, leaving?: string) => {
@@ -422,6 +486,34 @@ export function resolveChanges(input: Record<string, unknown>, deck: ChatDeck, h
   ];
 }
 
+/** Asked once when an answer's words only describe its buttons. */
+export const WORDS_FIRST = 'Before the buttons: answer my question itself in words - your judgement, your reasons, and any count I asked for, taken from the deck. Don\'t describe the buttons again.';
+
+/**
+ * An answer whose words only talk about its buttons (review item 31): under three sentences, or about the
+ * buttons ("I've put up six buttons", "That's two buttons") and little else.
+ */
+export function onlyButtons(text: string): boolean {
+  const t = text.trim();
+  const sentences = t.split(/(?<=[.!?])\s+/).filter((x) => x.trim().length > 3);
+  const aboutButtons = /\b(buttons?|apply|proposals?|I'?ve (put|proposed|added)|below)\b/i;
+  return sentences.length < 3 || (sentences.length < 5 && sentences.filter((x) => aboutButtons.test(x)).length >= sentences.length / 2);
+}
+
+/** The card a change takes out or acts on, for spotting a later proposal that replaces an earlier one. */
+const outOf = (c: Change) => (c.kind === 'swap' ? c.out?.name : c.kind === 'cut' || c.kind === 'move' || c.kind === 'add' ? c.name : null);
+
+/** A new answer's proposals replace earlier unapplied ones on the same card: those are marked and can't also be applied. */
+export function markReplaced(chat: DeckChat, now: Change[]): void {
+  const touched = new Set(now.map(outOf).filter((n): n is string => !!n).map((n) => front(n).toLowerCase()));
+  if (!touched.size) return;
+  for (const m of chat.messages) for (const c of m.changes ?? []) {
+    if (now.includes(c) || c.applied || c.done) continue;
+    const k = outOf(c);
+    if (k && touched.has(front(k).toLowerCase())) c.replaced = true;
+  }
+}
+
 /**
  * Claude's reply to the newest question: the tool loop, run to an answer.
  * `call` is a charged Claude call (ai.ts claudeCall); tests give their own.
@@ -436,17 +528,48 @@ export async function reply(
   const history: Anthropic.Beta.BetaMessageParam[] = chat.messages.map((m) => ({
     role: m.role,
     content: m.role === 'assistant' && m.changes?.length
-      ? `${m.text}\n\n(Proposed: ${m.changes.map((c) => `${c.kind} ${c.kind === 'swap' ? `${c.out?.name} for ` : ''}${c.name}${c.to ? ` (${c.to})` : ''}${c.applied ? ' - applied by the owner' : c.done ? ' - sent to Tune' : ''}`).join('; ')})`
+      ? `${m.text}\n\n(Proposed: ${m.changes.map((c) => `${c.kind} ${c.kind === 'swap' ? `${c.out?.name} for ` : ''}${c.name}${c.to ? ` (${c.to})` : ''}${c.applied ? ' - applied by the owner' : c.done ? ' - sent to Tune' : c.replaced ? ' - replaced by a later answer' : ''}`).join('; ')})`
       : m.text,
   }));
   const lookups: string[] = [];
   let changes: Change[] = [];
-  let go: ChatGo | null = null;
+  // Cards the look-ups returned, for linking names in the answer.
+  const seenCards = new Map<string, ChatCard>();
+  const note = (cs: ChatCard[] | undefined) => { for (const c of cs ?? []) if (c.id && seenCards.size < 300 && !seenCards.has(c.name)) seenCards.set(c.name, c); };
+  const cardsNow = () => {
+    note(changes.filter((c) => c.cardId && (c.kind === 'add' || c.kind === 'swap')).map((c) => ({ name: c.name, id: c.cardId!, image: c.image ?? null })));
+    return seenCards.size ? { cards: [...seenCards.values()] } : {};
+  };
+  // Claude's own page button, and what the cap held back; the buttons are worked out from the final proposals.
+  let asked: ChatGo | null = null;
+  let held: Array<{ kind: Change['kind']; n: number }> = [];
   let searches = 0;
+  // The owner's newest message: cards they named themselves are never held back, and their words can say "do it here".
+  const ownerText = [...chat.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
+  const ownerSays = ownerText.toLowerCase();
+  const pagesNow = () => { const p = pageButtons(changes, held, asked); return p.length ? { pages: p } : {}; };
+  // The answer, stored: [[names]] resolved to cards (kept with the message, so an old chat still links them), and
+  // earlier proposals this answer replaces marked so they can't also be applied.
+  const finish = (text: string, model?: string): ChatMessage => {
+    const marked = [...new Set([...text.matchAll(/\[\[([^\]]{2,80})\]\]/g)].map((m) => m[1].trim()))];
+    let unresolved = 0;
+    if (marked.length) {
+      const known = new Set([...deck.cards.map((c) => front(c.card.name).toLowerCase()), ...(deck.list.commander ? [front(deck.list.commander.name).toLowerCase()] : []), ...[...seenCards.keys()].map((n) => front(n).toLowerCase())]);
+      const want = marked.filter((n) => !known.has(front(n).toLowerCase()));
+      const found = want.length && tools.resolve ? tools.resolve(want) : [];
+      note(found);
+      const got = new Set(found.map((c) => front(c.name).toLowerCase()));
+      unresolved = want.filter((n) => !got.has(front(n).toLowerCase())).length;
+    }
+    markReplaced(chat, changes);
+    return { role: 'assistant', text, at: new Date().toISOString(), lookups, changes, ...pagesNow(), ...cardsNow(), ...(unresolved ? { unresolved } : {}), ...(model ? { model } : {}) };
+  };
+  // Searching one at a time can use more rounds than an answer usually takes: an answer that searches gets more.
+  const roundsFor = () => (searches > 0 ? MAX_ROUNDS + 8 : MAX_ROUNDS);
   // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
   const said: string[] = [];
   const messages = [...history];
-  for (let round = 0; round < MAX_ROUNDS; round++) {
+  for (let round = 0; round < roundsFor(); round++) {
     const answer = await call({
       model,
       max_tokens: 16_000,
@@ -463,23 +586,38 @@ export async function reply(
     const text = answer.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
-      return { role: 'assistant', text: said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, ...(go ? { go } : {}), model: answer.model };
+      // Buttons with no answer in words (review item 31): ask once for the answer itself, and put it first.
+      if (changes.length && answer.stop_reason !== 'refusal' && onlyButtons(said.join('\n\n'))) {
+        const more = await call({
+          model, max_tokens: 4_000,
+          system: [{ type: 'text', text: CHAT_SYSTEM }, { type: 'text', text: deckText(deck), cache_control: { type: 'ephemeral' } }],
+          tools: CHAT_TOOLS, tool_choice: { type: 'none' },
+          messages: [...messages, { role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] }, { role: 'user', content: WORDS_FIRST }],
+        } as ClaudeParams, 'answer in words').catch(() => null);
+        const words = more?.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+        if (words) said.unshift(words);
+      }
+      return finish(said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), answer.model);
     }
     messages.push({ role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const use of uses) {
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
-        const capped = capChanges(resolveChanges(input, deck, tools.held, tools.check), input.in_chat === true);
+        const all = resolveChanges(input, deck, tools.held, tools.check);
+        const named = new Set(all.map((c) => front(c.name).toLowerCase()).filter((n) => n.length >= 3 && ownerSays.includes(n)));
+        const capped = capChanges(all, { inChat: input.in_chat === true || saysHere(ownerText), named });
+        // A later propose_changes replaces the earlier one whole: its proposals and what it held back.
         changes = capped.changes;
-        if (capped.go && !go) go = capped.go;
+        held = capped.held;
         const refused = changes.filter((x) => x.blocked);
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}${capped.held.length ? ` Only the first ${CHAT_CHANGE_LIMIT} of each kind are shown (${capped.held.map((h) => `${h.n} more ${h.kind}${h.n === 1 ? '' : 's'} held back`).join(', ')}); ${capped.go ? `a button opens ${PAGE_LABEL[capped.go.page]} for the rest` : 'the rest are not shown'}. Say so in one line.` : ''}` });
+        const pages = capped.held.map((h) => PAGE_LABEL[PAGE_FOR[h.kind as keyof typeof PAGE_FOR]!]).filter((p, k, a) => a.indexOf(p) === k);
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}${capped.held.length ? ` Only the first ${CHAT_CHANGE_LIMIT} of each kind that can apply are shown (${capped.held.map((h) => `${h.n} more ${h.kind}${h.n === 1 ? '' : 's'} held back`).join(', ')}); a button opens ${pages.join(' and ')} for ${capped.held.length === 1 ? 'them' : 'each'}. Say so in one line.` : ''}` });
         continue;
       }
       if (use.name === 'open_page') {
         const page = pageGo(input);
-        if (page) go = page;
+        if (page) asked = page;
         results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, tags, check or plan.', ...(page ? {} : { is_error: true }) });
         continue;
       }
@@ -488,13 +626,15 @@ export async function reply(
         if (searches >= CHAT_SEARCH_LIMIT) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'No searches left for this answer. Answer with what you have.' }); continue; }
         searches += 1;
         const r = tools.mine ? tools.mine(q) : { error: 'The search over the owner\'s cards isn\'t available right now. Say so, and answer without it.' };
-        if (!('error' in r)) { const l = `Searched your cards: ${q}`; if (!lookups.includes(l)) lookups.push(l); }
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: 'error' in r ? r.error : mineText(r) + (searches >= CHAT_SEARCH_LIMIT ? '\n\nThat was your last search for this answer.' : '') });
+        if (!('error' in r)) { const l = `Searched your cards: ${q}`; if (!lookups.includes(l)) lookups.push(l); note(r.lines.filter((x) => x.id).map((x) => ({ name: x.name, id: x.id!, image: x.image ?? null }))); }
+        const left = roundsFor() - round - 1;
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: 'error' in r ? r.error : mineText(r) + (searches >= CHAT_SEARCH_LIMIT ? '\n\nThat was your last search for this answer.' : left <= 3 ? `\n\n${left} round${left === 1 ? '' : 's'} left in this answer: run the searches you still need together, then answer.` : '') });
         continue;
       }
       try {
-        const { result, lookup } = await runTool(use.name, input, deck, tools);
+        const { result, lookup, cards } = await runTool(use.name, input, deck, tools);
         if (lookup && !lookups.includes(lookup)) lookups.push(lookup);
+        note(cards);
         results.push({ type: 'tool_result', tool_use_id: use.id, content: result });
       } catch (error) {
         results.push({ type: 'tool_result', tool_use_id: use.id, content: `That failed: ${error instanceof Error ? error.message : 'unknown error'}`, is_error: true });
@@ -506,5 +646,5 @@ export async function reply(
     if (results.length) results[results.length - 1] = { ...results[results.length - 1], cache_control: { type: 'ephemeral' } };
     messages.push({ role: 'user', content: results });
   }
-  return { role: 'assistant', text: [...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'), at: new Date().toISOString(), lookups, changes, ...(go ? { go } : {}) };
+  return finish([...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'));
 }

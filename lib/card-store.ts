@@ -1,8 +1,8 @@
 /**
- * Scryfall's card data kept on the Pi, refreshed every night.
+ * Scryfall's card data kept on the Pi, refreshed once a week (early Sunday; Settings has Refresh now).
  *
  * Scryfall publishes its whole card list and its community tags as daily
- * files. The nightly refresh reads both and:
+ * files. The weekly refresh reads both and:
  *   - works out every card's roles (ramp, draw, removal...) from the tag
  *     file, so a new deck's roles are there at once instead of taking a
  *     hundred-odd searches;
@@ -10,8 +10,7 @@
  *     card does can be read without asking Scryfall - themes and the like;
  *   - keeps a slim copy of every card, so a card can be looked up by name
  *     without asking Scryfall;
- *   - refreshes the prices of the printings the app holds (Scryfall updates
- *     prices once a day).
+ *   - refreshes the prices of the printings the app holds (as of the refresh).
  * Search still asks Scryfall live: copying its search syntax is not worth it.
  * A failed refresh keeps yesterday's data and goes in the error log.
  * Server only.

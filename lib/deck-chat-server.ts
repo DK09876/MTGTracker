@@ -15,12 +15,26 @@ import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
 import { newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
-import { searchCards, ScryfallError, type ScryfallCard } from './scryfall';
+import { imageOf, searchCards, ScryfallError, type ScryfallCard } from './scryfall';
+import { finishStore } from './finish';
 import { localCards } from './card-store';
 import { finishPool, heldCards, type Pool } from './finish-pool';
 import { searchLines } from './finish-shared';
 
 export class ChatError extends Error {}
+
+/** Cards by name: the ones the app has stored (the owner's, the decks') first, then the full card data. By front name, lower case. */
+export function cardsNamed(names: string[]): Map<string, ScryfallCard> {
+  const key = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+  const out = new Map<string, ScryfallCard>();
+  for (const n of names) {
+    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? OR json_extract(data, '$.name') LIKE ? LIMIT 1`, [n, `${n} // %`]) as { data: string } | null;
+    if (r) out.set(key(n), JSON.parse(r.data) as ScryfallCard);
+  }
+  const rest = names.filter((n) => !out.has(key(n)));
+  if (rest.length) for (const c of localCards(rest)) if (!out.has(key(c.name))) out.set(key(c.name), c);
+  return out;
+}
 
 /**
  * Chat's look-ups over the owner's cards (handoff 9): search_my_cards over every card they hold that may go in
@@ -37,13 +51,12 @@ export function ownedTools(list: List, profile: string, tune: Context | null): P
       return searchLines(pool.lines, q);
     },
     fits: (names) => {
-      if (!tune) return {};
-      const known = new Map<string, ScryfallCard>(localCards(names).map((c) => [c.name.split(' // ')[0].toLowerCase(), c]));
-      // A card the bulk card data lacks may still be one the app stored (the owner's boxes, a deck).
-      for (const n of names) {
-        if (known.has(n.split(' // ')[0].toLowerCase())) continue;
-        const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? LIMIT 1`, [n]) as { data: string } | null;
-        if (r) known.set(n.split(' // ')[0].toLowerCase(), JSON.parse(r.data) as ScryfallCard);
+      // Without Tune's checks, at least the colours: an owned card outside the commander's still says so.
+      const known = cardsNamed(names);
+      if (!tune) {
+        if (!list.commander) return {};
+        const id = new Set(list.commander.color_identity ?? []);
+        return Object.fromEntries(names.map((n) => { const c = known.get(n.split(' // ')[0].toLowerCase()); return [n, c && !(c.color_identity ?? []).every((x) => id.has(x)) ? `${c.name} is outside this deck's colours` : null]; }));
       }
       return Object.fromEntries(names.map((n) => { const c = known.get(n.split(' // ')[0].toLowerCase()); return [n, c ? whyNotAddable(tune, c) : null]; }));
     },
@@ -87,13 +100,17 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     // Tune's checks for a card going into the main deck, so a proposal that Apply would refuse says why up front.
     const tune = await tuneContext(list, profile).catch(() => null);
     const { mine, fits } = ownedTools(list, profile, tune);
-    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections }, {
+    // Claude's reason for each card Finish picked on this deck (the open list, or the one last applied).
+    const fs = finishStore(list.id);
+    const finishWhy = new Map((fs.run?.items ?? fs.done?.session.run?.items ?? []).map((i) => [i.name, i.why] as const));
+    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections, finishWhy }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
       check: tune ? (card, leaving) => whyNotAddable(tune, card, leaving) : undefined,
       mine,
       fits,
+      resolve: (names) => [...cardsNamed(names).values()].map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })),
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     current.messages.push(message);
     saveChat(current);

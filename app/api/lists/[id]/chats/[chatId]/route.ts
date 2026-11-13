@@ -48,6 +48,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     // accept it." Don't add the Tune lock here.
     if (body.do === 'apply') {
       if (change.applied) return NextResponse.json({ error: 'That is already applied' }, { status: 409 });
+      if (change.replaced) return NextResponse.json({ error: 'A later answer replaced that one: apply the newer proposal instead' }, { status: 409 });
       change.applied = { at: new Date().toISOString(), undo: await applyChange(owned.list, owned.profile, change) };
     } else if (body.do === 'undo') {
       if (!change.applied) return NextResponse.json({ error: 'That isn’t applied' }, { status: 409 });

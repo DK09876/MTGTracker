@@ -907,7 +907,7 @@ export type FinishAction =
   | { action: 'undo' }
   | { action: 'reset' };
 export const finish = (listId: string) => get<FinishView>(`lists/${listId}/finish`);
-export const finishCard = (listId: string, cardId: string) => get<import('./scryfall').ScryfallCard>(`lists/${listId}/finish?card=${encodeURIComponent(cardId)}`);
+export const finishCard = (listId: string, cardId: string, name?: string) => get<import('./scryfall').ScryfallCard>(`lists/${listId}/finish?card=${encodeURIComponent(cardId)}${name ? `&name=${encodeURIComponent(name)}` : ''}`);
 export const finishAct = (listId: string, act: FinishAction) => {
   const paid = act.action === 'find';
   const work = send(`lists/${listId}/finish`, 'POST', act).then(json<FinishView>).finally(() => {

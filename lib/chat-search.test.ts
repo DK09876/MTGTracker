@@ -58,10 +58,10 @@ async function setup(opts: { commanderOnly?: boolean; noCommander?: boolean } = 
 }
 
 async function tools(list: Awaited<ReturnType<typeof setup>>['list']) {
-  const { tuneContext } = await import('./tune');
-  const { ownedTools } = await import('./deck-chat-server');
+  const { tuneContext, whyNotAddable } = await import('./tune');
+  const { ownedTools, cardsNamed } = await import('./deck-chat-server');
   const tune = await tuneContext(list, 'dk').catch(() => null);
-  return { search: async () => [], held: () => ({}), gaps: async () => [], ...ownedTools(list, 'dk', tune) };
+  return { search: async () => [], held: () => ({}), gaps: async () => [], resolve: (n: string[]) => [...cardsNamed(n).values()].map((c) => ({ name: c.name, id: c.id, image: null })), check: tune ? (c: ScryfallCard, l?: ScryfallCard | null) => whyNotAddable(tune, c, l) : undefined, ...ownedTools(list, 'dk', tune) };
 }
 
 const deckOf = (list: Awaited<ReturnType<typeof setup>>['list']) => ({ list, cards: [], brief: '', roles: null });
@@ -191,61 +191,202 @@ describe('search_my_cards', { timeout: 60_000 }, () => {
   });
 });
 
-describe('Chat opens a page for the full job (Part C)', { timeout: 60_000 }, () => {
-  const cuts = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Deck Spell ${(i % 5) + 1}`, why: 'Weak.' }));
+describe('Chat opens a page for the full job (Part C, and review items 1-8)', { timeout: 60_000 }, () => {
+  /** Azula with twelve more spells in the deck and seven more blue cards in the boxes, for caps of 5. */
+  async function big() {
+    const s = await setup();
+    for (let i = 1; i <= 12; i++) s.db.addCardToList(s.list.id, card(`Main ${i}`));
+    const col = await import('./collection');
+    for (let i = 1; i <= 7; i++) col.addToCollection('dk', card(`Box ${i}`, { oracle_text: 'Draw two cards.' }), 1);
+    // Roles for the new cards too, so nothing is looked up (the lookup is offline here and slow to give up).
+    const { ROLES_VERSION } = await import('./roles');
+    const ids = (s.db.database().all('SELECT data FROM cards') as Array<{ data: string }>).map((r) => (JSON.parse(r.data) as ScryfallCard).oracle_id!).filter(Boolean);
+    s.db.saveRoles(new Map(ids.map((id) => [id, []] as [string, string[]])), ROLES_VERSION);
+    return s;
+  }
+  const cut = (n: number, from = 1) => Array.from({ length: n }, (_, i) => ({ name: `Main ${i + from}`, why: 'Weak.' }));
+  const add = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `Box ${i + 1}`, why: 'Owned.' }));
 
   it('a named single cut stays in Chat, with no page button', async () => {
-    const { list } = await setup();
-    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { cut: [{ name: 'Deck Spell 1', why: 'You asked.' }] } }], 'Cut it.'], 'cut Deck Spell 1');
-    expect(answer.changes?.map((c) => [c.kind, c.name])).toEqual([['cut', 'Deck Spell 1']]);
-    expect(answer.go).toBeUndefined();
+    const { list } = await big();
+    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { cut: [{ name: 'Main 1', why: 'You asked.' }] } }], 'Cut it.'], 'cut Main 1');
+    expect(answer.changes?.map((c) => [c.kind, c.name])).toEqual([['cut', 'Main 1']]);
+    expect(answer.pages).toBeUndefined();
   });
 
-  it('"cut 12": a few proposals plus the Trim button carrying 12', async () => {
-    const { list } = await setup();
-    const { answer, asked } = await ask(list, [[{ name: 'propose_changes', input: { cut: cuts(3) } }, { name: 'open_page', input: { page: 'trim', why: 'Trim ranks all of them.', cut: 12 } }], 'Here are three; Trim does the rest.'], 'cut 12');
+  it('"cut 12" with three shown: the Trim button carries what is left, 9', async () => {
+    const { list } = await big();
+    const { answer, asked } = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(3) } }, { name: 'open_page', input: { page: 'trim', why: 'Trim ranks all of them.', cut: 12 } }], 'Three here; Trim does the rest.'], 'cut 12');
     expect(answer.changes).toHaveLength(3);
-    expect(answer.go).toEqual({ page: 'trim', why: 'Trim ranks all of them.', cut: 12 });
+    expect(answer.pages).toEqual([{ page: 'trim', why: 'Trim ranks all of them.', cut: 9 }]);
     expect(JSON.stringify(asked[1].messages)).toContain('a button that opens Trim');
   });
 
-  it('more than 5 of one kind: code keeps the first 5 and adds the page, even when the prompt is ignored', async () => {
-    const { list } = await setup();
-    const { answer, asked } = await ask(list, [[{ name: 'propose_changes', input: { cut: cuts(8), add: [{ name: 'Spare Draw', why: 'Owned.' }] } }], 'Done.'], 'what should I cut?');
+  it('8 cuts: 5 shown, and the button carries the 3 held back', async () => {
+    const { list } = await big();
+    const { answer, asked } = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(8) } }], 'Done.'], 'what should I cut?');
     expect(answer.changes?.filter((c) => c.kind === 'cut')).toHaveLength(5);
-    expect(answer.changes?.filter((c) => c.kind === 'add')).toHaveLength(1);
-    expect(answer.go).toMatchObject({ page: 'trim', cut: 8 });
+    expect(answer.pages).toEqual([expect.objectContaining({ page: 'trim', cut: 3 })]);
     expect(JSON.stringify(asked[1].messages)).toContain('3 more cuts held back');
   });
 
-  it('"just do it here": every proposal stays and no button', async () => {
-    const { list } = await setup();
-    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { cut: cuts(8), in_chat: true } }], 'Done.'], 'just do it here');
-    expect(answer.changes).toHaveLength(8);
-    expect(answer.go).toBeUndefined();
+  it('adds and cuts both over the cap: a button for each page', async () => {
+    const { list } = await big();
+    const { answer, asked } = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(7), add: add(7) } }], 'Done.'], 'rebuild it');
+    expect(answer.changes?.filter((c) => c.kind === 'cut')).toHaveLength(5);
+    expect(answer.changes?.filter((c) => c.kind === 'add')).toHaveLength(5);
+    expect(answer.pages?.map((g) => [g.page, g.cut ?? g.add]).sort()).toEqual([['finish', 2], ['trim', 2]]);
+    expect(JSON.stringify(asked[1].messages)).toMatch(/a button opens (Trim and Finish|Finish and Trim) for each/);
   });
 
-  it('a question about one card ends with at most one proposal for it and no page button', async () => {
-    const { list } = await setup();
-    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { never_cut: [{ name: 'Deck Spell 2', why: 'Your best draw.' }] } }], 'Keep it.'], 'how valuable is Deck Spell 2 compared to the others?');
-    expect(answer.changes?.map((c) => [c.kind, c.name])).toEqual([['never', 'Deck Spell 2']]);
-    expect(answer.go).toBeUndefined();
+  it('groups and ungroups are counted apart: 4 and 3 are both under the cap', async () => {
+    const { list } = await big();
+    const g = Array.from({ length: 4 }, (_, i) => ({ name: `Main ${i + 1}`, to: 'Draw', why: '.' }));
+    const u = Array.from({ length: 3 }, (_, i) => ({ name: `Main ${i + 5}`, to: 'Ramp', why: '.' }));
+    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { group: g, ungroup: u } }], 'Done.'], 'tidy the groups');
+    expect(answer.changes).toHaveLength(7);
+    expect(answer.pages).toBeUndefined();
+  });
+
+  it('the cap keeps the first five that can apply; refused rows stay to say why and don\'t count', async () => {
+    const { list } = await big();
+    const off = ['Green Draw', 'Green Draw', 'Green Draw'].map((name) => ({ name, why: 'Off-colour.' }));
+    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { add: [...off, ...add(5)] } }], 'Done.'], 'add some draw');
+    expect(answer.changes?.filter((c) => !c.blocked)).toHaveLength(5);
+    expect(answer.changes?.some((c) => c.blocked)).toBe(true);
+    expect(answer.pages).toBeUndefined();
+  });
+
+  it('a later propose_changes replaces the earlier one, and the buttons follow it', async () => {
+    const { list } = await big();
+    const { answer } = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(8) } }], [{ name: 'propose_changes', input: { cut: cut(2) } }], 'Done.'], 'what should I cut?');
+    expect(answer.changes).toHaveLength(2);
+    expect(answer.pages).toBeUndefined();
+  });
+
+  it('an earlier open_page doesn\'t block the button the cap needs', async () => {
+    const { list } = await big();
+    const { answer } = await ask(list, [[{ name: 'open_page', input: { page: 'check', why: 'Look at the curve.' } }, { name: 'propose_changes', input: { add: add(7) } }], 'Done.'], 'more draw please');
+    expect(answer.pages?.map((g) => g.page)).toEqual(['check', 'finish']);
+  });
+
+  it('cards the owner named in their message are never held back; "just do it here" holds nothing back', async () => {
+    const { list } = await big();
+    const named = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(7) } }], 'Done.'], 'cut these seven: Main 1, Main 2, Main 3, Main 4, Main 5, Main 6, Main 7');
+    expect(named.answer.changes).toHaveLength(7);
+    expect(named.answer.pages).toBeUndefined();
+    const here = await ask(list, [[{ name: 'propose_changes', input: { cut: cut(8) } }], 'Done.'], 'just do it here: cut 8 cards');
+    expect(here.answer.changes).toHaveLength(8);
+    expect(here.answer.pages).toBeUndefined();
+  });
+
+  it('an answer that searches one at a time gets more rounds than the usual 8, enough for all 12 searches', async () => {
+    const { list } = await big();
+    const { asked, answer } = await ask(list, [...Array.from({ length: 12 }, (_, i) => [s(`draw ${i}`)]), 'Done.']);
+    expect(answer.text).toBe('Done.');
+    expect(asked).toHaveLength(13);
+    expect(JSON.stringify(asked.at(-1)!.messages)).toContain('That was your last search for this answer.');
   });
 
   it('the button: its words, its number, and Plan while the plan is unconfirmed', async () => {
-    const { goLabel, pageGo } = await import('./chat-pages');
+    const { goLabel, pageGo, finishWant } = await import('./chat-pages');
     expect(pageGo({ page: 'nowhere', why: '' })).toBeNull();
     expect(pageGo({ page: 'finish', why: 'Fill it.', add: 42, cut: 3 })).toEqual({ page: 'finish', why: 'Fill it.', add: 42 });
     expect(pageGo({ page: 'trim', why: '', cut_to: 95 })).toEqual({ page: 'trim', why: '', cutTo: 95 });
     expect(goLabel({ page: 'trim', why: '', cut: 12 }, true)).toBe('Open Trim · cut 12');
-    expect(goLabel({ page: 'finish', why: '', add: 42 }, true)).toBe('Open Finish · add 42');
     expect(goLabel({ page: 'trim', why: '', cut: 12 }, false)).toBe('Confirm the plan first · Open Plan');
     expect(goLabel({ page: 'tags', why: '' }, false)).toBe('Open Tags');
-    // "add 99" on a commander-only deck is a fill to 100, where the app adds the lands.
-    const { finishWant } = await import('./chat-pages');
+    // "add 99" on a commander-only deck is a fill to 100; 97 cards and "add 5" is 5.
     expect(finishWant(99, 1)).toBeNull();
-    expect(finishWant(5, 1)).toBe(5);
+    expect(finishWant(5, 97)).toBe(5);
     expect(goLabel({ page: 'finish', why: '', add: 99 }, true, 1)).toBe('Open Finish · fill to 100');
-    expect(goLabel({ page: 'finish', why: '', add: 5 }, true, 60)).toBe('Open Finish · add 5');
+    expect(goLabel({ page: 'finish', why: '', add: 5 }, true, 97)).toBe('Open Finish · add 5');
+  });
+});
+
+describe('the rest of review item 7, and item 29', { timeout: 60_000 }, () => {
+  it('basics the owner holds are searchable in Chat though the deck has some', async () => {
+    const { list } = await setup();
+    const col = await import('./collection');
+    col.addToCollection('dk', card('Island', { type_line: 'Basic Land — Island', cmc: 0, mana_cost: '', oracle_text: '({T}: Add {U}.)', color_identity: [] }), 3);
+    const { asked } = await ask(list, [[s('t:basic island')], 'Done.']);
+    expect(lastResults(asked[1])[0].content).toMatch(/^1 match/);
+  });
+
+  it('without Tune\'s checks, my_collection still says an owned card is outside the colours', async () => {
+    const { list } = await setup();
+    const { ownedTools } = await import('./deck-chat-server');
+    const t = ownedTools(list, 'dk', null);
+    expect(t.fits!(['Green Draw', 'Spare Draw'])).toEqual({ 'Green Draw': 'Green Draw is outside this deck\'s colours', 'Spare Draw': null });
+    expect(t.mine!('draw')).toEqual({ error: expect.stringContaining('isn\'t available right now') });
+  });
+
+  it('an answer keeps the cards its look-ups returned, with ids and pictures, for the page to link', async () => {
+    const { list } = await setup();
+    const { answer } = await ask(list, [[s('draw two')], 'Spare Draw is the one.']);
+    expect(answer.cards?.map((c) => c.name).sort()).toEqual(['Lent Draw', 'Spare Draw', 'Waiting Draw']);
+    expect(answer.cards?.every((c) => !!c.id)).toBe(true);
+  });
+
+  it('the text: whole card names, longest first; bold and lists without asterisks', async () => {
+    const { splitNames, boldRuns, blocksOf } = await import('./chat-text');
+    const parts = splitNames('Cut Bastion of Remembrance, keep Bastion and play a second bastionx.', ['Bastion', 'Bastion of Remembrance']);
+    expect(parts.filter((p) => p.name).map((p) => p.name)).toEqual(['Bastion of Remembrance', 'Bastion']);
+    expect(splitNames('Feral Ghouls', ['Feral Ghoul']).some((p) => p.name)).toBe(false);
+    expect(boldRuns('**Mire Triton → Blood Artist:** drains on every death')).toEqual([{ text: 'Mire Triton → Blood Artist:', bold: true }, { text: ' drains on every death', bold: false }]);
+    expect(blocksOf('Swaps:\n- **A → B:** why\n- C\nDone.').map((b) => [b.list, b.lines.length])).toEqual([[false, 1], [true, 2], [false, 1]]);
+  });
+});
+
+describe('review item 31: answer in words, and replaced proposals; item 30: marked names', { timeout: 60_000 }, () => {
+  it('an answer that only describes its buttons is asked once for the answer in words, which goes first', async () => {
+    const { list } = await setup();
+    const { answer, asked } = await ask(list, [
+      [{ name: 'propose_changes', input: { cut: [{ name: 'Deck Spell 1', why: 'Weak.' }] } }],
+      "That's one button.",
+      'Your theme is solid: Zombies dying is what the commander wants, and you own about 44. Rad counters are a bonus, not a plan.',
+    ], 'is my theme solid?');
+    expect(asked).toHaveLength(3);
+    expect(JSON.stringify(asked[2].messages)).toContain('answer my question itself in words');
+    expect(asked[2].tool_choice).toEqual({ type: 'none' });
+    expect(answer.text.startsWith('Your theme is solid')).toBe(true);
+    expect(answer.text).toContain("That's one button.");
+  });
+
+  it('a later answer that proposes something else for the same card marks the earlier proposal replaced', async () => {
+    const { list } = await setup();
+    const { reply, newChat } = await import('./deck-chat');
+    const chat = newChat(list.id, 'dk', 'swap');
+    chat.messages.push({ role: 'user', text: 'what should replace Deck Spell 1?', at: '' });
+    const first = stand([[{ name: 'propose_changes', input: { swap: [{ out: 'Deck Spell 1', in: 'Spare Draw', why: 'Draws two.' }] } }], 'Spare Draw draws two for two. Deck Spell 1 draws one. Swap them.']);
+    chat.messages.push(await reply(chat, deckOf(list) as never, await tools(list), first.call as never, 'claude-opus-5-5'));
+    chat.messages.push({ role: 'user', text: 'not Spare Draw', at: '' });
+    const second = stand([[{ name: 'propose_changes', input: { swap: [{ out: 'Deck Spell 1', in: 'Waiting Draw', why: 'From your Sideboard.' }] } }], 'I was wrong about Spare Draw: Waiting Draw is already in your Sideboard. Same job. Swap that instead.']);
+    chat.messages.push(await reply(chat, deckOf(list) as never, await tools(list), second.call as never, 'claude-opus-5-5'));
+    expect(chat.messages[1].changes![0].replaced).toBe(true);
+    expect(chat.messages[3].changes![0].replaced).toBeUndefined();
+    // The model reads it as replaced in the history.
+    const third = stand(['Fine.']);
+    chat.messages.push({ role: 'user', text: 'ok', at: '' });
+    await reply(chat, deckOf(list) as never, await tools(list), third.call as never, 'claude-opus-5-5');
+    expect(JSON.stringify(third.asked[0].messages)).toContain('replaced by a later answer');
+  });
+
+  it('names marked [[like this]] resolve to cards and are kept with the answer; one that matches nothing is counted', async () => {
+    const { list } = await setup();
+    const { answer } = await ask(list, ['Play [[Spare Draw]] over [[Deck Spell 2]], and look for [[Not A Real Card]]. Both draw. One is better.']);
+    expect(answer.cards?.map((c) => c.name).sort()).toEqual(['Deck Spell 2', 'Spare Draw']);
+    expect(answer.unresolved).toBe(1);
+    const { splitMarked, marksNames } = await import('./chat-text');
+    expect(marksNames(answer.text)).toBe(true);
+    expect(splitMarked('Play [[Opt]] and keep your Opt').filter((p) => p.name).map((p) => p.name)).toEqual(['Opt']);
+  });
+
+  it('Finish\'s reason for a card it picked is in the deck list Chat reads', async () => {
+    const { deckText } = await import('./deck-chat');
+    const { list } = await setup();
+    const db = await import('./db');
+    const text = deckText({ list, cards: db.cardsInList(list.id), brief: '', roles: null, finishWhy: new Map([['Deck Spell 3', 'A Zombie that comes back by itself.']]) } as never);
+    expect(text).toContain('Deck Spell 3 - Instant (Finish: A Zombie that comes back by itself.)');
   });
 });

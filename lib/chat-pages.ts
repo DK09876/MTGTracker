@@ -48,11 +48,12 @@ export function pageGo(input: Record<string, unknown>): ChatGo | null {
 }
 
 /**
- * Finish's number from Chat's: an add that reaches 100 is Finish's fill to 100 (null), where the app picks the
- * lands. Chat says "add 99" for a commander-only deck; taken as 99 picks, Finish would add no lands.
+ * Finish's number from Chat's: an add that brings the deck to exactly 100 is Finish's fill to 100 (null), where
+ * the app picks the lands; Chat says "add 99" for a commander-only deck, and 99 picks would add no lands. Any
+ * other number is that many cards (97 cards and "add 5" is 5, to 102).
  */
 export const finishWant = (add: number | undefined, size: number | null): number | null | undefined =>
-  (add === undefined ? undefined : size !== null && size + add >= 100 ? null : add);
+  (add === undefined ? undefined : size !== null && size + add === 100 ? null : add);
 
 /** What the button says: where it goes, with its number. `size`: the deck's cards with the commander, when known. */
 export function goLabel(go: ChatGo, planConfirmed: boolean, size: number | null = null): string {
