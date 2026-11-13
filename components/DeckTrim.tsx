@@ -296,9 +296,9 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             </p>
           )}
 
-          <div className={`${CARD} flex flex-col gap-1`}>
+          {/* Claude's answer, then the box to answer back: at the top, above the list it talks about. */}
             {view.run.round > 1 && ch ? (
-              <div className="mb-2 flex flex-col gap-1.5 rounded-xl border border-[#3f6b4a] bg-[#141210] p-3 text-[13px]" data-trim-changed>
+              <div className="flex flex-col gap-1.5 rounded-xl border border-[#3f6b4a] bg-[#141210] p-3 text-[13px]" data-trim-changed>
                 <h4 className="text-[15px] font-bold text-[#9bdcae]">What changed, and why</h4>
                 {ch.kept.length > 0 && <p><b>Kept, as you said:</b> {names(ch.kept)}.</p>}
                 {ch.dropped.length > 0 && <p><b>No longer cuts, though you didn’t name them:</b> {names(ch.dropped)}.</p>}
@@ -306,8 +306,12 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
                 {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “{view.run.reply}”</p>}
               </div>
             ) : view.run.notes ? (
-              <p className="mb-2 text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {view.run.notes}</p>
+              <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {view.run.notes}</p>
             ) : null}
+          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
+            disabled={busy || cutsRunning || view.noKey} onSend={send} />
+
+          <div className={`${CARD} flex flex-col gap-1`}>
             {groups.map((g) => (
               <div key={g.tier} className="flex flex-col" data-trim-group={g.tier}>
                 <div className="flex flex-wrap items-baseline gap-x-3 pb-1 pt-3"><h4 className="font-display text-lg font-semibold">{TIER_TITLE[g.tier](g.items.length)[0]}</h4><span className="text-sm text-[var(--muted)]">{TIER_TITLE[g.tier](g.items.length)[1]}</span></div>
@@ -320,9 +324,6 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             ))}
             <p className="pt-2 text-xs text-[var(--faint)]">Lands: {view.lands.have} in the deck, usual {view.lands.range[0]}–{view.lands.range[1]}. The app never lets a cut take the deck under {Math.ceil(view.lands.floor)}.</p>
           </div>
-
-          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
-            disabled={busy || cutsRunning || view.noKey} onSend={send} />
         </div>
       )}
 
@@ -410,11 +411,29 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
   const can = marked > 0 || !!message.trim();
   const lastList = turns.map((t) => t.kind).lastIndexOf('claude-list');
   return (
-    <section className={`${CARD} flex flex-col gap-3`} data-trim-session aria-label="This session">
-      <h4 className="flex flex-wrap items-baseline gap-x-2 font-display text-lg font-semibold">This session
-        <span className="text-[13px] font-normal text-[var(--muted)]">everything here is sent to Claude each time you send</span>
-      </h4>
-      <ol className="flex flex-col">
+    <section className={`${CARD} flex flex-col gap-3`} data-trim-session aria-label="Say something back">
+      <div className={`${C.box} flex flex-col gap-2`}>
+        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> {ask}</p>}
+        <label htmlFor="trim-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say something back
+          <span className="text-[13px] font-normal text-[var(--muted)]">Make your changes on the cuts below first, then send them with anything you want to say.</span>
+        </label>
+        <textarea id="trim-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can && !disabled) { e.preventDefault(); onSend(); } }}
+          aria-describedby="trim-say-keys"
+          placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
+          className={`${C.input} w-full resize-y py-2.5`} />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13px] text-[var(--muted)]">Weigh more:</span>
+          {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p id="trim-say-keys" className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{marked ? `Goes with ${marked} change${marked === 1 ? '' : 's'} you made on the list.` : 'Mark keeps and cuts on the list, type here, or both.'} Claude answers and updates the list. ⌘ or Ctrl + Enter sends.</p>
+          <button className={TRIM_GO} disabled={disabled || !can} onClick={onSend} title={can ? undefined : 'Mark a keep or a cut on the list, or type something, first'}>✦ Send · {cost}</button>
+        </div>
+      </div>
+      <details className="text-[13px]" data-trim-history>
+        <summary className="cursor-pointer text-[var(--muted)]">This session so far · {turns.length} turn{turns.length === 1 ? '' : 's'} <span className="text-[var(--faint)]">· all of it is sent to Claude each time you send</span></summary>
+        <ol className="flex flex-col">
         {turns.map((t, k) => (
           <li key={k} className="flex flex-col gap-0.5 border-t border-[var(--border)] py-2.5 text-[13px]" data-turn={t.kind}>
             {t.kind === 'owner-start' ? (
@@ -435,24 +454,8 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
             )}
           </li>
         ))}
-      </ol>
-      <div className={`${C.box} flex flex-col gap-2`}>
-        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> {ask}</p>}
-        <label htmlFor="trim-say" className="font-bold">Say something back</label>
-        <textarea id="trim-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can && !disabled) { e.preventDefault(); onSend(); } }}
-          aria-describedby="trim-say-keys"
-          placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
-          className={`${C.input} w-full resize-y py-2.5`} />
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] text-[var(--muted)]">Weigh more:</span>
-          {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p id="trim-say-keys" className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{marked ? `Goes with ${marked} change${marked === 1 ? '' : 's'} you made on the list.` : 'Mark keeps and cuts on the list, type here, or both.'} Claude answers and updates the list. ⌘ or Ctrl + Enter sends.</p>
-          <button className={TRIM_GO} disabled={disabled || !can} onClick={onSend} title={can ? undefined : 'Mark a keep or a cut on the list, or type something, first'}>✦ Send · {cost}</button>
-        </div>
-      </div>
+        </ol>
+      </details>
     </section>
   );
 }
@@ -498,7 +501,7 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
             : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {item.why}</>}
         </span>
         <input value={choice?.text ?? ''} onChange={(e) => onReason(e.target.value)} maxLength={300} data-col="reason"
-          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : 'your reason, if you have one'}
+          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : item.tier === 'cut' ? 'Claude’s reason stands, or give your own' : 'your reason, if you have one'}
           aria-label={`Your reason for ${item.name}`}
           className={`col-span-2 min-h-9 w-full min-w-0 border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
       </div>
