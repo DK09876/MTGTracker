@@ -146,7 +146,9 @@ start_release() {
 }
 leave() {
   local code=$?
-  trap - EXIT INT TERM HUP
+  # Getting the app back must finish: a second hang-up (the session dropping) or Ctrl-C can't stop it now.
+  trap - EXIT
+  trap '' INT TERM HUP
   set +e
   rm -f "$FLAG"
   if [ -n "$STOPPED" ] && [ -z "$UP" ]; then
@@ -154,7 +156,7 @@ leave() {
     eval "$STOP_CMD" >/dev/null 2>&1
     if [ -n "$OLD" ] && start_release "$OLD" 0; then say "back on $(basename "$OLD")"
     elif [ -z "$OLD" ] && eval "$START_CMD"; then say "started what current points at"
-    else say "THE APP IS DOWN: start it by hand (sudo systemctl start mtg) and look at the service"; fi
+    else say "THE OLD RELEASE DIDN'T PASS ITS CHECKS EITHER: the service itself is wrong (sudo systemctl status mtg; check MTG_DB_PATH). It may be down or on the wrong database"; fi
     [ "$code" -eq 0 ] && code=1
   fi
   exit "$code"
