@@ -162,6 +162,56 @@ describe('the Tags tab', { timeout: 30_000 }, () => {
     expect(back.out).toEqual([]);
   });
 
+  it('a narrowed run asks for one kind of change and keeps only that', async () => {
+    const list = await deck();
+    const t = await import('./tags-tab');
+    const ph = await import('./plan-help');
+    await t.tagsAct(list, 'dk', { action: 'accept', keys: ['tag:magecraft'] });
+    await t.tagsAct(list, 'dk', { action: 'add', name: 'Pet cards' });
+    await ph.act(list, 'dk', { action: 'confirm' });
+    const ALL = { ...ANSWER, merge: [{ from: 'Pet cards', into: 'Magecraft', why: 'Same cards.' }], drop: [{ category: 'Pet cards', why: 'Adds nothing.' }], describe: [{ category: 'Pet cards', text: 'Cards I love.' }] };
+    const kinds = async () => (await t.tagsTab(list)).ai.rows.map((r) => `${r.kind}:${r.category}`);
+    // One group: only that group's cards, whatever came back.
+    const one = fakeModel(() => ALL);
+    await t.runTagsAi(one.model, list, 'dk', undefined, { kind: 'one', category: 'Magecraft' });
+    expect(one.asked[0].user).toContain('Only the category "Magecraft"');
+    expect(await kinds()).toEqual(['add:Magecraft', 'remove:Magecraft']);
+    expect((await t.tagsTab(list)).ai.focus).toEqual({ kind: 'one', category: 'Magecraft' });
+    // Look for a kind of card: one group.
+    const find = fakeModel(() => ALL);
+    await t.runTagsAi(find.model, list, 'dk', undefined, { kind: 'find', text: 'wheels' });
+    expect(find.asked[0].user).toContain('"wheels"');
+    expect(await kinds()).toEqual(['add:Magecraft', 'new:Engines']);
+    // Tidy: whole groups only, never a removal from the card data's own lists.
+    await t.runTagsAi(fakeModel(() => ALL).model, list, 'dk', undefined, { kind: 'tidy' });
+    expect(await kinds()).toEqual(['new:Engines', 'merge:Pet cards', 'drop:Pet cards']);
+    // Describe: a description, accepted onto the group.
+    await t.runTagsAi(fakeModel(() => ALL).model, list, 'dk', undefined, { kind: 'describe' });
+    let v = await t.tagsTab(list);
+    expect(v.ai.rows.map((r) => [r.kind, r.category, r.text])).toEqual([['describe', 'Pet cards', 'Cards I love.']]);
+    await t.tagsAct(list, 'dk', { action: 'accept', keys: [v.ai.rows[0].key] });
+    expect((await t.tagsTab(list)).categories.find((c) => c.name === 'Pet cards')!.how).toBe('Cards I love.');
+    // Tidy again: accept the merge; Pet cards goes into Magecraft. Skip all skips the rest at once.
+    await t.runTagsAi(fakeModel(() => ALL).model, list, 'dk', undefined, { kind: 'tidy' });
+    v = await t.tagsTab(list);
+    await t.tagsAct(list, 'dk', { action: 'skip', keys: v.ai.rows.filter((r) => r.kind !== 'merge').map((r) => r.key) });
+    v = await t.tagsTab(list);
+    expect(v.ai.rows.map((r) => r.kind)).toEqual(['merge']);
+    await t.tagsAct(list, 'dk', { action: 'accept', keys: [v.ai.rows[0].key] });
+    v = await t.tagsTab(list);
+    expect(v.categories.some((c) => c.name === 'Pet cards')).toBe(false);
+    expect(v.categories.find((c) => c.name === 'Magecraft')!.madeOf).toContain('Pet cards');
+  });
+
+  it('never merges away or removes a job, a way to win or the key cards', async () => {
+    const t = await import('./tags-tab');
+    const cats = [{ name: 'Ramp', kind: 'job' }, { name: 'Burn', kind: 'win' }, { name: 'Key cards', kind: 'key' }, { name: 'Mine', kind: 'own' }];
+    const out = t.parseTags({ merge: [{ from: 'Ramp', into: 'Mine', why: 'x' }, { from: 'Burn', into: 'Mine', why: 'x' }, { from: 'Mine', into: 'Key cards', why: 'x' }, { from: 'Mine', into: 'Burn', why: 'ok' }],
+      drop: [{ category: 'Ramp', why: 'x' }, { category: 'Key cards', why: 'x' }, { category: 'Mine', why: 'ok' }] }, [], cats, { kind: 'tidy' });
+    expect(out.merge).toEqual([{ from: 'Mine', into: 'Burn', why: 'ok' }]);
+    expect(out.drop).toEqual([{ category: 'Mine', why: 'ok' }]);
+  });
+
   it('skips come back on the next run', async () => {
     const list = await deck();
     const t = await import('./tags-tab');

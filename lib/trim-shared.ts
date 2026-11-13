@@ -35,9 +35,14 @@ export const TRIM_CHIP_LABELS: Record<TrimChip, string> = {
 };
 export const isTrimChip = (v: unknown): v is TrimChip => typeof v === 'string' && v in TRIM_CHIP_LABELS;
 
-/** The owner's call on one card: cut it or keep it, and why if they said. */
+/**
+ * The owner's call on one card: cut it or keep it (settled: remembered for
+ * the deck), or ask Claude to rethink it with their reason (nothing settled:
+ * the card stays as Claude listed it until Claude answers, and isn't
+ * remembered).
+ */
 export interface TrimChoice {
-  choice: 'cut' | 'keep';
+  choice: 'cut' | 'keep' | 'ask';
   chip?: TrimChip | null;
   text?: string;
 }
@@ -76,7 +81,7 @@ export interface TrimApproach {
 }
 
 /** The owner's call on one card as it went into the session. */
-export interface TrimMark { name: string; choice: 'cut' | 'keep'; chip: TrimChip | null; text: string }
+export interface TrimMark { name: string; choice: 'cut' | 'keep' | 'ask'; chip: TrimChip | null; text: string }
 
 /**
  * One turn of a cut session: what the owner said at the first "Find cuts",
@@ -150,7 +155,9 @@ export interface TrimView {
 
 /** The cards chosen to cut: Claude's cuts unless kept, and anything else the owner marked cut. */
 export function chosenCuts(items: TrimItem[], choices: Record<string, TrimChoice>): string[] {
-  return items.filter((i) => (choices[i.name]?.choice ?? (i.tier === 'cut' ? 'cut' : 'keep')) === 'cut').map((i) => i.name);
+  // A card sent back to rethink counts as Claude listed it until Claude answers.
+  const call = (i: TrimItem) => { const c = choices[i.name]?.choice; return !c || c === 'ask' ? (i.tier === 'cut' ? 'cut' : 'keep') : c; };
+  return items.filter((i) => call(i) === 'cut').map((i) => i.name);
 }
 
 /** The marks made since the last list: choices that say something and weren't carried over unchanged. */

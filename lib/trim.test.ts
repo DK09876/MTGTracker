@@ -62,6 +62,8 @@ const ANSWER = {
   notes: 'Mostly surplus spells.',
 };
 
+const TRIM_SYSTEM_HAS_RETHINK = (sys?: string) => !!sys && sys.includes('asked you to rethink a card');
+
 describe('trim', { timeout: 60_000 }, () => {
   it('keeps the ranked list to cards in the deck: the first N are the cuts, the rest closer calls', async () => {
     const { list } = await deck();
@@ -477,6 +479,32 @@ describe('trim', { timeout: 60_000 }, () => {
     ({ user } = await trim.trimMessage(list, 'dk'));
     expect(user).toMatch(/^- Ramp: [\d.]+ \(usual range \d+–\d+/m);
     expect(user).toMatch(/^- Card draw: [\d.]+$/m);
+  });
+
+  it('Rethink sends the reason without settling anything: nothing remembered, and the card may come back', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    // Rethink one of Claude's cuts: it still counts as a cut until Claude answers.
+    trim.setChoices(list.id, { 'Spell 2': { choice: 'ask', text: 'it draws me two cards a turn' } });
+    let v = await trim.trimView(list, 'dk');
+    expect(v.impact.size.after).toBe(100);
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[0].user).toContain('Owner: asked you to rethink Spell 2 ("it draws me two cards a turn")');
+    expect(TRIM_SYSTEM_HAS_RETHINK(asked[0].system)).toBe(true);
+    // Not remembered, not kept: Claude listed it again, and it stays on the list.
+    expect(trim.trimStore(list.id).said['Spell 2']).toBeUndefined();
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.find((i) => i.name === 'Spell 2')!.tier).toBe('cut');
+    expect(v.choices['Spell 2']).toBeUndefined();
+    // A kept card sent back to rethink may be listed again.
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'keep' } });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true });
+    expect((await trim.trimView(list, 'dk')).run!.items.find((i) => i.name === 'Spell 3')!.tier).toBe('yours');
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'ask', text: 'maybe it can go' } });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true });
+    expect((await trim.trimView(list, 'dk')).run!.items.find((i) => i.name === 'Spell 3')!.tier).toBe('cut');
   });
 
   it('keeps the card lists of the last six rounds and only the words of older ones', async () => {

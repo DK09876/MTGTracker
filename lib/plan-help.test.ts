@@ -238,6 +238,27 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     expect((await ph.planState(list)).notes.map((n) => n.text).join(' ')).toContain('Combat, mostly.');
   });
 
+  it('Skip all skips every suggested way to win, or every suggested key card, and leaves the rest waiting', async () => {
+    const { list } = await deck();
+    const ph = await import('./plan-help');
+    const keyed = { ...FULL, winRoutes: [...FULL.winRoutes, { name: 'Burn them out', how: 'Burn spells finish.', cards: ['Spell 3'] }], keyCards: [{ card: 'Spell 1', why: 'The engine.' }, 'Spell 2'] };
+    await ph.runHelp(fakeModel(() => keyed).model, list, 'dk');
+    let s = await ph.planState(list);
+    const wins = s.help!.wins.length;
+    expect(wins).toBeGreaterThan(1);
+    await ph.act(list, 'dk', { action: 'skipAllWins' });
+    s = await ph.planState(list);
+    expect(s.help!.wins).toEqual([]);
+    expect(s.help!.keys.map((k) => k.name)).toEqual(['Spell 1', 'Spell 2']);
+    expect(s.help!.skipped.filter((x) => x.label === 'Way to win')).toHaveLength(wins);
+    await ph.act(list, 'dk', { action: 'skipAllKeys' });
+    s = await ph.planState(list);
+    expect(s.help!.keys).toEqual([]);
+    expect(s.help!.skipped.filter((x) => x.label === 'Key card').map((x) => x.text)).toEqual(['Spell 1', 'Spell 2']);
+    // Nothing was accepted.
+    expect(s.wins.filter((w) => w.by === 'ai')).toEqual([]);
+  });
+
   it('a pile with no plan gets directions only; picking one fills the plan and three key cards', async () => {
     const { list } = await deck();
     const ph = await import('./plan-help');

@@ -11,8 +11,8 @@ export const PROMPT_VERSIONS = {
   planRead: 'plan-read-1',
   planPass: 'plan-pass-2',
   planHelp: 'plan-help-3',
-  tagsAi: 'tags-3',
-  trim: 'trim-2',
+  tagsAi: 'tags-4',
+  trim: 'trim-3',
   trimApproach: 'trim-approach-2',
 } as const;
 
