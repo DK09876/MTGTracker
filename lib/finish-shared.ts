@@ -22,6 +22,12 @@ export const SEARCH_LIMIT = 25;
 export const SEARCH_LIMIT_LATER = 8;
 /** Cards a search returns, at most; the true count is said too. */
 export const SEARCH_SHOWN = 40;
+/**
+ * Chat's searches over the owner's cards in one answer (handoff 9), counted and refused in code. 12 from the
+ * theme test (2026-11-13): with 20 allowed the runs used 12-15 and picked the same best theme as with 12; with 6
+ * one answer flipped.
+ */
+export const CHAT_SEARCH_LIMIT = 12;
 
 /** Where a pick's copy comes from. */
 export type Source = 'spare' | 'maybe' | 'other';
@@ -36,6 +42,8 @@ export interface PoolLine {
   src: Source;
   /** The deck it sits in, for a card only another deck holds. */
   deck?: string;
+  /** The section of this deck it waits in (the Maybeboard, a Sideboard, one of the owner's), for a card from there. */
+  section?: string;
 }
 
 export interface Query {
@@ -74,7 +82,7 @@ export function parseQuery(q: string): Query {
 }
 
 /** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value in range. */
-export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[] } {
+export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> } {
   const { words, not, type, mv, mvMin, ignored } = parseQuery(q);
   const hits = pool.filter((c) => {
     const l = c.line.toLowerCase();
@@ -83,7 +91,9 @@ export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): 
     if (mvMin !== null && c.cmc < mvMin) return false;
     return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
   });
-  return { total: hits.length, lines: hits.slice(0, shown), ignored };
+  const bySrc: Record<Source, number> = { spare: 0, maybe: 0, other: 0 };
+  for (const h of hits) bySrc[h.src] += 1;
+  return { total: hits.length, lines: hits.slice(0, shown), ignored, bySrc };
 }
 
 /** What the search tool answers, in search.py's format; a filter it couldn't use is named, so a "0 match" is never a silent misread. */
@@ -157,6 +167,8 @@ export interface FinishItem {
   why: string;
   src: Source;
   deck?: string;
+  /** The section of this deck it waits in, for src 'maybe'. */
+  section?: string;
   /** new: this round's pick after the first; yours: taken from a search's results by the owner. */
   mark: 'new' | 'yours' | null;
   card: { id: string; image: string | null; manaCost: string; typeLine: string; text: string; cmc: number };

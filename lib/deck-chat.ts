@@ -3,12 +3,14 @@
  * saved as it goes.
  *
  * Claude gets the deck (commander, the plan, cards and their roles, the
- * sections and groups) and tools to look things up - Scryfall, the owner's
- * collection, the cards that would fill a role. It never changes the deck
+ * sections and groups) and tools to look things up - a search over all of
+ * Magic, a search over the owner's own cards (handoff 9), whether the owner
+ * has named cards, the cards that would fill a role. It never changes the deck
  * itself: anything it suggests comes back as proposals the owner applies
  * one by one with a button (lib/chat-actions.ts): cut, add, swap, move to a
  * section, group or ungroup a card, never cut, a note, a way to win, a key
- * card.
+ * card. For an open-ended ask a page does better (many cuts, a whole fill),
+ * it adds a button that opens that page (lib/chat-pages.ts).
  *
  * Each reply runs as a background job (lib/jobs.ts), so the page can be
  * left while Claude thinks. Server only.
@@ -20,6 +22,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 import type { ClaudeParams } from './ai-claude';
 import { localCards } from './card-store';
+import { CHAT_CHANGE_LIMIT, PAGE_FOR, pageGo, PAGE_LABEL, type ChatGo } from './chat-pages';
+import { CHAT_SEARCH_LIMIT, searchText, type PoolLine, type Source } from './finish-shared';
 import { database, type List, type ListedCard } from './db';
 import type { GapCard } from './gap-cards';
 import { ROLES, type RoleCount } from './roles';
@@ -56,6 +60,8 @@ export interface ChatMessage {
   /** What it looked at to answer, in words. */
   lookups?: string[];
   changes?: Change[];
+  /** A page to open for the rest of the job (Part C), as a button under the answer. */
+  go?: ChatGo;
   model?: string;
 }
 
@@ -128,7 +134,13 @@ export interface ChatTools {
   gaps: (role: string, owned: boolean, max: number | null) => Promise<GapCard[]>;
   /** Why a card can't go into the main deck (Tune's checks), or null; `leaving` goes out in the same swap. */
   check?: (card: ScryfallCard, leaving?: ScryfallCard | null) => string | null;
+  /** A search over the owner's cards that may go in this deck, or why it can't run (no commander, no Tune context). */
+  mine?: (query: string) => MineResult | { error: string };
+  /** Why each named card can't go in this deck, or null; my_collection says so beside "owned". */
+  fits?: (names: string[]) => Record<string, string | null>;
 }
+
+export interface MineResult { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> }
 
 export interface ChatDeck {
   list: List;
@@ -154,12 +166,9 @@ say why in a sentence. Keep answers short unless asked for depth.
 How to help:
 - Start from what the deck is trying to do (its brief and how it wins).
   Every suggestion should serve that plan.
-- Look things up rather than guess: search Scryfall for cards and check the
-  owner's collection. Only suggest cards that are legal in Commander and in
-  the commander's colours. Judge cards by what they do for this plan, not by
-  how popular they are.
-- When the owner asks for cards from their collection, check it first and
-  prefer what they own.
+- Look things up rather than guess. Only suggest cards that are legal in
+  Commander and in the commander's colours. Judge cards by what they do for
+  this plan, not by how popular they are.
 - Cantrips are not card draw. A deck needs ways to actually win.
 - Count: the deck must stay at 100 cards with the commander. When you
   suggest adding cards, suggest as many cuts, and the reverse. A swap is one
@@ -175,7 +184,54 @@ How to help:
 - Every change you recommend goes through propose_changes, once per reply,
   so the owner gets a button for each and applies the ones they want. You
   cannot change the deck yourself; never say you have. When the owner asks
-  for one specific change ("cut X"), propose just that one.`;
+  for one specific change ("cut X"), propose just that one.
+
+The owner's cards:
+- For any question about what the owner owns, or what they could build from
+  it, search their cards with search_my_cards. Don't name cards from memory
+  and then check them. my_collection is for checking a few cards by name;
+  search_cards is for cards they don't own.
+- search_my_cards only returns cards that may go in this deck. Each line says
+  where the copy is: a spare copy, one of this deck's sections, or another
+  deck ("(in <deck>)"). When you recommend a card that sits in another deck,
+  say which. When you give counts, split them into spare copies and cards in
+  other decks. If the owner says "only spare copies" or "only from <deck>",
+  keep to those lines.
+- To compare themes for a commander: first count what the commander's own
+  text names (a creature type, a card type, an action). Then choose three or
+  four themes it supports and run two or three narrow searches for each, one
+  for payoffs and one for enablers. Counts come from the search totals, never
+  from memory. Search words differ in breadth ("token" also finds Treasure
+  makers), so give counts as "about N", say what each was a search for, and
+  never rank themes by raw totals alone. Answer short: one line per theme
+  (about how many cards, three to five standouts), then the pick and what it
+  is missing.
+- If the search says the commander isn't set, tell the owner to set it first.
+
+Doing it here, or opening a page:
+- Do it here when the owner has made the decision: they name the cards or
+  the change ("cut Sol Ring", "swap X for Y", "add these three"), or ask for
+  one or a few picks ("my worst card?", "one more board wipe I own").
+- A question about one card stays here start to finish: compare it with the
+  cards doing the same job in this deck. If it should go, propose that one
+  cut; if it should stay, you may propose marking it never cut. Don't mention
+  Trim for one card.
+- When the ask is open-ended and a page has a flow built for it, answer in a
+  sentence or two first, propose your top few if that helps, and add the
+  page's button with open_page:
+  - trim: many cuts ("cut 12", "get it to 100", "what should I cut?" for more
+    than a handful). Give the number.
+  - finish: finishing or filling the deck from their cards ("finish this
+    deck", "draft the rest"). Give how many. Never draft a whole deck here.
+    If this conversation settled a theme, also propose it as a note, so the
+    plan carries it into Finish.
+  - tags: sorting the deck into groups, retagging it.
+  - check: the mana, the curve, how the deck plays.
+  - plan: what the deck is trying to do, its bracket or budget.
+- Up to ${CHAT_CHANGE_LIMIT} changes of one kind in one answer. Past that, propose the best
+  ${CHAT_CHANGE_LIMIT} and open the page for the rest.
+- The owner outranks this: "just do it here" or "don't send me to Trim"
+  means do it here (set in_chat on propose_changes) with no page button.`;
 
 export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -184,8 +240,13 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
     input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
   },
   {
+    name: 'search_my_cards',
+    description: `Search the owner's own cards that may go in this deck: in its colours, Commander-legal, not already in it, within the plan's budget, deck rule and bracket. Lands included. Covers spare copies, this deck's sections and cards in the owner's other decks; each line ends with where the copy is. Plain words must all match the name, type line or rules text; add t:<type>, mv<=N, mv>=N, mv=N or o:word to narrow, and -word to leave cards out. Nothing else is understood (no colour filters): a filter it can't use is named in the answer. Answers with the total, how many are spare copies and how many sit in other decks, and up to 40 cards. At most ${CHAT_SEARCH_LIMIT} searches for one answer.`,
+    input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+  },
+  {
     name: 'my_collection',
-    description: 'Which of these cards the owner has, and where: a box in their collection, or in another of their decks.',
+    description: 'Which of these cards the owner has, and where: a box in their collection, or in another of their decks. Says when a card can\'t go in this deck, and why.',
     input_schema: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] },
   },
   {
@@ -213,10 +274,53 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
         note: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } },
         way_to_win: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, how: { type: 'string' }, cards: { type: 'array', items: { type: 'string' } } }, required: ['name', 'how'] } },
         key_card: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] } },
+        in_chat: { type: 'boolean', description: 'True only when the owner asked for this to be done here in Chat rather than on a page.' },
       },
     },
   },
+  {
+    name: 'open_page',
+    description: `A button under your answer that opens one of this deck's pages, for a job the page does better than Chat: trim (many cuts; cut: how many, or cut_to: the size to cut to), finish (fill from the owner's cards; add: how many), tags (sort into groups), check (mana, curve, how it plays), plan (what the deck is for, bracket, budget). why: one sentence. At most once per reply.`,
+    input_schema: {
+      type: 'object',
+      properties: { page: { type: 'string', enum: ['trim', 'finish', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' } },
+      required: ['page', 'why'],
+    },
+  },
 ];
+
+/** A search over the owner's cards as Claude reads it: the total split by where the copies are, then the lines. */
+export function mineText(r: MineResult): string {
+  const split = [`${r.bySrc.spare} spare cop${r.bySrc.spare === 1 ? 'y' : 'ies'}`, `${r.bySrc.other} in other decks`, ...(r.bySrc.maybe ? [`${r.bySrc.maybe} in this deck's sections`] : [])].join(', ');
+  return searchText(r).replace(/^[^\n]*/, (first) => `${first} (${split})`).replace('The search takes plain words, -word, t:<type>, mv<=N, mv>=N and mv=N only.', 'The search takes plain words, -word, t:<type>, o:word, mv<=N, mv>=N and mv=N only.');
+}
+
+/**
+ * More than CHAT_CHANGE_LIMIT changes of a kind that has a page: the first ones stay and that page gets the
+ * button, so the rule holds even when the model ignores the prompt. Not when the owner asked for it here.
+ */
+export function capChanges(changes: Change[], inChat: boolean): { changes: Change[]; go: ChatGo | null; held: Array<{ kind: Change['kind']; n: number }> } {
+  if (inChat) return { changes, go: null, held: [] };
+  const seen = new Map<string, number>();
+  const held = new Map<Change['kind'], number>();
+  const kept = changes.filter((c) => {
+    const page = PAGE_FOR[c.kind as keyof typeof PAGE_FOR];
+    if (!page) return true;
+    const key = page;
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    if (n <= CHAT_CHANGE_LIMIT) return true;
+    held.set(c.kind, (held.get(c.kind) ?? 0) + 1);
+    return false;
+  });
+  if (!held.size) return { changes, go: null, held: [] };
+  // The kind with the most held back names the page; its number is everything proposed of that kind.
+  const [kind] = [...held.entries()].sort((a, b) => b[1] - a[1])[0];
+  const page = PAGE_FOR[kind as keyof typeof PAGE_FOR]!;
+  const total = changes.filter((c) => c.kind === kind).length;
+  const go: ChatGo = { page, why: `More than ${CHAT_CHANGE_LIMIT} at once: ${PAGE_LABEL[page]} does the full job.`, ...(page === 'trim' ? { cut: total } : page === 'finish' ? { add: total } : {}) };
+  return { changes: kept, go, held: [...held.entries()].map(([k, n]) => ({ kind: k, n })) };
+}
 
 /** The deck as Claude reads it: commander, brief, every card with its roles. */
 export function deckText(deck: ChatDeck): string {
@@ -254,12 +358,13 @@ async function runTool(name: string, input: Record<string, unknown>, deck: ChatD
     case 'search_cards': {
       const query = String(input.query ?? '');
       const cards = (await tools.search(query)).slice(0, 15);
-      return { result: cards.length ? cards.map(cardLine).join('\n') : 'No cards found.', lookup: `Searched Scryfall: ${query}` };
+      return { result: cards.length ? cards.map(cardLine).join('\n') : 'No cards found.', lookup: `Searched all cards: ${query}` };
     }
     case 'my_collection': {
       const names = (input.names as string[] | undefined ?? []).slice(0, 40);
       const held = tools.held(names);
-      return { result: names.map((n) => `${n}: ${held[n] ?? 'not owned'}`).join('\n'), lookup: 'Looked at your collection' };
+      const fits = tools.fits?.(names) ?? {};
+      return { result: names.map((n) => `${n}: ${held[n] ?? 'not owned'}${fits[n] ? `; can't go in this deck: ${fits[n]}` : ''}`).join('\n'), lookup: 'Looked at your collection' };
     }
     case 'cards_for_role': {
       const role = String(input.role ?? '');
@@ -331,6 +436,8 @@ export async function reply(
   }));
   const lookups: string[] = [];
   let changes: Change[] = [];
+  let go: ChatGo | null = null;
+  let searches = 0;
   // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
   const said: string[] = [];
   const messages = [...history];
@@ -351,16 +458,33 @@ export async function reply(
     const text = answer.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
     if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
-      return { role: 'assistant', text: said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, model: answer.model };
+      return { role: 'assistant', text: said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, ...(go ? { go } : {}), model: answer.model };
     }
     messages.push({ role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const use of uses) {
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
-        changes = resolveChanges(input, deck, tools.held, tools.check);
+        const capped = capChanges(resolveChanges(input, deck, tools.held, tools.check), input.in_chat === true);
+        changes = capped.changes;
+        if (capped.go && !go) go = capped.go;
         const refused = changes.filter((x) => x.blocked);
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}` });
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: `Shown to the owner as ${changes.length} button${changes.length === 1 ? '' : 's'}.${refused.length ? ` These can't be applied, and say why on their row: ${refused.map((x) => x.blocked).join('; ')}. Offer something else for them if it matters.` : ''}${capped.held.length ? ` Only the first ${CHAT_CHANGE_LIMIT} of each kind are shown (${capped.held.map((h) => `${h.n} more ${h.kind}${h.n === 1 ? '' : 's'} held back`).join(', ')}); ${capped.go ? `a button opens ${PAGE_LABEL[capped.go.page]} for the rest` : 'the rest are not shown'}. Say so in one line.` : ''}` });
+        continue;
+      }
+      if (use.name === 'open_page') {
+        const page = pageGo(input);
+        if (page) go = page;
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, tags, check or plan.', ...(page ? {} : { is_error: true }) });
+        continue;
+      }
+      if (use.name === 'search_my_cards') {
+        const q = String(input.query ?? '').trim().slice(0, 200);
+        if (searches >= CHAT_SEARCH_LIMIT) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'No searches left for this answer. Answer with what you have.' }); continue; }
+        searches += 1;
+        const r = tools.mine ? tools.mine(q) : { error: 'The search over the owner\'s cards isn\'t available right now. Say so, and answer without it.' };
+        if (!('error' in r)) { const l = `Searched your cards: ${q}`; if (!lookups.includes(l)) lookups.push(l); }
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: 'error' in r ? r.error : mineText(r) + (searches >= CHAT_SEARCH_LIMIT ? '\n\nThat was your last search for this answer.' : '') });
         continue;
       }
       try {
@@ -371,7 +495,11 @@ export async function reply(
         results.push({ type: 'tool_result', tool_use_id: use.id, content: `That failed: ${error instanceof Error ? error.message : 'unknown error'}`, is_error: true });
       }
     }
+    // Every round re-sends the look-ups so far. Mark the newest result (and only it) as the cache point, so the
+    // next round reads everything before it from the cache instead of paying for it again (as Finish does).
+    for (const m of messages) if (m.role === 'user' && Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
+    if (results.length) results[results.length - 1] = { ...results[results.length - 1], cache_control: { type: 'ephemeral' } };
     messages.push({ role: 'user', content: results });
   }
-  return { role: 'assistant', text: [...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'), at: new Date().toISOString(), lookups, changes };
+  return { role: 'assistant', text: [...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'), at: new Date().toISOString(), lookups, changes, ...(go ? { go } : {}) };
 }

@@ -19,6 +19,7 @@ import { addable, gcRoomOf, type Context } from './tune';
 import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
 import type { Copies, PoolLine, Source } from './finish-shared';
 import { localCards } from './card-store';
+import { sectionsOf } from './sections';
 
 const keyOf = (c: ScryfallCard) => c.oracle_id ?? c.id;
 const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
@@ -34,6 +35,8 @@ export interface Held {
   decks: string[];
   /** In this deck's own sections (Maybeboard and the like). */
   here: boolean;
+  /** Which of this deck's sections, by name. */
+  sections: string[];
 }
 
 /** Everything the owner holds, by card: copies in boxes, the other decks that list it, and this deck's sections. */
@@ -43,7 +46,7 @@ export function heldCards(profileId: string, listId: string): Map<string, Held> 
   const at = (card: ScryfallCard) => {
     const k = keyOf(card);
     let h = out.get(k);
-    if (!h) { h = { card, boxes: 0, decks: [], here: false }; out.set(k, h); }
+    if (!h) { h = { card, boxes: 0, decks: [], here: false, sections: [] }; out.set(k, h); }
     return h;
   };
   for (const r of d.all(`SELECT c.data, SUM(cc.quantity) AS n FROM collection_cards cc JOIN cards c ON c.id = cc.cardId
@@ -58,26 +61,38 @@ export function heldCards(profileId: string, listId: string): Map<string, Held> 
     const h = at(JSON.parse(r.data) as ScryfallCard);
     if (!h.decks.includes(r.name)) h.decks.push(r.name);
   }
-  for (const r of d.all(`SELECT c.data FROM list_cards lc JOIN cards c ON c.id = lc.cardId WHERE lc.listId = ? AND lc.board != 'main'`, [listId]) as Array<{ data: string }>) {
-    at(JSON.parse(r.data) as ScryfallCard).here = true;
+  const own = sectionsOf(listId);
+  for (const r of d.all(`SELECT c.data, lc.board FROM list_cards lc JOIN cards c ON c.id = lc.cardId WHERE lc.listId = ? AND lc.board != 'main'`, [listId]) as Array<{ data: string; board: string }>) {
+    const h = at(JSON.parse(r.data) as ScryfallCard);
+    h.here = true;
+    const name = own.find((x) => x.id === r.board)?.name ?? (r.board === 'side' ? 'Sideboard' : 'Maybeboard');
+    if (!h.sections.includes(name)) h.sections.push(name);
   }
   return out;
 }
 
 /** Where the copy a pick uses comes from, under a setting; null when the setting doesn't offer it. */
-export function sourceOf(h: Held, copies: Copies): { src: Source; deck?: string } | null {
+export function sourceOf(h: Held, copies: Copies): { src: Source; deck?: string; section?: string } | null {
   if (h.boxes > 0) return { src: 'spare' };
-  if (h.here) return { src: 'maybe' };
+  if (h.here) return { src: 'maybe', section: h.sections[0] ?? 'Maybeboard' };
   if (copies === 'any' && h.decks.length) return { src: 'other', deck: h.decks[0] };
   return null;
 }
 
-export function poolLine(card: ScryfallCard, src: Source, deck?: string): PoolLine {
+/**
+ * One card as a search answers it. Finish's lines end "(in <deck>)" only for a card another deck holds (its
+ * prompt and tests rely on that); Chat's (`where`) say where every copy is: a spare copy, this deck's section,
+ * or the other deck.
+ */
+export function poolLine(card: ScryfallCard, src: Source, deck?: string, opts: { section?: string; where?: boolean } = {}): PoolLine {
   const text = oracleTextOf(card).replace(/\n+/g, ' / ');
+  const end = opts.where
+    ? (src === 'other' && deck ? ` (in ${deck})` : src === 'maybe' ? ` (in this deck's ${opts.section ?? 'Maybeboard'})` : ' (spare copy)')
+    : (src === 'other' && deck ? ` (in ${deck})` : '');
   return {
     name: card.name,
-    line: `${card.name} ${manaCostOf(card)} - ${typeLineOf(card)} - ${text || '(no rules text)'}${src === 'other' && deck ? ` (in ${deck})` : ''}`,
-    cmc: card.cmc ?? 0, typeLine: typeLineOf(card), src, ...(deck ? { deck } : {}),
+    line: `${card.name} ${manaCostOf(card)} - ${typeLineOf(card)} - ${text || '(no rules text)'}${end}`,
+    cmc: card.cmc ?? 0, typeLine: typeLineOf(card), src, ...(deck ? { deck } : {}), ...(opts.section ? { section: opts.section } : {}),
   };
 }
 
@@ -89,20 +104,21 @@ export interface Pool {
 }
 
 /**
- * The pool under a setting: not a land, then Tune's checks (one pass of
- * addable). A Game Changer is held back only when the bracket has no room
- * left; how many go in is checked on the picks.
+ * The pool under a setting: not a land (Finish: the app picks those), then
+ * Tune's checks (one pass of addable). A Game Changer is held back only when
+ * the bracket has no room left; how many go in is checked on the picks.
+ * Chat's search (`chat`) lets lands in and writes where each copy is.
  */
-export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.profileId, ctx.list.id)): Pool {
+export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.profileId, ctx.list.id), opts: { chat?: boolean } = {}): Pool {
   const all = [...held.values()];
   const fit = all.filter((h) => (h.card.color_identity ?? []).every((x) => ctx.identity.has(x)) && h.card.legalities?.commander === 'legal');
   const room = gcRoomOf(ctx);
-  const ok = new Set(addable(ctx, fit.filter((h) => !isLand(h.card)).map((h) => h.card), room === 0 ? 0 : null).map(keyOf));
+  const ok = new Set(addable(ctx, fit.filter((h) => opts.chat || !isLand(h.card)).map((h) => h.card), room === 0 ? 0 : null).map(keyOf));
   const offered = (c: Copies) => fit.filter((h) => ok.has(keyOf(h.card)) && sourceOf(h, c));
   const spare = offered('spare');
   const any = offered('any');
   const mine = copies === 'spare' ? spare : any;
-  const lines = mine.map((h) => { const s = sourceOf(h, copies)!; return poolLine(h.card, s.src, s.deck); }).sort((a, b) => a.name.localeCompare(b.name));
+  const lines = mine.map((h) => { const s = sourceOf(h, copies)!; return poolLine(h.card, s.src, s.deck, { section: s.section, where: opts.chat }); }).sort((a, b) => a.name.localeCompare(b.name));
   const cards = new Map<string, ScryfallCard>();
   for (const h of mine) { cards.set(h.card.name.toLowerCase(), h.card); cards.set(front(h.card.name), h.card); }
   return { lines, cards, held, counts: { held: all.length, fit: fit.length, spare: spare.length, any: any.length, otherOnly: any.length - spare.length } };

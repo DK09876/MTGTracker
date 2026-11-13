@@ -461,7 +461,7 @@ function Row({ item, state, text, name, onSet, onText }: {
   item: FinishItem; state: FinishChoice; text: string; name: React.ReactNode; onSet: (c: FinishChoice) => void; onText: (t: string) => void;
 }) {
   const chip = item.src === 'other' ? <span className="max-w-full truncate rounded-full border border-amber-300/50 px-2 text-[11px] text-amber-300" title={`In ${item.deck}`}>in {item.deck}</span>
-    : item.src === 'maybe' ? <span className="rounded-full border border-[var(--border)] px-2 text-[11px] text-[var(--muted)]">in your Maybeboard</span>
+    : item.src === 'maybe' ? <span className="max-w-full truncate rounded-full border border-[var(--border)] px-2 text-[11px] text-[var(--muted)]">in your {item.section ?? 'Maybeboard'}</span>
       : <span className="rounded-full border border-emerald-400/40 px-2 text-[11px] text-emerald-300">spare copy</span>;
   const mark = item.mark === 'new' ? <span className="rounded-full border border-[#c4a6f5]/50 px-2 text-[11px] text-[#c4a6f5]">new this round</span>
     : item.mark === 'yours' ? <span className="rounded-full border border-[#e8c558]/50 px-2 text-[11px] text-[#e8c558]">you added it</span> : null;

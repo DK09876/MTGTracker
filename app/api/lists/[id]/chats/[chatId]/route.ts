@@ -54,8 +54,14 @@ export async function PATCH(request: Request, { params }: Ctx) {
       await undoChange(owned.list, owned.profile, change.applied.undo as Undo);
       change.applied = null;
     } else change.done = true;
+    // Applied now: a reason it couldn't be, written when Claude answered, no longer holds.
+    if (change.applied) delete change.blocked;
   } catch (e) {
-    if (e instanceof ChatActionRefused) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof ChatActionRefused) {
+      // The deck may have changed since the answer: the row says today's reason (or loses a stale one).
+      if (body.do === 'apply' && (change.kind === 'add' || change.kind === 'swap')) { change.blocked = e.message; saveChat(chat); }
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     throw e;
   }
   saveChat(chat);

@@ -258,9 +258,9 @@ export function checkPicks(data: unknown, input: { pool: Pick<Pool, 'cards'>; se
   return { picks, dropped, short: Math.max(0, input.need - picks.length), reply: typeof d.reply === 'string' ? d.reply.trim().slice(0, 1200) : '', out };
 }
 
-const toItem = (card: ScryfallCard, held: Held | undefined, copies: Copies, rest: Omit<StoredItem, 'name' | 'cardId' | 'src' | 'deck'>): StoredItem => {
-  const s = (held && sourceOf(held, copies)) ?? { src: 'spare' as Source };
-  return { name: card.name, cardId: card.id, src: s.src, ...(s.deck ? { deck: s.deck } : {}), ...rest };
+const toItem = (card: ScryfallCard, held: Held | undefined, copies: Copies, rest: Omit<StoredItem, 'name' | 'cardId' | 'src' | 'deck' | 'section'>): StoredItem => {
+  const s: { src: Source; deck?: string; section?: string } = (held && sourceOf(held, copies)) ?? { src: 'spare' };
+  return { name: card.name, cardId: card.id, src: s.src, ...(s.deck ? { deck: s.deck } : {}), ...(s.section ? { section: s.section } : {}), ...rest };
 };
 
 /** The combos complete among the commander, the deck and these picks: one lookup, failing soft. */
