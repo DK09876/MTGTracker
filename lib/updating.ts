@@ -8,7 +8,8 @@
  * only.
  */
 
-import { existsSync, readFileSync } from 'fs';
+import { createHash } from 'crypto';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'fs';
 import { dirname, join } from 'path';
 
 export const UPDATING_MESSAGE = 'The app is updating. Try again in a moment.';
@@ -16,11 +17,36 @@ export const UPDATING_MESSAGE = 'The app is updating. Try again in a moment.';
 /** The file's path: beside the database, wherever MTG_DB_PATH puts it. */
 export const updatingFile = () => join(dirname(process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`), 'updating');
 
-/** When the deploy started waiting, or null when no deploy is under way. */
-export function updatingSince(): string | null {
+/** A flag with no end of its own (or unreadable) counts for this long: a killed script can't hold the app forever. */
+const STALE_MS = 15 * 60_000;
+
+/**
+ * When the deploy started waiting, or null when no deploy is under way. The file holds its start ("2026-...Z")
+ * and, from deploy.sh, the time it ends at the latest ("start until"); past that it is ignored (review 24).
+ */
+export function updatingSince(now = Date.now()): string | null {
   const f = updatingFile();
   if (!existsSync(f)) return null;
-  try { return readFileSync(f, 'utf8').trim() || new Date().toISOString(); } catch { return new Date().toISOString(); }
+  let text = '';
+  try { text = readFileSync(f, 'utf8').trim(); } catch { return null; }
+  const [since, until] = text.split(/\s+/);
+  const start = Date.parse(since ?? '');
+  const end = Date.parse(until ?? '') || (Number.isFinite(start) ? start + STALE_MS : NaN);
+  if (!Number.isFinite(end) || now > end) return null;
+  return since;
+}
+
+/** The app is starting: any deploy that wrote the flag is over (or died), so it goes (review 24). */
+export function clearUpdating(): void {
+  try { rmSync(updatingFile(), { force: true }); } catch { /* nothing to clear */ }
+}
+
+/** Which database the app has open, as a hash of its real path: deploy.sh checks it against the one it expects (review 23). */
+export function databaseId(): string {
+  const path = process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`;
+  let real = path;
+  try { real = realpathSync(path); } catch { /* not there yet */ }
+  return createHash('sha1').update(real).digest('hex').slice(0, 16);
 }
 
 /** This build's id (next.config.ts: the commit), as the pages have it baked in. */

@@ -12,6 +12,7 @@
 import { useEffect } from 'react';
 
 import * as api from '@/lib/api';
+import { looksLikeDeploy } from '@/lib/reach';
 import { useReach } from '@/lib/use-reach';
 
 const EVERY_MS = 20_000;
@@ -41,7 +42,7 @@ export default function UpdateBanner() {
       <div role="status" data-update-banner="updating" className="border-t border-sky-900/60 bg-sky-950/80">
         <p className="safe-x mx-auto flex max-w-[1680px] items-center gap-2 py-1.5 text-[13px] text-sky-100">
           <span aria-hidden className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-300 motion-reduce:animate-none" />
-          The app is updating. This page will reconnect by itself.
+          {looksLikeDeploy(r) ? 'The app is updating. This page will reconnect by itself.' : 'Can’t reach the app. This page will reconnect by itself.'}
         </p>
       </div>
     );

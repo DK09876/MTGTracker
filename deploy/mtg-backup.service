@@ -5,6 +5,7 @@ After=mtg.service
 [Service]
 Type=oneshot
 User=admin
-WorkingDirectory=/home/admin/development/MTGTracker
-Environment=MTG_DB_PATH=/home/admin/development/MTGTracker/data/mtg.db
-ExecStart=/home/admin/development/MTGTracker/scripts/backup.sh --verify
+# The release layout (scripts/DEPLOY.md): the script from the running release, the database from shared/.
+WorkingDirectory=/home/admin/mtg/current
+Environment=MTG_DB_PATH=/home/admin/mtg/shared/mtg.db
+ExecStart=/home/admin/mtg/current/scripts/backup.sh --verify

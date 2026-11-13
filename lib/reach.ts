@@ -9,8 +9,10 @@
  * and keeps its own message. Pure apart from the store.
  */
 
-export const NOT_SENT = 'Not sent: the app is updating. Try again in a moment.';
+/** A change whose answer never came: it may have been saved before the connection dropped (review 25). */
+export const MAYBE_SAVED = 'This may not have been saved. Check before trying again.';
 export const NOT_READ = 'The app is updating. This page will reconnect by itself.';
+export const NO_REACH = 'Can’t reach the app. This page will reconnect by itself.';
 
 /** This page's build, baked in at build time. */
 export const PAGE_BUILD = process.env.NEXT_PUBLIC_MTG_BUILD || 'dev';
@@ -33,6 +35,8 @@ export interface ReachState {
   down: boolean;
   /** A deploy has started (the server said so), so the buttons that start work are greyed out. */
   updating: boolean;
+  /** When the server last said a deploy was under way: an outage soon after is the deploy, not the network. */
+  updatingAt?: number;
   /** The server runs a different build from this page: offer a refresh. */
   newer: boolean;
 }
@@ -44,7 +48,7 @@ export const reachState = () => state;
 
 function set(next: Partial<ReachState>) {
   const merged = { ...state, ...next };
-  if (merged.down === state.down && merged.updating === state.updating && merged.newer === state.newer) return;
+  if (merged.down === state.down && merged.updating === state.updating && merged.newer === state.newer && merged.updatingAt === state.updatingAt) return;
   state = merged;
   for (const l of listeners) l(state);
 }
@@ -58,14 +62,18 @@ export function onReach(listener: (s: ReachState) => void): () => void {
 export function note(r: Parameters<typeof classify>[0]): { reach: Reach; build: string | null } {
   const c = classify(r);
   if (c.reach === 'down') set({ down: true });
-  else set({ down: false, ...(isNewer(c.build) ? { newer: true } : {}) });
+  // A build id says whether this page is behind: true or false, so a rollback clears the line again.
+  else set({ down: false, ...(c.build ? { newer: isNewer(c.build) } : {}) });
   return c;
 }
 
 /** What the status endpoint said: a deploy under way, and its build. */
 export function noteStatus(s: { build: string; updating: string | null }) {
-  set({ down: false, updating: !!s.updating, ...(isNewer(s.build) ? { newer: true } : {}) });
+  set({ down: false, updating: !!s.updating, newer: isNewer(s.build), ...(s.updating ? { updatingAt: Date.now() } : {}) });
 }
+
+/** Whether an outage now reads as the deploy: the server said it was updating in the last ten minutes. */
+export const looksLikeDeploy = (s: ReachState = state, now = Date.now()) => s.updating || (!!s.updatingAt && now - s.updatingAt < 10 * 60_000);
 
 /** For tests. */
 export function resetReach() { state = { down: false, updating: false, newer: false }; listeners.clear(); }
@@ -83,8 +91,8 @@ export async function reached(input: string, init?: RequestInit, f: typeof fetch
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e;
     note('threw');
-    throw new Error(change ? NOT_SENT : NOT_READ);
+    throw new Error(change ? MAYBE_SAVED : looksLikeDeploy() ? NOT_READ : NO_REACH);
   }
-  if (note(r).reach === 'down') throw new Error(change ? NOT_SENT : NOT_READ);
+  if (note(r).reach === 'down') throw new Error(change ? MAYBE_SAVED : looksLikeDeploy() ? NOT_READ : NO_REACH);
   return r;
 }

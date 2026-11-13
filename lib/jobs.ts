@@ -89,10 +89,18 @@ export function getJob(id: string): Job | null {
   return row ? revive(row.job) : null;
 }
 
-/** The newest job of a kind on a deck. */
-export function latestJob(kind: JobKind, listId: string): Job | null {
-  const row = db().get('SELECT job FROM jobs WHERE kind = ? AND listId = ? ORDER BY startedAt DESC LIMIT 1', [kind, listId]) as { job: string } | null;
-  return row ? revive(row.job) : null;
+/**
+ * The newest job of a kind on a deck. A job refused because a deploy was under way shows for a minute (so the
+ * page can say why), then steps aside for the one before it, whose result the page shows again (review 28).
+ */
+export function latestJob(kind: JobKind, listId: string, now = Date.now()): Job | null {
+  const rows = db().all('SELECT job FROM jobs WHERE kind = ? AND listId = ? ORDER BY startedAt DESC LIMIT 5', [kind, listId]) as Array<{ job: string }>;
+  for (const r of rows) {
+    const job = revive(r.job);
+    if (job.error === UPDATING_MESSAGE && now - Date.parse(job.startedAt) > 60_000) continue;
+    return job;
+  }
+  return null;
 }
 
 /** A profile's running jobs and the ones that finished in the last few minutes, newest first. */

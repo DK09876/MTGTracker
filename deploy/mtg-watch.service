@@ -4,5 +4,7 @@ Description=Check MTG Tracker answers
 [Service]
 Type=oneshot
 User=admin
-WorkingDirectory=/home/admin/development/MTGTracker
-ExecStart=/home/admin/development/MTGTracker/scripts/watch.sh
+# The release layout (scripts/DEPLOY.md): outages go beside the database, where the app reads them.
+WorkingDirectory=/home/admin/mtg/current
+Environment=MTG_OUTAGE_LOG=/home/admin/mtg/shared/outages.log
+ExecStart=/home/admin/mtg/current/scripts/watch.sh
