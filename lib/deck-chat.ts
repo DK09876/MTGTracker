@@ -185,11 +185,13 @@ MTG Tracker. Be direct and specific, and talk like a player: name cards,
 say why in a sentence. Keep answers short unless asked for depth.
 
 Answering:
-- Answer the owner's question in words first, in the reply itself: your
-  judgement and your reasons, and for a "how many / enough / too many"
-  question the count, taken from the deck in front of you (name what you
-  counted). Proposals come after, and are optional. A reply that only
-  describes its buttons has not answered.
+- Answer the owner's question in words first: your judgement and your
+  reasons, and for a "how many / enough / too many" question the count,
+  taken from the deck in front of you (name what you counted). When you
+  propose changes or open a page, that answer goes in the tool's "answer"
+  field, whole, and is shown above the buttons; anything you write after
+  the tools is a short closing note at most. A reply that only describes
+  its buttons has not answered.
 - A judgement question ("is my theme solid?", "am I using the commander
   well?") gets at most two proposals unless the owner asks for changes.
 - Never say the owner asked for something that isn't in their messages,
@@ -306,10 +308,12 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: 'propose_changes',
-    description: 'Every change you recommend, each with a one-sentence reason; the owner gets a button for each and applies the ones they want. Use only the lists you need. "to" for a cut, add or move is a section of the deck (its name, or "main"); for group/ungroup it is the group\'s name. Call at most once per reply, after looking things up.',
+    description: 'Every change you recommend, each with a one-sentence reason; the owner gets a button for each and applies the ones they want. Use only the lists you need. "to" for a cut, add or move is a section of the deck (its name, or "main"); for group/ungroup it is the group\'s name. Call at most once per reply, after looking things up. "answer" is your full answer to the owner\'s question in words, exactly as it should read above the buttons: the judgement, the reasons, any counts. Never just a remark about the buttons.',
     input_schema: {
       type: 'object',
+      required: ['answer'],
       properties: {
+        answer: { type: 'string', description: 'The full answer in words, shown above the buttons.' },
         add: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' }, to: { type: 'string' } }, required: ['name', 'why'] } },
         cut: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' }, to: { type: 'string' } }, required: ['name', 'why'] } },
         swap: { type: 'array', items: { type: 'object', properties: { out: { type: 'string' }, in: { type: 'string' }, why: { type: 'string' } }, required: ['out', 'in', 'why'] } },
@@ -329,8 +333,11 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
     description: `A button under your answer that opens one of this deck's pages, for a job the page does better than Chat: trim (many cuts; cut: how many, or cut_to: the size to cut to), finish (fill from the owner's cards; add: how many), tags (sort into groups), check (mana, curve, how it plays), plan (what the deck is for, bracket, budget). why: one sentence. At most once per reply.`,
     input_schema: {
       type: 'object',
-      properties: { page: { type: 'string', enum: ['trim', 'finish', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' } },
-      required: ['page', 'why'],
+      properties: {
+        page: { type: 'string', enum: ['trim', 'finish', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' },
+        answer: { type: 'string', description: 'Your full answer in words, shown above the button (the same as propose_changes\' answer when you call both: give it once).' },
+      },
+      required: ['page', 'why', 'answer'],
     },
   },
 ];
@@ -499,13 +506,18 @@ export const WORDS_FIRST = 'Before the buttons: answer my question itself in wor
  * Lines and list items count as sentences, so a short theme answer in lines, or "Cut it." with one proposal, is
  * an answer and never asked again.
  */
-export function onlyButtons(text: string, proposals: number): boolean {
+export function onlyButtons(text: string, proposals: number, proposed: string[] = []): boolean {
   const t = text.trim();
   const units = t.split(/\n+|(?<=[.!?])\s+/).map((x) => x.replace(/^\s*([-*•]|\d+[.)])\s+/, '').trim()).filter((x) => x.length > 2);
   const about = /\b(buttons?|proposals?|see (them )?below|below|I'?ve (put|proposed|added|queued)|that'?s (one|two|three|four|five|six|seven|eight|\d+))\b/i;
   const opens = /^(I'?ve (put|proposed|added|queued)|I have (put|proposed|added)|That'?s (one|two|three|four|five|six|seven|eight|\d+) (button|proposal|change)|See (the )?(buttons|below)|Here are (the|your|some) (buttons|proposals|changes))/i;
   const words = t.split(/\s+/).filter(Boolean).length;
   if (!units.length) return proposals > 0;
+  // A first sentence about the buttons ("The note button saves…", "The buttons cover the four swaps above") in a text
+  // that names fewer than two of the cards it proposes: what the real runs kept (PR 55 real runs, item 1).
+  const first = /\b(buttons?|above|below)\b/i.test(units[0]);
+  const named = proposed.filter((n) => n && t.toLowerCase().includes(front(n).toLowerCase())).length;
+  if (proposals > 0 && first && named < 2) return true;
   const aboutShare = units.filter((u) => about.test(u)).length / units.length;
   return (opens.test(units[0]) && units.length - units.filter((u) => about.test(u)).length <= 1) || aboutShare >= 0.6 || (words < 15 && proposals > 2);
 }
@@ -597,6 +609,14 @@ export async function reply(
   const roundsFor = () => (searches > 0 ? MAX_ROUNDS + 8 : MAX_ROUNDS);
   // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
   const said: string[] = [];
+  // The answer in words that came with the proposals or the page button: shown first, whatever else was said.
+  let answerText = '';
+  const takeAnswer = (input: Record<string, unknown>) => { const a = typeof input.answer === 'string' ? input.answer.trim() : ''; if (a.length > answerText.length) answerText = a.slice(0, 6000); };
+  const withAnswer = () => {
+    if (!answerText) return said;
+    const norm = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+    return [answerText, ...said.filter((x) => !norm(answerText).includes(norm(x)) && !norm(x).includes(norm(answerText)))];
+  };
   const messages = [...history];
   for (let round = 0; round < roundsFor(); round++) {
     const answer = await call({
@@ -616,7 +636,7 @@ export async function reply(
     if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
       // Buttons with no answer in words (review item 31): ask once for the answer itself, and put it first.
-      if (changes.length && answer.stop_reason !== 'refusal' && onlyButtons(said.join('\n\n'), changes.length)) {
+      if (changes.length && answer.stop_reason !== 'refusal' && onlyButtons(withAnswer().join('\n\n'), changes.length, changes.filter((c) => c.kind !== 'note' && c.kind !== 'win').map((c) => c.name))) {
         const more = await call({
           model, max_tokens: 4_000,
           system: [{ type: 'text', text: CHAT_SYSTEM }, { type: 'text', text: deckText(deck), cache_control: { type: 'ephemeral' } }],
@@ -626,13 +646,14 @@ export async function reply(
         const words = more?.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
         if (words) said.unshift(words);
       }
-      return finish(said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), answer.model);
+      return finish(withAnswer().join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), answer.model);
     }
     messages.push({ role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const use of uses) {
       const input = (use.input ?? {}) as Record<string, unknown>;
       if (use.name === 'propose_changes') {
+        takeAnswer(input);
         const all = resolveChanges(input, deck, tools.held, tools.check);
         // Whole names on word boundaries: "Opt" isn't named in "option" (round 2, item 11).
         const named = new Set(all.map((c) => front(c.name).toLowerCase()).filter((n) => n.length >= 3 && new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu').test(ownerSays)));
@@ -646,6 +667,7 @@ export async function reply(
         continue;
       }
       if (use.name === 'open_page') {
+        takeAnswer(input);
         const page = pageGo(input);
         if (page) asked = page;
         results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, tags, check or plan.', ...(page ? {} : { is_error: true }) });
@@ -676,5 +698,5 @@ export async function reply(
     if (results.length) results[results.length - 1] = { ...results[results.length - 1], cache_control: { type: 'ephemeral' } };
     messages.push({ role: 'user', content: results });
   }
-  return finish([...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'));
+  return finish([...withAnswer(), 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'));
 }

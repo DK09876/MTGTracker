@@ -576,6 +576,19 @@ describe('Finish review fixes (PR 55, items 11-19)', { timeout: 60_000 }, () => 
     expect(run.changes!.in).toEqual([]);
   });
 
+  it('real runs, item 4: a later round\'s theme picks join the list\'s theme group', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 2 });
+    const theme = (names: string[], name: string) => ({ groups: [{ group: 'theme', theme: name, cards: names.map((n) => ({ name: n, why: '.' })) }], reply: '' });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: theme(['Owned 2', 'Owned 4'], 'Zombie aristocrats') }]).call as never, 'claude-opus-5-5', list, 'dk');
+    finish.setChoices(list.id, { 'Owned 4': { choice: 'skip', text: '' } });
+    const { call, asked } = stand([{ search: ['draw'] }, { picks: theme(['Owned 6'], 'Zombie recursion') }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk', { rerun: true });
+    expect(text(asked[0])).toContain('The theme group is \\"Zombie aristocrats\\"');
+    expect(new Set(finish.finishStore(list.id).run!.items.map((i) => i.theme))).toEqual(new Set(['Zombie aristocrats']));
+  });
+
   it('19: a refused land search isn\'t counted; t:"land" is a land search; "+" takes only lands a land search found', async () => {
     const { parseQuery } = await import('./finish-shared');
     expect(parseQuery('t:"land" makes-blue').types).toEqual(['land']);

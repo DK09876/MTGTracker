@@ -455,3 +455,27 @@ describe('review round 2: Chat items 7-13', { timeout: 60_000 }, () => {
     expect(answer.cards?.find((c) => c.name === 'Deck Spell 2')?.id).toBe('Deck Spell 2');
   });
 });
+
+describe('real runs of PR 55, item 1: the answer travels with the proposals', { timeout: 60_000 }, () => {
+  it('the answer field is shown first, and the closing remark after it; no second call', async () => {
+    const { list } = await setup();
+    const words = 'Zombies: about 44 (42 spare, 2 in other decks), from t:zombie; standouts Undead Augur, Cemetery Reaper\nPick: Zombie aristocrats, because the Ghoul counts nontoken Zombies dying.\nMissing: free sacrifice outlets.';
+    const { answer, asked } = await ask(list, [
+      [{ name: 'propose_changes', input: { answer: words, note: [{ text: 'Theme: Zombie aristocrats.' }] } }],
+      'The note button saves Zombie aristocrats as the theme.',
+    ]);
+    expect(asked).toHaveLength(2);
+    expect(answer.text.startsWith('Zombies: about 44')).toBe(true);
+    expect(answer.text).toContain('The note button saves');
+  });
+
+  it('the backstop catches what the real runs kept: a first sentence about the buttons, naming few proposed cards', async () => {
+    const { onlyButtons } = await import('./deck-chat');
+    const a = 'The note button saves Zombie aristocrats as the deck\'s theme, and the Finish button can build the other 99 from your cards around it. One thing to watch: Zombie tokens don\'t trigger The Ghoul, so cards like [[Josu Vess, Lich Knight]] are support, not engines.';
+    const d = 'The buttons cover the four swaps above, plus a fifth that saves "Extra combats with Azula" as a way to win in the deck\'s plan. Taking [[Great Train Heist]] leaves a hole in your World at War deck, so you\'d need a replacement there.';
+    expect(onlyButtons(a, 1, ['Theme: Zombie aristocrats'])).toBe(true);
+    // The cards it proposes (the way to win, a name in quotes, isn't a card).
+    expect(onlyButtons(d, 5, ['Aggravated Assault', 'Great Train Heist', 'Combat Celebrant', 'Karlach, Fury of Avernus'])).toBe(true);
+    expect(onlyButtons('Cut Propaganda and Eel Umbra first: neither chains spells. Turnabout is slow. The buttons below do it.', 3, ['Propaganda', 'Eel Umbra', 'Turnabout'])).toBe(false);
+  });
+});

@@ -401,11 +401,14 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   const landTask = !askLands ? '' : rerun && !legacyLands
     ? (prevLands.length ? ` The lands Claude chose stay unless the owner's words are about the lands: ${prevLands.map((l) => l.name).join(NAMES)}. If they are, give "lands" again, at most ${landLimit}.` : '')
     : ` Also choose up to ${landLimit} of the owner's nonbasic lands worth a slot, in "lands" (search with t:land; ${pool.lands.lines.length} are on offer). The app adds the basics for the rest.`;
+  // The list's theme group, when it has one: a later round keeps it rather than opening a second.
+  const themeNow = rerun ? before.run!.items.find((i) => i.group === 'theme' && i.theme)?.theme ?? '' : '';
   const task = [
     ...sessionLines(turns),
     ...(rerun ? [
       '',
       kept.length ? `## Kept (they stay; don't pick them again)\n${kept.map((i) => i.name).join(NAMES)}` : '## Kept\nNothing.',
+      ...(themeNow ? ['', `## The theme group is "${themeNow}": give theme picks under exactly that name.`] : []),
       ...(skipped.size ? ['', `## Skipped by the owner: never pick these\n${[...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)].filter((n, i, a) => a.indexOf(n) === i).join(NAMES)}`] : []),
     ] : []),
     '',
@@ -478,7 +481,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   if (!checked.picks.length && !kept.length) throw new ModelError(`None of Claude’s ${checked.dropped} picks could be used (not among your cards on offer, or not from its searches). Nothing was saved; try again.`);
   // A card the owner asked Claude to rethink that it picked again comes back with a new reason (D 15).
   const asked = new Set([...(rerun ? (reply?.marks ?? []).filter((m) => m.choice === 'ask').map((m) => front(m.name)) : []), ...[...outs].map(front)]);
-  const fresh = checked.picks.map((p) => toItem(p.card, held.get(keyOf(p.card)), before.copies, { group: p.group, ...(p.theme ? { theme: p.theme } : {}), why: p.why, mark: rerun ? (asked.has(front(p.card.name)) ? 'back' : 'new') : null }));
+  // A later round's theme picks go in the list's theme group, whatever name the model gave them (real runs, item 4).
+  const fresh = checked.picks.map((p) => toItem(p.card, held.get(keyOf(p.card)), before.copies, { group: p.group, ...(p.group === 'theme' && (themeNow || p.theme) ? { theme: themeNow || p.theme } : {}), why: p.why, mark: rerun ? (asked.has(front(p.card.name)) ? 'back' : 'new') : null }));
   const items = [...kept, ...fresh];
   // Lands (Part E): Claude's picks, checked like the others and cut to the limit; on a later list they stay unless given again.
   const given = (answer as { lands?: unknown }).lands;
