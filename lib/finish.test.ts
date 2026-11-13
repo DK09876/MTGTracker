@@ -391,6 +391,72 @@ describe('combos', { timeout: 30_000 }, () => {
   });
 });
 
+describe('held review fixes (handoff 9, Part D)', { timeout: 60_000 }, () => {
+  it('the done message names only borrowed cards that went in, and says which picks were left out', async () => {
+    const lent = card('Lent Copy');
+    const { db, list } = await setup(owned, [lent]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 2, copies: 'any' });
+    await finish.runFinish(stand([{ search: ['copy'] }, { search: ['draw'] }, { picks: pick(['Lent Copy', 'Owned 2']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    expect(finish.finishStore(list.id).run!.items.map((i) => i.name)).toEqual(['Lent Copy', 'Owned 2']);
+    // Before apply, the borrowed card goes into this deck another way: it is no longer on offer.
+    db.addCardToList(list.id, lent);
+    const done = await finish.applyFinish(list, 'dk');
+    expect(done.added).toBe(1);
+    expect(done.borrowed).toEqual([]);
+    expect(done.left).toEqual(['Lent Copy']);
+  });
+
+  it('the combo lookup is keyed on the owner’s holdings, so an apply does not run it again', async () => {
+    const asks: number[] = [];
+    vi.doMock('./spellbook', async (orig) => ({ ...(await orig<typeof import('./spellbook')>()), combosInDeck: async (deck: { main: unknown[] }) => { asks.push(deck.main.length); return { included: [], almost: [] }; } }));
+    vi.resetModules();
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { goal: { chips: [], text: '', combos: 'first' } });
+    finish.setFinish(list.id, { want: 2 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2', 'Owned 4']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    // One lookup over the holdings (big), one re-check of the picks (the deck and two picks).
+    const first = asks.filter((n) => n > 20).length;
+    expect(first).toBe(1);
+    await finish.applyFinish(list, 'dk');
+    finish.resetFinish(list.id);
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 6']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    expect(asks.filter((n) => n > 20).length).toBe(first);
+    vi.doUnmock('./spellbook');
+  });
+
+  it('Finish’s price: a guess that grows with the cards asked for, then the average of real rounds by round', async () => {
+    const { measuredRounds, roundPrice } = await import('./finish-shared');
+    const guess = { usd: 0.38, measured: false, base: 0.06, perCard: 0.008 };
+    expect(roundPrice(guess, 5).usd).toBeCloseTo(0.1);
+    expect(roundPrice(guess, 43).usd).toBeCloseTo(0.404);
+    const call = (at: string, step: string, cost: number, label = 'Azula') => ({ at, profileId: 'dk', label, step, cost });
+    const calls = [
+      call('1', 'finish: first list', 0.1), call('2', 'finish: search', 0.05), call('3', 'finish: search', 0.05),
+      call('4', 'finish: later list', 0.03), call('5', 'finish: search', 0.02),
+      call('6', 'finish: first list', 0.3, 'Kratos'), call('7', 'finish: first list', 0.2), call('8', 'finish: search', 0.1, 'Kratos'),
+    ];
+    // A round is its first call and the searches after it on the same deck: 0.2, 0.4 and 0.2. One later round isn't enough.
+    const m = measuredRounds(calls);
+    expect(m.first).toBeCloseTo((0.2 + 0.4 + 0.2) / 3);
+    expect(m.later).toBeNull();
+    expect(measuredRounds(calls.slice(0, 5))).toEqual({ first: null, later: null });
+    expect(roundPrice({ usd: 0.27, measured: true }, 5)).toEqual({ usd: 0.27, measured: true });
+  });
+
+  it('the header budget chip: the cap that runs out first, quiet, amber from 80%, red when used up', async () => {
+    const { chipTone, tightest } = await import('./spend-chip');
+    expect(tightest({ today: 1, profileToday: 0.5, caps: { daily: 5, perProfile: 2 } })).toEqual({ spent: 0.5, cap: 2, whose: 'yours' });
+    expect(tightest({ today: 4.8, profileToday: 0.5, caps: { daily: 5, perProfile: 2 } })).toEqual({ spent: 4.8, cap: 5, whose: 'everyone' });
+    expect(chipTone(0.5, 2)).toBe('quiet');
+    expect(chipTone(1.6, 2)).toBe('amber');
+    expect(chipTone(2, 2)).toBe('red');
+    expect(chipTone(0, 0)).toBe('quiet');
+  });
+});
+
 describe('the plan’s combos choice', { timeout: 60_000 }, () => {
   it('is set on its own and kept when the goal chips or words change', async () => {
     const { list } = await setup();

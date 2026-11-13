@@ -18,15 +18,11 @@ import * as api from '@/lib/api';
 import { useMe } from '@/lib/use-me';
 import { useProfile } from '@/lib/profile';
 import { dollars } from '@/lib/spend';
+import { chipTone, tightest } from '@/lib/spend-chip';
+
+
 
 const EVERY_MS = 30_000;
-
-/** The cap that runs out first for this profile, and what has been spent against it. */
-export function tightest(spend: AiState['spend']): { spent: number; cap: number; whose: 'yours' | 'everyone' } {
-  const mine = spend.caps.perProfile - spend.profileToday;
-  const app = spend.caps.daily - spend.today;
-  return app < mine ? { spent: spend.today, cap: spend.caps.daily, whose: 'everyone' } : { spent: spend.profileToday, cap: spend.caps.perProfile, whose: 'yours' };
-}
 
 export default function AiSpend() {
   const profile = useProfile();
@@ -60,8 +56,8 @@ export default function AiSpend() {
 
   if (!profile || !ready || !state || !state.models.some((m) => m.hasKey && m.price)) return null;
   const t = tightest(state.spend);
-  const share = t.spent / Math.max(t.cap, 0.01);
-  const tone = share >= 1 ? 'border-red-400/60 text-red-300' : share >= 0.8 ? 'border-amber-300/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]';
+  const level = chipTone(t.spent, t.cap);
+  const tone = level === 'red' ? 'border-red-400/60 text-red-300' : level === 'amber' ? 'border-amber-300/60 text-amber-300' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]';
   const says = `AI budget today: ${dollars(t.spent)} spent of ${dollars(t.cap)} (${t.whose === 'yours' ? 'your share' : 'everyone'})`;
 
   return (
@@ -74,7 +70,7 @@ export default function AiSpend() {
         <div role="dialog" aria-label="Today's AI budget"
           className="absolute right-0 top-full z-40 mt-1 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 shadow-xl max-sm:fixed max-sm:inset-x-4 max-sm:top-[calc(env(safe-area-inset-top)+3.75rem)] max-sm:mt-0 max-sm:w-auto">
           <Budget state={state} />
-          {share >= 1 && <p className="mt-2 text-xs text-red-300">{t.whose === 'yours' ? 'Your share for today is used up.' : 'The app’s budget for today is used up.'} Claude can’t be asked until it resets.</p>}
+          {level === 'red' && <p className="mt-2 text-xs text-red-300">{t.whose === 'yours' ? 'Your share for today is used up.' : 'The app’s budget for today is used up.'} Claude can’t be asked until it resets.</p>}
           <Link href="/settings" onClick={() => setOpen(false)} className="mt-2 inline-block text-xs text-[var(--muted)] underline underline-offset-[3px] hover:text-[var(--foreground)]">Change the caps in Settings</Link>
         </div>
       )}

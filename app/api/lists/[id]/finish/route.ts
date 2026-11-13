@@ -66,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         if (!process.env.ANTHROPIC_API_KEY || profile === 'tour') return NextResponse.json({ error: NO_KEY }, { status: 503 });
         // Every AI step on the deck pages runs on Opus.
         const model = TRIM_MODELS.opus.id;
-        const call = claudeCall(model, { profile, feature: 'tagging', label: list.name });
+        const call = claudeCall(model, { profile, feature: 'finish', label: list.name });
         startJob({ kind: 'finish', label: 'Finishing the deck from your cards', subject: list.name, profileId: profile, listId: id, errorLevel: (e) => (e instanceof ModelError ? 'warn' : 'error') },
           ({ progress }) => runFinish(call, model, list, profile, { rerun: b.rerun === true, message: typeof b.message === 'string' ? b.message : '' }, progress));
         break;

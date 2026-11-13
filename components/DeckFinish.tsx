@@ -23,7 +23,7 @@ import SymbolText from './SymbolText';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
-import { chosenAdds, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, SEARCH_LIMIT, SEARCH_LIMIT_LATER, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
+import { chosenAdds, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, roundPrice, SEARCH_LIMIT, SEARCH_LIMIT_LATER, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
 import { price } from '@/lib/price';
 import type { ScryfallCard } from '@/lib/scryfall';
 
@@ -154,6 +154,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <h3 className="font-display text-2xl font-semibold">Added {plural(d.added + d.lands, 'card')}. The deck is at {d.size}.</h3>
         <p className="text-sm text-[var(--muted)]">{d.added} from your picks{d.lands ? ` and ${d.lands} lands chosen by the app` : ''}. A snapshot from before is in History.</p>
         {d.borrowed.length > 0 && <p className="text-sm text-amber-300">These stay in the decks they’re in, so you have no spare copy of them now: {d.borrowed.join('; ')}.</p>}
+        {(d.left?.length ?? 0) > 0 && <p className="text-sm text-amber-300" data-finish-left>Left out, no longer on offer when you applied (the deck or your cards changed since the picks): {d.left!.join('; ')}.</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
           {d.size > 100 ? <button className={C.go} onClick={() => onTab('tune')}>Next: Trim {d.size - 100}</button> : <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>}
@@ -169,7 +170,8 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const wanted = Math.max(1, Math.round(Number(wantText)) || 0);
   const isFull = full > 0 && wanted === full;
   const setWant = (n: number | null) => { setWantText(String(n ?? full)); void act({ action: 'settings', want: n === null || n === full ? null : n }); };
-  const cost = price(run ? view.cost.later : view.cost.first);
+  // A later round refills the open slots; a first list costs with how many it asks for (until the app has measured rounds).
+  const cost = price(run ? roundPrice(view.cost.later, Math.max(1, run.want - adds.length)) : roundPrice(view.cost.first, wanted));
   const combosLine = view.combos.mode === 'first' ? 'Your plan says build around them: the app finds the combos you own every piece of and sends that list with the request.'
     : view.combos.mode === 'none' ? 'Your plan says none: the app sends the combos you own as “leave a piece of each out”, and checks the picks itself after every round.'
       : 'Your plan doesn’t say, so nothing about combos is sent.';
@@ -290,6 +292,13 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     const byGroup = groups.map((g) => ({ g, names: items.filter((i) => groupKey(i) === g && adds.includes(i.name)) })).filter((x) => x.names.length);
     return (
       <section className="flex flex-col gap-4" data-section="Finish" data-finish-review>
+        {/* Apply stays in view however long the list: one sticky bar, the same element, where the picks' bar sits. */}
+        <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-finish-apply-bar>
+          <span className="min-w-0 flex-[1_1_16rem] text-[13px] text-[var(--muted)]"><b className="text-[var(--foreground)] tabular-nums">{view.size} → {total}</b> · A snapshot is saved first. Undo puts every card back where it was, Maybeboard cards included.</span>
+          <button className={C.btn} onClick={() => setReview(false)}>Back to the picks</button>
+          <button className={C.go} disabled={busy || !adds.length} onClick={() => act({ action: 'apply' }, onChanged)} data-finish-apply>Apply · add {plural(adds.length + lands, 'card')}</button>
+        </div>
+        {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className={`${CARD} flex flex-col gap-3`}>
           <h3 className="font-display text-xl font-semibold">Review and apply</h3>
           <p className="text-sm text-[var(--muted)]">Nothing has changed in the deck yet.</p>
@@ -316,12 +325,6 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
             )}
             {skips.length > 0 && <p className="text-sm text-[var(--muted)]"><b className="text-[var(--foreground)]">Skipped:</b> {skips.map((i) => i.name).join('; ')}</p>}
           </div>
-        </div>
-        {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-        <div className={`${CARD} flex flex-wrap items-center gap-3`}>
-          <span className="min-w-0 flex-[1_1_16rem] text-[13px] text-[var(--muted)]">A snapshot is saved first. Undo puts every card back where it was, Maybeboard cards included.</span>
-          <button className={C.btn} onClick={() => setReview(false)}>Back to the picks</button>
-          <button className={C.go} disabled={busy || !adds.length} onClick={() => act({ action: 'apply' }, onChanged)} data-finish-apply>Apply · add {plural(adds.length + lands, 'card')}</button>
         </div>
       </section>
     );

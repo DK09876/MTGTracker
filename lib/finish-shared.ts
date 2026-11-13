@@ -208,9 +208,42 @@ export interface FinishView {
   /** This round's searches, as they run and once done. */
   searches: FinishSearch[];
   job: { status: 'running' | 'failed'; detail: string | null; error: string | null } | null;
-  done: { at: string; added: number; lands: number; size: number; borrowed: string[] } | null;
-  cost: { first: { usd: number; measured: boolean }; later: { usd: number; measured: boolean } };
+  /** left: picks on Add that were no longer on offer when applied (the deck or the collection changed), so not added. */
+  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[] } | null;
+  /**
+   * What a round costs. measured: the average of this app's real rounds (by round, not by call: a round is
+   * several calls). Until there are enough, a guess that grows with the cards asked for (perCard).
+   */
+  cost: { first: RoundCost; later: RoundCost };
   noKey: boolean;
+}
+
+export interface RoundCost { usd: number; measured: boolean; base?: number; perCard?: number }
+
+/** The price of a first list of `want` cards: the measured average, or the guess for that many. */
+export const roundPrice = (c: RoundCost, want: number) => (c.measured || c.perCard === undefined ? c : { usd: (c.base ?? 0) + c.perCard * want, measured: false });
+
+/**
+ * Finish's rounds from the calls log, oldest first: a round starts with its first call ("finish: first list" or
+ * "finish: later list") and takes the searches after it from the same profile and deck. Averaged when there
+ * are at least `min` of a kind.
+ */
+export function measuredRounds(calls: Array<{ at: string; profileId: string; label: string; step: string; cost: number }>, min = 3): { first: number | null; later: number | null } {
+  const rounds: Array<{ kind: 'first' | 'later'; key: string; cost: number }> = [];
+  const open = new Map<string, { kind: 'first' | 'later'; key: string; cost: number }>();
+  for (const c of [...calls].sort((a, b) => a.at.localeCompare(b.at))) {
+    const key = `${c.profileId}|${c.label}`;
+    if (c.step === 'finish: first list' || c.step === 'finish: later list') {
+      const r = { kind: c.step === 'finish: first list' ? 'first' as const : 'later' as const, key, cost: c.cost };
+      rounds.push(r);
+      open.set(key, r);
+    } else if (c.step === 'finish: search') {
+      const r = open.get(key);
+      if (r) r.cost += c.cost;
+    }
+  }
+  const avg = (k: 'first' | 'later') => { const x = rounds.filter((r) => r.kind === k); return x.length >= min ? x.reduce((n, r) => n + r.cost, 0) / x.length : null; };
+  return { first: avg('first'), later: avg('later') };
 }
 
 /** The rows on Add, the owner's taken cards included. */

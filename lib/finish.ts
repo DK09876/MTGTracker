@@ -30,14 +30,14 @@ import type Anthropic from '@anthropic-ai/sdk';
 
 import { ModelError } from './ai';
 import type { ClaudeParams } from './ai-claude';
-import { addCardToList, cardsInList, database, setQuantity, updateListCard, type CardBefore, type List } from './db';
+import { addCardToList, aiCalls, cardsInList, database, setQuantity, updateListCard, type CardBefore, type List } from './db';
 import { planFor } from './deck-plan';
 import { latestJob } from './jobs';
 import { ownedCombos } from './finish-combos';
 import { BASIC, finishLands, finishPool, heldCards, isLand, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
 import { localCards } from './card-store';
 import {
-  chosenAdds, finishCount, FINISH_GROUPS, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
+  chosenAdds, finishCount, FINISH_GROUPS, measuredRounds, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
   type Copies, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
 } from './finish-shared';
 import { planContext } from './plan-context';
@@ -71,6 +71,8 @@ interface Run {
 }
 interface Done {
   at: string; added: number; lands: number; size: number; borrowed: string[];
+  /** Picks on Add that were no longer on offer at apply time, so not added. */
+  left?: string[];
   /** Each row the apply touched, and how it was before. */
   undo: Array<{ cardId: string; before: CardBefore }>;
   session: Pick<FinishStore, 'run' | 'choices' | 'skipped' | 'turns' | 'searches' | 'seen'>;
@@ -321,7 +323,14 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   let combosFailed = false;
   if (mode) {
     progress('Looking up the combos you own');
-    try { owned = await ownedCombos(profileId, list.commander.name, [...pool.lines.map((l) => l.name), ...ctx.main.map((c) => c.card.name)]); } catch { combosFailed = true; }
+    // The lookup is keyed on what the owner holds in the colours, not on what is in this deck, so an apply (picks and
+    // lands move from the holdings into the deck) does not throw the kept answer away. Then kept to what may go in now.
+    const holdings = [...held.values()].filter((h) => (h.card.color_identity ?? []).every((x) => ctx.identity.has(x)) && h.card.legalities?.commander === 'legal').map((h) => h.card.name);
+    try {
+      const all = await ownedCombos(profileId, list.commander.name, [...holdings, ...ctx.main.map((c) => c.card.name)]);
+      const usable = new Set([...pool.lines.map((l) => l.name), ...ctx.main.map((c) => c.card.name), ...ctx.commanders.map((c) => c.name)].map(front));
+      owned = all.filter((c) => c.cards.every((n) => usable.has(front(n))));
+    } catch { combosFailed = true; }
   }
 
   const limit = round === 1 ? SEARCH_LIMIT : SEARCH_LIMIT_LATER;
@@ -530,13 +539,16 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   for (const c of cards) add(c, 1);
   for (const l of lands) add(l.card, l.n);
   const landCount = lands.reduce((n, l) => n + l.n, 0);
-  const borrowed = s.run.items.filter((i) => i.src === 'other' && names.includes(i.name)).map((i) => `${i.name} (in ${i.deck})`);
+  // From what went in: a pick no longer on offer at apply time was left out, and is said so, not named as borrowed.
+  const added = new Set(cards.map((c) => c.name));
+  const borrowed = s.run.items.filter((i) => i.src === 'other' && added.has(pool.cards.get(i.name.toLowerCase())?.name ?? pool.cards.get(front(i.name))?.name ?? '')).map((i) => `${i.name} (in ${i.deck})`);
+  const left = names.filter((n) => !pool.cards.has(n.toLowerCase()) && !pool.cards.has(front(n)));
   const done: Done = {
-    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, undo,
+    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo,
     session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen },
   };
   update(list.id, (x) => { x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
-  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed };
+  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left };
 }
 
 /** Put every row the apply touched back exactly as it was, and bring the conversation back. */
@@ -560,12 +572,19 @@ export function undoFinish(list: List): { moved: number } {
 // --- the view ----------------------------------------------------------------------------------
 
 /**
- * What a round costs: a guess from the test runs' tokens (72-86k for a first
- * list of about 50 picks), not yet measured on the real API. A round is a run
- * of calls, mostly searches, so one call's average would not say it.
+ * What a round costs. Measured: the average of the app's own rounds this week
+ * (lib/finish-shared.ts measuredRounds; a round is several calls, mostly
+ * searches, so one call's average would not say it). Until there are three of
+ * a kind, a guess from the one real Opus run (2026-11-13: a first list of 43
+ * picks $0.41, a later round $0.05) that grows with the cards asked for, so
+ * 5 cards no longer show the price of a fill.
  */
-const ROUND_COST = { first: 0.45, later: 0.1 };
-const roundCost = (which: 'first' | 'later') => ({ usd: ROUND_COST[which], measured: false });
+const GUESS = { first: { base: 0.06, perCard: 0.008 }, later: { base: 0.04, perCard: 0.004 } };
+function roundCosts(): FinishView['cost'] {
+  const m = measuredRounds(aiCalls(new Date(Date.now() - 7 * 86400_000).toISOString(), 5000).filter((c) => c.step.startsWith('finish:')));
+  const one = (k: 'first' | 'later') => (m[k] !== null ? { usd: m[k]!, measured: true } : { usd: GUESS[k].base + GUESS[k].perCard * 40, measured: false, ...GUESS[k] });
+  return { first: one('first'), later: one('later') };
+}
 
 export async function finishView(list: List, profileId: string): Promise<FinishView> {
   const s = finishStore(list.id);
@@ -639,8 +658,8 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     turns: s.turns,
     searches: s.searches.filter((x) => x.round === (running && s.pending ? s.pending : s.run?.round ?? 1)).map(({ q, n, round }) => ({ q, n, round })),
     job: job && (running || (job.status === 'failed' && (!s.run || job.startedAt > s.run.at))) ? { status: job.status as 'running' | 'failed', detail: job.detail || null, error: job.status === 'failed' ? job.error ?? 'Claude didn’t finish' : null } : null,
-    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed } : null,
-    cost: { first: roundCost('first'), later: roundCost('later') },
+    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed, left: s.done.left ?? [] } : null,
+    cost: roundCosts(),
     noKey: !process.env.ANTHROPIC_API_KEY,
   };
 }

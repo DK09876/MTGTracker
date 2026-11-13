@@ -21,9 +21,10 @@ const FEATURES = [
   { key: 'tagging', label: 'Reading decks' },
   { key: 'tagcards', label: 'Tagging cards' },
   { key: 'chat', label: 'Chat' },
+  { key: 'finish', label: 'Finish' },
 ] as const;
 
-const FEATURE_TONE: Record<string, string> = { search: 'text-sky-300', rules: 'text-amber-300', tagging: 'text-violet-300', tagcards: 'text-fuchsia-300', chat: 'text-emerald-300' };
+const FEATURE_TONE: Record<string, string> = { search: 'text-sky-300', rules: 'text-amber-300', tagging: 'text-violet-300', tagcards: 'text-fuchsia-300', chat: 'text-emerald-300', finish: 'text-orange-300' };
 
 const OUTCOME: Record<string, string> = {
   failed: 'failed',
