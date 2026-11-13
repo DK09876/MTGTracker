@@ -244,7 +244,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
 
         {current === 'cuts' ? (
           <details className="rounded-2xl border border-[var(--border)]" data-tour="cut-rules">
-            <summary className="cursor-pointer px-4 py-3 text-sm"><b className="font-semibold">Cuts by rule, no AI</b>{state.cuts?.counts.all ? ` · ${state.cuts.counts.all}` : ''} <span className="text-[var(--muted)]">The rules’ own list, for when there is no Claude key or you want to browse. In testing its order was no better than chance, so it is out of the main path.</span></summary>
+            <summary className="cursor-pointer px-4 py-3 text-sm"><b className="font-semibold">Cuts by rule, no AI</b>{state.cuts?.counts.all ? ` · ${state.cuts.counts.all}` : ''} <span className="text-[var(--muted)]">The rules’ own list, for when there is no Claude key or you want to browse.</span></summary>
             <div className="flex flex-col gap-4 border-t border-[var(--border)] p-4">
               <CutsBar state={state} filter={filter} onFilter={setFilter} rules={rules} onRules={() => setRules((r) => !r)} />
               {rules && state.cuts && (

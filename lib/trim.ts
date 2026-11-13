@@ -1,25 +1,29 @@
 /**
  * Trim: cutting a deck that is over 100 cards down to 100 (the deck flow
- * plan, step 4a). Three steps, each kept with the deck so leaving the page
- * loses nothing:
+ * plan, step 4a), run as one conversation per cut session. Kept with the
+ * deck, so leaving the page loses nothing:
  *
- *   1. An approach: a few lines on where the cuts come from and what is
- *      protected. Drafted by code from the deck's numbers (free), written by
- *      Claude from the saved plan, or written by the owner. Skippable.
+ *   1. What matters for these cuts: one box in the owner's words. It can be
+ *      drafted by code from the deck's numbers (free), or Claude can add
+ *      bullets below what the owner wrote. It may be empty.
  *   2. A ranked list from Claude: about twice as many cards as the deck is
  *      over, most cuttable first. Its first N are the cuts, already chosen;
- *      the rest are closer calls. The method the deck flow evaluation
- *      measured (a ranked 2N list read against the plan pass): Opus 0.74 on
- *      the judge with 2% harmful cuts, Haiku on the Opus plan 0.66 and 6%,
- *      the rules list 0.48 and 20%.
- *   3. The owner's choices, each with an optional reason, then apply: the
- *      cards move to the section for cards that came out, after a snapshot.
+ *      the rest are closer calls. (The deck flow evaluation: Opus 0.74 on the
+ *      judge with 2% harmful cuts, the rules list 0.48 and 20%.)
+ *   3. The owner marks keeps and cuts, with reasons, and says something back;
+ *      every call after the first is sent the whole session, oldest first,
+ *      and answers with a new list and a reply. Then apply: the cards move to
+ *      the section for cards that came out, after a snapshot.
+ *
+ * A session starts at the first "Find cuts" and ends at apply or reset. Why
+ * one conversation (FINDINGS, Session 4): the owner's own words steer the
+ * cuts strongly, and two runs with nothing changed share only 40 to 70% of
+ * their cuts, so a re-run that is sent the session holds the list steady.
  *
  * Code decides what the model may not: never the commanders or a ★ card,
- * never a land under the land floor, the count. Engines and key cards from
- * the plan read are flagged, not blocked. What the owner kept or cut, and
- * why, is remembered for the deck and sent with every later list; a rerun
- * sends the choices made so far and leaves the approach as it is.
+ * never a land under the land floor, the count. Engines and key cards are
+ * flagged, not blocked. What the owner kept or cut, and why, is also
+ * remembered for the deck across sessions (`said`). Nothing crosses decks.
  *
  * Everything shown and what became of it goes to the suggestion log. Server
  * only.
@@ -44,8 +48,8 @@ import { clearOutcome, closeAll, logConversation, logOutcome, logShown, quietly,
 import { applyCuts, cutImpact, landFloor, tuneContext, undoApply, type Context, type UndoMoves } from './tune';
 import { tuneStore } from './tune-store';
 import {
-  chosenCuts, isTrimChip, saidSomething, TRIM_COST_GUESS, TRIM_MODELS,
-  type TrimApproach, type TrimChoice, type TrimDone, type TrimItem, type TrimModel, type TrimTier, type TrimView,
+  chosenCuts, isTrimChip, newMarks, saidSomething, TRIM_COST_GUESS, TRIM_MODELS,
+  type CutMark, type TrimApproach, type TrimChoice, type TrimDone, type TrimItem, type TrimMark, type TrimModel, type TrimTier, type TrimTurn, type TrimView,
 } from './trim-shared';
 import type { Board } from './decklist';
 
@@ -59,21 +63,29 @@ export const extraFor = (over: number) => Math.max(6, Math.min(over, 15));
 // --- kept with the deck ---------------------------------------------------------------
 
 interface StoredItem { name: string; tier: TrimTier; why: string; with: string[] }
-interface Run { id: string; at: string; model: string; round: number; deckHash: string; planPassId: string | null; over: number; notes: string; items: StoredItem[] }
+/** The list before, as code compares the new one with it. */
+interface Prev { cuts: string[]; confirmed: string[]; kept: string[]; named: string[] }
+interface Run {
+  id: string; at: string; model: string; round: number; deckHash: string; planPassId: string | null; over: number;
+  notes: string; reply: string; ask: string | null; items: StoredItem[]; prev: Prev | null;
+}
 /** What the owner said about a card on this deck, kept across lists. */
 export interface Said { choice: 'cut' | 'keep'; chip: string | null; text: string; at: string }
 
 export interface TrimStore {
   approach: TrimApproach | null;
-  correction: string;
   model: TrimModel;
   run: Run | null;
   choices: Record<string, TrimChoice>;
+  /** Choices carried over to the list on screen from the one before: already in the session. */
+  carried: Record<string, TrimChoice>;
+  /** The cut session so far, oldest first; cleared on apply or reset. */
+  turns: TrimTurn[];
   said: Record<string, Said>;
   done: TrimDone | null;
 }
 
-const EMPTY: TrimStore = { approach: null, correction: '', model: 'opus', run: null, choices: {}, said: {}, done: null };
+const EMPTY: TrimStore = { approach: null, model: 'opus', run: null, choices: {}, carried: {}, turns: [], said: {}, done: null };
 
 let ready = false;
 function db() {
@@ -132,12 +144,17 @@ export function draftApproach(ctx: Context): string {
   return [`Cut ${over} to reach 100.`, ...L].map((l) => `- ${l}`).join('\n');
 }
 
-const APPROACH_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app. The owner's deck is over 100 cards and they are about to ask for a cut list. Write the approach for those cuts: 3 to 5 short bullets, each with numbers where they apply, saying where the cuts should come from and what stays protected, for THIS deck. Follow the deck's plan and what the owner has told the app; the owner outranks your own reading. Name a card only as an example. No card-by-card list: that comes next. Plain words a player would say at the table.`;
+const APPROACH_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app. The owner's deck is over 100 cards and they are about to ask for a cut list. Write the approach for those cuts: 3 to 5 short bullets, each with numbers where they apply, saying where the cuts should come from and what stays protected, for THIS deck. Follow the deck's plan and what the owner has told the app; the owner outranks your own reading. When the owner has already written some lines, those stay exactly as they are: write 2 to 4 bullets that add to them, never repeating or contradicting them. Name a card only as an example. No card-by-card list: that comes next. Plain words a player would say at the table.`;
 
 const APPROACH_SCHEMA = { type: 'OBJECT', properties: { bullets: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['bullets'] };
 
-/** Claude's approach, from the plan as later AI steps read it (the plan read when current) and the deck's numbers. */
-export async function writeApproach(model: JsonModel, list: List, profileId: string): Promise<TrimApproach> {
+/**
+ * Claude's approach, from the confirmed plan and the deck's numbers. `box`:
+ * what the owner has typed so far. It is sent, and kept first, word for word,
+ * with Claude's bullets added below it.
+ */
+export async function writeApproach(model: JsonModel, list: List, profileId: string, box = ''): Promise<TrimApproach> {
+  const own = box.trim().slice(0, 2000);
   const ctx = await tuneContext(list, profileId);
   const over = Math.max(0, ctx.size - 100);
   const read = planOwner(list.id).planText.trim();
@@ -149,11 +166,13 @@ export async function writeApproach(model: JsonModel, list: List, profileId: str
     // With no current plan read, the cards themselves are the only way to tell what the deck does.
     ...(read ? [] : ['', 'Every card in the deck:', ...ctx.main.map((c) => `- ${c.card.name} ${manaCostOf(c.card)} - ${typeLineOf(c.card)} - ${oracleTextOf(c.card).replace(/\n+/g, ' / ') || '(no text)'}`)]),
     ...saidLines(s, new Set(ctx.main.map((c) => c.card.name))),
+    ...(own ? ['', "## What the owner has already written (it stays as it is; add to it)", '"""', own, '"""'] : []),
   ].join('\n');
   const answer = await model({ step: 'trim: write the approach', system: APPROACH_SYSTEM, user, schema: APPROACH_SCHEMA, thinking: 'low' }, { maxBusy: 1 });
   const bullets = ((answer.data as { bullets?: unknown })?.bullets as unknown[] | undefined ?? []).filter((b): b is string => typeof b === 'string' && !!b.trim()).slice(0, 6);
   if (!bullets.length) throw new ModelError('The approach came back empty. Nothing was saved; try again, or write your own.');
-  const approach: TrimApproach = { text: bullets.map((b) => `- ${b.trim().replace(/^[-•]\s*/, '').slice(0, 400)}`).join('\n'), by: 'claude', at: now() };
+  const added = bullets.map((b) => `- ${b.trim().replace(/^[-•]\s*/, '').slice(0, 400)}`).join('\n');
+  const approach: TrimApproach = own ? { text: `${own}\n${added}`, by: 'both', at: now() } : { text: added, by: 'claude', at: now() };
   update(list.id, (x) => { x.approach = approach; });
   quietly(() => logConversation(profileId, list.id, 'trim', 'approach_shown', approach.text, PROMPT_VERSIONS.trimApproach));
   return approach;
@@ -161,7 +180,7 @@ export async function writeApproach(model: JsonModel, list: List, profileId: str
 
 /** The approach the owner wrote, the code's draft, or none. */
 export async function setApproach(list: List, profileId: string, input: { text?: string; draft?: boolean; clear?: boolean }): Promise<void> {
-  if (input.clear) { update(list.id, (s) => { s.approach = null; }); return; }
+  if (input.clear || (input.text !== undefined && !input.text.trim() && !input.draft)) { update(list.id, (s) => { s.approach = null; }); return; }
   if (input.draft) {
     const text = draftApproach(await tuneContext(list, profileId));
     update(list.id, (s) => { s.approach = { text, by: 'code', at: now() }; });
@@ -178,16 +197,26 @@ export async function setApproach(list: List, profileId: string, input: { text?:
 
 // --- the cut list --------------------------------------------------------------------------
 
-export const TRIM_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app, helping the owner trim a deck that is over 100 cards. You get the deck's facts (the commander, numbers the app's code worked out on this exact list, and every card with its rules text); the deck's plan when one has been read (how it wins, key cards, themes and a role for cards: a strong starting point, not infallible); what the owner has told the app; the approach for these cuts when there is one; and what the owner decided on earlier lists.
+export const TRIM_SYSTEM = `You are an experienced Commander deckbuilder inside a deck app, helping the owner trim a deck that is over 100 cards. You get the deck's facts (the commander, numbers the app's code worked out on this exact list, and every card with its rules text); the plan the owner confirmed on the Plan tab (what the commander does, their settings, how the deck wins, ways to win and key cards, with who set each part); what the owner has told the app; what they said matters for these cuts; what they decided on earlier cut lists for this deck; and, after the first list, the whole cut session so far.
+
+This is one conversation. Read the whole session. The owner's latest words outrank their earlier ones, and all of them outrank your own reading.
 
 The owner picks their cuts from your list. Give:
 - ranked: the number of cards the task asks for, most cuttable first. Your first N (the number the deck is over) are your own recommended cuts; the rest are the closer calls, in order. For each: "why", one or two short sentences a player would say at the table, about this card in this deck; and "with", the other cards in the deck it works with (empty when none matter to the call).
 - keep: up to 5 cards a quick look would cut (over a usual range, weak on their own, expensive) that should stay, each with why. Only where it is not obvious.
-- notes: 2 or 3 sentences: where the cuts come from and what you protected.
+- notes (the first list only): 2 or 3 sentences: where the cuts come from and what you protected.
+- reply (every list after the first): 2 to 4 sentences to the owner: what changed since your last list and which of their words changed it, or the answer to their question.
+- ask: optional, one question for the owner. Leave it empty unless you cannot tell what they want.
+
+On every list after the first:
+- Change only what the owner's input changes. A card that was a cut last time and that nothing the owner said touches stays a cut, in the same order where you can. Say so in the reply if you move one anyway.
+- Where the owner gave a reason, apply it to similar cards and name them in the reply.
+- When the owner asks a question, answer it in the reply. The list may stay the same.
+- When two things the owner said conflict, follow the later one and say which you followed. Ask at most one question, and only when you cannot tell.
 
 How to rank:
 - Use your own judgement: what the commander and the owner want, the deck's plan and its combos, the curve, and the jobs every deck needs.
-- Where an approach is given, follow it. The owner's own words (their approach, notes and reasons) outrank your reading of the deck.
+- Follow what the owner said matters for these cuts. The owner's own words (that, their notes, their reasons and their messages) outrank your reading of the deck.
 - The owner's earlier decisions stand. Never list a card they chose to keep. Where they said why, apply the same reasoning to similar cards.
 - Never list a commander or a card marked never cut. List a land only when the task says lands may be cut.
 - A combo piece or an engine goes only with a clear reason, said in its "why". Say what breaks.
@@ -195,14 +224,23 @@ How to rank:
 - Use card names exactly as they appear in the list.
 - Think it through privately; the answer holds only the fields asked for.`;
 
-const TRIM_SCHEMA = {
+/** The answer's shape: notes on the first list, a reply on every later one; ask is optional on both. */
+const trimSchema = (first: boolean) => ({
   type: 'OBJECT',
   properties: {
     ranked: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, why: { type: 'STRING' }, with: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['name', 'why', 'with'] } },
     keep: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, why: { type: 'STRING' } }, required: ['name', 'why'] } },
-    notes: { type: 'STRING' },
+    ...(first ? { notes: { type: 'STRING' } } : { reply: { type: 'STRING' } }),
+    ask: { type: 'STRING' },
   },
-  required: ['ranked', 'keep', 'notes'],
+  required: ['ranked', 'keep', first ? 'notes' : 'reply'],
+});
+
+const APPROACH_BY: Record<TrimApproach['by'], string> = {
+  owner: "the owner's own words",
+  claude: 'written by you earlier, kept by the owner',
+  code: 'drafted by the app from the numbers, kept by the owner',
+  both: "the owner's own words first, then bullets you added earlier, kept by the owner",
 };
 
 const CHIP_WORDS: Record<string, string> = { pet_card: 'a pet card', part_of_plan: 'part of my plan', already_tried: 'I tried cutting it before', too_slow: 'too slow', off_plan: 'off-plan', have_better: 'I have better' };
@@ -221,25 +259,49 @@ function saidLines(s: TrimStore, main: Set<string>): string[] {
   ];
 }
 
-/** The choices made on the list on screen, for a rerun. */
-function choiceLines(s: TrimStore): string[] {
-  if (!s.run) return [];
-  const byName = new Map(s.run.items.map((i) => [i.name, i]));
-  const rows = Object.entries(s.choices).filter(([n]) => byName.has(n));
-  if (!rows.length) return [];
-  return [
-    '', '## The list you gave last, and what the owner did with it',
-    `Your cuts were: ${s.run.items.filter((i) => i.tier === 'cut').map((i) => i.name).join(', ')}.`,
-    ...rows.map(([n, c]) => `- ${n}: the owner ${c.choice === 'keep' ? 'keeps it' : 'cuts it'}${reasonOf(c) ? ` ("${reasonOf(c)}")` : ''}`),
-    'Give a new list with these choices taken as settled.',
+const quote = (t: string) => `"${t.replace(/\s+/g, ' ').trim()}"`;
+
+/** How many rounds keep their card lists in the session; older rounds keep only the words. */
+export const FULL_ROUNDS = 6;
+
+function ownerLine(t: Extract<TrimTurn, { kind: 'owner-reply' }>): string {
+  const why = (m: TrimMark) => (reasonOf(m) ? ` (${quote(reasonOf(m))})` : '');
+  const parts = [
+    ...(t.approach !== undefined ? [`changed what matters for these cuts to: ${t.approach.trim() ? quote(t.approach) : 'nothing'}`] : []),
+    ...t.marks.filter((m) => m.choice === 'keep').map((m) => `kept ${m.name}${why(m)}`),
+    ...(t.marks.some((m) => m.choice === 'cut') ? [`confirmed cuts: ${t.marks.filter((m) => m.choice === 'cut').map((m) => `${m.name}${why(m)}`).join(', ')}`] : []),
+    ...(t.message.trim() ? [`said: ${quote(t.message)}`] : []),
   ];
+  return parts.length ? parts.join('; ') : 'changed nothing and asked for the list again';
+}
+
+/** The whole session, oldest first, in plain lines; nothing before the first list. */
+export function sessionLines(turns: TrimTurn[]): string[] {
+  const lists = turns.filter((t) => t.kind === 'claude-list');
+  if (!lists.length) return [];
+  const full = new Set(lists.slice(-FULL_ROUNDS));
+  const out = ['', '## This cut session so far'];
+  for (const t of turns) {
+    if (t.kind === 'owner-start') out.push(`Owner, at the start: ${t.text.trim() ? quote(t.text) : 'said nothing'}`);
+    else if (t.kind === 'owner-reply') out.push(`Owner: ${ownerLine(t)}`);
+    else {
+      const words = [...(t.reply.trim() ? [`you said: ${quote(t.reply)}`] : []), ...(t.ask ? [`you asked: ${quote(t.ask)}`] : [])];
+      const cards = full.has(t) ? [`cuts: ${t.cuts.join(', ') || 'none'}`, `closer calls: ${t.maybes.join(', ') || 'none'}`] : ['(its cards are left out here)'];
+      out.push(`You, list ${t.round}: ${[...cards, ...words].join(' | ')}`);
+    }
+  }
+  return out;
 }
 
 /** Everything the cut list call is sent, and what the parse needs. */
-export async function trimMessage(list: List, profileId: string, s: TrimStore = trimStore(list.id)): Promise<{ user: string; ctx: Context; over: number; ask: number; planPassId: string | null; landsFree: number }> {
+export async function trimMessage(list: List, profileId: string, s: TrimStore = trimStore(list.id)): Promise<{ user: string; ctx: Context; over: number; want: number; ask: number; round: number; planPassId: string | null; landsFree: number }> {
   const ctx = await tuneContext(list, profileId);
   const over = Math.max(0, ctx.size - 100);
-  const ask = over + extraFor(over);
+  // One more than wanted: runs with no list before came back one short 6 times in 42. parseTrim trims to `want`.
+  const want = over + extraFor(over);
+  const ask = want + 1;
+  const session = sessionLines(s.turns);
+  const round = s.turns.filter((t) => t.kind === 'claude-list').length + 1;
   const { md } = await planFacts(list, list.id, list.name, ctx.commanders.map((c) => c.name));
   const main = new Set(ctx.main.map((c) => c.card.name));
   const store = tuneStore(list.id);
@@ -252,19 +314,20 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
     // The block every AI step reads: the confirmed plan with who set each part, never-cut, every category with who added it, and the rules.
     await planContext(list),
     ...(never.length ? ['', `## Never cut\n${never.map(([n, w]) => `${n} (${w})`).join(', ')}`] : []),
-    ...(s.approach ? ['', `## The approach for these cuts (${s.approach.by === 'owner' ? "the owner's own words" : s.approach.by === 'claude' ? 'written by you earlier, seen by the owner' : "drafted by the app from the numbers, seen by the owner"})`, s.approach.text] : []),
-    ...(s.correction.trim() ? ['', `## The owner adds\n"""\n${s.correction.trim()}\n"""`] : []),
+    // The first list reads the box as it is; later ones read it as the session's first line.
+    ...(!session.length && s.approach?.text.trim() ? ['', `## What matters for these cuts (${APPROACH_BY[s.approach.by]})`, '"""', s.approach.text.trim(), '"""'] : []),
     ...saidLines(s, main),
-    ...choiceLines(s),
+    ...session,
     ...(out.length ? ['', `## Cards that came out of this deck before\n${out.slice(0, 60).map((c) => `${c.card.name}${store.cutReasons[c.card.name]?.why ? ` (${store.cutReasons[c.card.name].why.slice(0, 80)})` : ''}`).join('; ')}`] : []),
     ...(ctx.pool.length ? ['', `## Waiting in the owner's maybeboard\n${ctx.pool.slice(0, 60).map((c) => c.card.name).join(', ')}`] : []),
     '',
     '## The task',
     `The deck has ${ctx.size} cards including the commander${ctx.commanders.length > 1 ? 's' : ''}; a Commander deck is exactly 100. It is ${over} over.`,
-    `Rank exactly ${ask} cards, most cuttable first: your first ${over} are your cuts, the other ${ask - over} the closer calls.`,
+    `${round > 1 ? `This is list ${round}. ` : ''}Rank exactly ${ask} cards, most cuttable first: your first ${over} are your cuts, the other ${ask - over} the closer calls.`,
+    round > 1 ? 'Fill reply for the owner, and ask only if you cannot tell what they want.' : 'Fill notes. Leave ask empty unless you cannot tell what the owner wants.',
     landsFree > 0 ? `Lands: at most ${landsFree} may be listed; fewer than ${Math.ceil(landFloor(ctx))} lands is not allowed.` : 'Lands: none may be listed; the deck is at or under the fewest lands it should have.',
   ].join('\n');
-  return { user, ctx, over, ask, planPassId: planOwner(list.id).confirmedAt, landsFree };
+  return { user, ctx, over, want, ask, round, planPassId: planOwner(list.id).confirmedAt, landsFree };
 }
 
 /**
@@ -273,8 +336,8 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
  * the owner's settled choices applied, then the first N as cuts and the rest
  * as closer calls. Throws when too few usable cards came back to make N cuts.
  */
-export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: number): { items: StoredItem[]; notes: string } {
-  const d = (data ?? {}) as { ranked?: unknown; keep?: unknown; notes?: unknown };
+export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: number, want = over + extraFor(over)): { items: StoredItem[]; notes: string; reply: string; ask: string | null } {
+  const d = (data ?? {}) as { ranked?: unknown; keep?: unknown; notes?: unknown; reply?: unknown; ask?: unknown };
   const cards = ctx.main.filter((c) => c.slot !== 'partner');
   const byFront = new Map(cards.map((c) => [front(c.card.name), c.card]));
   const rows = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
@@ -288,14 +351,16 @@ export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: numbe
   const oldWhy = new Map((s.run?.items ?? []).map((i) => [i.name, i]));
   const first = fixed.map((n) => guarded.find((r) => r.card.name === n) ?? { card: byFront.get(front(n))!, why: oldWhy.get(n)?.why ?? 'You chose to cut it.', with: oldWhy.get(n)?.with ?? [] });
   const rest = guarded.filter((r) => !fixed.includes(r.card.name));
-  const all = [...first, ...rest];
+  // One more was asked for than is wanted: keep the wanted number (more only when the owner chose more).
+  const all = [...first, ...rest].slice(0, Math.max(want, first.length));
   if (all.length < over) throw new ModelError(`The list came back with ${all.length} usable cards for ${over} cuts. Nothing was saved; try again.`);
   const listed = new Set(all.map((r) => r.card.name));
   const items: StoredItem[] = all.map((r, i) => ({ name: r.card.name, tier: i < over ? 'cut' : 'maybe', why: r.why, with: r.with }));
   for (const k of rows(d.keep).filter((r) => !listed.has(r.card.name) && !ctx.protectedWhy.has(r.card.name) && !keptByOwner.has(r.card.name)).slice(0, 5)) items.push({ name: k.card.name, tier: 'kept', why: k.why, with: [] });
   // What the owner kept from the list before stays in view, under its own heading.
   if (s.run) for (const [n, c] of Object.entries(s.choices)) if (c.choice === 'keep' && byFront.has(front(n)) && oldWhy.has(n)) items.push({ name: n, tier: 'yours', why: oldWhy.get(n)!.why, with: oldWhy.get(n)!.with });
-  return { items, notes: String(d.notes ?? '').trim().slice(0, 800) };
+  const text = (x: unknown, n: number) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
+  return { items, notes: text(d.notes, 800), reply: text(d.reply, 1200), ask: text(d.ask, 400) || null };
 }
 
 /** Fold the choices on the list into what is remembered for the deck, and ★ the pet cards. */
@@ -315,45 +380,90 @@ function remember(list: Pick<List, 'id'>, s: TrimStore): void {
   }
 }
 
+/** The approach text the session last heard: the box at the start, or the last change sent since. */
+function lastBoxText(turns: TrimTurn[]): string | null {
+  for (let k = turns.length - 1; k >= 0; k--) {
+    const t = turns[k];
+    if (t.kind === 'owner-reply' && t.approach !== undefined) return t.approach;
+    if (t.kind === 'owner-start') return t.text;
+  }
+  return null;
+}
+
 /**
- * Ask for the cut list and keep it with the deck. `rerun`: the list on
- * screen and the owner's choices on it go with the request, taken as
- * settled; the approach is left as it is.
+ * Ask for the cut list and keep it with the deck. The first call starts a
+ * session with what is in the box. `rerun`: the owner's answer to the list on
+ * screen (the keeps and cuts marked since, and `message`) joins the session,
+ * and the whole session is sent, so with nothing marked or typed the list
+ * holds unless something changed.
  */
-export async function runTrim(model: JsonModel, list: List, profileId: string, opts: { model: TrimModel; rerun?: boolean }, progress: (s: string) => void = () => {}): Promise<{ runId: string; items: number }> {
+export async function runTrim(model: JsonModel, list: List, profileId: string, opts: { model: TrimModel; rerun?: boolean; message?: string }, progress: (s: string) => void = () => {}): Promise<{ runId: string; items: number }> {
   progress('Gathering the deck’s facts');
-  // A fresh list starts from what is remembered; a rerun keeps the choices on screen in play.
   const before = trimStore(list.id);
-  const s: TrimStore = opts.rerun ? before : { ...before, choices: {} };
-  const { user, ctx, over, planPassId } = await trimMessage(list, profileId, s);
+  const at = now();
+  const rerun = !!opts.rerun && !!before.run;
+  const box = before.approach?.text.trim() ?? '';
+  let turns: TrimTurn[];
+  let reply: Extract<TrimTurn, { kind: 'owner-reply' }> | null = null;
+  if (!rerun) turns = [{ kind: 'owner-start', text: box, at }];
+  else {
+    // A list from before sessions were kept: start the session from it.
+    turns = before.turns.length ? [...before.turns] : [
+      { kind: 'owner-start', text: box, at: before.run!.at },
+      { kind: 'claude-list', round: before.run!.round, cuts: before.run!.items.filter((i) => i.tier === 'cut').map((i) => i.name), maybes: before.run!.items.filter((i) => i.tier === 'maybe').map((i) => i.name), reply: before.run!.reply || before.run!.notes, ask: before.run!.ask ?? null, at: before.run!.at },
+    ];
+    const heard = lastBoxText(turns);
+    reply = {
+      kind: 'owner-reply',
+      marks: newMarks(before.run!.items, before.choices, before.carried),
+      message: (opts.message ?? '').trim().slice(0, 1500),
+      ...(heard !== null && heard.trim() !== box ? { approach: box } : {}),
+      at,
+    };
+    turns.push(reply);
+  }
+  const s: TrimStore = { ...before, choices: rerun ? before.choices : {}, turns };
+  const { user, ctx, over, want, round, planPassId } = await trimMessage(list, profileId, s);
   if (over <= 0) throw new ModelError('The deck is at 100 or under: there is nothing to trim.');
-  progress(`Claude is ranking the cuts (${over} to find)`);
+  progress(round > 1 ? `Claude is reading your answer (list ${round})` : `Claude is ranking the cuts (${over} to find)`);
   const answer = await model({
     step: `trim: rank the cuts (${opts.model})`,
     system: TRIM_SYSTEM,
     user,
-    schema: TRIM_SCHEMA,
+    schema: trimSchema(round === 1),
     promptOnly: true,
     thinking: 'high',
     timeoutMs: 5 * 60_000,
   }, { maxBusy: 1 });
-  const { items, notes } = parseTrim(answer.data, ctx, s, over);
-  const run: Run = { id: randomUUID(), at: now(), model: answer.model, round: (before.run && opts.rerun ? before.run.round : 0) + 1, deckHash: deckHash(list.commander, ctx.main), planPassId, over, notes, items };
+  const parsed = parseTrim(answer.data, ctx, s, over, want);
+  const { items } = parsed;
+  const prev: Prev | null = rerun ? {
+    cuts: before.run!.items.filter((i) => i.tier === 'cut').map((i) => i.name),
+    confirmed: Object.entries(before.choices).filter(([, c]) => c.choice === 'cut').map(([n]) => n),
+    kept: (reply?.marks ?? []).filter((m) => m.choice === 'keep').map((m) => m.name),
+    named: [...Object.keys(before.choices), ...(reply?.marks ?? []).map((m) => m.name)],
+  } : null;
+  const run: Run = {
+    id: randomUUID(), at: now(), model: answer.model, round, deckHash: deckHash(list.commander, ctx.main), planPassId, over,
+    notes: round === 1 ? parsed.notes : '', reply: round === 1 ? '' : parsed.reply || parsed.notes, ask: parsed.ask, items, prev,
+  };
   update(list.id, (x) => {
-    if (opts.rerun) remember(list, x);
+    if (rerun) remember(list, x);
     // Choices on cards still listed as cuts carry over with their reasons; the rest start fresh.
     const stays = new Set(items.filter((i) => i.tier === 'cut').map((i) => i.name));
-    x.choices = opts.rerun ? Object.fromEntries(Object.entries(x.choices).filter(([n, c]) => c.choice === 'cut' && stays.has(n))) : {};
+    x.choices = rerun ? Object.fromEntries(Object.entries(x.choices).filter(([n, c]) => c.choice === 'cut' && stays.has(n))) : {};
+    x.carried = structuredClone(x.choices);
+    x.turns = [...turns, { kind: 'claude-list', round, cuts: items.filter((i) => i.tier === 'cut').map((i) => i.name), maybes: items.filter((i) => i.tier === 'maybe').map((i) => i.name), reply: run.reply || run.notes, ask: run.ask, at: run.at }];
     x.run = run;
     x.model = opts.model;
     x.done = null;
   });
   quietly(() => {
-    if (s.correction.trim()) logConversation(profileId, list.id, 'trim', 'approach_corrected', s.correction.trim(), PROMPT_VERSIONS.trim);
+    if (reply?.message) logConversation(profileId, list.id, 'trim', 'owner_said', reply.message, PROMPT_VERSIONS.trim);
+    if (run.reply) logConversation(profileId, list.id, 'trim', 'reply_shown', run.reply, PROMPT_VERSIONS.trim);
+    if (run.ask) logConversation(profileId, list.id, 'trim', 'question_asked', run.ask, PROMPT_VERSIONS.trim);
     logRun(list, profileId, run);
   });
-  // A line added to the approach is the owner's note on the deck from here on.
-  if (s.correction.trim() && !opts.rerun) changePlan(list.id, { notes: { add: [s.correction.trim().slice(0, 600)], by: 'owner' } });
   return { runId: run.id, items: items.length };
 }
 
@@ -399,14 +509,18 @@ export function setChoices(listId: string, choices: unknown): void {
   });
 }
 
-export function setCorrection(listId: string, text: unknown): void {
-  update(listId, (s) => { s.correction = typeof text === 'string' ? text.slice(0, 600) : ''; });
-}
-
-/** Start over: the list and the choices go, what was remembered about cards stays. */
+/** Start over: the list, the choices and the session go; the box and what was remembered about cards stay. */
 export function resetTrim(listId: string): void {
   quietly(() => closeAll(listId, 'trim:'));
-  update(listId, (s) => { s.run = null; s.choices = {}; s.done = null; });
+  update(listId, (s) => { s.run = null; s.choices = {}; s.carried = {}; s.turns = []; s.done = null; });
+}
+
+/** What the owner said in the session: the box at the start and each message, for "Keep for next time". */
+export function sessionMessages(turns: TrimTurn[]): Array<{ id: string; text: string }> {
+  return turns.flatMap((t, i) => {
+    const text = t.kind === 'owner-start' ? t.text : t.kind === 'owner-reply' ? t.message : '';
+    return text.trim() ? [{ id: `t${i}`, text: text.trim() }] : [];
+  });
 }
 
 /**
@@ -414,7 +528,7 @@ export function resetTrim(listId: string): void {
  * the floor, never past 100. The cards move to the section for cards that
  * came out, each with its reason; the caller takes the snapshot.
  */
-export async function applyTrim(list: List, profileId: string, cutsTo?: Board): Promise<TrimDone> {
+export async function applyTrim(list: List, profileId: string, cutsTo?: Board, keepNotes: string[] = []): Promise<TrimDone> {
   const s = trimStore(list.id);
   if (!s.run) throw new Error('There is no cut list to apply');
   const ctx = await tuneContext(list, profileId);
@@ -430,9 +544,13 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board): 
   const cut = new Set(kept.map((k) => k.name));
   const refused = items.filter((i) => i.tier === 'cut' && !cut.has(i.name));
   const reasons = Object.entries(s.choices).filter(([n, c]) => byName.has(n) && (c.chip || c.text?.trim())).length;
+  // Only the lines the owner ticked "Keep for next time" become notes on the deck.
+  const notes = sessionMessages(s.turns).filter((m) => keepNotes.includes(m.id)).map((m) => m.text.slice(0, 600));
+  if (notes.length) changePlan(list.id, { notes: { add: notes, by: 'owner' } });
   const done: TrimDone = {
     at: now(), cut: moved.cut, size: ctx.size - moved.cut, to: ctx.sections.find((x) => x.id === moved.to)?.name ?? 'Came out', undo: moved.undo,
     logged: { accepted: cut.size, refused: refused.length, left: items.filter((i) => i.tier === 'maybe' && !cut.has(i.name)).length, reasons },
+    notes: notes.length, session: s.turns,
   };
   quietly(() => {
     for (const name of cut) logOutcome(list.id, [itemKey(name)], 'accepted', { chip: (s.choices[name]?.chip ?? null) as ReasonChip | null, text: s.choices[name]?.text ?? null });
@@ -443,6 +561,8 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board): 
   update(list.id, (x) => {
     remember(list, x);
     for (const name of cut) x.said[name] = { choice: 'cut', chip: x.choices[name]?.chip ?? null, text: x.choices[name]?.text?.trim() ?? '', at: done.at };
+    // The session ends here; `said` keeps what remember folded in.
+    x.turns = [];
     x.done = done;
   });
   return done;
@@ -455,6 +575,8 @@ export function undoTrim(list: List): { moved: number } {
   const result = undoApply(list, s.done.undo as UndoMoves);
   update(list.id, (x) => {
     for (const [n, v] of Object.entries(x.said)) if (v.choice === 'cut' && v.at === x.done?.at) delete x.said[n];
+    // Undo brings the session back with the cards.
+    x.turns = x.done?.session ?? [];
     x.done = null;
   });
   return result;
@@ -476,11 +598,28 @@ export const TRIM_READS = [
   'The plan you confirmed, with who set each part: what the commander does, your settings, how the deck wins, ways to win and key cards',
   'Your notes, word for word',
   'Every category on the deck with its cards and who added it',
-  'The approach, and anything you add to it',
+  'What you wrote under "What matters for these cuts"',
+  'Everything said in this cut session: each list, what you kept and cut with your reasons, and your messages',
   'Your never-cut cards',
   'What you kept or cut on this deck before, with your reasons',
   'The names in the sections for cards that came out, and in your maybeboard',
 ];
+
+/**
+ * The new list against the one before, by code: each cut is the owner's
+ * (they confirmed it), the same as before, or new; what they kept; and the
+ * cuts that dropped off without the owner naming them.
+ */
+export function compare(run: Pick<Run, 'prev'>, items: Array<Pick<TrimItem, 'name' | 'tier'>>): { marks: Record<string, CutMark> | null; changed: NonNullable<TrimView['run']>['changed'] } {
+  const p = run.prev;
+  if (!p) return { marks: null, changed: null };
+  const cuts = items.filter((i) => i.tier === 'cut').map((i) => i.name);
+  const marks: Record<string, CutMark> = Object.fromEntries(cuts.map((n) => [n, p.confirmed.includes(n) ? 'yours' : p.cuts.includes(n) ? 'same' : 'new']));
+  const now = new Set(cuts);
+  const named = new Set(p.named);
+  const count = (m: CutMark) => Object.values(marks).filter((x) => x === m).length;
+  return { marks, changed: { kept: p.kept, dropped: p.cuts.filter((n) => !now.has(n) && !named.has(n)), yours: count('yours'), same: count('same'), fresh: count('new') } };
+}
 
 export async function trimView(list: List, profileId: string): Promise<TrimView> {
   const ctx = await tuneContext(list, profileId);
@@ -511,14 +650,17 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
   return {
     size: ctx.size, over,
     plan: { state: planState, text: po.planText.trim() || null, at: po.confirmedAt, confirmed: !!po.confirmedAt },
-    approach: s.approach, correction: s.correction,
+    approach: s.approach,
     model: 'opus',
     costs: {
       opus: costOf('trim: rank the cuts (opus)', TRIM_COST_GUESS.opus),
       approach: costOf('trim: write the approach', TRIM_COST_GUESS.approach),
     },
-    run: s.run ? { id: s.run.id, at: s.run.at, model: s.run.model, round: s.run.round, notes: s.run.notes, items, stale: !s.done && s.run.deckHash !== hash } : null,
+    run: s.run ? { id: s.run.id, at: s.run.at, model: s.run.model, round: s.run.round, notes: s.run.notes, reply: s.run.reply ?? '', ask: s.run.ask ?? null, items, ...compare(s.run, items), stale: !s.done && s.run.deckHash !== hash } : null,
     choices,
+    carried: Object.fromEntries(Object.entries(s.carried ?? {}).filter(([n]) => inMain.has(n))),
+    turns: s.turns ?? [],
+    messages: sessionMessages(s.turns ?? []),
     impact: { rows: impact.rows, size: impact.size },
     lands: { have: ctx.plan.landNumber.have, floor: landFloor(ctx), range: ctx.plan.lands },
     reads: TRIM_READS,

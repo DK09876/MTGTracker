@@ -63,6 +63,8 @@ export interface PlanState {
     wins: Array<{ name: string; how: string; cards: string[] }>;
     keys: Array<{ key: string; name: string; why: string }>;
     questions: PlanQuestion[];
+    /** Suggestions skipped from this run: shown folded, each can be brought back (the `skip` action with on: false). */
+    skipped: Array<{ what: string; label: string; text: string }>;
   } | null;
   /** Suggestions and questions still waiting, which block confirming. */
   open: { suggestions: number; questions: number };

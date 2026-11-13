@@ -15,7 +15,7 @@ import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
 import PlanTab from '@/components/PlanTab';
 import TagsTab from '@/components/TagsTab';
-import { TuneLead, TuneLocked } from '@/components/TuneLock';
+import { TuneLocked } from '@/components/TuneLock';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
 import DeckRail from '@/components/DeckRail';
 import DeckPlaytest from '@/components/DeckPlaytest';
@@ -655,7 +655,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
         <>
-          <TuneLead listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTags={() => { setSection('tags'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
           <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />
           <DeckTune
             listId={id}

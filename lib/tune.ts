@@ -185,10 +185,12 @@ async function numbersOf(ctx: Context, cards: Array<{ card: ScryfallCard; quanti
 
 export async function impactOf(ctx: Context, changes: Changes): Promise<Impact> {
   const [b, a] = await Promise.all([numbersOf(ctx, ctx.main), numbersOf(ctx, changed(ctx, changes))]);
+  // A range only for a job on the deck, as on the Cards tab: a job the deck doesn't count has no aim.
+  const onDeck = jobsOnDeck(ctx.list.id);
   const rows = ['ramp', 'draw', 'impulse', 'interaction', 'protection', 'finishers'].map((id) => {
     const jb = b.jobs.find((j) => j.id === id)!;
     const ja = a.jobs.find((j) => j.id === id)!;
-    return { id, label: JOB_LABELS[id as JobId], before: jb.count, after: ja.count, range: ja.range };
+    return { id, label: JOB_LABELS[id as JobId], before: jb.count, after: ja.count, range: onDeck.has(id === 'impulse' ? 'draw' : id) ? ja.range : null };
   });
   rows.push({ id: 'lands', label: 'Lands', before: b.lands.have, after: a.lands.have, range: ctx.plan.lands });
   return {

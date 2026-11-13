@@ -529,6 +529,20 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             ))}
           </div>
         )}
+
+        {h && h.skipped.length > 0 && (
+          <details data-plan-skipped className="rounded-xl border border-[var(--border)] px-3 py-2 text-sm">
+            <summary className="cursor-pointer text-[var(--muted)]">Show {h.skipped.length} skipped</summary>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {h.skipped.map((x) => (
+                <li key={x.what} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--border)] pt-1.5">
+                  <span className="line-clamp-2 min-w-0 flex-[1_1_14rem]"><span className="text-[var(--muted)]">{x.label}:</span> {x.text}</span>
+                  <button type="button" className={C.btn} aria-label={`Bring back ${x.label}: ${x.text.slice(0, 60)}`} onClick={() => act({ action: 'skip', what: x.what, on: false })}>Bring back</button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </section>
 
       {/* Confirm: the row itself stays at the bottom of the screen. */}

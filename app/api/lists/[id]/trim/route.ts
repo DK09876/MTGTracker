@@ -4,17 +4,19 @@
  * GET: the view: the approach, the latest list with the owner's choices, what
  * the chosen cuts do to the deck's numbers, and the call running now.
  * POST {action, ...}:
- *   approach {text?, draft?, clear?, claude?}  the owner's own approach, the
- *       code's draft from the deck's numbers (free), none, or one written by
- *       Claude in the background
- *   correction {text}     a line added to the approach, kept as it is typed
- *   find {rerun?}         ask Claude for the cut list in the background; rerun
- *       sends the choices made so far and keeps the approach
+ *   approach {text?, draft?, clear?, claude?}  what matters for these cuts:
+ *       the owner's box as typed (empty clears it), the code's draft from the
+ *       deck's numbers (free), or Claude adding bullets below `text` in the
+ *       background
+ *   find {rerun?, message?}  ask Claude for the cut list in the background.
+ *       The first starts a session; rerun sends the whole session with the
+ *       marks made since the last list and the owner's message
  *   choices {choices}     the owner's choices and reasons, replaced whole; answers
  *       with the view so the numbers follow
- *   apply {cutsTo?}       cut the chosen cards, after a snapshot
+ *   apply {cutsTo?, keepNotes?}  cut the chosen cards, after a snapshot; the
+ *       session lines ticked "Keep for next time" go to the deck's notes
  *   undo                  put back what the last apply moved
- *   reset                 drop the list and start over
+ *   reset                 drop the list and the session, and start over
  */
 
 import { NextResponse } from 'next/server';
@@ -24,7 +26,7 @@ import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { hasBoard } from '@/lib/sections';
-import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setCorrection, trimView, undoTrim, writeApproach } from '@/lib/trim';
+import { applyTrim, resetTrim, runTrim, setApproach, setChoices, trimView, undoTrim, writeApproach } from '@/lib/trim';
 import { TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
 import type { Board } from '@/lib/decklist';
 
@@ -55,21 +57,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const model = modelById(TRIM_MODELS.opus.id, [], { profile, feature: 'tagging', label: list.name });
         if (!model) return NextResponse.json({ error: NO_KEY }, { status: 503 });
         startJob({ kind: 'trimapproach', label: 'Writing the cut approach', subject: list.name, profileId: profile, listId: id, errorLevel: warn },
-          async ({ progress }) => { progress('Claude is writing the approach'); await writeApproach(model, list, profile); return { ok: true }; });
+          async ({ progress }) => { progress('Claude is adding to it'); await writeApproach(model, list, profile, typeof b.text === 'string' ? b.text : ''); return { ok: true }; });
         break;
       }
       await setApproach(list, profile, { text: typeof b.text === 'string' ? b.text : undefined, draft: b.draft === true, clear: b.clear === true });
       break;
     }
-    case 'correction':
-      setCorrection(id, b.text);
-      break;
     case 'find': {
       const which: TrimModel = 'opus';
       const model = modelById(TRIM_MODELS[which].id, [], { profile, feature: 'tagging', label: list.name });
       if (!model) return NextResponse.json({ error: NO_KEY }, { status: 503 });
       startJob({ kind: 'trim', label: 'Ranking the cuts', subject: list.name, profileId: profile, listId: id, errorLevel: warn },
-        ({ progress }) => runTrim(model, list, profile, { model: which, rerun: b.rerun === true }, progress));
+        ({ progress }) => runTrim(model, list, profile, { model: which, rerun: b.rerun === true, message: typeof b.message === 'string' ? b.message : '' }, progress));
       break;
     }
     case 'choices':
@@ -79,7 +78,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const cutsTo = typeof b.cutsTo === 'string' && b.cutsTo !== 'main' && hasBoard(id, b.cutsTo) ? b.cutsTo as Board : undefined;
       try {
         takeSnapshot(id, 'Before trimming to 100', { profile }, true);
-        await recorded(id, { profile }, 'tune', 'Trimmed the deck', () => applyTrim(list, profile, cutsTo));
+        const keepNotes = Array.isArray(b.keepNotes) ? b.keepNotes.filter((x): x is string => typeof x === 'string').slice(0, 50) : [];
+        await recorded(id, { profile }, 'tune', 'Trimmed the deck', () => applyTrim(list, profile, cutsTo, keepNotes));
       } catch (e) {
         return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not apply the cuts' }, { status: 400 });
       }

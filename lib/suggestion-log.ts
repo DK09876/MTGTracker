@@ -35,7 +35,7 @@ export { REASON_CHIPS, REASON_LABELS, type ReasonChip };
 export type Task = 'trim' | 'find' | 'tune' | 'build' | 'plan' | 'tags';
 export type Method = 'code' | 'ai';
 export type Outcome = 'accepted' | 'refused' | 'ignored';
-export type ConversationKind = 'question_asked' | 'question_answered' | 'question_skipped' | 'approach_shown' | 'approach_corrected';
+export type ConversationKind = 'question_asked' | 'question_answered' | 'question_skipped' | 'approach_shown' | 'approach_corrected' | 'owner_said' | 'reply_shown';
 
 /** How long after accepting a change undoing it counts as regret. */
 export const REGRET_DAYS = 14;

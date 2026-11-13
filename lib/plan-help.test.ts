@@ -223,6 +223,16 @@ describe('the Plan tab', { timeout: 30_000 }, () => {
     expect(s.open).toEqual({ suggestions: 0, questions: 0 });
     // The typed answer is kept, not skipped.
     expect(s.help!.questions[0]).toMatchObject({ answer: 'Combat, mostly.', skipped: false });
+    // Skipped suggestions stay in view, and one can be brought back without a new run.
+    const skipped = s.help!.skipped;
+    expect(skipped.length).toBeGreaterThan(2);
+    expect(skipped).toEqual(expect.arrayContaining([expect.objectContaining({ label: 'Key card', text: 'Spell 1' })]));
+    const back = skipped.find((x) => x.text === 'Spell 1')!;
+    await ph.act(list, 'dk', { action: 'skip', what: back.what, on: false });
+    s = await ph.planState(list);
+    expect(s.help!.keys.map((k) => k.name)).toEqual(['Spell 1']);
+    expect(s.help!.skipped).toHaveLength(skipped.length - 1);
+    await ph.act(list, 'dk', { action: 'skip', what: back.what });
     await ph.act(list, 'dk', { action: 'confirm' });
     expect(requirePlan(list.id)).toBeNull();
     expect((await ph.planState(list)).notes.map((n) => n.text).join(' ')).toContain('Combat, mostly.');

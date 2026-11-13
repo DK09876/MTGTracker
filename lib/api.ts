@@ -849,10 +849,9 @@ export const savePlaytest = (listId: string, change: { settings?: GoldfishSettin
 export type TrimView = import('./trim-shared').TrimView;
 export type TrimAction =
   | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
-  | { action: 'correction'; text: string }
-  | { action: 'find'; rerun?: boolean }
+  | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
-  | { action: 'apply'; cutsTo?: string }
+  | { action: 'apply'; cutsTo?: string; keepNotes?: string[] }
   | { action: 'undo' }
   | { action: 'reset' };
 export const trim = (listId: string) => get<TrimView>(`lists/${listId}/trim`);

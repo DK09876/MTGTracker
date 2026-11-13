@@ -64,14 +64,3 @@ export function TuneLocked({ listId, version, onPlan, onConfirmed }: { listId: s
     </section>
   );
 }
-
-export function TuneLead({ listId, version, onTags }: { listId: string; version: string; onTags: () => void }) {
-  const { state } = usePlanState(listId, version);
-  if (!state || state.generatedAccepted) return null;
-  return (
-    <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[#141210] px-3 py-2.5 text-sm">
-      <span className="min-w-0 flex-[1_1_16rem]">No tags have been generated for this deck yet. They help you read the deck, and Find can search your collection for any tag you accept.</span>
-      <button type="button" className={C.btn} onClick={onTags}>Generate tags</button>
-    </div>
-  );
-}

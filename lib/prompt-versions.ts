@@ -12,8 +12,8 @@ export const PROMPT_VERSIONS = {
   planPass: 'plan-pass-2',
   planHelp: 'plan-help-3',
   tagsAi: 'tags-2',
-  trim: 'trim-1',
-  trimApproach: 'trim-approach-1',
+  trim: 'trim-2',
+  trimApproach: 'trim-approach-2',
 } as const;
 
 export type PromptName = keyof typeof PROMPT_VERSIONS;

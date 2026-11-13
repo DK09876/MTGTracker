@@ -39,7 +39,7 @@ import {
 import { isCommanderRole } from './plan-shared';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { primaryType } from './deckview';
-import { logConversation, logOutcome, logShown, quietly } from './suggestion-log';
+import { clearOutcome, logConversation, logOutcome, logShown, quietly } from './suggestion-log';
 import { tagKey } from './tags';
 
 /** Opus only on the deck pages: no cheaper model (FINDINGS, Session 3). */
@@ -335,11 +335,10 @@ interface Open {
 }
 
 /** The last run's suggestions still waiting: not set since, not skipped, not accepted, not removed before. */
-function openOf(listId: string, help: Help | null, o: Owner, bracket: number | null, cats: Category[], deckKey: Map<string, string>): Open {
+function openOf(listId: string, help: Help | null, o: Owner, bracket: number | null, cats: Category[], deckKey: Map<string, string>, skip: Set<string> = skippedKeys(listId, 'plan')): Open {
   const none: Open = { commander: null, bracket: null, plan: null, fuller: null, wins: [], keys: [] };
   if (!help) return none;
   const out = help.output;
-  const skip = skippedKeys(listId, 'plan');
   const gone = goneKeys(listId);
   const from = fromKeys(listId);
   const wins = cats.filter((c) => c.kind === 'win');
@@ -364,6 +363,17 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
   const help = latestHelp(list.id);
   const deckKey = new Map<string, string>([...main.map((c) => [front(c.card.name), tagKey(c.card)] as [string, string]), ...(list.commander ? [[front(list.commander.name), tagKey(list.commander)] as [string, string]] : [])]);
   const open = openOf(list.id, help, o, plan.bracket, cats, deckKey);
+  // What would still be waiting but was skipped: kept in view under "Show N skipped", each with Bring back.
+  const all = openOf(list.id, help, o, plan.bracket, cats, deckKey, new Set());
+  const roleWords = (roles: string[]) => roles.map((r) => COMMANDER_ROLES.find((x) => x.id === r)?.label ?? r).join(', ');
+  const skipped: Array<{ what: string; label: string; text: string }> = [
+    ...(all.commander && !open.commander ? [{ what: 'commander', label: 'What the commander does', text: roleWords(all.commander.roles) }] : []),
+    ...(all.bracket && !open.bracket ? [{ what: 'bracket', label: 'Bracket', text: `Bracket ${all.bracket.level}` }] : []),
+    ...(all.plan && !open.plan ? [{ what: 'plan', label: 'How the deck wins', text: all.plan }] : []),
+    ...(all.fuller && !open.fuller ? [{ what: 'fuller', label: 'A fuller version of your plan', text: all.fuller }] : []),
+    ...all.wins.filter((w) => !open.wins.some((x) => x.name === w.name)).map((w) => ({ what: `win:${low(w.name)}`, label: 'Way to win', text: w.name })),
+    ...all.keys.filter((k) => !open.keys.some((x) => x.key === k.key)).map((k) => ({ what: `key:${k.key}`, label: 'Key card', text: k.name })),
+  ];
   const drafts = help && o.drafts?.helpId === help.id ? o.drafts : { helpId: null, answers: {}, skipped: [] };
   const saved = new Set(drafts.saved ?? []);
   const questions = help && o.helpDone !== help.id ? (help.output.questions ?? []).map((q, i) => {
@@ -392,7 +402,7 @@ export async function planState(list: Pick<List, 'id' | 'commander'>, profileId?
     cardNames: [...new Set([...commanders, ...main.filter((c) => !isLand(c) || true).map((c) => c.card.name)])].sort(),
     help: help ? {
       id: help.id, at: help.at, state: help.output.state, summary: help.output.summary, directions: help.output.directions ?? [],
-      commander: open.commander ?? null, bracket: open.bracket ?? null, plan: open.plan, fuller: open.fuller, wins: open.wins, keys: open.keys, questions,
+      commander: open.commander ?? null, bracket: open.bracket ?? null, plan: open.plan, fuller: open.fuller, wins: open.wins, keys: open.keys, questions, skipped,
     } : null,
     open: { suggestions, questions: openQ },
     bulk: (open.commander ? 1 : 0) + (open.bracket ? 1 : 0) + (open.plan ? 1 : 0) + open.wins.length + open.keys.length,
@@ -472,7 +482,9 @@ export async function act(list: Pick<List, 'id' | 'commander'>, profileId: strin
       const on = a.on !== false;
       markSkipped(id, 'plan', String(a.what), on);
       const k = a.what === 'plan' ? 'plan:text' : `plan:${a.what}`;
-      outcome(id, [k], 'refused');
+      // Bring back undoes the skip, and the refusal with it.
+      if (on) outcome(id, [k], 'refused');
+      else quietly(() => clearOutcome(id, [k]));
       return;
     }
     case 'goal':

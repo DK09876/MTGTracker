@@ -67,8 +67,7 @@ describe('trim', { timeout: 60_000 }, () => {
     const { list } = await deck();
     const trim = await import('./trim');
     const { model, asked } = fakeModel(() => ANSWER);
-    await trim.setApproach(list, 'dk', { text: 'Cut the weakest spells first.' });
-    trim.setCorrection(list.id, 'Keep Spell 70.');
+    await trim.setApproach(list, 'dk', { text: 'Cut the weakest spells first.\nKeep Spell 70.' });
     await trim.runTrim(model, list, 'dk', { model: 'opus' });
     const v = await trim.trimView(list, 'dk');
     expect(v.size).toBe(108);
@@ -80,13 +79,17 @@ describe('trim', { timeout: 60_000 }, () => {
     expect(v.run!.items[0].with).toEqual(['Spell 60']);
     // The cuts are chosen from the start, and the numbers follow them.
     expect(v.impact.size).toEqual({ before: 108, after: 100 });
-    // One call, with the count, the approach and the owner's line; the big answer is read leniently.
+    // One call, with the count (one card more than wanted) and the box; the big answer is read leniently.
     expect(asked).toHaveLength(1);
     expect(asked[0].promptOnly).toBe(true);
     expect(asked[0].user).toContain('It is 8 over');
-    expect(asked[0].user).toContain('Rank exactly 16 cards');
-    expect(asked[0].user).toContain('Cut the weakest spells first.');
-    expect(asked[0].user).toContain('Keep Spell 70.');
+    expect(asked[0].user).toContain('Rank exactly 17 cards');
+    expect(asked[0].user).toContain("## What matters for these cuts (the owner's own words)");
+    expect(asked[0].user).toContain('Cut the weakest spells first.\nKeep Spell 70.');
+    expect(asked[0].user).not.toContain('This cut session so far');
+    // The first list has notes, and the session has begun with the box.
+    expect(v.run!.notes).toBe('Mostly surplus spells.');
+    expect(v.turns.map((t) => t.kind)).toEqual(['owner-start', 'claude-list']);
     expect(asked[0].user).toContain('**Spell 1**');
   });
 
@@ -122,9 +125,8 @@ describe('trim', { timeout: 60_000 }, () => {
     // The model lists the kept card again anyway: code leaves it out.
     const { model, asked } = fakeModel(() => ANSWER);
     await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
-    expect(asked[0].user).toContain('- Spell 3: the owner keeps it ("a pet card")');
-    expect(asked[0].user).toContain('- Spell 12: the owner cuts it ("never cast it")');
-    expect(asked[0].user).toContain('My approach.');
+    expect(asked[0].user).toContain('Owner: kept Spell 3 ("a pet card"); confirmed cuts: Spell 12 ("never cast it")');
+    expect(asked[0].user).toContain('Owner, at the start: "My approach."');
     v = await trim.trimView(list, 'dk');
     expect(v.approach!.text).toBe('My approach.');
     expect(v.run!.round).toBe(2);
@@ -196,5 +198,172 @@ describe('trim', { timeout: 60_000 }, () => {
     expect(a).toMatchObject({ by: 'claude', text: '- Trim the surplus spells.\n- Keep the loop.' });
     expect(asked[0].user).toContain('8 to cut');
     await expect(trim.writeApproach(fakeModel(() => ({ bullets: [] })).model, list, 'dk')).rejects.toThrow(/empty/);
+  });
+
+  it('sends the whole session in order: the start, list 1, the owner’s keeps with reasons and message, list 2', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.setApproach(list, 'dk', { text: 'Keep my mana dorks.' });
+    let n = 0;
+    const replies = [
+      { ...ANSWER, notes: 'Cut surplus spells.' },
+      { ranked: ranked(1, 2).concat(ranked(5, 15)), keep: [], reply: 'I kept Spell 3 and Spell 4, and treated Spell 5 the same way.', ask: 'Is Spell 9 part of the combo?' },
+      { ranked: ranked(1, 17), keep: [], reply: 'Nothing new.', ask: '' },
+    ];
+    const { model, asked } = fakeModel(() => replies[n++]);
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'keep', chip: 'part_of_plan', text: 'I need it on turn 3' }, 'Spell 4': { choice: 'keep' } });
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true, message: 'Why is Spell 1 first?' });
+    const second = asked[1].user;
+    const at = (s: string) => { const i = second.indexOf(s); expect([s, i >= 0]).toEqual([s, true]); return i; };
+    const order = [
+      at('## This cut session so far'),
+      at('Owner, at the start: "Keep my mana dorks."'),
+      at(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join(', ')} | closer calls: ${ranked(9, 8).map((r) => r.name).join(', ')} | you said: "Cut surplus spells."`),
+      at('Owner: kept Spell 3 ("part of my plan: I need it on turn 3"); kept Spell 4; said: "Why is Spell 1 first?"'),
+      at('This is list 2.'),
+    ];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // The box is read once, as the session's first line.
+    expect(second).not.toContain('## What matters for these cuts');
+    expect(asked[1].schema).toMatchObject({ required: ['ranked', 'keep', 'reply'] });
+    // The reply and the question are kept and shown.
+    let v = await trim.trimView(list, 'dk');
+    expect(v.run!.reply).toBe('I kept Spell 3 and Spell 4, and treated Spell 5 the same way.');
+    expect(v.run!.ask).toBe('Is Spell 9 part of the combo?');
+    expect(v.turns.map((t) => t.kind)).toEqual(['owner-start', 'claude-list', 'owner-reply', 'claude-list']);
+    // A third list is sent list 2 as well, with Claude's question.
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true, message: 'Yes, it is.' });
+    expect(asked[2].user).toContain('You, list 2: cuts: Spell 1, Spell 2, Spell 5');
+    expect(asked[2].user).toContain('you asked: "Is Spell 9 part of the combo?"');
+    expect(asked[2].user).toContain('Owner: said: "Yes, it is."');
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.ask).toBeNull();
+    expect(v.messages.map((m) => m.text)).toEqual(['Keep my mana dorks.', 'Why is Spell 1 first?', 'Yes, it is.']);
+  });
+
+  it('a re-run with nothing marked or typed still sends the last list', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[1].user).toContain(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join(', ')}`);
+    expect(asked[1].user).toContain('Owner, at the start: said nothing');
+    expect(asked[1].user).toContain('Owner: changed nothing and asked for the list again');
+  });
+
+  it('asks for one card more and keeps the wanted number; an answer one short is still full', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    // Asked for 17, gave 16: the list is whole.
+    await trim.runTrim(fakeModel(() => ({ ranked: ranked(1, 16), keep: [], notes: '' })).model, list, 'dk', { model: 'opus' });
+    let v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.filter((i) => i.tier === 'cut' || i.tier === 'maybe')).toHaveLength(16);
+    // Gave 17: trimmed to 16.
+    await trim.runTrim(fakeModel(() => ({ ranked: ranked(1, 17), keep: [], notes: '' })).model, list, 'dk', { model: 'opus' });
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.filter((i) => i.tier === 'cut' || i.tier === 'maybe').map((i) => i.name)).toEqual(ranked(1, 16).map((r) => r.name));
+  });
+
+  it('marks each cut on a later list as yours, the same, or new, and lists what dropped off unnamed', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    // List 1 cuts: Spells 1-8. Keep 2, confirm 3 with a reason, cut closer call 9.
+    trim.setChoices(list.id, { 'Spell 2': { choice: 'keep', chip: 'pet_card' }, 'Spell 3': { choice: 'cut', chip: 'too_slow' }, 'Spell 9': { choice: 'cut' } });
+    // List 2 ranks 1, 4, 5 and new cards 30-34 first; 6-8 drop off without the owner naming them.
+    const second = { ranked: [...['Spell 1', 'Spell 4', 'Spell 5'].map((name) => ({ name, why: 'x', with: [] })), ...ranked(30, 14)], keep: [], reply: 'Moved things.' };
+    await trim.runTrim(fakeModel(() => second).model, list, 'dk', { model: 'opus', rerun: true });
+    const v = await trim.trimView(list, 'dk');
+    const cuts = v.run!.items.filter((i) => i.tier === 'cut').map((i) => i.name);
+    expect(cuts).toEqual(['Spell 3', 'Spell 9', 'Spell 1', 'Spell 4', 'Spell 5', 'Spell 30', 'Spell 31', 'Spell 32']);
+    expect(v.run!.marks).toEqual({
+      'Spell 3': 'yours', 'Spell 9': 'yours', 'Spell 1': 'same', 'Spell 4': 'same', 'Spell 5': 'same', 'Spell 30': 'new', 'Spell 31': 'new', 'Spell 32': 'new',
+    });
+    expect(v.run!.changed).toEqual({ kept: ['Spell 2'], dropped: ['Spell 6', 'Spell 7', 'Spell 8'], yours: 2, same: 3, fresh: 3 });
+    // The confirmed cuts carry over; they were already said, so they aren't new marks for the next send.
+    expect(Object.keys(v.carried).sort()).toEqual(['Spell 3', 'Spell 9']);
+    const { model, asked } = fakeModel(() => second);
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[0].user).toContain('Owner: changed nothing and asked for the list again');
+  });
+
+  it('"Have Claude add to it" is sent the box and keeps it first, word for word', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    const { model, asked } = fakeModel(() => ({ bullets: ['Cut the slowest ramp first.', 'No lands.'] }));
+    const a = await trim.writeApproach(model, list, 'dk', 'I want more ramp, not less.\nCut removal first.');
+    expect(asked[0].user).toContain('I want more ramp, not less.\nCut removal first.');
+    expect(a.by).toBe('both');
+    expect(a.text).toBe('I want more ramp, not less.\nCut removal first.\n- Cut the slowest ramp first.\n- No lands.');
+    expect((await trim.trimView(list, 'dk')).approach!.text.startsWith('I want more ramp, not less.')).toBe(true);
+  });
+
+  it('apply ends the session, keeps what was said about cards, and saves only the ticked lines to notes', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.setApproach(list, 'dk', { text: 'Keep my dorks.' });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'keep', text: 'my favourite' }, 'Spell 9': { choice: 'cut' } });
+    await trim.runTrim(fakeModel(() => ({ ...ANSWER, reply: 'ok' })).model, list, 'dk', { model: 'opus', rerun: true, message: 'Weigh speed more.' });
+    let v = await trim.trimView(list, 'dk');
+    expect(v.messages.map((m) => m.text)).toEqual(['Keep my dorks.', 'Weigh speed more.']);
+    const tick = v.messages.find((m) => m.text === 'Weigh speed more.')!.id;
+    await trim.applyTrim(list, 'dk', undefined, [tick]);
+    const s = trim.trimStore(list.id);
+    expect(s.turns).toEqual([]);
+    expect(s.said['Spell 3']).toMatchObject({ choice: 'keep', text: 'my favourite' });
+    const notes = (await (await import('./plan-help')).planState(db.getList(list.id, 'dk')!)).notes.map((x) => x.text);
+    expect(notes).toEqual(['Weigh speed more.']);
+    v = await trim.trimView(db.getList(list.id, 'dk')!, 'dk');
+    expect(v.done!.notes).toBe(1);
+    // Undo brings the session back with the cards.
+    trim.undoTrim(db.getList(list.id, 'dk')!);
+    expect(trim.trimStore(list.id).turns.map((t) => t.kind)).toEqual(['owner-start', 'claude-list', 'owner-reply', 'claude-list']);
+  });
+
+  it('sends nothing from one deck’s session or remembered choices for another deck', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.setApproach(list, 'dk', { text: 'Secret plan for Azula.' });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'keep', text: 'only on Azula' } });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true, message: 'Azula message.' });
+    const other = db.createList('dk', 'Other', '', { kind: 'deck', commander });
+    db.addCardToList(other.id, island, 37);
+    for (let i = 1; i <= 70; i++) db.addCardToList(other.id, card(`Spell ${i}`));
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, db.getList(other.id, 'dk')!, 'dk', { model: 'opus' });
+    for (const s of ['Secret plan for Azula.', 'only on Azula', 'Azula message.', 'This cut session so far', 'What the owner decided on earlier cut lists']) expect(asked[0].user).not.toContain(s);
+    await trim.runTrim(model, db.getList(other.id, 'dk')!, 'dk', { model: 'opus', rerun: true });
+    for (const s of ['Secret plan for Azula.', 'only on Azula', 'Azula message.']) expect(asked[1].user).not.toContain(s);
+  });
+
+  it('shows a usual range only for a job counted on the deck', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    const range = async () => Object.fromEntries((await trim.trimView(list, 'dk')).impact.rows.map((r) => [r.id, r.range]));
+    let r = await range();
+    expect([r.ramp, r.draw, r.interaction]).toEqual([null, null, null]);
+    expect(r.lands).not.toBeNull();
+    (await import('./categories')).addCategory(list.id, { kind: 'job', name: 'Ramp', by: 'cards', jobId: 'ramp' });
+    r = await range();
+    expect(r.ramp).not.toBeNull();
+    expect(r.draw).toBeNull();
+  });
+
+  it('keeps the card lists of the last six rounds and only the words of older ones', async () => {
+    const { sessionLines } = await import('./trim');
+    const turns = [{ kind: 'owner-start' as const, text: 'Start.', at: '' }, ...Array.from({ length: 8 }, (_, k) => [
+      { kind: 'claude-list' as const, round: k + 1, cuts: [`Cut ${k + 1}`], maybes: [], reply: `Reply ${k + 1}.`, ask: null, at: '' },
+      { kind: 'owner-reply' as const, marks: [], message: `Message ${k + 1}.`, at: '' },
+    ]).flat()];
+    const out = sessionLines(turns).join('\n');
+    expect(out).toContain('You, list 1: (its cards are left out here) | you said: "Reply 1."');
+    expect(out).toContain('You, list 2: (its cards are left out here)');
+    expect(out).toContain('You, list 3: cuts: Cut 3');
+    expect(out).toContain('Owner: said: "Message 1."');
+    expect(out).not.toContain('Cut 1,');
   });
 });
