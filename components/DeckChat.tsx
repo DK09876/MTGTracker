@@ -76,8 +76,13 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
 
   useEffect(() => { end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [chat?.messages.length, replying]);
 
+  // One question at a time: a second tap while the first is on its way used to start a second chat and a second paid reply.
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const send = async (question = text) => {
-    if (!question.trim() || replying) return;
+    if (!question.trim() || replying || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
     setError(null);
     try {
       const r = await api.askDeck(listId, question, open ?? undefined);
@@ -88,6 +93,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
       void loadList();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not ask that');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -246,7 +254,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
         {!replying && (
           <div className="flex flex-wrap gap-2">
             {PROMPTS.map((p) => (
-              <button key={p} onClick={() => send(p)} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
+              <button key={p} onClick={() => send(p)} disabled={sending} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
             ))}
           </div>
         )}
@@ -264,7 +272,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
           <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
-          <button type="submit" disabled={replying || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
+          <button type="submit" disabled={replying || sending || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
       </section>
     </div>

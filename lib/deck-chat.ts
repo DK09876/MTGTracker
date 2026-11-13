@@ -100,6 +100,11 @@ export function chatsFor(listId: string): Array<Pick<DeckChat, 'id' | 'title' | 
   });
 }
 
+/** A profile's newest chats on a deck, whole (for spotting a question sent twice). */
+export function recentChats(listId: string, profileId: string, limit = 5): DeckChat[] {
+  return (db().all('SELECT chat FROM deck_chats WHERE listId = ? AND profileId = ? ORDER BY updatedAt DESC LIMIT ?', [listId, profileId, limit]) as Array<{ chat: string }>).map((r) => JSON.parse(r.chat) as DeckChat);
+}
+
 export function deleteChat(listId: string, id: string): boolean {
   return db().run('DELETE FROM deck_chats WHERE id = ? AND listId = ?', [id, listId]).changes > 0;
 }
@@ -309,6 +314,8 @@ export async function reply(
   }));
   const lookups: string[] = [];
   let changes: Change[] = [];
+  // What Claude writes in every round: its explanation often comes in the same turn as a look-up or its proposals.
+  const said: string[] = [];
   const messages = [...history];
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const answer = await call({
@@ -325,8 +332,9 @@ export async function reply(
 
     const uses = answer.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
     const text = answer.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();
+    if (text) said.push(text);
     if (answer.stop_reason !== 'tool_use' || !uses.length) {
-      return { role: 'assistant', text: text || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, model: answer.model };
+      return { role: 'assistant', text: said.join('\n\n') || (answer.stop_reason === 'refusal' ? 'Claude declined to answer that.' : '…'), at: new Date().toISOString(), lookups, changes, model: answer.model };
     }
     messages.push({ role: 'assistant', content: answer.content as Anthropic.Beta.BetaContentBlockParam[] });
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
@@ -347,5 +355,5 @@ export async function reply(
     }
     messages.push({ role: 'user', content: results });
   }
-  return { role: 'assistant', text: 'I looked up a lot and ran out of steps before answering - ask again, more narrowly.', at: new Date().toISOString(), lookups, changes };
+  return { role: 'assistant', text: [...said, 'I looked up a lot and ran out of steps before finishing - ask again, more narrowly.'].join('\n\n'), at: new Date().toISOString(), lookups, changes };
 }

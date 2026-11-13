@@ -63,6 +63,19 @@ describe('deck chat', () => {
     ]);
   });
 
+  it('keeps what Claude wrote in the same turn as its proposals, not only the last words', async () => {
+    const { reply, newChat } = await import('./deck-chat');
+    let n = 0;
+    const call = vi.fn(async () => (++n === 1
+      ? message([{ type: 'text', text: 'Leyline Axe is good here: double strike on Jiang means 21 commander damage comes fast.' }, { type: 'tool_use', id: 't1', name: 'propose_changes', input: { cut: [{ name: 'Opt', why: 'Weakest.' }] } }], 'tool_use')
+      : message([{ type: 'text', text: 'There is a button to cut Opt.' }], 'end_turn')));
+    const chat = newChat('l1', 'dk', 'Is Leyline Axe good enough?');
+    chat.messages.push({ role: 'user', text: 'Is Leyline Axe good enough?', at: '' });
+    const answer = await reply(chat, deck(), { search: async () => [], held: () => ({}), gaps: async () => [] }, call as never, 'claude-opus-5-5');
+    expect(answer.text).toBe('Leyline Axe is good here: double strike on Jiang means 21 commander damage comes fast.\n\nThere is a button to cut Opt.');
+    expect(answer.changes?.map((c) => c.name)).toEqual(['Opt']);
+  });
+
   it('names a new chat after its first question', async () => {
     const { newChat } = await import('./deck-chat');
     expect(newChat('l1', 'dk', 'What should I cut to make room for three new cards from the Avatar set?').title)

@@ -11,8 +11,8 @@ import { deckIdentity } from './commanders';
 import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
-import { startJob, type Job } from './jobs';
-import { newChat, reply, saveChat, type DeckChat } from './deck-chat';
+import { latestJob, startJob, type Job } from './jobs';
+import { newChat, recentChats, reply, saveChat, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
 import { searchCards, ScryfallError } from './scryfall';
 
@@ -22,6 +22,16 @@ export class ChatError extends Error {}
 export async function ask(list: List, profile: string, text: string, chat: DeckChat | null): Promise<{ chat: DeckChat; job: Job }> {
   const model = modelFor(profile, 'chat');
   if (providerOf(model) !== 'anthropic' || !appModel(profile, 'chat')) throw new ChatError('Deck chat needs Claude: no Anthropic key is set on the server');
+  // The same question twice in a row (a double tap, or a phone resending) is one question.
+  const running = latestJob('chat', list.id);
+  if (chat && chat.messages.at(-1)?.role === 'user' && running?.status === 'running') {
+    if (chat.messages.at(-1)!.text === text.trim()) return { chat, job: running };
+    throw new ChatError('Claude is still answering the last question in this chat');
+  }
+  if (!chat) {
+    const again = recentChats(list.id, profile).find((c) => c.messages.length && c.messages[0].role === 'user' && c.messages[0].text === text.trim() && Date.now() - Date.parse(c.createdAt) < 30_000);
+    if (again && running) return { chat: again, job: running };
+  }
   const current = chat ?? newChat(list.id, profile, text);
   current.messages.push({ role: 'user', text: text.trim(), at: new Date().toISOString() });
   saveChat(current);
