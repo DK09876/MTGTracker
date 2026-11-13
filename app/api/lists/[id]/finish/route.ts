@@ -6,11 +6,14 @@
  * GET: the view: the setting and the funnel, the latest picks with the
  * owner's choices, the searches of the round running now, the combos.
  * POST {action, ...}:
- *   settings {copies?, want?}  which cards may be used ("spare" | "any") and
- *       how many to add (null: fill to 100); kept per deck
+ *   settings {copies?, want?, lands?}  which cards may be used ("spare" | "any"),
+ *       how many to add (null: fill to 100), and the lands in the deck when a
+ *       fill to 100 is done (null: the plan's land number); kept per deck
  *   find {rerun?, message?}    ask Claude in the background: the first list,
  *       or (rerun) the owner's marks and message, refilling the open slots
  *   choices {choices}          Add / Rethink / Skip and reasons, replaced whole
+ *   lands {skip?, basics?}     a fill to 100: duals left out, and how many of
+ *       each basic to take
  *   take {name, group}         "+" from a search's results: no paid round
  *   apply                      add the cards on Add (and, on a full fill, the
  *       app's lands), after a snapshot
@@ -23,7 +26,7 @@ import { NextResponse } from 'next/server';
 import { claudeCall, ModelError } from '@/lib/ai';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
-import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, takeCard, undoFinish } from '@/lib/finish';
+import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish } from '@/lib/finish';
 import { startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
@@ -57,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     switch (b.action) {
       case 'settings':
-        setFinish(id, { copies: b.copies, want: b.want });
+        setFinish(id, { copies: b.copies, want: b.want, lands: b.lands });
         break;
       case 'find': {
         if (!process.env.ANTHROPIC_API_KEY || profile === 'tour') return NextResponse.json({ error: NO_KEY }, { status: 503 });
@@ -70,6 +73,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
       case 'choices':
         setChoices(id, b.choices);
+        break;
+      case 'lands':
+        setLands(id, { skip: b.skip, basics: b.basics });
         break;
       case 'take':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });

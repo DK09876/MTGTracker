@@ -34,7 +34,8 @@ import { addCardToList, cardsInList, database, setQuantity, updateListCard, type
 import { planFor } from './deck-plan';
 import { latestJob } from './jobs';
 import { ownedCombos } from './finish-combos';
-import { finishLands, finishPool, heldCards, isLand, sourceOf, type Held, type Pool } from './finish-pool';
+import { BASIC, finishLands, finishPool, heldCards, isLand, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
+import { localCards } from './card-store';
 import {
   chosenAdds, finishCount, FINISH_GROUPS, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
   type Copies, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
@@ -47,6 +48,9 @@ import { combosInDeck } from './spellbook';
 import { gcRoomOf, landPlan, tuneContext, type Context } from './tune';
 
 const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+const fmt = (x: number) => String(Math.round(x * 10) / 10);
+/** Lands to add for the deck to hold `target` lands (a double-faced card counts as part of one, as the land number does). */
+export const landsToAdd = (lp: { have: number }, target: number) => Math.max(0, Math.ceil(target - lp.have));
 const keyOf = (c: ScryfallCard) => c.oracle_id ?? c.id;
 const now = () => new Date().toISOString();
 /** Names are joined with "; " for the model: many card names have commas in them. */
@@ -62,6 +66,8 @@ interface Run {
   /** The combos complete among the commander, the deck and every pick this round (the app's check). */
   combos: OwnedCombo[];
   owned: number | null; combosFailed: boolean;
+  /** Lands in the deck when this fill is done (a full fill). */
+  landsTarget?: number;
 }
 interface Done {
   at: string; added: number; lands: number; size: number; borrowed: string[];
@@ -74,6 +80,10 @@ export interface FinishStore {
   copies: Copies;
   /** The number asked for; null is a full fill. */
   want: number | null;
+  /** Lands in the deck when a fill to 100 is done, the owner's number; null is the plan's land number. */
+  lands: number | null;
+  /** The owner's changes to the app's lands for this list: duals left out, and how many of each basic. */
+  landPicks: { skip: string[]; basics: Record<string, number> };
   run: Run | null;
   choices: Record<string, { choice: FinishChoice; text: string }>;
   /** Never offered again in this conversation. */
@@ -87,7 +97,7 @@ export interface FinishStore {
   pending: number | null;
 }
 
-const EMPTY: FinishStore = { copies: 'spare', want: null, run: null, choices: {}, skipped: [], seen: [], searches: [], turns: [], done: null, pending: null };
+const EMPTY: FinishStore = { copies: 'spare', want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], seen: [], searches: [], turns: [], done: null, pending: null };
 
 let ready = false;
 function db() {
@@ -115,13 +125,15 @@ function update(listId: string, change: (s: FinishStore) => void): FinishStore {
 
 /** Start over: the picks, the choices and the conversation go; the copies setting and the number stay. */
 export function resetFinish(listId: string): void {
-  update(listId, (s) => { s.run = null; s.choices = {}; s.skipped = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; });
+  update(listId, (s) => { s.run = null; s.choices = {}; s.skipped = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; s.landPicks = { skip: [], basics: {} }; });
 }
 
 /** The copies setting and the number, per deck. A new commander starts the conversation over. */
-export function setFinish(listId: string, input: { copies?: unknown; want?: unknown }): void {
+export function setFinish(listId: string, input: { copies?: unknown; want?: unknown; lands?: unknown }): void {
   update(listId, (s) => {
     if (input.copies === 'spare' || input.copies === 'any') s.copies = input.copies;
+    if (input.lands === null) s.lands = null;
+    else if (typeof input.lands === 'number' && Number.isFinite(input.lands) && input.lands >= 0) s.lands = Math.min(99, Math.round(input.lands));
     if (input.want === null) s.want = null;
     else if (typeof input.want === 'number' && Number.isFinite(input.want) && input.want >= 1) s.want = Math.min(500, Math.round(input.want));
   });
@@ -276,7 +288,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   const pool = finishPool(ctx, before.copies, held);
   if (!pool.lines.length) throw new ModelError('None of your cards can go in this deck under these settings. Try “Take from other decks too”, or check the budget and deck rule on the Plan tab.');
   const lp = landPlan(ctx);
-  const count = finishCount(ctx.size, Math.ceil(lp.range[0] - lp.have), before.want);
+  const landsTarget = before.lands ?? lp.range[0];
+  const count = finishCount(ctx.size, landsToAdd(lp, landsTarget), before.want);
   const at = now();
   const round = rerun ? before.run!.round + 1 : 1;
 
@@ -331,7 +344,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     '## The task',
     rerun
       ? `This is list ${round}. Pick exactly ${need} more non-land card${need === 1 ? '' : 's'} for the slots that opened${reply?.message ? ' (and the replacements for any you name in "out")' : ''}, in groups. No lands. You have ${limit} searches.`
-      : `Pick exactly ${count.want} non-land cards, in groups. No lands${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100` : ''}. You have ${limit} searches.`,
+      : `Pick exactly ${count.want} non-land cards, in groups. No lands${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100, so it will hold ${landsTarget} lands when done (${before.lands !== null ? 'the number the owner chose' : "the plan's land number"}). Weigh ramp and mana costs with that in mind` : ''}. You have ${limit} searches.`,
   ].join('\n').trim();
 
   update(list.id, (s) => { if (!rerun) { s.searches = []; s.seen = []; } s.done = null; s.pending = round; });
@@ -392,11 +405,12 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   const found = await combosFound(ctx, items.map((i) => i.name));
   const run: Run = {
     id: randomUUID(), at: now(), model, round, want: count.want, full: count.full, short: checked.short, reply: checked.reply,
-    items, dropped: checked.dropped, combos: found ?? [], owned: owned?.length ?? null, combosFailed: combosFailed || found === null,
+    items, dropped: checked.dropped, combos: found ?? [], owned: owned?.length ?? null, combosFailed: combosFailed || found === null, ...(count.full ? { landsTarget } : {}),
   };
   update(list.id, (s) => {
     s.run = run;
     s.choices = {};
+    if (!rerun) s.landPicks = { skip: [], basics: {} };
     s.skipped = rerun ? [...new Set([...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)])] : [];
     s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: checked.short, searches: used, reply: checked.reply, at: run.at }];
     s.done = null;
@@ -453,6 +467,40 @@ export async function takeCard(list: List, profileId: string, name: string, grou
 }
 
 /**
+ * The app's lands for a fill to 100 (Part D), and the owner's changes to them:
+ * duals left out, and any number of each basic (every colour of the deck is
+ * offered, at 0 when the split gave it none). Nothing else is added for a
+ * dual left out: the owner sets the basics.
+ */
+export function landsFor(ctx: Context, held: Map<string, Held>, s: Pick<FinishStore, 'copies' | 'lands' | 'landPicks' | 'run'>, lp: { have: number; range: [number, number] }, adds: number, costs: string[]): { suggested: LandPick[]; chosen: LandPick[] } {
+  const target = s.run?.landsTarget ?? s.lands ?? lp.range[0];
+  const n = Math.max(0, Math.min(100 - ctx.size - adds, landsToAdd(lp, target)));
+  const suggested = finishLands(ctx, held, s.copies, n, costs);
+  const isBasic = (c: ScryfallCard) => /\bBasic\b/.test(c.type_line ?? '');
+  const basics = new Map(suggested.filter((l) => isBasic(l.card)).map((l) => [l.card.name, l]));
+  const more = localCards([...ctx.identity].map((c) => BASIC[c]).filter((b) => b && !basics.has(b)));
+  for (const c of more) basics.set(c.name, { card: ctx.main.find((x) => x.card.name === c.name)?.card ?? c, n: 0, src: 'spare' });
+  const picks = s.landPicks ?? { skip: [], basics: {} };
+  const chosen = [
+    ...suggested.filter((l) => !isBasic(l.card) && !picks.skip.includes(l.card.name)),
+    ...[...basics.values()].map((l) => ({ ...l, n: picks.basics[l.card.name] ?? l.n })).filter((l) => l.n > 0),
+  ];
+  return { suggested: [...suggested.filter((l) => !isBasic(l.card)), ...basics.values()], chosen };
+}
+
+/** The owner's changes to the app's lands: a dual in or out, a basic's count. */
+export function setLands(listId: string, input: { skip?: unknown; basics?: unknown }): void {
+  update(listId, (s) => {
+    if (Array.isArray(input.skip)) s.landPicks.skip = input.skip.filter((x): x is string => typeof x === 'string').slice(0, 100);
+    if (input.basics && typeof input.basics === 'object') {
+      for (const [k, v] of Object.entries(input.basics as Record<string, unknown>)) {
+        if (typeof v === 'number' && Number.isFinite(v) && v >= 0) s.landPicks.basics[k] = Math.min(99, Math.round(v));
+      }
+    }
+  });
+}
+
+/**
  * Apply: the picks on Add and, on a full fill, the app's lands go into the
  * main deck. A card waiting in a section moves in; a card in another deck is
  * only added here (the other deck keeps it). The caller takes the snapshot.
@@ -467,7 +515,7 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   const cards = names.map((n) => pool.cards.get(n.toLowerCase()) ?? pool.cards.get(front(n))).filter((c): c is ScryfallCard => !!c);
   if (!cards.length) throw new Error('Nothing to add: put at least one card on Add');
   const lp = landPlan(ctx);
-  const lands = s.run.full ? finishLands(ctx, held, s.copies, Math.min(Math.max(0, 100 - ctx.size - cards.length), Math.max(0, Math.ceil(lp.range[0] - lp.have))), cards.map(manaCostOf)) : [];
+  const lands = s.run.full ? landsFor(ctx, held, s, lp, cards.length, cards.map(manaCostOf)).chosen : [];
   const undo: Done['undo'] = [];
   const add = (card: ScryfallCard, n: number) => {
     // A card waiting in a section moves to the main deck as it is; anything else is a new row or more copies.
@@ -521,7 +569,8 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
   const running = job?.status === 'running';
   const ctx = await tuneContext(list, profileId);
   const lp = landPlan(ctx);
-  const count = finishCount(ctx.size, Math.ceil(lp.range[0] - lp.have), null);
+  const landsTarget = s.lands ?? lp.range[0];
+  const count = finishCount(ctx.size, landsToAdd(lp, landsTarget), null);
   const po = planOwner(list.id);
   const mode = ctx.plan.goal.combos ?? null;
   // The funnel is worked out on the setup screen only: the list and the polling while Claude runs don't need it.
@@ -555,14 +604,15 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
   let lands: NonNullable<FinishView['run']>['lands'] = null;
   if (s.run?.full) {
     const adds = chosenAdds(items, s.choices);
-    const n = Math.max(0, Math.min(100 - ctx.size - adds.length, Math.ceil(lp.range[0] - lp.have)));
-    const picks = finishLands(ctx, heldCards(profileId, list.id), s.copies, n, items.filter((i) => adds.includes(i.name)).map((i) => i.card.manaCost));
-    const basics = picks.filter((p) => /\bBasic\b/.test(p.card.type_line ?? ''));
+    const { suggested, chosen } = landsFor(ctx, heldCards(profileId, list.id), s, lp, adds.length, items.filter((i) => adds.includes(i.name)).map((i) => i.card.manaCost));
+    const basic = (l: { card: ScryfallCard }) => /\bBasic\b/.test(l.card.type_line ?? '');
     lands = {
-      names: picks.filter((p) => !basics.includes(p)).map((p) => p.card.name),
-      basics: basics.map((b) => ({ name: b.card.name, n: b.n })),
-      total: picks.reduce((k, p) => k + p.n, 0),
-      why: `The plan wants ${lp.range[0]}–${lp.range[1]} lands and the deck has ${lp.have}.`,
+      duals: suggested.filter((l) => !basic(l)).map((l) => ({ name: l.card.name, on: !s.landPicks.skip.includes(l.card.name) })),
+      basics: suggested.filter(basic).map((l) => ({ name: l.card.name, n: chosen.find((c) => c.card.name === l.card.name)?.n ?? 0, suggested: l.n })),
+      total: chosen.reduce((k, p) => k + p.n, 0),
+      suggested: suggested.reduce((k, p) => k + p.n, 0),
+      target: s.run.landsTarget ?? landsTarget,
+      why: `${s.run.landsTarget !== undefined && s.run.landsTarget !== lp.range[0] ? `You asked for ${s.run.landsTarget} lands in the deck (the plan says ${lp.range[0]}–${lp.range[1]})` : `The plan wants ${lp.range[0]}–${lp.range[1]} lands`}; the deck has ${fmt(lp.have)}.`,
     };
   }
   return {
@@ -575,7 +625,7 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
       base: [...ctx.commanders.map((c) => c.name), ...ctx.main.map((c) => c.card.name)],
     },
     plan: { text: po.planText.trim() || null, confirmed: !!po.confirmedAt },
-    howMany: { room: count.room, nonland: count.nonland, lands: Math.min(count.room, Math.max(0, Math.ceil(lp.range[0] - lp.have))) },
+    howMany: { room: count.room, nonland: count.nonland, lands: count.lands || Math.min(count.room, landsToAdd(lp, landsTarget)), target: landsTarget, mine: s.lands !== null, have: fmt(lp.have), plan: lp.range },
     run: s.run ? {
       id: s.run.id, at: s.run.at, round: s.run.round, model: s.run.model, want: s.run.want, full: s.run.full, short: s.run.short, reply: s.run.reply,
       items, more, lands, dropped: s.run.dropped,

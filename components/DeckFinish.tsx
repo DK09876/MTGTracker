@@ -203,6 +203,17 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           {isFull ? `Fills the deck from ${view.size} to 100: ${full} cards by Claude and ${view.howMany.lands} lands by the app.`
             : `Takes the deck from ${view.size} to ${view.size + wanted}${view.size + wanted > 100 ? `, ${view.size + wanted - 100} over: Trim them back after` : ''}. No lands: the app adds lands only on a fill to 100.`}
         </p>
+        {isFull && (
+          <div className="flex flex-wrap items-center gap-2" data-finish-landtotal>
+            <label htmlFor="finish-lands" className="text-sm">Lands in the deck when it’s done</label>
+            <input id="finish-lands" type="number" min={0} max={99} inputMode="numeric" defaultValue={view.howMany.target} key={`${view.howMany.target}`}
+              onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== view.howMany.target) void act({ action: 'settings', lands: n }); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              className={`${C.input} w-20 text-center font-semibold tabular-nums`} />
+            <span className="text-[13px] text-[var(--muted)]">{view.howMany.mine ? 'your number' : 'the plan’s number'} · the plan says {view.howMany.plan[0]}–{view.howMany.plan[1]} · the deck has {view.howMany.have} now. Claude is told the total.</span>
+            {view.howMany.mine && <button type="button" className={LINK} disabled={busy} onClick={() => act({ action: 'settings', lands: null })}>Use the plan’s number</button>}
+          </div>
+        )}
       </div>
       <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and your settings.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -292,7 +303,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
             ))}
             {lands > 0 && run.lands && (
               <div className="flex flex-col gap-1"><h4 className={H3}>Lands · {lands}</h4>
-                <p className="text-sm text-[var(--muted)]">{[...run.lands.names, ...run.lands.basics.map((b) => `${b.n} ${b.name}`)].join(', ')}</p></div>
+                <p className="text-sm text-[var(--muted)]">{[...run.lands.duals.filter((d) => d.on).map((d) => d.name), ...run.lands.basics.filter((b) => b.n > 0).map((b) => `${b.n} ${b.name}`)].join(', ')}</p></div>
             )}
             {skips.length > 0 && <p className="text-sm text-[var(--muted)]"><b className="text-[var(--foreground)]">Skipped:</b> {skips.map((i) => i.name).join('; ')}</p>}
           </div>
@@ -383,15 +394,51 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         })}
       </div>
 
-      {lands > 0 && run.lands && (
-        <div className={`${CARD} flex flex-col gap-1.5`} data-finish-lands>
-          <h4 className={H3}>Lands · {lands} · chosen by the app, not by Claude</h4>
-          {run.lands.names.length > 0 && <p className="text-[13px] text-[var(--muted)]"><b className="text-[var(--foreground)]">{plural(run.lands.names.length, 'land')} you own that make two or more of your colours:</b> {run.lands.names.join(', ')}.</p>}
-          {run.lands.basics.length > 0 && <p className="text-[13px] text-[var(--muted)]"><b className="text-[var(--foreground)]">{plural(run.lands.basics.reduce((n, b) => n + b.n, 0), 'basic')}, split by the colour symbols on your cards:</b> {run.lands.basics.map((b) => `${b.n} ${b.name}`).join(', ')}.</p>}
-          <p className="text-xs text-[var(--faint)]">{run.lands.why} Lands are added only when the run fills the deck to 100.</p>
+      {run.full && run.lands && <Lands lands={run.lands} size={view.size + adds.length} busy={busy || running} onLands={(change) => act({ action: 'lands', ...change })} />}
+    </section>
+  );
+}
+
+/**
+ * The app's lands on a fill to 100, to take as they are or change: a dual
+ * in or out, and how many of each basic. The total and the deck size follow.
+ */
+function Lands({ lands, size, busy, onLands }: { lands: NonNullable<NonNullable<FinishView['run']>['lands']>; size: number; busy: boolean; onLands: (change: { skip?: string[]; basics?: Record<string, number> }) => void }) {
+  const skip = lands.duals.filter((d) => !d.on).map((d) => d.name);
+  const end = size + lands.total;
+  return (
+    <div className={`${CARD} flex flex-col gap-2.5`} data-finish-lands>
+      <h4 className={H3}>Lands · {lands.total} · chosen by the app, not by Claude</h4>
+      <p className="text-[13px] text-[var(--muted)]">{lands.why} The app picked {lands.suggested} to reach {lands.target}. Take them as they are, or change any below.</p>
+      {lands.duals.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[13px] font-semibold">Your lands that make two or more of your colours</span>
+          <div className="flex flex-wrap gap-1.5">
+            {lands.duals.map((d) => (
+              <button key={d.name} type="button" aria-pressed={d.on} disabled={busy} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })}
+                className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] disabled:opacity-60 ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
+                <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}
+              </button>
+            ))}
+          </div>
         </div>
       )}
-    </section>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[13px] font-semibold">Basics, split by the colour symbols on your cards</span>
+        <div className="flex flex-wrap gap-3">
+          {lands.basics.map((b) => (
+            <label key={b.name} className="flex items-center gap-2 text-sm">
+              <input type="number" min={0} max={99} inputMode="numeric" defaultValue={b.n} key={`${b.name}:${b.n}`} disabled={busy} aria-label={`How many ${b.name}`}
+                onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== b.n) onLands({ basics: { [b.name]: n } }); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                className={`${C.input} w-16 text-center font-semibold tabular-nums`} />
+              {b.name}{b.n !== b.suggested && <span className="text-xs text-[var(--faint)]">(app: {b.suggested})</span>}
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className={`text-[13px] ${end === 100 ? 'text-[var(--muted)]' : 'text-amber-300'}`} data-finish-lands-total>{lands.total} lands take the deck to {end}{end === 100 ? '.' : end > 100 ? `, ${end - 100} over.` : `, ${100 - end} short.`}</p>
+    </div>
   );
 }
 

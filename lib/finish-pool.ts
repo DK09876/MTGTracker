@@ -110,7 +110,7 @@ export function finishPool(ctx: Context, copies: Copies, held = heldCards(ctx.pr
 
 // --- lands on a full fill ---------------------------------------------------------------
 
-const BASIC: Record<string, string> = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
+export const BASIC: Record<string, string> = { W: 'Plains', U: 'Island', B: 'Swamp', R: 'Mountain', G: 'Forest' };
 
 /** Colour symbols in a list of costs, by colour ({W/U} counts for both, {2/W} for W). */
 export function pips(costs: string[], identity: Set<string>): Record<string, number> {

@@ -271,6 +271,43 @@ describe('review, apply and undo', { timeout: 60_000 }, () => {
   });
 });
 
+describe('the lands on a fill to 100', { timeout: 60_000 }, () => {
+  it('the owner sets the land total: the room for picks follows and Claude is told the total', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    const view = await finish.finishView(list, 'dk');
+    expect(view.howMany).toMatchObject({ target: 30, mine: true, lands: 25, nonland: 59 });
+    const { call, asked } = stand([{ search: ['draw'] }, { picks: pick(['Owned 2']) }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    expect(text(asked[0])).toContain('Pick exactly 59 non-land cards');
+    expect(text(asked[0])).toContain('so it will hold 30 lands when done (the number the owner chose)');
+    finish.setFinish(list.id, { lands: null });
+    expect((await finish.finishView(list, 'dk')).howMany.mine).toBe(false);
+  });
+
+  it('a dual can be left out and any number of a basic taken; apply adds exactly that', async () => {
+    const dual = card('Sulfur Falls', { type_line: 'Land', mana_cost: '', color_identity: ['U', 'R'], produced_mana: ['U', 'R'] });
+    const { db, list } = await setup([...owned, dual]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    const n = (await finish.finishView(list, 'dk')).howMany.nonland;
+    await finish.runFinish(stand([{ search: ['draw'] }, { search: ['destroy'] }, { picks: pick(owned.slice(0, n).map((c) => c.name)) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    const before = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(before.duals).toEqual([{ name: 'Sulfur Falls', on: true }]);
+    expect(before.total).toBe(25);
+    finish.setLands(list.id, { skip: ['Sulfur Falls'], basics: { Island: 10 } });
+    const after = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(after.total).toBe(10);
+    expect(after.basics.find((b) => b.name === 'Island')).toMatchObject({ n: 10 });
+    const done = await finish.applyFinish(list, 'dk');
+    expect(done.lands).toBe(10);
+    const main = db.cardsInList(list.id).filter((c) => c.board === 'main');
+    expect(main.find((c) => c.card.name === 'Sulfur Falls')).toBeUndefined();
+    expect(main.find((c) => c.card.name === 'Island')!.quantity).toBe(15);
+  });
+});
+
 describe('how many', () => {
   it('5 adds no lands; exactly the room left fills to 100 with lands; past 100 is allowed with no lands', () => {
     expect(finishCount(16, 33, 5)).toEqual({ want: 5, full: false, room: 84, nonland: 51, lands: 0 });

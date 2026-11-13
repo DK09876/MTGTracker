@@ -888,10 +888,11 @@ export const trimAct = (listId: string, act: TrimAction) => {
 /** Finish the deck from your cards (lib/finish.ts). */
 export type FinishView = import('./finish-shared').FinishView;
 export type FinishAction =
-  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null }
+  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null }
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: FinishView['choices'] }
   | { action: 'take'; name: string; group: string }
+  | { action: 'lands'; skip?: string[]; basics?: Record<string, number> }
   | { action: 'apply' }
   | { action: 'undo' }
   | { action: 'reset' };

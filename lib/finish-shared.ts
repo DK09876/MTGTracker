@@ -152,13 +152,15 @@ export interface FinishView {
    */
   combos: { mode: 'first' | 'none' | null; owned: number | null; failed: boolean; found: OwnedCombo[]; base: string[] };
   plan: { text: string | null; confirmed: boolean };
-  howMany: { room: number; nonland: number; lands: number };
+  /** lands: to add on a fill to 100; target: lands in the deck when done (mine: the owner's number, else the plan's); have: lands now. */
+  howMany: { room: number; nonland: number; lands: number; target: number; mine: boolean; have: string; plan: [number, number] };
   run: {
     id: string; at: string; round: number; model: string; want: number; full: boolean; short: number; reply: string;
     items: FinishItem[];
     /** Per group: the search that fed it, and its cards not already listed (for "+"). */
     more: Record<string, { q: string; n: number; cards: Array<{ name: string; manaCost: string }> }>;
-    lands: { names: string[]; basics: Array<{ name: string; n: number }>; total: number; why: string } | null;
+    /** A fill to 100: the app's lands, with the owner's changes. total: what goes in; suggested: what the app chose; target: lands in the deck when done. */
+    lands: { duals: Array<{ name: string; on: boolean }>; basics: Array<{ name: string; n: number; suggested: number }>; total: number; suggested: number; target: number; why: string } | null;
     /** Picks Claude named that the app dropped (not on offer or not searched), for the record. */
     dropped: number;
   } | null;
