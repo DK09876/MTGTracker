@@ -901,7 +901,7 @@ export type FinishAction =
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: FinishView['choices'] }
   | { action: 'take'; name: string; group: string }
-  | { action: 'lands'; skip?: string[]; basics?: Record<string, number>; add?: string }
+  | { action: 'lands'; skip?: string[]; basics?: Record<string, number>; add?: string; room?: number }
   | { action: 'unskip'; name: string }
   | { action: 'apply' }
   | { action: 'undo' }

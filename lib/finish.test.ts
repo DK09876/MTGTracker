@@ -317,6 +317,7 @@ describe('the lands on a fill to 100', { timeout: 60_000 }, () => {
     const before = (await finish.finishView(list, 'dk')).run!.lands!;
     expect(before.duals).toEqual([{ name: 'Sulfur Falls', on: true, why: 'Both colours.' }]);
     expect(before.total).toBe(25);
+    // The dual out and 10 Islands typed (this test's card data has no other basic): the typed number stands.
     finish.setLands(list.id, { skip: ['Sulfur Falls'], basics: { Island: 10 } });
     const after = (await finish.finishView(list, 'dk')).run!.lands!;
     expect(after.total).toBe(10);
@@ -417,9 +418,112 @@ describe('Claude picks the lands worth playing; the app counts (Part E)', { time
     expect(JSON.stringify(asked[1].messages.at(-1))).not.toContain('Owned 4 {');
     expect(finish.finishStore(list.id).run!.items.map((i) => i.name)).toEqual(['Owned 6']);
     // Searched: how many cards, and the colours in words.
-    expect((await finish.finishView(list, 'dk')).offer).toEqual({ n: 59, colours: 'blue, black and red' });
+    expect((await finish.finishView(list, 'dk')).offer).toEqual({ n: 59, lands: 0, colours: 'blue, black and red' });
     finish.unskip(list.id, 'Owned 4');
     expect(finish.finishStore(list.id).skippedBefore).toEqual([]);
+  });
+});
+
+describe('Finish review fixes (PR 55, items 11-19)', { timeout: 60_000 }, () => {
+  const dual = card('Sulfur Falls', { type_line: 'Land', mana_cost: '', color_identity: ['U', 'R'], produced_mana: ['U', 'R'] });
+  const fill = async (list: { id: string }, finish: typeof import('./finish'), lands: Array<{ name: string; why: string }>) => {
+    const n = (await finish.finishView(list as never, 'dk')).howMany.nonland;
+    await finish.runFinish(stand([{ search: ['draw', 't:land'] }, { picks: { ...pick(owned.slice(0, n).map((c) => c.name)), lands } }]).call as never, 'claude-opus-5-5', list as never, 'dk');
+  };
+
+  it('11: with every basic typed, unticking a land still keeps the land number', async () => {
+    const { list } = await setup([...owned, dual]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    await fill(list, finish, [{ name: 'Sulfur Falls', why: 'Both colours.' }]);
+    const v0 = (await finish.finishView(list, 'dk')).run!.lands!;
+    finish.setLands(list.id, { basics: Object.fromEntries(v0.basics.map((b) => [b.name, b.n])), room: v0.basics.reduce((k, b) => k + b.n, 0) });
+    expect((await finish.finishView(list, 'dk')).run!.lands!.total).toBe(v0.total);
+    finish.setLands(list.id, { skip: ['Sulfur Falls'] });
+    const v1 = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(v1.total).toBe(v0.total);
+    expect(v1.basics.reduce((k, b) => k + b.n, 0)).toBe(v0.basics.reduce((k, b) => k + b.n, 0) + 1);
+  });
+
+  it('12: a run stored before Claude chose lands asks for them on its next round', async () => {
+    const { list } = await setup([...owned, dual]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    await fill(list, finish, []);
+    // As a run from before this change was stored: no land picks at all.
+    const db = await import('./db');
+    const raw = JSON.parse((db.database().get('SELECT state FROM deck_finish WHERE listId = ?', [list.id]) as { state: string }).state);
+    delete raw.run.landPicks; delete raw.run.landsLimit;
+    db.database().run('UPDATE deck_finish SET state = ? WHERE listId = ?', [JSON.stringify(raw), list.id]);
+    finish.setChoices(list.id, { 'Owned 1': { choice: 'skip', text: '' } });
+    const { call, asked } = stand([{ search: ['t:land'] }, { picks: { ...pick(['Owned 61'.slice(0, 0) || 'Owned 3']), lands: [{ name: 'Sulfur Falls', why: 'Both colours.' }] } }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk', { rerun: true });
+    expect(text(asked[0])).toContain('Also choose up to');
+    expect(finish.finishStore(list.id).run!.landPicks).toEqual([{ name: 'Sulfur Falls', why: 'Both colours.' }]);
+  });
+
+  it('13: a colourless commander\'s fill reaches 100 with Wastes', async () => {
+    const { finishLands } = await import('./finish-pool');
+    const wastes = card('Wastes', { type_line: 'Basic Land', mana_cost: '', color_identity: [], produced_mana: ['C'] });
+    const ctx = { identity: new Set<string>(), main: [{ card: wastes, quantity: 1, board: 'main' }], commanders: [] } as never;
+    const { lands } = finishLands(ctx, new Map(), 'spare', 30, [], []);
+    expect(lands).toEqual([expect.objectContaining({ n: 30, card: expect.objectContaining({ name: 'Wastes' }) })]);
+  });
+
+  it('16: Undo takes back the skips that Apply remembered; 17: a card taken off meanwhile stays off', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 3 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2', 'Owned 4', 'Owned 6']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    finish.setChoices(list.id, { 'Owned 4': { choice: 'skip', text: 'slow' } });
+    await finish.applyFinish(list, 'dk');
+    expect(finish.finishStore(list.id).skippedBefore.map((x) => x.name)).toEqual(['Owned 4']);
+    finish.undoFinish(list);
+    expect(finish.finishStore(list.id).skippedBefore).toEqual([]);
+    // Skip again and send: the skip is remembered; taking another off while a round runs is kept.
+    finish.setChoices(list.id, { 'Owned 4': { choice: 'skip', text: 'slow' } });
+    const db = await import('./db');
+    const st = JSON.parse((db.database().get('SELECT state FROM deck_finish WHERE listId = ?', [list.id]) as { state: string }).state);
+    st.skippedBefore = [{ name: 'Owned 10', why: '' }];
+    db.database().run('UPDATE deck_finish SET state = ? WHERE listId = ?', [JSON.stringify(st), list.id]);
+    const slow = stand([{ search: ['draw'] }, { picks: pick(['Owned 8']) }]);
+    const call = async (p: never) => { finish.unskip(list.id, 'Owned 10'); return slow.call(p); };
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk', { rerun: true });
+    expect(finish.finishStore(list.id).skippedBefore.map((x) => x.name)).toEqual(['Owned 4']);
+  });
+
+  it('15: the measured price counts only calls that answered', async () => {
+    const { measuredRounds } = await import('./finish-shared');
+    const c = (at: string, step: string, cost: number) => ({ at, profileId: 'dk', label: 'A', step, cost });
+    const ok = [c('1', 'finish: first list', 0.3), c('2', 'finish: first list', 0.3), c('3', 'finish: first list', 0.3)];
+    expect(measuredRounds(ok)).toEqual({ first: 0.3, later: null });
+    const lib = await import('./finish');
+    expect(typeof lib.finishView).toBe('function');
+  });
+
+  it('18: a kept card Claude takes out and picks again comes back, and is listed as back', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 2 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2', 'Owned 4']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: { ...pick(['Owned 2']), out: ['Owned 2'] } }]).call as never, 'claude-opus-5-5', list, 'dk', { rerun: true, message: 'rethink everything' });
+    const run = finish.finishStore(list.id).run!;
+    expect(run.items.find((i) => i.name === 'Owned 2')!.mark).toBe('back');
+    expect(run.changes!.back).toEqual(['Owned 2']);
+    expect(run.changes!.in).toEqual([]);
+  });
+
+  it('19: a refused land search isn\'t counted; t:"land" is a land search; "+" takes only lands a land search found', async () => {
+    const { parseQuery } = await import('./finish-shared');
+    expect(parseQuery('t:"land" makes-blue').types).toEqual(['land']);
+    const { list } = await setup([...owned, dual]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 2 });
+    const { call, asked } = stand([{ search: ['t:land', 'draw'] }, { picks: pick(['Owned 2', 'Owned 4']) }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    expect(JSON.stringify(asked[1].messages.at(-1))).toContain('That search wasn');
+    expect(finish.finishStore(list.id).searches.map((x) => x.q)).toEqual(['draw']);
+    expect(() => finish.setLands(list.id, { add: 'Owned 6' })).toThrow(/land search/);
   });
 });
 

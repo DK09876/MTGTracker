@@ -67,7 +67,8 @@ export interface Query {
 /** A search as Claude writes it: words that must all match, `-word`, `t:<type>`, `mv<=N`, `mv>=N`, `mv=N`. */
 export function parseQuery(q: string): Query {
   const out: Query = { words: [], not: [], types: [], notTypes: [], mv: null, mvMin: null, ignored: [] };
-  for (const w of q.toLowerCase().replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
+  // A quoted filter value is the value: t:"land" is t:land (review 19).
+  for (const w of q.toLowerCase().replace(/(-?[a-z]+):["“”]([^"“”]*)["“”]/g, (_, k: string, v: string) => `${k}:${v.trim().replace(/\s+/g, '-')}`).replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
     const mv = w.match(/^(?:mv|cmc|manavalue)(<=|>=|<|>|=|:)(\d+)$/);
     const text = w.match(/^(?:o|oracle|text|name|n):(.+)$/);
     const type = w.match(/^(?:t|type):(.+)$/);
@@ -230,7 +231,8 @@ export interface FinishView {
   /** Cards skipped on this deck in earlier Finishes, with the owner's reason: never offered again here. */
   skippedBefore: Array<{ name: string; why: string }>;
   /** The cards Claude searches this round: how many, and the deck's colours in words. */
-  offer: { n: number; colours: string } | null;
+  /** n: the spells on offer; lands: the owner's lands searched apart for a fill to 100 (0 when not asked). */
+  offer: { n: number; lands: number; colours: string } | null;
   turns: FinishTurn[];
   /** This round's searches, as they run and once done. */
   searches: FinishSearch[];

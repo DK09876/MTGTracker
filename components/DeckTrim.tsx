@@ -12,7 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
-import ListControls, { GroupHead, sortRows, useListView, useShown } from './ListControls';
+import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -175,7 +175,9 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   // Fold, filter and sort (D 13), the same control as Finish's, remembered for this deck in this browser.
   const [lv, setLv] = useListView(`mtg-trim-list:${listId}`);
   const callOf = (i: TrimItem) => { const c = choices[i.name]?.choice; return c ?? (i.tier === 'cut' ? 'cut' : 'keep'); };
-  const shown = useShown(items, (i) => i.name, (i) => lv.filter === 'all' || (lv.filter === 'new' ? view?.run?.marks?.[i.name] === 'new' : callOf(i) === lv.filter), `${lv.filter}:${view?.run?.at ?? ''}:${items.length}`);
+  const trimPasses = (i: TrimItem) => lv.filter === 'all' || (lv.filter === 'new' ? view?.run?.marks?.[i.name] === 'new' : callOf(i) === lv.filter);
+  const shown = useShown(items, (i) => i.name, trimPasses, `${lv.filter}:${lv.press ?? 0}:${view?.run?.at ?? ''}:${items.length}`);
+  useFilterFallback(view?.run?.at ?? '', lv.filter !== 'all' && !items.some(trimPasses), () => setLv({ filter: 'all' }));
   const marked = useMemo(() => newMarks(items, choices, view?.carried ?? {}).length, [items, choices, view?.carried]);
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading the deck…</p>;

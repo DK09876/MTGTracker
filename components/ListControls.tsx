@@ -14,7 +14,7 @@ import { useCallback, useState } from 'react';
 export type ListSort = 'claude' | 'choice' | 'mv' | 'name';
 export const SORTS: Array<[ListSort, string]> = [['claude', 'Claude’s order'], ['choice', 'By choice'], ['mv', 'By mana value'], ['name', 'By name']];
 
-export interface ListView { filter: string; sort: ListSort; folded: string[] }
+export interface ListView { filter: string; sort: ListSort; folded: string[]; /** Bumped on every filter press (not kept): pressing the same filter again re-applies it. */ press?: number }
 
 const read = (key: string, fallback: ListView): ListView => {
   try { const v = JSON.parse(localStorage.getItem(key) ?? 'null') as Partial<ListView> | null; return v ? { ...fallback, ...v } : fallback; } catch { return fallback; }
@@ -24,8 +24,24 @@ const write = (key: string, v: ListView) => { try { localStorage.setItem(key, JS
 /** The list's view, remembered per deck in this browser. */
 export function useListView(key: string): [ListView, (change: Partial<ListView>) => void] {
   const [view, setView] = useState<ListView>(() => (typeof window === 'undefined' ? { filter: 'all', sort: 'claude', folded: [] } : read(key, { filter: 'all', sort: 'claude', folded: [] })));
-  const set = useCallback((change: Partial<ListView>) => setView((v) => { const next = { ...v, ...change }; write(key, next); return next; }), [key]);
+  const set = useCallback((change: Partial<ListView>) => setView((v) => {
+    const next = { ...v, ...change, ...('filter' in change ? { press: (v.press ?? 0) + 1 } : {}) };
+    write(key, { filter: next.filter, sort: next.sort, folded: next.folded });
+    return next;
+  }), [key]);
   return [view, set];
+}
+
+/**
+ * A remembered filter that has no rows on a new list falls back to All (review 14): checked once per list
+ * (`list`), not on every change, so a filter the owner emptied themselves stays until they press another.
+ */
+export function useFilterFallback(list: string, empty: boolean, toAll: () => void): void {
+  const [checked, setChecked] = useState<string | null>(null);
+  if (list && checked !== list) {
+    setChecked(list);
+    if (empty) toAll();
+  }
 }
 
 /**

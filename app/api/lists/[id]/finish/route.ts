@@ -81,7 +81,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         setChoices(id, b.choices);
         break;
       case 'lands':
-        setLands(id, { skip: b.skip, basics: b.basics, add: b.add });
+        setLands(id, { skip: b.skip, basics: b.basics, add: b.add, room: b.room });
         break;
       case 'unskip':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });

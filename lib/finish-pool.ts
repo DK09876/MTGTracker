@@ -233,8 +233,13 @@ export function dualCandidates(ctx: Context, held: Map<string, Held>, copies: Co
  * its share is returned for the Lands box to say.
  */
 export function finishLands(ctx: Context, held: Map<string, Held>, copies: Copies, n: number, pickCosts: string[], nonbasics?: LandPick[]): { lands: LandPick[]; short: Array<{ colour: string; have: number; want: number }> } {
-  if (n <= 0 || !ctx.identity.size) return { lands: [], short: [] };
+  if (n <= 0) return { lands: [], short: [] };
   const nb = (nonbasics ?? dualCandidates(ctx, held, copies, n)).slice(0, n);
+  // A colourless commander (review 13): the rest are Wastes, so the fill still reaches 100.
+  if (!ctx.identity.size) {
+    const wastes = ctx.main.find((x) => x.card.name === 'Wastes')?.card ?? localCards(['Wastes']).find((c) => c.name === 'Wastes');
+    return { lands: [...nb, ...(wastes && n > nb.length ? [{ card: wastes, n: n - nb.length, src: 'spare' as const }] : [])], short: [] };
+  }
   const { split, short } = basicsFor(ctx, n, nb.map((l) => l.card), pickCosts);
   const out: LandPick[] = [...nb];
   const basics = localCards(Object.keys(split).map((c) => BASIC[c]));

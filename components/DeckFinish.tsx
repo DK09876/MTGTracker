@@ -18,7 +18,7 @@ import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import CardName from './CardName';
-import ListControls, { GroupHead, sortRows, useListView, useShown } from './ListControls';
+import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
 import SymbolText from './SymbolText';
@@ -139,7 +139,8 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     const c = choices[i.name]?.choice ?? 'add';
     return lv.filter === 'all' ? true : lv.filter === 'changed' ? i.mark === 'new' || i.mark === 'back' : lv.filter === 'other' ? i.src === 'other' : c === lv.filter;
   };
-  const shown = useShown(items, (i) => i.name, passes, `${lv.filter}:${view?.run?.id ?? ''}`);
+  const shown = useShown(items, (i) => i.name, passes, `${lv.filter}:${lv.press ?? 0}:${view?.run?.id ?? ''}:${items.length}`);
+  useFilterFallback(view?.run?.id ?? '', lv.filter !== 'all' && !items.some(passes), () => setLv({ filter: 'all' }));
   const open = (cardId: string) => { if (onCard) void api.finishCard(listId, cardId).then(onCard).catch(() => {}); };
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading your cards…</p>;
@@ -252,7 +253,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
 
   // --- the searches, as they run --------------------------------------------------------------
   // Every search is already limited to what may go in: say so, with the number and the deck's colours (D 10).
-  const offerLine = view.offer && <p className="text-[13px] text-[var(--muted)]" data-finish-offer>Searching the {view.offer.n.toLocaleString()} cards you own that can go in this deck ({view.offer.colours}, Commander-legal).</p>;
+  const offerLine = view.offer && <p className="text-[13px] text-[var(--muted)]" data-finish-offer>Searching the {view.offer.n.toLocaleString()} cards you own that can go in this deck{view.offer.lands ? `, and ${view.offer.lands.toLocaleString()} of your lands for the lands` : ''} ({view.offer.colours}, Commander-legal).</p>;
   // Cards skipped on this deck before (D 14): never offered again here, until taken off the list.
   const skippedBefore = view.skippedBefore.length > 0 && (
     <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]" data-finish-skipped-before>
@@ -261,7 +262,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         {view.skippedBefore.map((x) => (
           <li key={x.name} className="flex flex-wrap items-baseline gap-x-2">
             <b>{x.name}</b>{x.why && <span className="text-[#e2b93b]">“{x.why}”</span>}
-            <button type="button" disabled={busy} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
+            <button type="button" disabled={busy || running} title={running ? 'After this round' : undefined} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
           </li>
         ))}
         <li className="text-xs text-[var(--faint)]">Your reasons go with every request on this deck, so Claude applies them to similar cards.</li>
@@ -467,8 +468,11 @@ const COLOUR: Record<string, string> = { W: 'White', U: 'Blue', B: 'Black', R: '
  * hover, "+" for another land its searches found; then the basics the app adds for the rest, by the colour
  * symbols. Unticking a land gives its slot back to a basic. The total and the deck size follow.
  */
-function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonNullable<FinishView['run']>['lands']>; size: number; busy: boolean; onLands: (change: { skip?: string[]; basics?: Record<string, number>; add?: string }) => void; /** A typed count, saved without locking the page. */ onSave: (change: { basics?: Record<string, number> }) => void }) {
+function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonNullable<FinishView['run']>['lands']>; size: number; busy: boolean; onLands: (change: { skip?: string[]; basics?: Record<string, number>; add?: string }) => void; /** A typed count, saved without locking the page. */ onSave: (change: { basics?: Record<string, number>; room?: number }) => void }) {
   const skip = lands.duals.filter((d) => !d.on).map((d) => d.name);
+  // The reason of the land last pointed at, focused or tapped: a line that is always there, so nothing moves.
+  const [why, setWhy] = useState<{ name: string; why: string } | null>(null);
+  const tell = (d: { name: string; why?: string }) => setWhy(d.why ? { name: d.name, why: d.why } : null);
   const end = size + lands.total;
   const on = lands.duals.filter((d) => d.on).length;
   return (
@@ -481,12 +485,15 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           {lands.byClaude && !lands.duals.length && <span className="text-[13px] text-[var(--muted)]">None: Claude found none worth a basic’s slot.</span>}
           <div className="flex flex-wrap gap-1.5">
             {lands.duals.map((d) => (
-              <button key={d.name} type="button" aria-pressed={d.on} disabled={busy} title={d.why} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
+              <button key={d.name} type="button" aria-pressed={d.on} disabled={busy} title={d.why} onMouseEnter={() => tell(d)} onFocus={() => tell(d)} onClick={() => { tell(d); onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) }); }} data-land={d.name}
                 className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] disabled:opacity-60 ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
                 <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}{d.deck && <span className="text-[11px] text-amber-300">in {d.deck}</span>}
               </button>
             ))}
           </div>
+          {lands.byClaude && lands.duals.length > 0 && (
+            <p className="min-h-5 text-[13px] text-[var(--muted)]" data-land-why>{why ? <><b className="text-[var(--foreground)]">{why.name}:</b> {why.why}</> : 'Point at or tap a land to read why Claude chose it.'}</p>
+          )}
           {lands.more.length > 0 && (
             <details className="rounded-xl border border-[var(--border)] bg-[var(--background)]" data-finish-more-lands>
               <summary className="cursor-pointer px-3 py-2 text-[13px]">More of your lands the searches found · {lands.more.length}</summary>
@@ -506,7 +513,7 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           {lands.basics.map((b) => (
             <label key={b.name} className="flex items-center gap-2 text-sm">
               <input type="number" min={0} max={99} inputMode="numeric" defaultValue={b.n} key={`${b.name}:${b.n}`} disabled={busy} aria-label={`How many ${b.name}`}
-                onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== b.n) onSave({ basics: { [b.name]: n } }); }}
+                onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== b.n) onSave({ basics: { [b.name]: n }, room: lands.basics.reduce((k, x) => k + x.n, 0) }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                 className={`${C.input} w-16 text-center font-semibold tabular-nums`} />
               {b.name}{b.n !== b.suggested && <span className="text-xs text-[var(--faint)]">(app: {b.suggested})</span>}
@@ -514,7 +521,7 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           ))}
         </div>
       </div>
-      {lands.short.length > 0 && <p className="text-[13px] text-amber-300" data-finish-lands-short>{lands.short.map((x) => `${COLOUR[x.colour] ?? x.colour}: ${x.have} sources, ${x.want} wanted for its share`).join('; ')}. A land that makes no coloured mana took a basic’s place; untick one or add a basic if that matters.</p>}
+      {lands.short.length > 0 && lands.basics.length > 1 && <p className="text-[13px] text-amber-300" data-finish-lands-short>Fewer {lands.short.map((x) => `${(COLOUR[x.colour] ?? x.colour).toLowerCase()} sources (${x.have}) than your cards’ ${(COLOUR[x.colour] ?? x.colour).toLowerCase()} symbols call for (${x.want})`).join(', and fewer ')}. Untick a land that makes no colour, or add a basic, if that matters.</p>}
       <p className={`text-[13px] ${end === 100 ? 'text-[var(--muted)]' : 'text-amber-300'}`} data-finish-lands-total>{lands.total} lands take the deck to {end}{end === 100 ? '.' : end > 100 ? `, ${end - 100} over.` : `, ${100 - end} short.`}</p>
     </div>
   );
@@ -529,7 +536,7 @@ function Changes({ changes, items, onShow }: { changes: NonNullable<NonNullable<
   const groupOf = (n: string) => { const i = items.find((x) => x.name === n); return i ? groupTitle(groupKey(i)) : ''; };
   if (!changes.out.length && !changes.in.length && !changes.back.length) return <p className={`${CARD} text-[13px] text-[var(--muted)]`} data-finish-changes>Nothing changed in round {changes.round}: the list is the one you sent.</p>;
   return (
-    <div className={`${CARD} flex flex-col gap-1.5 text-[13px]`} data-finish-changes>
+    <div className={`${CARD} flex scroll-mt-48 flex-col gap-1.5 text-[13px]`} data-finish-changes>
       <h4 className={H3}>What changed in round {changes.round}</h4>
       {changes.out.length > 0 && <p><b className="text-[#f0714f]">Out · {changes.out.length}:</b> <span className="text-[var(--muted)]">{changes.out.map((x, k) => <span key={x.name}>{k ? '; ' : ''}{x.name} ({BECAUSE[x.because]})</span>)}</span></p>}
       {changes.in.length > 0 && <p><b className="text-[#c4a6f5]">In · {changes.in.length}:</b> <span className="text-[var(--muted)]">{list(changes.in.map((x) => <span key={x.name}>{link(x.name)} <span className="text-[var(--faint)]">({groupOf(x.name)})</span></span>))}</span></p>}
@@ -558,8 +565,9 @@ function Row({ item, state, text, name, onSet, onText }: {
   const unsure = state === 'add' && soundsUnsure(text);
   const off = state === 'skip' ? 'line-through opacity-50' : '';
   return (
-    <div className="@container border-t border-[var(--border)] py-2.5" data-finish-row={item.name} data-state={state}>
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 @[66rem]:grid-cols-[auto_17rem_minmax(0,1fr)_15rem]">
+    <div className="@container scroll-mt-48 border-t border-[var(--border)] py-2.5" data-finish-row={item.name} data-state={state}>
+      {/* Narrow: four lines. Middle (a laptop): the buttons and the name, then Claude's reason beside yours. Wide: one line. */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 @[44rem]:grid-cols-[auto_minmax(0,1fr)_minmax(0,15rem)] @[66rem]:grid-cols-[auto_17rem_minmax(0,1fr)_15rem]">
         <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">
           {(['add', 'ask', 'skip'] as const).map((v) => (
             <button key={v} type="button" aria-pressed={state === v} onClick={() => onSet(v)} aria-label={`${LABEL[v]} ${item.name}`}
@@ -567,13 +575,13 @@ function Row({ item, state, text, name, onSet, onText }: {
               className={`min-h-10 min-w-[3.6rem] px-3 text-sm font-bold ${state === v ? LIT[v] : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>{LABEL[v]}</button>
           ))}
         </span>
-        <span className="order-first col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @[66rem]:order-none @[66rem]:col-span-1" data-col="name">
+        <span className="order-first col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @[44rem]:order-none @[44rem]:col-span-2 @[66rem]:col-span-1" data-col="name">
           <span className={`min-w-0 break-words ${off}`}>{name}</span>
           {item.card.manaCost && <ManaCost cost={item.card.manaCost} size={13} />}
           {chip}{mark}
         </span>
-        <span className={`col-span-2 min-w-0 text-[13px] @[66rem]:col-span-1 ${item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'} ${off}`} data-col="why"><span className="font-semibold text-[#c3a6e6]">✦</span> <SymbolText text={item.why} /></span>
-        <span className="relative col-span-2 min-w-0 @[66rem]:col-span-1">
+        <span className={`col-span-2 min-w-0 text-[13px] @[44rem]:col-span-2 @[66rem]:col-span-1 ${item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'} ${off}`} data-col="why"><span className="font-semibold text-[#c3a6e6]">✦</span> <SymbolText text={item.why} /></span>
+        <span className="relative col-span-2 min-w-0 @[44rem]:col-span-1">
         <input value={text} onChange={(e) => onText(e.target.value)} maxLength={300} data-col="reason" title={text.trim() || undefined}
           onBlur={(e) => { e.currentTarget.scrollLeft = 0; }} placeholder={HINT[state]} aria-label={`Your reason for ${item.name}`}
           className={`min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] ${unsure ? 'pr-32' : ''} ${state === 'add' ? 'placeholder:text-[var(--faint)]' : 'placeholder:text-[#e2b93b]'}`} />
