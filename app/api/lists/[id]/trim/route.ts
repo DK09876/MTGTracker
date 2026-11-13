@@ -13,6 +13,7 @@
  *       marks made since the last list and the owner's message
  *   choices {choices}     the owner's choices and reasons, replaced whole; answers
  *       with the view so the numbers follow
+ *   never {name, on}      mark a card never cut from its opened card, or take it off
  *   apply {cutsTo?, keepNotes?}  cut the chosen cards, after a snapshot; the
  *       session lines ticked "Keep for next time" go to the deck's notes
  *   undo                  put back what the last apply moved
@@ -26,7 +27,7 @@ import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { hasBoard } from '@/lib/sections';
-import { applyTrim, resetTrim, runTrim, setApproach, setChoices, trimView, undoTrim, writeApproach } from '@/lib/trim';
+import { applyTrim, resetTrim, runTrim, setApproach, setChoices, setNeverCut, trimView, undoTrim, writeApproach } from '@/lib/trim';
 import { TRIM_MODELS, type TrimModel } from '@/lib/trim-shared';
 import type { Board } from '@/lib/decklist';
 
@@ -73,6 +74,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     case 'choices':
       setChoices(id, b.choices);
+      break;
+    case 'never':
+      if (typeof b.name === 'string') setNeverCut(id, b.name, b.on !== false);
       break;
     case 'apply': {
       const cutsTo = typeof b.cutsTo === 'string' && b.cutsTo !== 'main' && hasBoard(id, b.cutsTo) ? b.cutsTo as Board : undefined;

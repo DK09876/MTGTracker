@@ -35,8 +35,8 @@ import { ModelError, type JsonModel } from './ai';
 import { guardCuts } from './cut-guard';
 import { cardsInList, database, type List } from './db';
 import { deckHash } from './deck-hash';
-import { changePlan } from './deck-plan';
-import { setKeep } from './deck-roles';
+import { changePlan, planFor } from './deck-plan';
+import { keeps, setKeep } from './deck-roles';
 import { latestJob } from './jobs';
 import { planContext } from './plan-context';
 import { owner as planOwner } from './plan-help';
@@ -172,7 +172,8 @@ export async function writeApproach(model: JsonModel, list: List, profileId: str
   const bullets = ((answer.data as { bullets?: unknown })?.bullets as unknown[] | undefined ?? []).filter((b): b is string => typeof b === 'string' && !!b.trim()).slice(0, 6);
   if (!bullets.length) throw new ModelError('The approach came back empty. Nothing was saved; try again, or write your own.');
   const added = bullets.map((b) => `- ${b.trim().replace(/^[-•]\s*/, '').slice(0, 400)}`).join('\n');
-  const approach: TrimApproach = own ? { text: `${own}\n${added}`, by: 'both', at: now() } : { text: added, by: 'claude', at: now() };
+  // The owner's lines and Claude's bullets stay apart: only the owner's are their words in the session and for notes.
+  const approach: TrimApproach = own ? { text: `${own}\n${added}`, by: 'both', own, at: now() } : { text: added, by: 'claude', own: '', at: now() };
   update(list.id, (x) => { x.approach = approach; });
   quietly(() => logConversation(profileId, list.id, 'trim', 'approach_shown', approach.text, PROMPT_VERSIONS.trimApproach));
   return approach;
@@ -217,7 +218,7 @@ On every list after the first:
 How to rank:
 - Use your own judgement: what the commander and the owner want, the deck's plan and its combos, the curve, and the jobs every deck needs.
 - Follow what the owner said matters for these cuts. The owner's own words (that, their notes, their reasons and their messages) outrank your reading of the deck.
-- The owner's earlier decisions stand. Never list a card they chose to keep. Where they said why, apply the same reasoning to similar cards.
+- The owner's earlier decisions stand. Don't list a card they kept, unless their latest message asks to cut it: then list it. Where they said why, apply the same reasoning to similar cards.
 - Never list a commander or a card marked never cut. List a land only when the task says lands may be cut.
 - A combo piece or an engine goes only with a clear reason, said in its "why". Say what breaks.
 - The numbers are facts the code worked out, not judgements; many good decks sit outside the usual ranges on purpose.
@@ -254,11 +255,13 @@ function saidLines(s: TrimStore, main: Set<string>): string[] {
   const line = ([n, v]: [string, Said]) => `- ${n}${reasonOf(v) ? ` ("${reasonOf(v)}")` : ''}`;
   return [
     '', '## What the owner decided on earlier cut lists for this deck',
-    ...(kept.length ? ['Kept, not to be listed again:', ...kept.slice(-60).map(line)] : []),
+    ...(kept.length ? ['Kept so far (the owner can take one back):', ...kept.slice(-60).map(line)] : []),
     ...(cut.length ? ['Cut:', ...cut.map(line)] : []),
   ];
 }
 
+/** Names are joined with "; " for the model: many card names have commas in them. */
+const NAMES = '; ';
 const quote = (t: string) => `"${t.replace(/\s+/g, ' ').trim()}"`;
 
 /** How many rounds keep their card lists in the session; older rounds keep only the words. */
@@ -269,7 +272,7 @@ function ownerLine(t: Extract<TrimTurn, { kind: 'owner-reply' }>): string {
   const parts = [
     ...(t.approach !== undefined ? [`changed what matters for these cuts to: ${t.approach.trim() ? quote(t.approach) : 'nothing'}`] : []),
     ...t.marks.filter((m) => m.choice === 'keep').map((m) => `kept ${m.name}${why(m)}`),
-    ...(t.marks.some((m) => m.choice === 'cut') ? [`confirmed cuts: ${t.marks.filter((m) => m.choice === 'cut').map((m) => `${m.name}${why(m)}`).join(', ')}`] : []),
+    ...(t.marks.some((m) => m.choice === 'cut') ? [`confirmed cuts: ${t.marks.filter((m) => m.choice === 'cut').map((m) => `${m.name}${why(m)}`).join(NAMES)}`] : []),
     ...(t.message.trim() ? [`said: ${quote(t.message)}`] : []),
   ];
   return parts.length ? parts.join('; ') : 'changed nothing and asked for the list again';
@@ -282,11 +285,14 @@ export function sessionLines(turns: TrimTurn[]): string[] {
   const full = new Set(lists.slice(-FULL_ROUNDS));
   const out = ['', '## This cut session so far'];
   for (const t of turns) {
-    if (t.kind === 'owner-start') out.push(`Owner, at the start: ${t.text.trim() ? quote(t.text) : 'said nothing'}`);
+    if (t.kind === 'owner-start') {
+      out.push(`Owner, at the start: ${t.text.trim() ? quote(t.text) : 'said nothing'}`);
+      if (t.added?.trim()) out.push(`Bullets you added to it before the first list, kept by the owner: ${quote(t.added)}`);
+    }
     else if (t.kind === 'owner-reply') out.push(`Owner: ${ownerLine(t)}`);
     else {
       const words = [...(t.reply.trim() ? [`you said: ${quote(t.reply)}`] : []), ...(t.ask ? [`you asked: ${quote(t.ask)}`] : [])];
-      const cards = full.has(t) ? [`cuts: ${t.cuts.join(', ') || 'none'}`, `closer calls: ${t.maybes.join(', ') || 'none'}`] : ['(its cards are left out here)'];
+      const cards = full.has(t) ? [`cuts: ${t.cuts.join(NAMES) || 'none'}`, `closer calls: ${t.maybes.join(NAMES) || 'none'}`] : ['(its cards are left out here)'];
       out.push(`You, list ${t.round}: ${[...cards, ...words].join(' | ')}`);
     }
   }
@@ -313,13 +319,13 @@ export async function trimMessage(list: List, profileId: string, s: TrimStore = 
     '',
     // The block every AI step reads: the confirmed plan with who set each part, never-cut, every category with who added it, and the rules.
     await planContext(list),
-    ...(never.length ? ['', `## Never cut\n${never.map(([n, w]) => `${n} (${w})`).join(', ')}`] : []),
+    ...(never.length ? ['', `## Never cut\n${never.map(([n, w]) => `${n} (${w})`).join(NAMES)}`] : []),
     // The first list reads the box as it is; later ones read it as the session's first line.
     ...(!session.length && s.approach?.text.trim() ? ['', `## What matters for these cuts (${APPROACH_BY[s.approach.by]})`, '"""', s.approach.text.trim(), '"""'] : []),
     ...saidLines(s, main),
     ...session,
     ...(out.length ? ['', `## Cards that came out of this deck before\n${out.slice(0, 60).map((c) => `${c.card.name}${store.cutReasons[c.card.name]?.why ? ` (${store.cutReasons[c.card.name].why.slice(0, 80)})` : ''}`).join('; ')}`] : []),
-    ...(ctx.pool.length ? ['', `## Waiting in the owner's maybeboard\n${ctx.pool.slice(0, 60).map((c) => c.card.name).join(', ')}`] : []),
+    ...(ctx.pool.length ? ['', `## Waiting in the owner's maybeboard\n${ctx.pool.slice(0, 60).map((c) => c.card.name).join(NAMES)}`] : []),
     '',
     '## The task',
     `The deck has ${ctx.size} cards including the commander${ctx.commanders.length > 1 ? 's' : ''}; a Commander deck is exactly 100. It is ${over} over.`,
@@ -343,8 +349,12 @@ export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: numbe
   const rows = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
     .map((x) => ({ card: byFront.get(front(String(x.name ?? ''))), why: String(x.why ?? '').trim().slice(0, 400), with: (Array.isArray(x.with) ? x.with : []).map((w) => byFront.get(front(String(w)))?.name).filter((w): w is string => !!w).slice(0, 6) }))
     .filter((x): x is { card: ScryfallCard; why: string; with: string[] } => !!x.card);
-  // The owner's settled choices on the list before: kept cards never come back, cuts stay cuts.
-  const keptByOwner = new Set([...Object.entries(s.choices).filter(([, c]) => c.choice === 'keep').map(([n]) => n), ...Object.entries(s.said).filter(([, v]) => v.choice === 'keep').map(([n]) => n)]);
+  // The owner's settled choices: kept cards don't come back, cuts stay cuts. A kept card comes back
+  // when the owner took the keep back (pressed Cut on it), or their latest message names it.
+  const back = takenBack(s);
+  const cutNow = new Set(Object.entries(s.choices).filter(([, c]) => c.choice === 'cut').map(([n]) => n));
+  const keptByOwner = new Set([...Object.entries(s.choices).filter(([, c]) => c.choice === 'keep').map(([n]) => n), ...Object.entries(s.said).filter(([, v]) => v.choice === 'keep').map(([n]) => n)]
+    .filter((n) => !back.has(n) && !cutNow.has(n)));
   const fixed = Object.entries(s.choices).filter(([n, c]) => c.choice === 'cut' && byFront.has(front(n))).map(([n]) => n);
   const ranked = rows(d.ranked).filter((r) => !keptByOwner.has(r.card.name));
   const guarded = guardCuts(ranked.map((r) => ({ name: r.card.name, land: isLand(r.card), row: r })), { count: null, lands: { have: ctx.plan.landNumber.have, floor: landFloor(ctx) }, never: ctx.protectedWhy }).kept.map((k) => k.row);
@@ -357,22 +367,47 @@ export function parseTrim(data: unknown, ctx: Context, s: TrimStore, over: numbe
   const listed = new Set(all.map((r) => r.card.name));
   const items: StoredItem[] = all.map((r, i) => ({ name: r.card.name, tier: i < over ? 'cut' : 'maybe', why: r.why, with: r.with }));
   for (const k of rows(d.keep).filter((r) => !listed.has(r.card.name) && !ctx.protectedWhy.has(r.card.name) && !keptByOwner.has(r.card.name)).slice(0, 5)) items.push({ name: k.card.name, tier: 'kept', why: k.why, with: [] });
-  // What the owner kept from the list before stays in view, under its own heading.
-  if (s.run) for (const [n, c] of Object.entries(s.choices)) if (c.choice === 'keep' && byFront.has(front(n)) && oldWhy.has(n)) items.push({ name: n, tier: 'yours', why: oldWhy.get(n)!.why, with: oldWhy.get(n)!.with });
+  // What the owner has kept is not stored with the list: the view lists it under "Kept by you" (listedItems).
   const text = (x: unknown, n: number) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
   return { items, notes: text(d.notes, 800), reply: text(d.reply, 1200), ask: text(d.ask, 400) || null };
 }
 
-/** Fold the choices on the list into what is remembered for the deck, and ★ the pet cards. */
+/**
+ * Kept cards the owner's latest message names: Claude may list them again,
+ * because the owner may be taking the keep back ("actually cut X after all").
+ */
+export function takenBack(s: Pick<TrimStore, 'turns' | 'said' | 'choices'>): Set<string> {
+  const last = [...s.turns].reverse().find((t) => t.kind === 'owner-reply') as Extract<TrimTurn, { kind: 'owner-reply' }> | undefined;
+  const said = last?.message.toLowerCase() ?? '';
+  if (!said) return new Set();
+  const kept = new Set([...Object.entries(s.said).filter(([, v]) => v.choice === 'keep').map(([n]) => n), ...Object.entries(s.choices).filter(([, c]) => c.choice === 'keep').map(([n]) => n)]);
+  return new Set([...kept].filter((n) => said.includes(front(n))));
+}
+
+/**
+ * Every row the owner can mark: the list's own rows, then "Kept by you":
+ * every card kept on this deck that is still in it and not on the list
+ * (this session's keeps fold into `said` at each send), with the owner's
+ * reason in place of Claude's.
+ */
+function listedItems(s: TrimStore, inMain: (name: string) => boolean): StoredItem[] {
+  const listed = (s.run?.items ?? []).filter((i) => i.tier !== 'yours');
+  const on = new Set(listed.map((i) => i.name));
+  const yours = Object.entries(s.said).filter(([n, v]) => v.choice === 'keep' && !on.has(n) && inMain(n))
+    .map(([n, v]): StoredItem => ({ name: n, tier: 'yours', why: reasonOf(v), with: [] }));
+  return [...listed, ...yours];
+}
+
+/** Fold the choices on the list into what is remembered for the deck. A cut on a kept card takes the keep back. */
 function remember(list: Pick<List, 'id'>, s: TrimStore): void {
   if (!s.run) return;
-  const byName = new Map(s.run.items.map((i) => [i.name, i]));
+  const byName = new Map(listedItems(s, () => true).map((i) => [i.name, i]));
   const main = cardsInList(list.id).filter((c) => c.board === 'main');
   for (const [name, c] of Object.entries(s.choices)) {
     const item = byName.get(name);
     if (!item || !saidSomething(item as TrimItem, c)) continue;
     s.said[name] = { choice: c.choice, chip: c.chip ?? null, text: c.text?.trim().slice(0, 300) ?? '', at: now() };
-    // "Pet card" is the owner saying never cut it: it joins the ★ list, where it can be taken off again.
+    // An old "Pet card" choice still means never cut (the ★ now lives in the opened card).
     if (c.choice === 'keep' && c.chip === 'pet_card') {
       const card = main.find((m) => m.card.name === name)?.card;
       if (card) setKeep(list.id, card.oracle_id ?? card.id, true);
@@ -380,12 +415,12 @@ function remember(list: Pick<List, 'id'>, s: TrimStore): void {
   }
 }
 
-/** The approach text the session last heard: the box at the start, or the last change sent since. */
+/** The box text the session last heard: the box at the start (with any bullets Claude added), or the last change sent since. */
 function lastBoxText(turns: TrimTurn[]): string | null {
   for (let k = turns.length - 1; k >= 0; k--) {
     const t = turns[k];
     if (t.kind === 'owner-reply' && t.approach !== undefined) return t.approach;
-    if (t.kind === 'owner-start') return t.text;
+    if (t.kind === 'owner-start') return `${t.text}\n${t.added ?? ''}`.trim();
   }
   return null;
 }
@@ -403,19 +438,23 @@ export async function runTrim(model: JsonModel, list: List, profileId: string, o
   const at = now();
   const rerun = !!opts.rerun && !!before.run;
   const box = before.approach?.text.trim() ?? '';
+  // Claude's bullets are kept apart from the owner's own lines.
+  const a = before.approach;
+  const ownText = a && (a.by === 'claude' || a.by === 'both') && a.own !== undefined ? a.own.trim() : box;
+  const added = ownText !== box ? box.slice(ownText.length).trim() : '';
   let turns: TrimTurn[];
   let reply: Extract<TrimTurn, { kind: 'owner-reply' }> | null = null;
-  if (!rerun) turns = [{ kind: 'owner-start', text: box, at }];
+  if (!rerun) turns = [{ kind: 'owner-start', text: ownText, ...(added ? { added } : {}), at }];
   else {
     // A list from before sessions were kept: start the session from it.
     turns = before.turns.length ? [...before.turns] : [
-      { kind: 'owner-start', text: box, at: before.run!.at },
+      { kind: 'owner-start', text: ownText, ...(added ? { added } : {}), at: before.run!.at },
       { kind: 'claude-list', round: before.run!.round, cuts: before.run!.items.filter((i) => i.tier === 'cut').map((i) => i.name), maybes: before.run!.items.filter((i) => i.tier === 'maybe').map((i) => i.name), reply: before.run!.reply || before.run!.notes, ask: before.run!.ask ?? null, at: before.run!.at },
     ];
     const heard = lastBoxText(turns);
     reply = {
       kind: 'owner-reply',
-      marks: newMarks(before.run!.items, before.choices, before.carried),
+      marks: newMarks(listedItems(before, () => true), before.choices, before.carried),
       message: (opts.message ?? '').trim().slice(0, 1500),
       ...(heard !== null && heard.trim() !== box ? { approach: box } : {}),
       at,
@@ -447,8 +486,11 @@ export async function runTrim(model: JsonModel, list: List, profileId: string, o
     id: randomUUID(), at: now(), model: answer.model, round, deckHash: deckHash(list.commander, ctx.main), planPassId, over,
     notes: round === 1 ? parsed.notes : '', reply: round === 1 ? '' : parsed.reply || parsed.notes, ask: parsed.ask, items, prev,
   };
+  const back = takenBack(s);
   update(list.id, (x) => {
     if (rerun) remember(list, x);
+    // A kept card the owner's message named and Claude listed again: the keep is taken back.
+    for (const n of back) if (items.some((i) => i.name === n && (i.tier === 'cut' || i.tier === 'maybe')) && x.said[n]?.choice === 'keep') delete x.said[n];
     // Choices on cards still listed as cuts carry over with their reasons; the rest start fresh.
     const stays = new Set(items.filter((i) => i.tier === 'cut').map((i) => i.name));
     x.choices = rerun ? Object.fromEntries(Object.entries(x.choices).filter(([n, c]) => c.choice === 'cut' && stays.has(n))) : {};
@@ -487,17 +529,30 @@ const cleanChoice = (v: unknown): TrimChoice | null => {
   return { choice: c.choice, chip: isTrimChip(c.chip) ? c.chip : null, text: typeof c.text === 'string' ? c.text.slice(0, 300) : '' };
 };
 
-/** The owner's choices on the list, replaced whole (the page sends them as they change). A kept cut is a refusal in the log, with its reason. */
+/**
+ * The owner's choices on the list, replaced whole (the page sends them as
+ * they change). A kept cut is a refusal in the log, with its reason. Cutting
+ * a ★ card takes it off the never-cut list.
+ */
 export function setChoices(listId: string, choices: unknown): void {
   const before = trimStore(listId);
   if (!before.run) return;
-  const items = new Map(before.run.items.map((i) => [i.name, i]));
+  const items = new Map(listedItems(before, () => true).map((i) => [i.name, i]));
   const next: Record<string, TrimChoice> = {};
   for (const [name, v] of Object.entries((choices ?? {}) as Record<string, unknown>).slice(0, 200)) {
     const c = cleanChoice(v);
     if (c && items.has(name)) next[name] = c;
   }
   update(listId, (s) => { s.choices = next; });
+  const fresh = Object.entries(next).filter(([n, c]) => c.choice === 'cut' && before.choices[n]?.choice !== 'cut').map(([n]) => n);
+  if (fresh.length) {
+    const main = cardsInList(listId).filter((c) => c.board === 'main');
+    const starred = keeps(listId);
+    for (const n of fresh) {
+      const card = main.find((m) => m.card.name === n)?.card;
+      if (card && starred.has(card.oracle_id ?? card.id)) setKeep(listId, card.oracle_id ?? card.id, false);
+    }
+  }
   quietly(() => {
     for (const [name, item] of items) {
       const was = before.choices[name];
@@ -507,6 +562,12 @@ export function setChoices(listId: string, choices: unknown): void {
       else if (was?.choice === 'keep' && item.tier === 'cut') clearOutcome(listId, [itemKey(name)]);
     }
   });
+}
+
+/** "Mark never cut" from the opened card: the ★ list, where it can be taken off again. The page sets the row to Keep. */
+export function setNeverCut(listId: string, name: string, on: boolean): void {
+  const card = cardsInList(listId).find((c) => c.board === 'main' && c.card.name === name)?.card;
+  if (card) setKeep(listId, card.oracle_id ?? card.id, on);
 }
 
 /** Start over: the list, the choices and the session go; the box and what was remembered about cards stay. */
@@ -534,7 +595,7 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board, k
   const ctx = await tuneContext(list, profileId);
   const over = Math.max(0, ctx.size - 100);
   const inMain = new Map(ctx.main.map((c) => [c.card.name, c.card]));
-  const items = s.run.items.filter((i) => inMain.has(i.name));
+  const items = listedItems(s, (n) => inMain.has(n)).filter((i) => inMain.has(i.name));
   const names = chosenCuts(items as TrimItem[], s.choices);
   const { kept } = guardCuts(names.map((name) => ({ name, land: isLand(inMain.get(name)!) })), { count: over, lands: { have: ctx.plan.landNumber.have, floor: landFloor(ctx) }, never: ctx.protectedWhy });
   if (!kept.length) throw new Error('Nothing to cut: choose at least one card');
@@ -546,11 +607,14 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board, k
   const reasons = Object.entries(s.choices).filter(([n, c]) => byName.has(n) && (c.chip || c.text?.trim())).length;
   // Only the lines the owner ticked "Keep for next time" become notes on the deck.
   const notes = sessionMessages(s.turns).filter((m) => keepNotes.includes(m.id)).map((m) => m.text.slice(0, 600));
+  const noteIds = (): Set<string> => new Set(planFor(list.id, '', list.commander, []).notes.map((n) => n.id));
+  const had = noteIds();
   if (notes.length) changePlan(list.id, { notes: { add: notes, by: 'owner' } });
+  const added = [...noteIds()].filter((id) => !had.has(id));
   const done: TrimDone = {
     at: now(), cut: moved.cut, size: ctx.size - moved.cut, to: ctx.sections.find((x) => x.id === moved.to)?.name ?? 'Came out', undo: moved.undo,
     logged: { accepted: cut.size, refused: refused.length, left: items.filter((i) => i.tier === 'maybe' && !cut.has(i.name)).length, reasons },
-    notes: notes.length, session: s.turns,
+    notes: notes.length, noteIds: added, session: s.turns,
   };
   quietly(() => {
     for (const name of cut) logOutcome(list.id, [itemKey(name)], 'accepted', { chip: (s.choices[name]?.chip ?? null) as ReasonChip | null, text: s.choices[name]?.text ?? null });
@@ -573,6 +637,8 @@ export function undoTrim(list: List): { moved: number } {
   const s = trimStore(list.id);
   if (!s.done) return { moved: 0 };
   const result = undoApply(list, s.done.undo as UndoMoves);
+  // The notes the apply saved from "Keep for next time" come off again.
+  for (const id of s.done.noteIds ?? []) changePlan(list.id, { notes: { remove: id } });
   update(list.id, (x) => {
     for (const [n, v] of Object.entries(x.said)) if (v.choice === 'cut' && v.at === x.done?.at) delete x.said[n];
     // Undo brings the session back with the cards.
@@ -629,11 +695,14 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
   const planState = po.confirmedAt ? 'current' : 'none';
   const inMain = new Map(ctx.main.filter((c) => c.slot !== 'partner').map((c) => [c.card.name, c.card]));
   const hash = deckHash(list.commander, ctx.main);
-  const items: TrimItem[] = (s.run?.items ?? []).filter((i) => inMain.has(i.name)).map((i) => {
+  const items: TrimItem[] = (s.run ? listedItems(s, (n) => inMain.has(n)) : []).filter((i) => inMain.has(i.name)).map((i) => {
     const card = inMain.get(i.name)!;
     const f = ctx.flags.get(i.name);
     return {
-      key: itemKey(i.name), name: i.name, tier: i.tier, why: i.why, with: i.with,
+      key: itemKey(i.name), name: i.name, tier: i.tier, why: i.tier === 'yours' ? '' : i.why, with: i.with,
+      ...(i.tier === 'yours' ? { mine: i.why } : {}),
+      star: ctx.protectedWhy.get(i.name) === '★ never cut',
+      jobs: ctx.jobs.filter((j) => j.cards.includes(i.name)).map((j) => j.label),
       flag: f?.flag ?? null,
       warn: i.tier === 'kept' ? 'Claude left this in on purpose.' : f?.strong ? `${f.flag}: cutting it may break what the deck is built on.` : null,
       card: { id: card.id, image: imageOf(card, 'normal'), manaCost: manaCostOf(card), typeLine: typeLineOf(card), text: oracleTextOf(card), land: isLand(card) },

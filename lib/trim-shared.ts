@@ -22,7 +22,10 @@ export const TRIM_MODELS: Record<TrimModel, { id: string; label: string; note: s
 /** What a call is expected to cost before any have been made (the flow plan's token estimates), shown as estimates. */
 export const TRIM_COST_GUESS: Record<TrimModel | 'approach', number> = { opus: 0.12, approach: 0.02 };
 
-/** Why the owner keeps a suggested cut, or cuts a card: one tap. */
+/**
+ * The reason chips the page offered until handoff 5. Reasons are typed text
+ * now; old stored chips still print, in the session and to Claude.
+ */
 export const KEEP_CHIPS = ['pet_card', 'part_of_plan', 'already_tried'] as const;
 export const CUT_CHIPS = ['too_slow', 'off_plan', 'have_better'] as const;
 export type TrimChip = (typeof KEEP_CHIPS)[number] | (typeof CUT_CHIPS)[number];
@@ -39,7 +42,7 @@ export interface TrimChoice {
   text?: string;
 }
 
-/** Where a card stands in the list: one of Claude's N cuts, a closer call, a card it left in on purpose, or one the owner kept on the list before. */
+/** Where a card stands in the list: one of Claude's N cuts, a closer call, a card it left in on purpose, or one the owner has kept on this deck (this session or before). */
 export type TrimTier = 'cut' | 'maybe' | 'kept' | 'yours';
 
 export interface TrimItem {
@@ -54,6 +57,12 @@ export interface TrimItem {
   flag: string | null;
   /** What cutting it would break, said plainly: shown once it is chosen. */
   warn: string | null;
+  /** On the owner's never-cut list. */
+  star: boolean;
+  /** The jobs it counts as on this deck, shown in the opened card. */
+  jobs: string[];
+  /** Kept by you: the owner's own reason, shown in place of Claude's. */
+  mine?: string;
   card: { id: string; image: string | null; manaCost: string; typeLine: string; text: string; land: boolean };
 }
 
@@ -61,6 +70,8 @@ export interface TrimApproach {
   text: string;
   /** 'both': the owner's lines first, word for word, then bullets Claude added. */
   by: 'claude' | 'code' | 'owner' | 'both';
+  /** For 'claude' and 'both': the owner's own lines (what the box held before Claude added to it). */
+  own?: string;
   at: string;
 }
 
@@ -73,7 +84,8 @@ export interface TrimMark { name: string; choice: 'cut' | 'keep'; chip: TrimChip
  * (the keeps and cuts marked since the last list, and their message).
  */
 export type TrimTurn =
-  | { kind: 'owner-start'; text: string; at: string }
+  /** `text`: the owner's own words; `added`: bullets Claude added to the box before the first list. */
+  | { kind: 'owner-start'; text: string; added?: string; at: string }
   | { kind: 'claude-list'; round: number; cuts: string[]; maybes: string[]; reply: string; ask: string | null; at: string }
   | { kind: 'owner-reply'; marks: TrimMark[]; message: string; approach?: string; at: string };
 
@@ -86,8 +98,9 @@ export interface TrimJob { kind: 'approach' | 'cuts'; status: 'running' | 'faile
 export interface TrimDone {
   at: string; cut: number; size: number; to: string; undo: unknown;
   logged: { accepted: number; refused: number; left: number; reasons: number };
-  /** Lines from the session saved to the deck's notes. */
+  /** Lines from the session saved to the deck's notes, and their note ids so an undo can take them off. */
   notes: number;
+  noteIds?: string[];
   /** The session as it was, so an undo brings it back. */
   session?: TrimTurn[];
 }

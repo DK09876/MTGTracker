@@ -851,6 +851,7 @@ export type TrimAction =
   | { action: 'approach'; text?: string; draft?: boolean; clear?: boolean; claude?: boolean }
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: Record<string, import('./trim-shared').TrimChoice> }
+  | { action: 'never'; name: string; on: boolean }
   | { action: 'apply'; cutsTo?: string; keepNotes?: string[] }
   | { action: 'undo' }
   | { action: 'reset' };

@@ -62,9 +62,9 @@ export function planText(plan: Plan, roles: RoleCount[] | null, read = false): s
     lines.push(`- Leans on the commander: ${plan.lean} [${by(s.lean?.by)}]`);
     const key = s.key?.v ?? snap.keyCards ?? [];
     // Key cards are not protected from cuts by code; only the commanders and the ★ never-cut list are.
-    if (key.length) lines.push(`- Key cards (built around): ${key.join(', ')}`);
+    if (key.length) lines.push(`- Key cards (built around): ${key.join('; ')}`);
     if (snap.themes?.length) lines.push(`- Themes: ${snap.themes.map((t) => `${t.name} (${t.cards.length} of ${t.size})`).join('; ')}`);
-    if (snap.routes?.length) lines.push(`- Ways to win: ${snap.routes.map((r) => `${r.label}${r.main ? ' (main)' : ''}: ${r.cards.slice(0, 6).join(', ')}${r.needsCommander ? ' - needs the commander' : ''}`).join('; ')}`);
+    if (snap.routes?.length) lines.push(`- Ways to win: ${snap.routes.map((r) => `${r.label}${r.main ? ' (main)' : ''}: ${r.cards.slice(0, 6).join('; ')}${r.needsCommander ? ' - needs the commander' : ''}`).join(' | ')}`);
     const stages = s.stages?.v ?? snap.stages;
     if (stages) lines.push(`- Game plan: early - ${stages.early} Middle - ${stages.mid} Close - ${stages.close}`);
   }

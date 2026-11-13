@@ -20,7 +20,7 @@ import Tip from './Tip';
 import * as api from '@/lib/api';
 import type { DeckSection } from '@/lib/sections-shared';
 import {
-  chosenCuts, CUT_CHIPS, KEEP_CHIPS, newMarks, saidSomething, TRIM_CHIP_LABELS,
+  chosenCuts, newMarks, saidSomething, TRIM_CHIP_LABELS,
   type CutMark, type TrimChoice, type TrimItem, type TrimTier, type TrimTurn, type TrimView,
 } from '@/lib/trim-shared';
 
@@ -46,12 +46,14 @@ const HINTS = ['Keep my ramp', 'Cut from interaction first', 'Keep my mana dorks
 const WEIGH = ['speed', 'card advantage', 'my theme', 'staying on budget', 'interaction'];
 
 const money = (c: { usd: number; measured: boolean }) => `about ${c.usd < 0.995 ? `${Math.max(1, Math.round(c.usd * 100))}¢` : `$${c.usd.toFixed(2)}`}${c.measured ? '' : ', estimated'}`;
-const TIER_TITLE: Record<TrimTier, [string, string]> = {
-  cut: ['Claude’s cuts', 'Already chosen. Tap Cut to keep one.'],
-  maybe: ['Closer calls', 'In order, not chosen. Tap Keep to cut one.'],
-  kept: ['Kept on purpose', 'Cards a quick look would cut, and why Claude left them in. You can still cut them.'],
-  yours: ['Kept by you', 'From the list before. Not suggested again.'],
+const TIER_TITLE: Record<TrimTier, (n: number) => [string, string]> = {
+  cut: (n) => [`Claude would cut these ${n}`, 'Agree by leaving them. Press Keep to overrule one.'],
+  maybe: (n) => [`Closer calls · ${n}`, 'Claude would keep these, most cuttable first. Press Cut to take one.'],
+  kept: (n) => [`Kept on purpose · ${n}`, 'Cards a quick look would cut, and why Claude left them in. Press Cut to take one anyway.'],
+  yours: (n) => [`Kept by you · ${n}`, 'Every card you’ve kept on this deck. Claude doesn’t list them again. Press Cut to take a keep back.'],
 };
+/** What Claude (or, for "Kept by you", the owner before) called each row. */
+const callOf = (t: TrimTier): 'cut' | 'keep' => (t === 'cut' ? 'cut' : 'keep');
 const MARK_LABEL: Record<CutMark, [string, string]> = {
   yours: ['your cut', 'bg-[#2b2410] text-[#e8c558]'],
   same: ['same', 'bg-[#26221c] text-[var(--muted)]'],
@@ -60,7 +62,7 @@ const MARK_LABEL: Record<CutMark, [string, string]> = {
 const reasonWords = (c?: { chip?: string | null; text?: string }) => [c?.chip ? TRIM_CHIP_LABELS[c.chip as keyof typeof TRIM_CHIP_LABELS] ?? c.chip : '', c?.text?.trim() ?? ''].filter(Boolean).join(': ');
 /** A line added after what is typed: a full stop between them unless the text already ends a sentence. */
 const addLine = (box: string, line: string) => { const t = box.trim(); return !t ? line : /[.!?]$/.test(t) ? `${t} ${line}` : `${t}. ${line}`; };
-const names = (xs: string[]) => xs.join(', ');
+const names = (xs: string[]) => xs.join('; ');
 
 export default function DeckTrim({ listId, version, sections, onChanged, onTab }: Props) {
   const [view, setView] = useState<TrimView | null>(null);
@@ -69,7 +71,6 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   const [step, setStep] = useState<Step | null>(null);
   // Your choices as you make them: shown at once, saved a moment later.
   const [choices, setChoices] = useState<Record<string, TrimChoice>>({});
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   const [card, setCard] = useState<Record<string, boolean>>({});
   // The box in step 1, and the message back in step 2.
   const [box, setBox] = useState('');
@@ -81,15 +82,16 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   const approachAt = useRef<string | null | undefined>(undefined);
   // The box text last saved from this page: its echo from the server must not overwrite what was typed since.
   const sentBox = useRef<string | null>(null);
+  const scrollChanged = useRef(false);
 
   // What the server says, taken in: the list's choices only when it is a new list or nothing is waiting to be saved.
   const take = useCallback((v: TrimView) => {
     setView(v);
     setError(null);
     const fresh = runId.current !== (v.run?.id ?? null);
-    if (fresh || !dirty.current) { setChoices(v.choices); if (fresh) { setOpen({}); setCard({}); } }
-    // A new list answered what was sent: the message box starts empty again.
-    if (fresh && v.run && runId.current !== null) { setStep('cuts'); setMessage(''); }
+    if (fresh || !dirty.current) { setChoices(v.choices); if (fresh) setCard({}); }
+    // A new list answered what was sent: the message box starts empty again, and "What changed" comes into view.
+    if (fresh && v.run && runId.current !== null) { setStep('cuts'); setMessage(''); if (v.run.round > 1) scrollChanged.current = true; }
     runId.current = v.run?.id ?? null;
     // The box follows the saved text when it changes on the server (a draft, or Claude adding to it).
     const at = v.approach?.at ?? null;
@@ -106,6 +108,15 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
     api.trim(listId).then((v) => { if (!stop) take(v); }).catch((e) => { if (!stop) setError(e instanceof Error ? e.message : 'Couldn’t read the deck just now'); });
     return () => { stop = true; };
   }, [listId, version, take]);
+
+  // After a send, bring the answer into view: the page was at the bottom, far below the list.
+  useEffect(() => {
+    if (!scrollChanged.current) return;
+    const el = document.querySelector('[data-trim-changed]');
+    if (!el) return;
+    scrollChanged.current = false;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [view?.run?.id, step]);
 
   // Claude runs in the background: look until it finishes.
   const running = view?.job?.status === 'running';
@@ -170,17 +181,16 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
       return next;
     });
   };
-  const toggle = (item: TrimItem) => {
-    const isCut = cuts.includes(item.name);
-    // A new call starts without the old reason: "pet card" is no reason to cut.
-    choose(item, { choice: isCut ? 'keep' : 'cut', chip: null, text: '' });
-    // Keeping one of Claude's cuts opens its reason row in place.
-    setOpen((o) => ({ ...o, [item.name]: isCut }));
+  // Keep or Cut: nothing opens and nothing moves; a reason already typed stays.
+  const set = (item: TrimItem, choice: 'cut' | 'keep') => { if ((cuts.includes(item.name) ? 'cut' : 'keep') !== choice) choose(item, { choice }); };
+  const star = (item: TrimItem) => {
+    void act({ action: 'never', name: item.name, on: !item.star });
+    if (!item.star) set(item, 'keep');
   };
   const n = cuts.length;
   const hint = n < over ? `Pick ${over - n} more, from the closer calls or anywhere below.` : n > over ? `${n - over} too many: keep ${n - over} of them.` : `Exactly ${over}. Ready to review.`;
   const outs = [...sections].sort((a, b) => Number(b.purpose === 'out') - Number(a.purpose === 'out'));
-  const refused = items.filter((i) => (i.tier === 'cut' || i.tier === 'yours') && !cuts.includes(i.name));
+  const refused = items.filter((i) => i.tier === 'cut' && !cuts.includes(i.name));
   const cost = money(view.costs[view.model]);
   const send = () => act({ action: 'find', rerun: true, message });
 
@@ -292,7 +302,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
                 <h4 className="text-[15px] font-bold text-[#9bdcae]">What changed, and why</h4>
                 {ch.kept.length > 0 && <p><b>Kept, as you said:</b> {names(ch.kept)}.</p>}
                 {ch.dropped.length > 0 && <p><b>No longer cuts, though you didn’t name them:</b> {names(ch.dropped)}.</p>}
-                <p><b>{ch.fresh ? `${ch.fresh} new cut${ch.fresh === 1 ? '' : 's'}` : 'No new cuts'};</b> {ch.same + ch.yours} the same as before{ch.yours ? `, ${ch.yours} of them the ones you confirmed` : ''}.</p>
+                <p><b>{ch.fresh ? `${ch.fresh} new cut${ch.fresh === 1 ? '' : 's'}` : 'No new cuts'}.</b> {ch.same + ch.yours} the same as before{ch.yours ? `, ${ch.yours} of them confirmed by you` : ''}.</p>
                 {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “{view.run.reply}”</p>}
               </div>
             ) : view.run.notes ? (
@@ -300,11 +310,11 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             ) : null}
             {groups.map((g) => (
               <div key={g.tier} className="flex flex-col" data-trim-group={g.tier}>
-                <div className="flex flex-wrap items-baseline gap-x-3 pb-1 pt-3"><h4 className="font-display text-lg font-semibold">{TIER_TITLE[g.tier][0]} · {g.items.length}</h4><span className="text-sm text-[var(--muted)]">{TIER_TITLE[g.tier][1]}</span></div>
+                <div className="flex flex-wrap items-baseline gap-x-3 pb-1 pt-3"><h4 className="font-display text-lg font-semibold">{TIER_TITLE[g.tier](g.items.length)[0]}</h4><span className="text-sm text-[var(--muted)]">{TIER_TITLE[g.tier](g.items.length)[1]}</span></div>
                 {g.items.map((i) => (
-                  <Row key={i.name} item={i} cut={cuts.includes(i.name)} choice={choices[i.name]} mark={view.run!.marks?.[i.name] ?? null}
-                    open={open[i.name] ?? false} showCard={card[i.name] ?? false}
-                    onToggle={() => toggle(i)} onOpen={(v) => setOpen((o) => ({ ...o, [i.name]: v }))} onCard={(v) => setCard((o) => ({ ...o, [i.name]: v }))} onReason={(change) => choose(i, change)} />
+                  <Row key={i.name} item={i} cut={cuts.includes(i.name)} choice={choices[i.name]} marks={!!view.run!.marks} mark={view.run!.marks?.[i.name] ?? null}
+                    showCard={card[i.name] ?? false} busy={busy}
+                    onSet={(c) => set(i, c)} onCard={(v) => setCard((o) => ({ ...o, [i.name]: v }))} onReason={(text) => choose(i, { text })} onStar={() => star(i)} />
                 ))}
               </div>
             ))}
@@ -331,7 +341,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
                 <div className="flex flex-col gap-1 border-t border-[var(--border)] pt-3 text-sm">
                   <b className="font-semibold">Suggested cuts you kept</b>
                   <ul className="list-disc pl-5">{refused.map((i) => <li key={i.name}>{i.name} <span className="text-[var(--muted)]">· {reasonWords(choices[i.name]) || 'no reason given'}</span></li>)}</ul>
-                  <span className="text-xs text-[var(--faint)]">Your reasons are remembered for this deck and sent with the next cut list. “Pet card” also marks the card ★ never cut.</span>
+                  <span className="text-xs text-[var(--faint)]">Your reasons are remembered for this deck and sent with the next cut list.</span>
                 </div>
               )}
               {view.messages.length > 0 && (
@@ -398,6 +408,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
   turns: TrimTurn[]; ask: string | null; message: string; setMessage: (m: string) => void; marked: number; cost: string; disabled: boolean; onSend: () => void;
 }) {
   const can = marked > 0 || !!message.trim();
+  const lastList = turns.map((t) => t.kind).lastIndexOf('claude-list');
   return (
     <section className={`${CARD} flex flex-col gap-3`} data-trim-session aria-label="This session">
       <h4 className="flex flex-wrap items-baseline gap-x-2 font-display text-lg font-semibold">This session
@@ -407,11 +418,13 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
         {turns.map((t, k) => (
           <li key={k} className="flex flex-col gap-0.5 border-t border-[var(--border)] py-2.5 text-[13px]" data-turn={t.kind}>
             {t.kind === 'owner-start' ? (
-              <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU · AT THE START</span><p className="whitespace-pre-line">{t.text.trim() || 'Nothing said. Claude went by your plan and notes.'}</p></>
+              <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU · AT THE START</span><p className="whitespace-pre-line">{t.text.trim() || (t.added ? 'Nothing of your own; Claude wrote what matters.' : 'Nothing said. Claude went by your plan and notes.')}</p>
+                {t.added && <div className="mt-1.5 flex flex-col gap-0.5" data-added><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ ADDED BY CLAUDE</span><p className="whitespace-pre-line text-[var(--muted)]">{t.added}</p></div>}</>
             ) : t.kind === 'claude-list' ? (
               <><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ CLAUDE · LIST {t.round}</span>
                 <p>{t.cuts.length} cuts and {t.maybes.length} closer calls.{t.reply ? ` ${t.reply}` : ''}</p>
-                {t.ask && <p className={C.ai}>Asked: {t.ask}</p>}</>
+                {/* The latest question shows once, above the box. */}
+                {t.ask && k !== lastList && <p className={C.ai}>Asked: {t.ask}</p>}</>
             ) : (
               <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU</span>
                 {t.approach !== undefined && <p>Changed what matters to: “{t.approach || 'nothing'}”</p>}
@@ -427,6 +440,8 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
         {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> {ask}</p>}
         <label htmlFor="trim-say" className="font-bold">Say something back</label>
         <textarea id="trim-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can && !disabled) { e.preventDefault(); onSend(); } }}
+          aria-describedby="trim-say-keys"
           placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
           className={`${C.input} w-full resize-y py-2.5`} />
         <div className="flex flex-wrap items-center gap-2">
@@ -434,7 +449,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
           {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{marked ? `Goes with ${marked} change${marked === 1 ? '' : 's'} you made on the list.` : 'Mark keeps and cuts on the list, type here, or both.'} Claude answers and updates the list.</p>
+          <p id="trim-say-keys" className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">{marked ? `Goes with ${marked} change${marked === 1 ? '' : 's'} you made on the list.` : 'Mark keeps and cuts on the list, type here, or both.'} Claude answers and updates the list. ⌘ or Ctrl + Enter sends.</p>
           <button className={TRIM_GO} disabled={disabled || !can} onClick={onSend} title={can ? undefined : 'Mark a keep or a cut on the list, or type something, first'}>✦ Send · {cost}</button>
         </div>
       </div>
@@ -442,56 +457,63 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
   );
 }
 
-function Row({ item, cut, choice, mark, open, showCard, onToggle, onOpen, onCard, onReason }: {
-  item: TrimItem; cut: boolean; choice?: TrimChoice; mark: CutMark | null; open: boolean; showCard: boolean;
-  onToggle: () => void; onOpen: (v: boolean) => void; onCard: (v: boolean) => void; onReason: (change: Partial<TrimChoice>) => void;
+/**
+ * One card: four fixed columns on every row of every section, so nothing
+ * moves when a choice changes. Keep | Cut; the name (opens the card); Claude's
+ * reason (the owner's own, under "Kept by you"); the owner's reason line.
+ * After a round, a narrow slot before the name holds the your cut / same /
+ * new mark. On a phone: Keep | Cut and the name, then the two reasons below.
+ */
+function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, onReason, onStar }: {
+  item: TrimItem; cut: boolean; choice?: TrimChoice; marks: boolean; mark: CutMark | null; showCard: boolean; busy: boolean;
+  onSet: (c: 'cut' | 'keep') => void; onCard: (v: boolean) => void; onReason: (text: string) => void; onStar: () => void;
 }) {
-  const chips = cut ? CUT_CHIPS : KEEP_CHIPS;
-  const has = !!choice?.chip || !!choice?.text?.trim();
-  // Keeping one of Claude's cuts opens the reason row; on a cut it opens on request.
-  const keptCut = !cut && item.tier === 'cut';
-  const showReason = open;
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[var(--border)] py-2" data-trim-card={item.name}>
-      <button onClick={onToggle} aria-pressed={cut} aria-label={`${cut ? 'Keep' : 'Cut'} ${item.name}`}
-        className={`min-h-11 w-[5.5rem] shrink-0 rounded-xl border px-2 text-sm font-bold ${cut ? 'border-[#ffb4a8]/70 bg-[#ffb4a8]/10 text-[#ffb4a8]' : 'border-[#4a443b] text-[#9bdcae] hover:bg-[var(--surface-hover)]'}`}>
-        {cut ? 'Cut' : item.tier === 'kept' ? 'Cut anyway' : 'Keep'}
+  const changed = (cut ? 'cut' : 'keep') !== callOf(item.tier);
+  const badge = mark ? <span className={`inline-block rounded-lg px-2 py-0.5 text-center text-[11px] font-bold ${MARK_LABEL[mark][1]}`}>{MARK_LABEL[mark][0]}</span> : null;
+  const seg = (v: 'keep' | 'cut') => {
+    const on = (v === 'cut') === cut;
+    return (
+      <button type="button" aria-pressed={on} onClick={() => onSet(v)} aria-label={`${v === 'cut' ? 'Cut' : 'Keep'} ${item.name}`}
+        className={`min-h-10 min-w-[3.6rem] px-3 text-sm font-bold ${on ? (v === 'cut' ? 'bg-[#3a211b] text-[#f0714f]' : 'bg-[#16301f] text-[#7fd6a0]') : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>
+        {v === 'cut' ? 'Cut' : 'Keep'}
       </button>
-      {mark && <span className={`shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-bold ${MARK_LABEL[mark][1]}`}>{MARK_LABEL[mark][0]}</span>}
-      <div className="min-w-0 flex-[1_1_18rem] text-sm">
-        <button type="button" onClick={() => onCard(!showCard)} aria-expanded={showCard} className={`font-bold hover:underline ${cut ? 'line-through decoration-[#6b6357]' : keptCut ? 'text-[#9bdcae]' : ''}`}>{item.name}</button>
-        {item.flag && <span className="ml-1.5 rounded-full border border-amber-300/60 px-1.5 text-[11px] font-semibold text-amber-300">{item.flag}</span>}
-        {' '}<span className="text-[13px] text-[var(--muted)]">{item.why}</span>
-        {cut && item.warn && <span className="block text-xs font-semibold text-amber-300">{item.warn}</span>}
-        {!showReason && (cut || has) && (
-          <button type="button" className="ml-1.5 text-xs text-[var(--muted)] underline hover:text-[var(--foreground)]" onClick={() => onOpen(true)}>
-            {has ? `Your reason: ${reasonWords(choice)}` : 'Why cut?'}
+    );
+  };
+  return (
+    <div className="border-t border-[var(--border)] py-2.5" data-trim-card={item.name}>
+      <div className={`grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 ${marks ? 'min-[821px]:grid-cols-[auto_4.75rem_15rem_minmax(0,1fr)_17rem]' : 'min-[821px]:grid-cols-[auto_15rem_minmax(0,1fr)_17rem]'}`} data-trim-row>
+        <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">{seg('keep')}{seg('cut')}</span>
+        {marks && <span className="hidden min-[821px]:block" data-col="mark">{badge}</span>}
+        <span className="flex min-w-0 items-center gap-2" data-col="name">
+          {marks && <span className="min-[821px]:hidden">{badge}</span>}
+          <button type="button" onClick={() => onCard(!showCard)} aria-expanded={showCard} className="inline-flex min-w-0 items-baseline gap-1.5 text-left font-bold hover:underline">
+            <span aria-hidden="true" className={`shrink-0 text-[11px] text-[var(--faint)] transition-transform ${showCard ? 'rotate-90' : ''}`}>▶</span>
+            <span className="min-w-0 break-words">{item.name}{item.star && <span className="text-[#e2b93b]" title="Never cut"> ★</span>}</span>
           </button>
-        )}
+          {item.flag && <span className="shrink-0 rounded-full border border-amber-300/60 px-1.5 text-[11px] font-semibold text-amber-300">{item.flag.split(':')[0]}</span>}
+        </span>
+        <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] min-[821px]:col-span-1" data-col="why">
+          {item.tier === 'yours'
+            ? <><span className={`font-semibold ${C.yours}`}>You:</span> {item.mine || 'kept, no reason given'}</>
+            : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> {item.why}</>}
+        </span>
+        <input value={choice?.text ?? ''} onChange={(e) => onReason(e.target.value)} maxLength={300} data-col="reason"
+          placeholder={changed ? (cut ? 'you cut it. why?' : 'you kept it. why?') : 'your reason, if you have one'}
+          aria-label={`Your reason for ${item.name}`}
+          className={`col-span-2 min-h-9 w-full min-w-0 border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] min-[821px]:col-span-1 ${changed ? 'placeholder:text-[#e2b93b]' : 'placeholder:text-[var(--faint)]'}`} />
       </div>
       {showCard && (
-        <div className="flex basis-full flex-wrap items-start gap-3 pl-0 sm:pl-[6.25rem]">
+        <div className="mt-2.5 flex flex-wrap gap-3.5 rounded-xl border border-[var(--border)] bg-[#221e1a] p-3" data-trim-card-open>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {item.card.image && <img src={item.card.image} alt="" loading="lazy" className="w-28 shrink-0 rounded-md" style={{ aspectRatio: '488 / 680' }} />}
-          <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1 text-xs">
-            <span className="flex flex-wrap items-center gap-2">{item.card.manaCost && <ManaCost cost={item.card.manaCost} size={13} />}<span className="text-[var(--muted)]">{item.card.typeLine}</span></span>
-            {item.card.text && <p className="whitespace-pre-line text-[var(--muted)]">{item.card.text}</p>}
-            {item.with.length > 0 && <span className="text-[var(--muted)]">Works with: {item.with.join(', ')}</span>}
+          <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-1.5 text-[13px]">
+            <span className="flex flex-wrap items-center gap-2"><b>{item.name}</b>{item.card.manaCost && <ManaCost cost={item.card.manaCost} size={13} />}<span className="text-[var(--muted)]">{item.card.typeLine}</span></span>
+            {item.card.text && <p className="whitespace-pre-line">{item.card.text}</p>}
+            <span className="text-[var(--muted)]">{item.jobs.length ? `Counts as ${item.jobs.join(' and ')} on this deck.` : 'Not counted in a job on this deck.'}</span>
+            {item.with.length > 0 && <span className="text-[var(--muted)]">Works with: {item.with.join('; ')}</span>}
+            {item.warn && <span className="font-semibold text-amber-300">{item.warn}</span>}
+            <span><button type="button" className={C.btn} disabled={busy} aria-pressed={item.star} onClick={onStar}>{item.star ? '★ Never cut · take off' : '☆ Mark never cut'}</button></span>
           </div>
-        </div>
-      )}
-      {showReason && (
-        <div className="flex basis-full flex-wrap items-center gap-2 pb-1 sm:pl-[6.25rem]" role="group" aria-label={`Why ${cut ? 'cut' : 'keep'} ${item.name}?`}>
-          <span className="text-[13px] text-[var(--muted)]">Why {cut ? 'cut' : 'keep'} it?</span>
-          {chips.map((c) => (
-            <button key={c} type="button" aria-pressed={choice?.chip === c} onClick={() => onReason({ choice: cut ? 'cut' : 'keep', chip: choice?.chip === c ? null : c })}
-              className={`min-h-10 rounded-full border px-3 text-[13px] ${choice?.chip === c ? C.on : 'border-[var(--border)] bg-[var(--background)] hover:border-[#d6aa2e]'}`}>{TRIM_CHIP_LABELS[c]}</button>
-          ))}
-          <input value={choice?.text ?? ''} onChange={(e) => onReason({ choice: cut ? 'cut' : 'keep', text: e.target.value })} maxLength={300}
-            placeholder={cut ? 'or say why, e.g. too slow for this deck' : 'or say why, e.g. I keep all my mana dorks'} aria-label={`Why ${cut ? 'cut' : 'keep'} ${item.name}, in your words`}
-            className={`${C.input} flex-[1_1_14rem]`} />
-          <span className="basis-full text-[13px] text-[#9bdcae]">A reason is applied to similar cards too.{cut ? '' : ' A pet card is also marked never cut.'}</span>
-          <button type="button" className="text-xs text-[var(--muted)] underline" onClick={() => onOpen(false)}>Hide</button>
         </div>
       )}
     </div>

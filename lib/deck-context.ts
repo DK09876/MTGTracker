@@ -26,7 +26,8 @@ export const CONTEXT_RULES = `How to read this:
 - Only the never-cut cards and the commander are blocked, and the app's code enforces that.
 - Where the list and the owner's aim differ, that is the work: say which aim a cut or add serves.`;
 
-const cardsLine = (c: Category, max = 14) => `${c.cards.slice(0, max).map((x) => x.name).join(', ') || 'no cards'}${c.cards.length > max ? `, and ${c.cards.length - max} more` : ''}`;
+// Card names are joined with "; ": many names have commas in them.
+const cardsLine = (c: Category, max = 14) => `${c.cards.slice(0, max).map((x) => x.name).join('; ') || 'no cards'}${c.cards.length > max ? `; and ${c.cards.length - max} more` : ''}`;
 
 /** The block, from the pages as they are now. allCards lists every card in each category (the tags read judges what is missing); otherwise 14 each. */
 export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { rules?: boolean; allCards?: boolean } = {}): Promise<string> {
@@ -48,11 +49,11 @@ export async function deckContext(list: Pick<List, 'id' | 'commander'>, opts: { 
     `- What they want from the deck: ${goal.length ? `${goal.join(', ')} [the owner's]` : 'nothing said'}`,
     `- Bracket aimed for: ${plan.bracket === null ? 'not sure' : `${plan.bracket}${plan.stored.bracket?.by === 'claude' ? ' [suggested by AI, accepted by the owner]' : " [the owner's]"}`}`,
     `- Budget per card: ${plan.budget ? `$${plan.budget}, cards they own always allowed` : 'any'}. Only cards they own: ${plan.own ? 'yes' : 'no'}.${plan.rule.text ? ` Deck rule: ${plan.rule.text}${plan.rule.filter ? ` (cards must match: ${plan.rule.filter})` : ''}` : ''}`,
-    `- Never cut: ${[...commanders.map((n) => `${n} (the commander)`), ...main.filter((c) => kept.has(tagKey(c.card)) && !commanders.includes(c.card.name)).map((c) => c.card.name)].join(', ')}`,
+    `- Never cut: ${[...commanders.map((n) => `${n} (the commander)`), ...main.filter((c) => kept.has(tagKey(c.card)) && !commanders.includes(c.card.name)).map((c) => c.card.name)].join('; ')}`,
     `- How the deck wins: ${o.planText.trim() ? `"${o.planText.trim()}"${o.planBy === 'ai' ? ` [${o.direction ? 'an AI direction picked by the owner' : 'suggested by AI, accepted by the owner'}]` : " [the owner's]"}` : 'not sure'}`,
     `- Ways to win: ${wins.length ? '' : 'none listed'}`,
-    ...wins.map((w) => `  - ${w.name}${who(w.by)}${w.how ? `: ${w.how}` : ''} Cards: ${w.cards.map((x) => `${x.name}${x.by !== w.by ? who(x.by) : ''}`).join(', ') || 'none yet'}`),
-    `- Key cards: ${key?.cards.length ? key.cards.map((x) => `${x.name}${who(x.by)}`).join(', ') : 'none listed'}`,
+    ...wins.map((w) => `  - ${w.name}${who(w.by)}${w.how ? `: ${w.how}` : ''} Cards: ${w.cards.map((x) => `${x.name}${x.by !== w.by ? who(x.by) : ''}`).join('; ') || 'none yet'}`),
+    `- Key cards: ${key?.cards.length ? key.cards.map((x) => `${x.name}${who(x.by)}`).join('; ') : 'none listed'}`,
   ];
   if (notes.length) L.push('', "The owner's notes, in their words:", ...notes.map((n) => `- ${n.text}`));
   L.push('', 'Categories on this deck (who added each):');

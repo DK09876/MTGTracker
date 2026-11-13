@@ -142,7 +142,7 @@ describe('trim', { timeout: 60_000 }, () => {
     // A later fresh list is told what was kept before.
     const later = fakeModel(() => ({ ...ANSWER, ranked: ranked(20, 16) }));
     await trim.runTrim(later.model, list, 'dk', { model: 'opus' });
-    expect(later.asked[0].user).toContain('Kept, not to be listed again:');
+    expect(later.asked[0].user).toContain('Kept so far (the owner can take one back):');
     expect(later.asked[0].user).toContain('- Spell 3 ("a pet card")');
   });
 
@@ -219,7 +219,7 @@ describe('trim', { timeout: 60_000 }, () => {
     const order = [
       at('## This cut session so far'),
       at('Owner, at the start: "Keep my mana dorks."'),
-      at(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join(', ')} | closer calls: ${ranked(9, 8).map((r) => r.name).join(', ')} | you said: "Cut surplus spells."`),
+      at(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join('; ')} | closer calls: ${ranked(9, 8).map((r) => r.name).join('; ')} | you said: "Cut surplus spells."`),
       at('Owner: kept Spell 3 ("part of my plan: I need it on turn 3"); kept Spell 4; said: "Why is Spell 1 first?"'),
       at('This is list 2.'),
     ];
@@ -234,7 +234,7 @@ describe('trim', { timeout: 60_000 }, () => {
     expect(v.turns.map((t) => t.kind)).toEqual(['owner-start', 'claude-list', 'owner-reply', 'claude-list']);
     // A third list is sent list 2 as well, with Claude's question.
     await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true, message: 'Yes, it is.' });
-    expect(asked[2].user).toContain('You, list 2: cuts: Spell 1, Spell 2, Spell 5');
+    expect(asked[2].user).toContain('You, list 2: cuts: Spell 1; Spell 2; Spell 5');
     expect(asked[2].user).toContain('you asked: "Is Spell 9 part of the combo?"');
     expect(asked[2].user).toContain('Owner: said: "Yes, it is."');
     v = await trim.trimView(list, 'dk');
@@ -248,7 +248,7 @@ describe('trim', { timeout: 60_000 }, () => {
     const { model, asked } = fakeModel(() => ANSWER);
     await trim.runTrim(model, list, 'dk', { model: 'opus' });
     await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
-    expect(asked[1].user).toContain(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join(', ')}`);
+    expect(asked[1].user).toContain(`You, list 1: cuts: ${ranked(1, 8).map((r) => r.name).join('; ')}`);
     expect(asked[1].user).toContain('Owner, at the start: said nothing');
     expect(asked[1].user).toContain('Owner: changed nothing and asked for the list again');
   });
@@ -351,6 +351,132 @@ describe('trim', { timeout: 60_000 }, () => {
     r = await range();
     expect(r.ramp).not.toBeNull();
     expect(r.draw).toBeNull();
+  });
+
+  it('a reason typed on a row reaches the Owner line and what is remembered, with no chip; an old stored chip still prints', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 2': { choice: 'keep', text: 'I need it on turn 3' }, 'Spell 4': { choice: 'keep', chip: 'pet_card' } });
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[0].user).toContain('Owner: kept Spell 2 ("I need it on turn 3"); kept Spell 4 ("a pet card")');
+    expect(trim.trimStore(list.id).said['Spell 2']).toMatchObject({ choice: 'keep', chip: null, text: 'I need it on turn 3' });
+    // The next list reads both from what is remembered: the typed reason, and the old chip in words.
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[1].user).toContain('- Spell 2 ("I need it on turn 3")');
+    expect(asked[1].user).toContain('- Spell 4 ("a pet card")');
+  });
+
+  it('a keep taken back under "Kept by you" leaves what is remembered, and the card can be listed again', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 2': { choice: 'keep', text: 'mine' } });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true });
+    let v = await trim.trimView(list, 'dk');
+    // Kept by you, with the owner's reason in place of Claude's.
+    expect(v.run!.items.find((i) => i.name === 'Spell 2')).toMatchObject({ tier: 'yours', mine: 'mine', why: '' });
+    expect(v.run!.items.some((i) => i.name === 'Spell 2' && i.tier === 'cut')).toBe(false);
+    // Press Cut on it: a confirmed cut, at the top of the next list.
+    trim.setChoices(list.id, { ...v.choices, 'Spell 2': { choice: 'cut', text: '' } });
+    v = await trim.trimView(list, 'dk');
+    expect(v.impact.size.after).toBe(99);
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[0].user).toContain('confirmed cuts: Spell 2');
+    expect(trim.trimStore(list.id).said['Spell 2']?.choice).toBe('cut');
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.find((i) => i.name === 'Spell 2')!.tier).toBe('cut');
+    expect(v.run!.items.some((i) => i.tier === 'yours' && i.name === 'Spell 2')).toBe(false);
+  });
+
+  it('a kept card the model lists comes back only when the owner’s latest message names it', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 2': { choice: 'keep' } });
+    // Claude lists the kept card anyway, unasked: code strips it.
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true, message: 'Weigh speed more.' });
+    let v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.find((i) => i.name === 'Spell 2')!.tier).toBe('yours');
+    // The owner asks for it to go after all: Claude lists it, and the keep is taken back.
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true, message: 'Actually cut spell 2 after all.' });
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.find((i) => i.name === 'Spell 2')!.tier).toBe('cut');
+    expect(trim.trimStore(list.id).said['Spell 2']).toBeUndefined();
+    // A message that names nothing kept leaves the strip in place on the next list.
+    trim.setChoices(list.id, { 'Spell 3': { choice: 'keep' } });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus', rerun: true, message: 'Cut spell 2 please.' });
+    v = await trim.trimView(list, 'dk');
+    expect(v.run!.items.find((i) => i.name === 'Spell 3')!.tier).toBe('yours');
+  });
+
+  it('joins card names with "; " in every list sent to the model', async () => {
+    const { db, list } = await deck();
+    const comma = card('War Machine, Avenging Arsenal');
+    db.addCardToList(list.id, comma);
+    db.saveRoles(new Map([['o-War Machine, Avenging Arsenal', []]]), (await import('./roles')).ROLES_VERSION);
+    (await import('./deck-roles')).setKeep(list.id, 'o-War Machine, Avenging Arsenal', true);
+    const c = await import('./categories');
+    const win = c.addCategory(list.id, { kind: 'win', name: 'Beats', by: 'owner' });
+    c.setCategoryCard(list.id, win, { key: 'o-Spell 9', name: 'Spell 9' }, true);
+    c.setCategoryCard(list.id, win, { key: 'o-Spell 10', name: 'Spell 10' }, true);
+    const trim = await import('./trim');
+    const l = db.getList(list.id, 'dk')!;
+    await trim.runTrim(fakeModel(() => ANSWER).model, l, 'dk', { model: 'opus' });
+    trim.setChoices(list.id, { 'Spell 1': { choice: 'cut', text: 'slow' }, 'Spell 12': { choice: 'cut' } });
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, l, 'dk', { model: 'opus', rerun: true });
+    const u = asked[0].user;
+    expect(u).toContain('confirmed cuts: Spell 1 ("slow"); Spell 12');
+    expect(u).toContain('War Machine, Avenging Arsenal (★ never cut)');
+    expect(u).toMatch(/Spell 9; Spell 10|Spell 10; Spell 9/);
+    expect(u).toContain(`You, list 1: cuts: ${ranked(1, 9).map((r) => r.name).join('; ')} | closer calls: Spell 10; `);
+  });
+
+  it('after "Have Claude add to it", only the owner’s lines are theirs: in the session and for notes', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    await trim.writeApproach(fakeModel(() => ({ bullets: ['Cut slow ramp.'] })).model, list, 'dk', 'Keep my dorks.');
+    const { model, asked } = fakeModel(() => ANSWER);
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    let v = await trim.trimView(list, 'dk');
+    expect(v.turns[0]).toMatchObject({ kind: 'owner-start', text: 'Keep my dorks.', added: '- Cut slow ramp.' });
+    expect(v.messages.map((m) => m.text)).toEqual(['Keep my dorks.']);
+    await trim.runTrim(model, list, 'dk', { model: 'opus', rerun: true });
+    expect(asked[1].user).toContain('Owner, at the start: "Keep my dorks."');
+    expect(asked[1].user).toContain('Bullets you added to it before the first list, kept by the owner: "- Cut slow ramp."');
+    // Claude alone: nothing of the owner's to keep.
+    await trim.resetTrim(list.id);
+    await trim.writeApproach(fakeModel(() => ({ bullets: ['Cut slow ramp.'] })).model, list, 'dk', '');
+    await trim.runTrim(model, list, 'dk', { model: 'opus' });
+    v = await trim.trimView(list, 'dk');
+    expect(v.messages).toEqual([]);
+  });
+
+  it('undo takes off the notes the apply saved', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.setApproach(list, 'dk', { text: 'Keep my dorks.' });
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    const v = await trim.trimView(list, 'dk');
+    await trim.applyTrim(list, 'dk', undefined, [v.messages[0].id]);
+    const notes = async () => (await (await import('./plan-help')).planState(db.getList(list.id, 'dk')!)).notes.map((x) => x.text);
+    expect(await notes()).toEqual(['Keep my dorks.']);
+    trim.undoTrim(db.getList(list.id, 'dk')!);
+    expect(await notes()).toEqual([]);
+  });
+
+  it('sends a usual range only for a job counted on the deck', async () => {
+    const { list } = await deck();
+    const trim = await import('./trim');
+    let { user } = await trim.trimMessage(list, 'dk');
+    expect(user).toMatch(/^- Ramp: [\d.]+$/m);
+    (await import('./categories')).addCategory(list.id, { kind: 'job', name: 'Ramp', by: 'cards', jobId: 'ramp' });
+    ({ user } = await trim.trimMessage(list, 'dk'));
+    expect(user).toMatch(/^- Ramp: [\d.]+ \(usual range \d+–\d+/m);
+    expect(user).toMatch(/^- Card draw: [\d.]+$/m);
   });
 
   it('keeps the card lists of the last six rounds and only the words of older ones', async () => {

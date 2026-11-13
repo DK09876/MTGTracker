@@ -8,6 +8,7 @@
  */
 
 import { cardsInList, type List } from './db';
+import { jobsOnDeck } from './categories';
 import { deckRolesKnown } from './deck-roles';
 import { analyse } from './health';
 import { planState } from './plan-server';
@@ -29,6 +30,7 @@ export async function planFacts(list: List, slug: string, name: string, commande
     const plan = await planState(list);
     const parts = plan.parts as unknown as Record<string, Part>;
     const ranges = (parts.ranges?.value as Array<{ job: string; label: string; count: number | null; range: [number, number] | null; from?: string; how?: { inputs: string[]; steps: string[] } }>) ?? [];
+    const onDeck = jobsOnDeck(list.id);
     const lands = parts.lands?.value as { have: number; range: [number, number]; want: number } | undefined;
     const landsHow = (parts.lands as unknown as { how?: { inputs: string[]; steps: string[] } })?.how;
     const health = analyse({ commander: list.commander, cards: main });
@@ -53,7 +55,11 @@ export async function planFacts(list: List, slug: string, name: string, commande
     const facts = {
       slug, name: key.deck.name, commanders: cmdCards.map((c) => ({ name: c.name, cost: costOf(c), type: typeOf(c), text: oracleTextOf(c), identity: c.color_identity ?? [] })),
       identity, size: health.size, averageMv: health.averageMv, lands: lands ?? null, landsHow: landsHow ?? null,
-      jobs: ranges.map((r) => ({ job: r.job, label: r.label, count: r.count, range: r.range, from: r.from ?? null, how: r.how ?? null })),
+      // A usual range only for a job counted on the deck, as on the pages; the others are sent as a plain count.
+      jobs: ranges.map((r) => {
+        const counted = onDeck.has(r.job === 'impulse' ? 'draw' : r.job);
+        return { job: r.job, label: r.label, count: r.count, range: counted ? r.range : null, from: counted ? r.from ?? null : null, how: r.how ?? null };
+      }),
       curve: health.curve.map((b) => ({ mv: b.label, count: b.count })), types: health.types,
       colours: health.colors.map((c) => ({ colour: c.color, pips: c.pips, sources: c.sources, needed: c.needed, neededFor: c.neededFor })),
       gameChangers: health.gameChangers, extraTurns, massLandDenial: mld,

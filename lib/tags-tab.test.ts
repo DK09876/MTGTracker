@@ -149,7 +149,7 @@ describe('the Tags tab', { timeout: 30_000 }, () => {
     const { model, asked } = fakeModel(() => ({ addTo: [{ category: 'Engines', card: 'Spell 11', why: 'Draws.' }], removeFrom: [{ category: 'Engines', card: 'Spell 10', why: 'No.' }], categories: [], notes: '' }));
     await t.runTagsAi(model, list, 'dk');
     // Every card in each category is sent, not the first 14.
-    expect(asked[0].user).toMatch(/Magecraft \[from the card data\] \(a tag from the card data, stays live\): Spell 1, Spell 2, Spell 3$/m);
+    expect(asked[0].user).toMatch(/Magecraft \[from the card data\] \(a tag from the card data, stays live\): Spell 1; Spell 2; Spell 3$/m);
     v = await t.tagsTab(list);
     expect(v.ai.rows.map((r) => `${r.kind}:${r.card}`)).toEqual(['add:Spell 11']);
     // Undo: a card-data card taken out of a live tag goes back to being live.
