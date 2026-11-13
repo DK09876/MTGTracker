@@ -12,6 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
+import ListControls, { GroupHead, sortRows, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -171,6 +172,10 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
 
   const items = useMemo(() => view?.run?.items ?? [], [view]);
   const cuts = useMemo(() => chosenCuts(items, choices), [items, choices]);
+  // Fold, filter and sort (D 13), the same control as Finish's, remembered for this deck in this browser.
+  const [lv, setLv] = useListView(`mtg-trim-list:${listId}`);
+  const callOf = (i: TrimItem) => { const c = choices[i.name]?.choice; return c ?? (i.tier === 'cut' ? 'cut' : 'keep'); };
+  const shown = useShown(items, (i) => i.name, (i) => lv.filter === 'all' || (lv.filter === 'new' ? view?.run?.marks?.[i.name] === 'new' : callOf(i) === lv.filter), `${lv.filter}:${view?.run?.at ?? ''}:${items.length}`);
   const marked = useMemo(() => newMarks(items, choices, view?.carried ?? {}).length, [items, choices, view?.carried]);
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading the deck…</p>;
@@ -330,16 +335,30 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
 
           <div className={`${CARD} flex flex-col gap-1`}>
-            {groups.map((g) => (
+            <ListControls filter={lv.filter} onFilter={(f) => setLv({ filter: f })} sort={lv.sort} onSort={(x) => setLv({ sort: x })} filters={[
+              { id: 'all', label: 'All', count: items.length },
+              { id: 'cut', label: 'Cut', count: items.filter((i) => callOf(i) === 'cut').length },
+              { id: 'keep', label: 'Keep', count: items.filter((i) => callOf(i) === 'keep').length },
+              { id: 'ask', label: 'Rethink', count: items.filter((i) => callOf(i) === 'ask').length },
+              ...(view.run.marks ? [{ id: 'new', label: 'New this round', count: items.filter((i) => view.run!.marks?.[i.name] === 'new').length }] : []),
+            ]} />
+            {groups.map((g) => {
+              const rows = sortRows(g.items.filter((i) => shown.has(i.name)), lv.sort, { choice: (i) => ['cut', 'ask', 'keep'].indexOf(callOf(i)), mv: (i) => mvOf(i.card.manaCost), name: (i) => i.name });
+              const folded = lv.folded.includes(g.tier);
+              if (!rows.length && lv.filter !== 'all') return null;
+              return (
               <div key={g.tier} className="flex flex-col" data-trim-group={g.tier}>
-                <div className="flex flex-wrap items-baseline gap-x-3 pb-1 pt-3"><h4 className="font-display text-lg font-semibold">{TIER_TITLE[g.tier](g.items.length)[0]}</h4><span className="text-sm text-[var(--muted)]">{TIER_TITLE[g.tier](g.items.length)[1]}</span></div>
-                {g.items.map((i) => (
+                <GroupHead title={TIER_TITLE[g.tier](g.items.length)[0]} count={g.items.length} extra={[TIER_TITLE[g.tier](g.items.length)[1], lv.filter !== 'all' ? `${rows.length} shown` : ''].filter(Boolean).join(' · ')}
+                  folded={folded} onToggle={() => setLv({ folded: folded ? lv.folded.filter((x) => x !== g.tier) : [...lv.folded, g.tier] })} />
+                {!folded && rows.map((i) => (
                   <Row key={i.name} item={i} cut={cuts.includes(i.name)} choice={choices[i.name]} marks={!!view.run!.marks} mark={view.run!.marks?.[i.name] ?? null}
                     showCard={card[i.name] ?? false} busy={busy}
                     onSet={(c) => set(i, c)} onCard={(v) => setCard((o) => ({ ...o, [i.name]: v }))} onReason={(text) => choose(i, { text })} onStar={() => star(i)} />
                 ))}
               </div>
-            ))}
+              );
+            })}
+            {lv.filter !== 'all' && items.every((i) => !shown.has(i.name)) && <p className="py-3 text-sm text-[var(--muted)]">Nothing here. <button type="button" className={LINK} onClick={() => setLv({ filter: 'all' })}>Show all</button></p>}
             <p className="pt-2 text-xs text-[var(--faint)]">Lands: {view.lands.have} in the deck, usual {view.lands.range[0]}–{view.lands.range[1]}. The app never lets a cut take the deck under {Math.ceil(view.lands.floor)}.</p>
           </div>
         </div>
@@ -410,6 +429,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
 }
 
 const fmt = (x: number) => (Math.round(x * 10) / 10).toString();
+/** A card's mana value from its cost, for sorting: {X} counts 0, a hybrid one. */
+const mvOf = (cost: string) => (cost.match(/\{[^}]+\}/g) ?? []).reduce((n, sym) => { const x = sym.slice(1, -1); return n + (/^\d+$/.test(x) ? Number(x) : x === 'X' ? 0 : 1); }, 0);
 
 /**
  * How many to cut: a number of cuts or a size to reach, the same box as
