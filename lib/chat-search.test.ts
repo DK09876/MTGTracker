@@ -157,6 +157,17 @@ describe('search_my_cards', { timeout: 60_000 }, () => {
     expect(r.answer.lookups).toEqual([]);
   });
 
+  it('applies every t: filter, not only the last', async () => {
+    const { searchLines } = await import('./finish-shared');
+    const pool = [
+      { name: 'Zed', line: 'Zed - Creature — Zombie', cmc: 2, typeLine: 'Creature — Zombie', src: 'spare' as const },
+      { name: 'Bear', line: 'Bear - Creature — Bear', cmc: 2, typeLine: 'Creature — Bear', src: 'spare' as const },
+      { name: 'Zombify', line: 'Zombify - Sorcery', cmc: 4, typeLine: 'Sorcery', src: 'spare' as const },
+    ];
+    expect(searchLines(pool, 't:zombie t:creature').lines.map((l) => l.name)).toEqual(['Zed']);
+    expect(searchLines(pool, 't:creature').total).toBe(2);
+  });
+
   it('names a filter it can’t use', async () => {
     const { list } = await setup();
     const { asked } = await ask(list, [[s('draw c:u')], 'Done.']);

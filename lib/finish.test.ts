@@ -133,9 +133,9 @@ describe('the search', () => {
     expect(searchLines(pool, 'draw t:instant').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'draw mv<=1').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'destroy').lines[0].line).toContain('(in Zuko)');
-    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], not: [], type: 'instant', mv: 2, mvMin: null, ignored: [] });
+    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], not: [], types: ['instant'], mv: 2, mvMin: null, ignored: [] });
     // What Claude tends to write beyond that: mv>=, mv=, o:, -word; anything else is named, not matched as a word.
-    expect(parseQuery('o:treasure mv>=3 -creature c:r pow>=4')).toEqual({ words: ['treasure'], not: ['creature'], type: null, mv: null, mvMin: 3, ignored: ['c:r', 'pow>=4'] });
+    expect(parseQuery('o:treasure mv>=3 -creature c:r pow>=4')).toEqual({ words: ['treasure'], not: ['creature'], types: [], mv: null, mvMin: 3, ignored: ['c:r', 'pow>=4'] });
     expect(parseQuery('mv=2')).toMatchObject({ mv: 2, mvMin: 2 });
     expect(searchLines(pool, 'o:draw mv>=3').lines.map((l) => l.name)).toEqual(['Divination']);
     expect(searchLines(pool, 'draw -scry').lines.map((l) => l.name)).not.toContain('Opt');
@@ -233,7 +233,9 @@ describe('a round with the stand-in Claude', { timeout: 60_000 }, () => {
     expect(t).toContain('Pick exactly 2 more');
     expect(t).toContain('You have 8 searches');
     const s = finish.finishStore(list.id);
-    expect(s.run!.items.map((i) => [i.name, i.mark])).toEqual([['Owned 2', null], ['Owned 6', 'new'], ['Owned 8', 'new']]);
+    // A Rethink Claude picked again comes back with a new reason; a card that wasn't on the list is new.
+    expect(s.run!.items.map((i) => [i.name, i.mark])).toEqual([['Owned 2', null], ['Owned 6', 'back'], ['Owned 8', 'new']]);
+    expect(s.run!.changes).toEqual({ round: 2, out: [{ name: 'Owned 4', because: 'skipped' }], in: [{ name: 'Owned 8', group: 'draw' }], back: ['Owned 6'] });
     expect(s.skipped).toEqual(['Owned 4']);
     // A third round: the skipped card stays out.
     finish.setChoices(list.id, { 'Owned 8': { choice: 'skip', text: '' } });
@@ -280,7 +282,7 @@ describe('review, apply and undo', { timeout: 60_000 }, () => {
     const n = view.howMany.nonland;
     expect(n + view.howMany.lands).toBe(100 - 16);
     finish.setFinish(list.id, { want: null });
-    await finish.runFinish(stand([{ search: ['draw'] }, { search: ['destroy'] }, { picks: pick(owned.slice(0, n).map((c) => c.name)) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    await finish.runFinish(stand([{ search: ['draw'] }, { search: ['destroy', 't:land'] }, { picks: { ...pick(owned.slice(0, n).map((c) => c.name)), lands: [{ name: 'Sulfur Falls', why: 'Both colours, untapped early.' }] } }]).call as never, 'claude-opus-5-5', list, 'dk');
     expect(finish.finishStore(list.id).run!.full).toBe(true);
     const done = await finish.applyFinish(list, 'dk');
     expect(done.size).toBe(100);
@@ -311,9 +313,9 @@ describe('the lands on a fill to 100', { timeout: 60_000 }, () => {
     const finish = await import('./finish');
     finish.setFinish(list.id, { lands: 30 });
     const n = (await finish.finishView(list, 'dk')).howMany.nonland;
-    await finish.runFinish(stand([{ search: ['draw'] }, { search: ['destroy'] }, { picks: pick(owned.slice(0, n).map((c) => c.name)) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    await finish.runFinish(stand([{ search: ['draw'] }, { search: ['destroy', 't:land'] }, { picks: { ...pick(owned.slice(0, n).map((c) => c.name)), lands: [{ name: 'Sulfur Falls', why: 'Both colours.' }] } }]).call as never, 'claude-opus-5-5', list, 'dk');
     const before = (await finish.finishView(list, 'dk')).run!.lands!;
-    expect(before.duals).toEqual([{ name: 'Sulfur Falls', on: true }]);
+    expect(before.duals).toEqual([{ name: 'Sulfur Falls', on: true, why: 'Both colours.' }]);
     expect(before.total).toBe(25);
     finish.setLands(list.id, { skip: ['Sulfur Falls'], basics: { Island: 10 } });
     const after = (await finish.finishView(list, 'dk')).run!.lands!;
@@ -324,6 +326,98 @@ describe('the lands on a fill to 100', { timeout: 60_000 }, () => {
     const main = db.cardsInList(list.id).filter((c) => c.board === 'main');
     expect(main.find((c) => c.card.name === 'Sulfur Falls')).toBeUndefined();
     expect(main.find((c) => c.card.name === 'Island')!.quantity).toBe(15);
+  });
+});
+
+describe('Claude picks the lands worth playing; the app counts (Part E)', { timeout: 60_000 }, () => {
+  const land = (name: string, makes: string[], extra: Partial<ScryfallCard> = {}) => card(name, { type_line: 'Land', mana_cost: '', cmc: 0, oracle_text: `{T}: Add ${makes.map((m) => `{${m}}`).join(' or ') || '{C}'}.`, color_identity: makes, produced_mana: makes.length ? makes : ['C'], ...extra });
+  /** A mono-blue deck of 16 (commander, 5 Islands, 10 spells), the owner's lands in boxes or in another deck. */
+  async function mono(boxed: ScryfallCard[], other: ScryfallCard[] = []) {
+    const db = await import('./db');
+    const col = await import('./collection');
+    db.addProfile('dk', 'DK');
+    const cmd = card('Talrand', { type_line: 'Legendary Creature', color_identity: ['U'], mana_cost: '{2}{U}{U}' });
+    const list = db.createList('dk', 'Talrand', '', { kind: 'deck', commander: cmd });
+    db.addCardToList(list.id, island, 5);
+    for (let i = 1; i <= 10; i++) db.addCardToList(list.id, card(`Deck Spell ${i}`));
+    const z = db.createList('dk', 'Zuko', '', { kind: 'deck', commander: card('Zuko', { type_line: 'Legendary Creature', color_identity: ['U'] }) });
+    for (const c of other) db.addCardToList(z.id, c);
+    for (const c of boxed) col.addToCollection('dk', c, 1);
+    const { ROLES_VERSION } = await import('./roles');
+    const ids = (db.database().all('SELECT data FROM cards') as Array<{ data: string }>).map((r) => (JSON.parse(r.data) as ScryfallCard).oracle_id!).filter(Boolean);
+    db.saveRoles(new Map([...new Set([...ids, cmd.oracle_id!])].map((id) => [id, []] as [string, string[]])), ROLES_VERSION);
+    return { db, list: db.getList(list.id, 'dk')! };
+  }
+  const tower = land('Reliquary Tower', []);
+  const academy = land('Academy Ruins', ['C'].slice(1), { oracle_text: '{T}: Add {C}. {1}{U}, {T}: Put target artifact card from your graveyard on top of your library.' });
+  const lagoon = land('Lonely Lagoon', ['U']);
+  const fall = land('Sulfur Falls', ['U', 'R']);
+  const lent = land('Lent Land', ['U']);
+
+  it('a one-colour deck is offered its nonbasic lands; the basics drop by as many and the total stays', async () => {
+    const { list } = await mono([...owned, tower, academy, lagoon, fall], [lent]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    const n = (await finish.finishView(list, 'dk')).howMany.nonland;
+    const { call, asked } = stand([{ search: ['draw', 't:land'] }, { picks: { ...pick(owned.slice(0, n).map((c) => c.name)), lands: [{ name: 'Reliquary Tower', why: 'No hand size.' }, { name: 'Lonely Lagoon', why: 'Fixes nothing, finds an Island.' }] } }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    // The task asks for up to a third of 30 (10), and the land search shows only nonbasic lands that fit, under the copies setting.
+    expect(text(asked[0])).toContain('Also choose up to 10 of the owner\'s nonbasic lands');
+    const landResult = JSON.stringify(asked[1].messages.at(-1));
+    expect(landResult).toContain('Reliquary Tower');
+    expect(landResult).not.toContain('Sulfur Falls'); // red: outside the colours
+    expect(landResult).not.toContain('Lent Land'); // only in another deck, spare copies only
+    expect(landResult).not.toMatch(/Island \{/);
+    // The spell search never shows a land.
+    expect(JSON.stringify(asked[1].messages.at(-1)).split('tool_use_id')[1]).not.toContain('Reliquary');
+    const v = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(v.duals.map((d) => d.name)).toEqual(['Reliquary Tower', 'Lonely Lagoon']);
+    expect(v.total).toBe(25);
+    expect(v.basics.find((b) => b.name === 'Island')!.n).toBe(23);
+    // A colourless land takes a basic's place: blue has 24 sources of the 25 its share wanted, and the box says so.
+    expect(v.short).toEqual([{ colour: 'U', have: 24, want: 25 }]);
+    // Unticking a land gives its slot back to a basic.
+    finish.setLands(list.id, { skip: ['Reliquary Tower'] });
+    const after = (await finish.finishView(list, 'dk')).run!.lands!;
+    expect(after.total).toBe(25);
+    expect(after.basics.find((b) => b.name === 'Island')!.n).toBe(24);
+    expect(after.short).toEqual([]);
+  });
+
+  it('cuts a land answer to the limit, and never takes a land already in the deck', async () => {
+    const many = Array.from({ length: 14 }, (_, i) => land(`Blue Land ${i + 1}`, ['U']));
+    const { db, list } = await mono([...owned, ...many]);
+    db.addCardToList(list.id, many[0]);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { lands: 30 });
+    const n = (await finish.finishView(list, 'dk')).howMany.nonland;
+    const { asked, call } = stand([{ search: ['draw', 't:land'] }, { picks: { ...pick(owned.slice(0, n).map((c) => c.name)), lands: many.map((l) => ({ name: l.name, why: 'Blue.' })) } }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    // A third of 30, less the one nonbasic already in the deck: 9.
+    expect(text(asked[0])).toContain('Also choose up to 9 of');
+    const picks = finish.finishStore(list.id).run!.landPicks!;
+    expect(picks).toHaveLength(9);
+    expect(picks.map((l) => l.name)).not.toContain('Blue Land 1');
+  });
+
+  it('remembers what was skipped on this deck through Apply and Start over, with the reason, until taken off', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 2 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2', 'Owned 4']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    finish.setChoices(list.id, { 'Owned 4': { choice: 'skip', text: 'too slow for this deck' } });
+    finish.resetFinish(list.id);
+    expect(finish.finishStore(list.id).skippedBefore).toEqual([{ name: 'Owned 4', why: 'too slow for this deck' }]);
+    const { call, asked } = stand([{ search: ['draw'] }, { picks: pick(['Owned 4', 'Owned 6']) }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    // Not on offer, and the reason goes with the request.
+    expect(JSON.stringify(asked[0].system)).toContain('Owned 4: \\"too slow for this deck\\"');
+    expect(JSON.stringify(asked[1].messages.at(-1))).not.toContain('Owned 4 {');
+    expect(finish.finishStore(list.id).run!.items.map((i) => i.name)).toEqual(['Owned 6']);
+    // Searched: how many cards, and the colours in words.
+    expect((await finish.finishView(list, 'dk')).offer).toEqual({ n: 59, colours: 'blue, black and red' });
+    finish.unskip(list.id, 'Owned 4');
+    expect(finish.finishStore(list.id).skippedBefore).toEqual([]);
   });
 });
 

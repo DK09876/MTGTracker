@@ -34,11 +34,11 @@ import { addCardToList, aiCalls, cardsInList, database, setQuantity, updateListC
 import { planFor } from './deck-plan';
 import { latestJob } from './jobs';
 import { ownedCombos } from './finish-combos';
-import { BASIC, finishLands, finishPool, heldCards, isLand, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
+import { BASIC, dualCandidates, finishLands, finishPool, heldCards, isLand, nonbasicLimit, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
 import { localCards } from './card-store';
 import {
-  chosenAdds, finishCount, FINISH_GROUPS, measuredRounds, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
-  type Copies, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
+  chosenAdds, colourWords, finishCount, FINISH_GROUPS, measuredRounds, parseQuery, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
+  type Copies, type FinishChanges, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
 } from './finish-shared';
 import { planContext } from './plan-context';
 import { owner as planOwner } from './plan-help';
@@ -68,7 +68,13 @@ interface Run {
   owned: number | null; combosFailed: boolean;
   /** Lands in the deck when this fill is done (a full fill). */
   landsTarget?: number;
+  /** A full fill (Part E): the nonbasic lands Claude chose, each with why, and the most it could choose. */
+  landPicks?: StoredLand[];
+  landsLimit?: number;
+  /** A later round: what changed since the last list. */
+  changes?: FinishChanges;
 }
+interface StoredLand { name: string; why: string }
 interface Done {
   at: string; added: number; lands: number; size: number; borrowed: string[];
   /** Picks on Add that were no longer on offer at apply time, so not added. */
@@ -84,12 +90,16 @@ export interface FinishStore {
   want: number | null;
   /** Lands in the deck when a fill to 100 is done, the owner's number; null is the plan's land number. */
   lands: number | null;
-  /** The owner's changes to the app's lands for this list: duals left out, and how many of each basic. */
-  landPicks: { skip: string[]; basics: Record<string, number> };
+  /** The owner's changes to the lands for this list: nonbasic lands left out, how many of each basic, and lands added with "+". */
+  landPicks: { skip: string[]; basics: Record<string, number>; added?: string[] };
   run: Run | null;
   choices: Record<string, { choice: FinishChoice; text: string }>;
   /** Never offered again in this conversation. */
   skipped: string[];
+  /** Skipped on this deck in an earlier Finish, with the owner's reason: never offered again on this deck (D 14). */
+  skippedBefore: Array<{ name: string; why: string }>;
+  /** The cards Claude searches in the round running now or last run (D 10). */
+  offer: { n: number; colours: string } | null;
   /** Every name a search returned in this conversation: a pick must be one of them. */
   seen: string[];
   searches: StoredSearch[];
@@ -99,7 +109,7 @@ export interface FinishStore {
   pending: number | null;
 }
 
-const EMPTY: FinishStore = { copies: 'spare', want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], seen: [], searches: [], turns: [], done: null, pending: null };
+const EMPTY: FinishStore = { copies: 'spare', want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], skippedBefore: [], offer: null, seen: [], searches: [], turns: [], done: null, pending: null };
 
 let ready = false;
 function db() {
@@ -125,9 +135,32 @@ function update(listId: string, change: (s: FinishStore) => void): FinishStore {
   return s;
 }
 
-/** Start over: the picks, the choices and the conversation go; the copies setting and the number stay. */
+/**
+ * What the owner skipped on this list, with the reason they typed, joins the deck's skipped-before list (D 14):
+ * per deck, kept through Apply and Start over, so a later Finish on this deck never offers them again.
+ */
+function rememberSkips(s: FinishStore): void {
+  if (!s.run) return;
+  const have = new Set(s.skippedBefore.map((x) => front(x.name)));
+  for (const i of s.run.items) {
+    const c = s.choices[i.name];
+    if (c?.choice !== 'skip') continue;
+    const why = (c.text ?? '').trim().slice(0, 300);
+    if (have.has(front(i.name))) { const x = s.skippedBefore.find((y) => front(y.name) === front(i.name))!; if (why) x.why = why; continue; }
+    s.skippedBefore.push({ name: i.name, why });
+    have.add(front(i.name));
+  }
+  s.skippedBefore = s.skippedBefore.slice(-300);
+}
+
+/** Take a card off the deck's skipped-before list: it may be offered again. */
+export function unskip(listId: string, name: string): void {
+  update(listId, (s) => { s.skippedBefore = s.skippedBefore.filter((x) => front(x.name) !== front(name)); });
+}
+
+/** Start over: the picks, the choices and the conversation go; the copies setting, the number and the skipped-before list stay. */
 export function resetFinish(listId: string): void {
-  update(listId, (s) => { s.run = null; s.choices = {}; s.skipped = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; s.landPicks = { skip: [], basics: {} }; });
+  update(listId, (s) => { rememberSkips(s); s.run = null; s.choices = {}; s.skipped = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; s.landPicks = { skip: [], basics: {} }; });
 }
 
 /** The copies setting and the number, per deck. A new commander starts the conversation over. */
@@ -146,11 +179,11 @@ export function setFinish(listId: string, input: { copies?: unknown; want?: unkn
 export const FINISH_SYSTEM = `You help a Magic: The Gathering player finish their Commander deck from cards they own.
 You get the deck's plan (each part with who set it), the cards already in the deck, and how many cards to pick. After the first list, you also get the conversation so far.
 
-Find cards with the search tool. It searches only the owner's cards that may go in this deck: in its colours, legal, within the owner's budget, deck rule and bracket. Words are matched in the name, type line and rules text, and all words must match; add t:<type>, mv<=N, mv>=N or mv=N to narrow, and -word to leave cards out. Nothing else is understood (no colour or other filters): a word it can't use is ignored, and the result says so. Each search returns up to 40 cards with their rules text and the total count. Searches are limited; when none are left, give your picks.
+Find cards with the search tool. It searches only the owner's cards that may go in this deck: in its colours, legal, within the owner's budget, deck rule and bracket. Lands are searched apart: a search with t:land looks only at the owner's nonbasic lands; any other search never shows lands. Words are matched in the name, type line and rules text, and all words must match; add t:<type>, mv<=N, mv>=N or mv=N to narrow, and -word to leave cards out. Nothing else is understood (no colour or other filters): a word it can't use is ignored, and the result says so. Each search returns up to 40 cards with their rules text and the total count. Searches are limited; when none are left, give your picks.
 
 Give your picks with give_picks, sorted into groups: ramp, draw (real card draw, not cantrips), interaction (removal, counterspells, board wipes), theme (name the theme), wins (ways to end the game), protection.
 - Pick only cards a search returned, by their exact name. A card a search didn't return can't be used.
-- No lands: the app chooses the lands.
+- No lands in the groups. When the task asks for lands, give them in "lands" only: the owner's nonbasic lands worth a slot, at most the number the task gives, each with one sentence why for this deck. Choose lands that fix the colours without slowing the deck (few that enter tapped), and lands that do something the plan wants. Say nothing about basics: the app decides how many lands go in, adds the basics and checks every colour has enough sources. A few searches with t:land are enough.
 - Exactly the number of cards asked for, each once. If the searches truly can't fill it, give fewer and say so in the reply.
 - Give every card one short sentence why, as a player would say it at the table, about this card in this deck.
 - A line that ends "(in <deck>)" is a card the owner has only in another deck. Pick it only when it is clearly better than what their spare copies offer.
@@ -161,7 +194,9 @@ This is one conversation. On every list after the first:
 - Never pick a card the owner skipped.
 - When the owner asked you to rethink a card, weigh their reason: pick it again with a better argument, or pick something else, and say which in the reply.
 - Where the owner said something, follow it, and apply their reasons to similar cards. If what they said means a kept card should go, name it in "out" and pick its replacement too.
-- Reply in 2 to 4 sentences: what you changed and which of their words changed it.`;
+- Reply in 2 to 4 sentences: what you changed and which of their words changed it.
+- Lands: give "lands" again only when the owner's words are about the lands ("more utility lands", "no lands that enter tapped"); then give the whole new set. Otherwise leave it out and the lands stay as they are. Never pick a land the owner took out.
+- Cards the owner skipped on this deck before are listed with their reasons: they are never on offer; apply those reasons to similar cards too.`;
 
 export const FINISH_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -186,6 +221,11 @@ export const FINISH_TOOLS: Anthropic.Beta.BetaTool[] = [
             },
             required: ['group', 'cards'],
           },
+        },
+        lands: {
+          type: 'array',
+          description: 'Only when the task asks for lands: the owner\'s nonbasic lands worth a slot (from t:land searches), at most the number the task gives. No basics.',
+          items: { type: 'object', properties: { name: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'why'] },
         },
         reply: { type: 'string', description: 'First list: one or two sentences on the build. Later lists: 2 to 4 sentences on what changed and why.' },
         out: { type: 'array', items: { type: 'string' }, description: 'Later lists only: kept picks the owner\'s words say should go. Leave empty otherwise.' },
@@ -284,16 +324,24 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   progress('Working out which of your cards may go in');
   const before = finishStore(list.id);
   const rerun = !!opts.rerun && !!before.run;
+  // This list's skips join the deck's skipped-before list now, so they are left out of every later Finish too.
+  if (rerun) rememberSkips(before);
   const ctx = await tuneContext(list, profileId);
   if (!list.commander) throw new ModelError('Set the commander first: the cards on offer follow its colours.');
   const held = heldCards(profileId, list.id);
-  const pool = finishPool(ctx, before.copies, held);
+  // Skipped on this deck before, and lands the owner took out this conversation: never on offer.
+  const leaveOut = new Set([...before.skippedBefore.map((x) => front(x.name)), ...(rerun ? before.landPicks.skip.map(front) : [])]);
+  const pool = finishPool(ctx, before.copies, held, { leaveOut });
   if (!pool.lines.length) throw new ModelError('None of your cards can go in this deck under these settings. Try “Take from other decks too”, or check the budget and deck rule on the Plan tab.');
   const lp = landPlan(ctx);
   const landsTarget = before.lands ?? lp.range[0];
   const count = finishCount(ctx.size, landsToAdd(lp, landsTarget), before.want);
   const at = now();
   const round = rerun ? before.run!.round + 1 : 1;
+  // Part E: on a full fill Claude also chooses which of the owner's nonbasic lands are worth a slot, up to a limit.
+  const landLimit = count.full ? Math.min(count.lands, nonbasicLimit(ctx, landsTarget)) : 0;
+  const askLands = landLimit > 0 && pool.lands.lines.length > 0;
+  const prevLands = rerun ? (before.run!.landPicks ?? []).filter((l) => !before.landPicks.skip.some((x) => front(x) === front(l.name))) : [];
 
   // What the owner's answer changes: the picks on Add stay, the rest open their slots.
   let turns: FinishTurn[];
@@ -341,7 +389,11 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     '',
     ctx.main.length ? `Already in the deck (${ctx.main.reduce((n, c) => n + c.quantity, 0)}): ${ctx.main.map((c) => c.card.name).join(NAMES)}` : 'Nothing else is in the deck yet.',
     ...combosLines(mode, owned),
+    ...(before.skippedBefore.length ? ['', `## Skipped on this deck before, with the owner's reasons (never on offer; apply the reasons to similar cards)`, ...before.skippedBefore.map((x) => `- ${x.name}${x.why ? `: ${quote(x.why)}` : ''}`)] : []),
   ].join('\n');
+  const landTask = !askLands ? '' : rerun
+    ? (prevLands.length ? ` The lands Claude chose stay unless the owner's words are about the lands: ${prevLands.map((l) => l.name).join(NAMES)}. If they are, give "lands" again, at most ${landLimit}.` : '')
+    : ` Also choose up to ${landLimit} of the owner's nonbasic lands worth a slot, in "lands" (search with t:land; ${pool.lands.lines.length} are on offer). The app adds the basics for the rest.`;
   const task = [
     ...sessionLines(turns),
     ...(rerun ? [
@@ -352,11 +404,12 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     '',
     '## The task',
     rerun
-      ? `This is list ${round}. Pick exactly ${need} more non-land card${need === 1 ? '' : 's'} for the slots that opened${reply?.message ? ' (and the replacements for any you name in "out")' : ''}, in groups. No lands. You have ${limit} searches.`
-      : `Pick exactly ${count.want} non-land cards, in groups. No lands${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100, so it will hold ${landsTarget} lands when done (${before.lands !== null ? 'the number the owner chose' : "the plan's land number"}). Weigh ramp and mana costs with that in mind` : ''}. You have ${limit} searches.`,
+      ? `This is list ${round}. Pick exactly ${need} more non-land card${need === 1 ? '' : 's'} for the slots that opened${reply?.message ? ' (and the replacements for any you name in "out")' : ''}, in groups. No lands in the groups.${landTask} You have ${limit} searches.`
+      : `Pick exactly ${count.want} non-land cards, in groups. No lands in the groups${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100, so it will hold ${landsTarget} lands when done (${before.lands !== null ? 'the number the owner chose' : "the plan's land number"}). Weigh ramp and mana costs with that in mind` : ''}.${landTask} You have ${limit} searches.`,
   ].join('\n').trim();
 
-  update(list.id, (s) => { if (!rerun) { s.searches = []; s.seen = []; } s.done = null; s.pending = round; });
+  const offer = { n: pool.lines.length + (askLands ? pool.lands.lines.length : 0), colours: colourWords(ctx.identity) };
+  update(list.id, (s) => { if (!rerun) { s.searches = []; s.seen = []; } s.done = null; s.pending = round; s.offer = offer; });
   progress(rerun ? `Claude is reading your answer (list ${round})` : `Claude is searching your cards (${count.want} to find)`);
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: task }];
@@ -389,7 +442,10 @@ export async function runFinish(call: Call, model: string, list: List, profileId
       if (use.name !== 'search') { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'Unknown tool.', is_error: true }); continue; }
       if (used >= limit) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'No searches left, give your picks now.' }); continue; }
       used += 1;
-      const r = searchLines(pool.lines, q);
+      // t:land searches the owner's nonbasic lands, and only when lands are asked for; nothing else ever shows a land.
+      const landAsk = parseQuery(q).types.some((t) => t.startsWith('land'));
+      if (landAsk && !askLands) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'Lands aren\'t part of this ask: the app chooses them. That search wasn\'t counted.' }); continue; }
+      const r = searchLines(landAsk ? pool.lands.lines : pool.lines, q);
       for (const l of r.lines) seen.add(front(l.name));
       const names = r.lines.map((l) => l.name);
       update(list.id, (s) => { s.searches.push({ q, n: r.total, round, names }); s.seen = [...new Set([...s.seen, ...names])]; });
@@ -413,16 +469,40 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     gcRoom: (() => { const r = gcRoomOf(ctx); return r === null ? null : Math.max(0, r - kept.filter((i) => pool.cards.get(i.name.toLowerCase())?.game_changer).length); })(),
   });
   if (!checked.picks.length && !kept.length) throw new ModelError(`None of Claude’s ${checked.dropped} picks could be used (not among your cards on offer, or not from its searches). Nothing was saved; try again.`);
-  const fresh = checked.picks.map((p) => toItem(p.card, held.get(keyOf(p.card)), before.copies, { group: p.group, ...(p.theme ? { theme: p.theme } : {}), why: p.why, mark: rerun ? 'new' : null }));
+  // A card the owner asked Claude to rethink that it picked again comes back with a new reason (D 15).
+  const asked = new Set(rerun ? (reply?.marks ?? []).filter((m) => m.choice === 'ask').map((m) => front(m.name)) : []);
+  const fresh = checked.picks.map((p) => toItem(p.card, held.get(keyOf(p.card)), before.copies, { group: p.group, ...(p.theme ? { theme: p.theme } : {}), why: p.why, mark: rerun ? (asked.has(front(p.card.name)) ? 'back' : 'new') : null }));
   const items = [...kept, ...fresh];
+  // Lands (Part E): Claude's picks, checked like the others and cut to the limit; on a later list they stay unless given again.
+  const given = (answer as { lands?: unknown }).lands;
+  const landPicks: StoredLand[] | undefined = !askLands ? undefined
+    : Array.isArray(given) && (!rerun || given.length) ? checkLands(given, pool, seen, landLimit) : rerun ? prevLands : [];
+  // What changed since the last list, by the app from the two lists, not from Claude's reply.
+  let changes: FinishChanges | undefined;
+  if (rerun) {
+    const now2 = new Set(items.map((i) => front(i.name)));
+    const was = new Set(before.run!.items.map((i) => front(i.name)));
+    const because = (n: string): FinishChanges['out'][number]['because'] => {
+      const c = before.choices[n]?.choice ?? 'add';
+      return c === 'skip' ? 'skipped' : c === 'ask' ? 'rethink' : outs.has(n) ? 'message' : 'gone';
+    };
+    changes = {
+      round,
+      out: before.run!.items.filter((i) => !now2.has(front(i.name))).map((i) => ({ name: i.name, because: because(i.name) })),
+      in: fresh.filter((i) => !was.has(front(i.name))).map((i) => ({ name: i.name, group: i.group === 'theme' && i.theme ? `theme:${i.theme}` : i.group })),
+      back: fresh.filter((i) => i.mark === 'back').map((i) => i.name),
+    };
+  }
   const found = await combosFound(ctx, items.map((i) => i.name));
   const run: Run = {
     id: randomUUID(), at: now(), model, round, want: count.want, full: count.full, short: checked.short, reply: checked.reply,
     items, dropped: checked.dropped, combos: found ?? [], owned: owned?.length ?? null, combosFailed: combosFailed || found === null, ...(count.full ? { landsTarget } : {}),
+    ...(landPicks ? { landPicks, landsLimit: landLimit } : {}), ...(changes ? { changes } : {}),
   };
   update(list.id, (s) => {
     s.run = run;
     s.choices = {};
+    s.skippedBefore = before.skippedBefore;
     if (!rerun) s.landPicks = { skip: [], basics: {} };
     s.skipped = rerun ? [...new Set([...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)])] : [];
     s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: checked.short, searches: used, reply: checked.reply, at: run.at }];
@@ -430,6 +510,18 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     s.pending = null;
   });
   return { runId: run.id, picks: items.length };
+}
+
+/** Claude's land picks: the owner's nonbasic lands on offer that a search returned, once each, cut to the limit. */
+export function checkLands(given: unknown[], pool: Pick<Pool, 'lands'>, seen: Set<string>, limit: number): StoredLand[] {
+  const out: StoredLand[] = [];
+  for (const g of given as Array<{ name?: unknown; why?: unknown }>) {
+    const card = pool.lands.cards.get(String(g?.name ?? '').trim().toLowerCase()) ?? pool.lands.cards.get(front(String(g?.name ?? '')));
+    if (!card || !seen.has(front(card.name)) || out.some((l) => front(l.name) === front(card.name))) continue;
+    if (out.length >= limit) break;
+    out.push({ name: card.name, why: String(g.why ?? '').trim().slice(0, 300) || 'Claude’s pick' });
+  }
+  return out;
 }
 
 const checkOut = (answer: unknown, kept: StoredItem[]): string[] => {
@@ -475,40 +567,58 @@ export async function takeCard(list: List, profileId: string, name: string, grou
     if (!x.run) return;
     x.run.items.push(item);
     x.skipped = x.skipped.filter((n) => front(n) !== front(card.name));
+    x.skippedBefore = x.skippedBefore.filter((n) => front(n.name) !== front(card.name));
     if (found) x.run.combos = found;
   });
 }
 
 /**
- * The app's lands for a fill to 100 (Part D), and the owner's changes to them:
- * duals left out, and any number of each basic (every colour of the deck is
- * offered, at 0 when the split gave it none). Nothing else is added for a
- * dual left out: the owner sets the basics.
+ * The lands for a fill to 100, and the owner's changes to them (Part E). The nonbasic lands are Claude's picks
+ * (or, for a run from before Part E, the colour-fixing lands by how many colours they make) plus any the owner
+ * added with "+"; a land unticked gives its slot back to a basic, so the land number never changes. Basics are
+ * split by basicsFor, counting what the ticked lands make; the owner may set any basic's count, and every
+ * colour's basic is offered, at 0 when the split gave it none.
  */
-export function landsFor(ctx: Context, held: Map<string, Held>, s: Pick<FinishStore, 'copies' | 'lands' | 'landPicks' | 'run'>, lp: { have: number; range: [number, number] }, adds: number, costs: string[]): { suggested: LandPick[]; chosen: LandPick[] } {
+export function landsFor(ctx: Context, held: Map<string, Held>, s: Pick<FinishStore, 'copies' | 'lands' | 'landPicks' | 'run'>, lp: { have: number; range: [number, number] }, adds: number, costs: string[]): {
+  suggested: LandPick[]; chosen: LandPick[]; short: Array<{ colour: string; have: number; want: number }>; byClaude: boolean;
+} {
   const target = s.run?.landsTarget ?? s.lands ?? lp.range[0];
   const n = Math.max(0, Math.min(100 - ctx.size - adds, landsToAdd(lp, target)));
-  const suggested = finishLands(ctx, held, s.copies, n, costs);
+  const picks = { skip: s.landPicks?.skip ?? [], basics: s.landPicks?.basics ?? {}, added: s.landPicks?.added ?? [] };
   const isBasic = (c: ScryfallCard) => /\bBasic\b/.test(c.type_line ?? '');
-  const basics = new Map(suggested.filter((l) => isBasic(l.card)).map((l) => [l.card.name, l]));
+  const byName = new Map([...held.values()].map((h) => [front(h.card.name), h]));
+  const asPick = (l: StoredLand): LandPick | null => {
+    const h = byName.get(front(l.name));
+    return h ? { card: h.card, n: 1, ...(sourceOf(h, s.copies) ?? { src: 'spare' as Source }), why: l.why } : null;
+  };
+  const byClaude = !!s.run?.landPicks;
+  const added = picks.added.map((name) => asPick({ name, why: 'You added it.' })).filter((l): l is LandPick => !!l);
+  const all = [...(byClaude ? s.run!.landPicks!.map(asPick).filter((l): l is LandPick => !!l) : dualCandidates(ctx, held, s.copies, n)), ...added]
+    .filter((l, k, a) => a.findIndex((x) => front(x.card.name) === front(l.card.name)) === k);
+  const on = all.filter((l) => !picks.skip.includes(l.card.name)).slice(0, n);
+  const { lands, short } = finishLands(ctx, held, s.copies, n, costs, on);
+  const basics = new Map(lands.filter((l) => isBasic(l.card)).map((l) => [l.card.name, l]));
   const more = localCards([...ctx.identity].map((c) => BASIC[c]).filter((b) => b && !basics.has(b)));
   for (const c of more) basics.set(c.name, { card: ctx.main.find((x) => x.card.name === c.name)?.card ?? c, n: 0, src: 'spare' });
-  const picks = s.landPicks ?? { skip: [], basics: {} };
-  const chosen = [
-    ...suggested.filter((l) => !isBasic(l.card) && !picks.skip.includes(l.card.name)),
-    ...[...basics.values()].map((l) => ({ ...l, n: picks.basics[l.card.name] ?? l.n })).filter((l) => l.n > 0),
-  ];
-  return { suggested: [...suggested.filter((l) => !isBasic(l.card)), ...basics.values()], chosen };
+  const chosen = [...on, ...[...basics.values()].map((l) => ({ ...l, n: picks.basics[l.card.name] ?? l.n })).filter((l) => l.n > 0)];
+  return { suggested: [...all, ...basics.values()], chosen, short, byClaude };
 }
 
-/** The owner's changes to the app's lands: a dual in or out, a basic's count. */
-export function setLands(listId: string, input: { skip?: unknown; basics?: unknown }): void {
+/** The owner's changes to the lands: a nonbasic in or out, a basic's count, and "+" for another of their lands a land search found. */
+export function setLands(listId: string, input: { skip?: unknown; basics?: unknown; add?: unknown }): void {
   update(listId, (s) => {
     if (Array.isArray(input.skip)) s.landPicks.skip = input.skip.filter((x): x is string => typeof x === 'string').slice(0, 100);
     if (input.basics && typeof input.basics === 'object') {
       for (const [k, v] of Object.entries(input.basics as Record<string, unknown>)) {
         if (typeof v === 'number' && Number.isFinite(v) && v >= 0) s.landPicks.basics[k] = Math.min(99, Math.round(v));
       }
+    }
+    if (typeof input.add === 'string') {
+      const name = s.seen.find((n) => front(n) === front(input.add as string));
+      if (!name) throw new Error(`${input.add} wasn't in a land search's results`);
+      const added = s.landPicks.added ?? [];
+      if (!added.some((n) => front(n) === front(name))) s.landPicks.added = [...added, name].slice(0, 40);
+      s.landPicks.skip = s.landPicks.skip.filter((n) => front(n) !== front(name));
     }
   });
 }
@@ -547,7 +657,7 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
     at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo,
     session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen },
   };
-  update(list.id, (x) => { x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
+  update(list.id, (x) => { rememberSkips(x); x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
   return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left };
 }
 
@@ -627,10 +737,14 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
   let lands: NonNullable<FinishView['run']>['lands'] = null;
   if (s.run?.full) {
     const adds = chosenAdds(items, s.choices);
-    const { suggested, chosen } = landsFor(ctx, heldCards(profileId, list.id), s, lp, adds.length, items.filter((i) => adds.includes(i.name)).map((i) => i.card.manaCost));
+    const { suggested, chosen, short, byClaude } = landsFor(ctx, heldCards(profileId, list.id), s, lp, adds.length, items.filter((i) => adds.includes(i.name)).map((i) => i.card.manaCost));
     const basic = (l: { card: ScryfallCard }) => /\bBasic\b/.test(l.card.type_line ?? '');
+    const picked = new Set(suggested.map((l) => front(l.card.name)));
+    // "+": the owner's lands the land searches found that aren't listed yet.
+    const landSearched = [...new Set(s.searches.filter((x) => parseQuery(x.q).types.some((t) => t.startsWith('land'))).flatMap((x) => x.names))].filter((n) => !picked.has(front(n)));
     lands = {
-      duals: suggested.filter((l) => !basic(l)).map((l) => ({ name: l.card.name, on: !s.landPicks.skip.includes(l.card.name) })),
+      duals: suggested.filter((l) => !basic(l)).map((l) => ({ name: l.card.name, on: !s.landPicks.skip.includes(l.card.name), ...(l.why ? { why: l.why } : {}), ...(l.src === 'other' && l.deck ? { deck: l.deck } : {}) })),
+      more: landSearched.slice(0, 24), short, limit: s.run.landsLimit ?? null, byClaude,
       basics: suggested.filter(basic).map((l) => ({ name: l.card.name, n: chosen.find((c) => c.card.name === l.card.name)?.n ?? 0, suggested: l.n })),
       total: chosen.reduce((k, p) => k + p.n, 0),
       suggested: suggested.reduce((k, p) => k + p.n, 0),
@@ -651,10 +765,12 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     howMany: { room: count.room, nonland: count.nonland, lands: count.lands || Math.min(count.room, landsToAdd(lp, landsTarget)), target: landsTarget, mine: s.lands !== null, have: fmt(lp.have), plan: lp.range },
     run: s.run ? {
       id: s.run.id, at: s.run.at, round: s.run.round, model: s.run.model, want: s.run.want, full: s.run.full, short: s.run.short, reply: s.run.reply,
-      items, more, lands, dropped: s.run.dropped,
+      items, more, lands, changes: s.run.changes ?? null, dropped: s.run.dropped,
     } : null,
     choices: s.choices,
     skipped: s.skipped,
+    skippedBefore: s.skippedBefore,
+    offer: s.offer,
     turns: s.turns,
     searches: s.searches.filter((x) => x.round === (running && s.pending ? s.pending : s.run?.round ?? 1)).map(({ q, n, round }) => ({ q, n, round })),
     job: job && (running || (job.status === 'failed' && (!s.run || job.startedAt > s.run.at))) ? { status: job.status as 'running' | 'failed', detail: job.detail || null, error: job.status === 'failed' ? job.error ?? 'Claude didn’t finish' : null } : null,

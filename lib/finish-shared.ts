@@ -50,7 +50,8 @@ export interface Query {
   words: string[];
   /** Words a card must not have (-word). */
   not: string[];
-  type: string | null;
+  /** Every t: filter; a card must match all of them (t:zombie t:creature is Zombie creatures). */
+  types: string[];
   /** Mana value at most / at least. */
   mv: number | null;
   mvMin: number | null;
@@ -60,12 +61,12 @@ export interface Query {
 
 /** A search as Claude writes it: words that must all match, `-word`, `t:<type>`, `mv<=N`, `mv>=N`, `mv=N`. */
 export function parseQuery(q: string): Query {
-  const out: Query = { words: [], not: [], type: null, mv: null, mvMin: null, ignored: [] };
+  const out: Query = { words: [], not: [], types: [], mv: null, mvMin: null, ignored: [] };
   for (const w of q.toLowerCase().replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
     const mv = w.match(/^(?:mv|cmc|manavalue)(<=|>=|<|>|=|:)(\d+)$/);
     const text = w.match(/^(?:o|oracle|text|name|n):(.+)$/);
     const type = w.match(/^(?:t|type):(.+)$/);
-    if (type) out.type = type[1];
+    if (type) out.types.push(type[1]);
     else if (mv) {
       const n = Number(mv[2]);
       if (mv[1] === '<=') out.mv = n;
@@ -83,10 +84,10 @@ export function parseQuery(q: string): Query {
 
 /** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value in range. */
 export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> } {
-  const { words, not, type, mv, mvMin, ignored } = parseQuery(q);
+  const { words, not, types, mv, mvMin, ignored } = parseQuery(q);
   const hits = pool.filter((c) => {
     const l = c.line.toLowerCase();
-    if (type && !c.typeLine.toLowerCase().includes(type)) return false;
+    if (!types.every((t) => c.typeLine.toLowerCase().includes(t))) return false;
     if (mv !== null && c.cmc > mv) return false;
     if (mvMin !== null && c.cmc < mvMin) return false;
     return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
@@ -169,8 +170,11 @@ export interface FinishItem {
   deck?: string;
   /** The section of this deck it waits in, for src 'maybe'. */
   section?: string;
-  /** new: this round's pick after the first; yours: taken from a search's results by the owner. */
-  mark: 'new' | 'yours' | null;
+  /**
+   * new: on this list and not the last; back: a card the owner asked Claude to rethink that it picked again, with
+   * a new reason (the reason is what is new); yours: taken from a search's results by the owner.
+   */
+  mark: 'new' | 'back' | 'yours' | null;
   card: { id: string; image: string | null; manaCost: string; typeLine: string; text: string; cmc: number };
 }
 
@@ -198,12 +202,27 @@ export interface FinishView {
     /** Per group: the search that fed it, and its cards not already listed (for "+"). */
     more: Record<string, { q: string; n: number; cards: Array<{ name: string; manaCost: string }> }>;
     /** A fill to 100: the app's lands, with the owner's changes. total: what goes in; suggested: what the app chose; target: lands in the deck when done. */
-    lands: { duals: Array<{ name: string; on: boolean }>; basics: Array<{ name: string; n: number; suggested: number }>; total: number; suggested: number; target: number; why: string } | null;
+    /**
+     * duals: the nonbasic lands, ticked or not (Claude's picks with its reason, Part E; or an older run's
+     * colour-fixing lands). more: the owner's lands the land searches found, for "+". short: colours left
+     * short of their share once the nonbasic lands are in. limit: how many nonbasic lands Claude could pick.
+     */
+    lands: {
+      duals: Array<{ name: string; on: boolean; why?: string; deck?: string }>; basics: Array<{ name: string; n: number; suggested: number }>;
+      total: number; suggested: number; target: number; why: string;
+      more: string[]; short: Array<{ colour: string; have: number; want: number }>; limit: number | null; byClaude: boolean;
+    } | null;
+    /** What changed since the last list (a later round), worked out by the app from the two lists. */
+    changes: FinishChanges | null;
     /** Picks Claude named that the app dropped (not on offer or not searched), for the record. */
     dropped: number;
   } | null;
   choices: Record<string, { choice: FinishChoice; text: string }>;
   skipped: string[];
+  /** Cards skipped on this deck in earlier Finishes, with the owner's reason: never offered again here. */
+  skippedBefore: Array<{ name: string; why: string }>;
+  /** The cards Claude searches this round: how many, and the deck's colours in words. */
+  offer: { n: number; colours: string } | null;
   turns: FinishTurn[];
   /** This round's searches, as they run and once done. */
   searches: FinishSearch[];
@@ -217,6 +236,24 @@ export interface FinishView {
   cost: { first: RoundCost; later: RoundCost };
   noKey: boolean;
 }
+
+/** What a later list changed: cards that left (and which mark sent them), cards that came in, and Rethinks that came back. */
+export interface FinishChanges {
+  round: number;
+  out: Array<{ name: string; because: 'skipped' | 'rethink' | 'message' | 'gone' }>;
+  in: Array<{ name: string; group: string }>;
+  back: string[];
+}
+
+const COLOUR_WORD: Record<string, string> = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
+/** A deck's colours in words, in WUBRG order: "blue, black and red"; "colourless" for none. */
+export function colourWords(identity: Iterable<string>): string {
+  const w = [...'WUBRG'].filter((c) => [...identity].includes(c)).map((c) => COLOUR_WORD[c]);
+  return !w.length ? 'colourless' : w.length === 1 ? w[0] : `${w.slice(0, -1).join(', ')} and ${w.at(-1)}`;
+}
+
+/** A kept row's comment that reads like a doubt ("kind of expensive for what it does"): offer Rethink. A plain rule, in code. */
+export const soundsUnsure = (text: string) => /(not sure|unsure|maybe|kind of|kinda|sort of|meh|expensive|pricey|weak|not great|not sold|doubt|hmm+|iffy|idk|questionable|too slow|clunky)|\?\s*$/i.test(text.trim());
 
 export interface RoundCost { usd: number; measured: boolean; base?: number; perCard?: number }
 

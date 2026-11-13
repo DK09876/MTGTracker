@@ -12,8 +12,9 @@
  *   find {rerun?, message?}    ask Claude in the background: the first list,
  *       or (rerun) the owner's marks and message, refilling the open slots
  *   choices {choices}          Add / Rethink / Skip and reasons, replaced whole
- *   lands {skip?, basics?}     a fill to 100: duals left out, and how many of
- *       each basic to take
+ *   lands {skip?, basics?, add?}  a fill to 100: nonbasic lands left out, how
+ *       many of each basic to take, and "+" for another land a search found
+ *   unskip {name}              take a card off the deck's skipped-before list
  *   take {name, group}         "+" from a search's results: no paid round
  *   apply                      add the cards on Add (and, on a full fill, the
  *       app's lands), after a snapshot
@@ -26,7 +27,7 @@ import { NextResponse } from 'next/server';
 import { claudeCall, ModelError } from '@/lib/ai';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
-import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish } from '@/lib/finish';
+import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish, unskip } from '@/lib/finish';
 import { startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
@@ -75,7 +76,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         setChoices(id, b.choices);
         break;
       case 'lands':
-        setLands(id, { skip: b.skip, basics: b.basics });
+        setLands(id, { skip: b.skip, basics: b.basics, add: b.add });
+        break;
+      case 'unskip':
+        if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
+        unskip(id, b.name);
         break;
       case 'take':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
