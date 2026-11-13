@@ -74,7 +74,9 @@ LOG="$LOGS/deploy-$(date +%Y%m%d_%H%M%S).log"
 exec 3>&1
 exec >>"$LOG" 2>&1
 ls -1t "$LOGS"/deploy-*.log 2>/dev/null | tail -n +21 | xargs rm -f 2>/dev/null || true
-say() { local m; m="[deploy $(date +%H:%M:%S)] $*"; echo "$m"; echo "$m" >&3 2>/dev/null || true; }
+# The terminal copy goes through an outside command: under bash 3.2 a failed builtin write to a closed pipe stays
+# buffered and comes out in the next $(...). After the first failure the terminal copy goes nowhere.
+say() { local m; m="[deploy $(date +%H:%M:%S)] $*"; echo "$m"; /bin/echo "$m" >&3 2>/dev/null || exec 3>/dev/null; }
 say "log: $LOG"
 now() { node -e 'process.stdout.write(String(Date.now()))'; }
 status() { curl -s -m 3 "$STATUS" 2>/dev/null || true; }
