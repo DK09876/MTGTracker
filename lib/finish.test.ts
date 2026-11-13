@@ -13,7 +13,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ClaudeParams } from './ai-claude';
-import { chunkPairs, completeCombos, finishCount, parseQuery, searchLines, SEARCH_LIMIT, type PoolLine } from './finish-shared';
+import { chunkPairs, completeCombos, finishCount, parseQuery, searchLines, searchText, SEARCH_LIMIT, type PoolLine } from './finish-shared';
 import type { ScryfallCard } from './scryfall';
 
 let dir: string;
@@ -133,7 +133,13 @@ describe('the search', () => {
     expect(searchLines(pool, 'draw t:instant').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'draw mv<=1').lines.map((l) => l.name)).toEqual(['Opt', 'Brainstorm']);
     expect(searchLines(pool, 'destroy').lines[0].line).toContain('(in Zuko)');
-    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], type: 'instant', mv: 2 });
+    expect(parseQuery('"draw a card" t:Instant mv<=2')).toEqual({ words: ['draw', 'a', 'card'], not: [], type: 'instant', mv: 2, mvMin: null, ignored: [] });
+    // What Claude tends to write beyond that: mv>=, mv=, o:, -word; anything else is named, not matched as a word.
+    expect(parseQuery('o:treasure mv>=3 -creature c:r pow>=4')).toEqual({ words: ['treasure'], not: ['creature'], type: null, mv: null, mvMin: 3, ignored: ['c:r', 'pow>=4'] });
+    expect(parseQuery('mv=2')).toMatchObject({ mv: 2, mvMin: 2 });
+    expect(searchLines(pool, 'o:draw mv>=3').lines.map((l) => l.name)).toEqual(['Divination']);
+    expect(searchLines(pool, 'draw -scry').lines.map((l) => l.name)).not.toContain('Opt');
+    expect(searchText(searchLines(pool, 'draw c:u'))).toContain('Ignored, not understood: c:u');
     const many = Array.from({ length: 55 }, (_, i) => line(`Card ${i}`, 'Instant', 1, 'Draw a card.'));
     const r = searchLines(many, 'draw');
     expect(r.total).toBe(55);
@@ -161,6 +167,19 @@ describe('a round with the stand-in Claude', { timeout: 60_000 }, () => {
     const results = JSON.stringify(asked[1].messages.at(-1));
     expect(results).toContain('30 match');
     expect(results).toContain('Owned 2 {1}{U} - Instant - Draw two cards.');
+  });
+
+  it('marks only the newest search result as the cache point, so earlier searches are read from the cache', async () => {
+    const { list } = await setup(owned);
+    const finish = await import('./finish');
+    const { call, asked } = stand([{ search: ['draw 1', 'draw 2'] }, { search: ['draw 3'] }, { search: ['draw 4'] }, { picks: pick(['Owned 2']) }]);
+    finish.setFinish(list.id, { want: 1 });
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk');
+    const last = asked.at(-1)!.messages;
+    const marked = last.flatMap((m, i) => (Array.isArray(m.content) ? m.content.map((b, j) => ((b as { cache_control?: unknown }).cache_control ? `${i}.${j}` : '')) : [])).filter(Boolean);
+    expect(marked).toEqual([`${last.length - 1}.0`]);
+    // The second call had two results: only the later one is marked.
+    expect((asked[1].messages.at(-1)!.content as Array<{ cache_control?: unknown }>).map((b) => !!b.cache_control)).toEqual([false, true]);
   });
 
   it('refuses the 26th search in code', async () => {

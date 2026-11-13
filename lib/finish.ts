@@ -144,7 +144,7 @@ export function setFinish(listId: string, input: { copies?: unknown; want?: unkn
 export const FINISH_SYSTEM = `You help a Magic: The Gathering player finish their Commander deck from cards they own.
 You get the deck's plan (each part with who set it), the cards already in the deck, and how many cards to pick. After the first list, you also get the conversation so far.
 
-Find cards with the search tool. It searches only the owner's cards that may go in this deck: in its colours, legal, within the owner's budget, deck rule and bracket. Words are matched in the name, type line and rules text, and all words must match; add t:<type> or mv<=N to narrow. Each search returns up to 40 cards with their rules text and the total count. Searches are limited; when none are left, give your picks.
+Find cards with the search tool. It searches only the owner's cards that may go in this deck: in its colours, legal, within the owner's budget, deck rule and bracket. Words are matched in the name, type line and rules text, and all words must match; add t:<type>, mv<=N, mv>=N or mv=N to narrow, and -word to leave cards out. Nothing else is understood (no colour or other filters): a word it can't use is ignored, and the result says so. Each search returns up to 40 cards with their rules text and the total count. Searches are limited; when none are left, give your picks.
 
 Give your picks with give_picks, sorted into groups: ramp, draw (real card draw, not cantrips), interaction (removal, counterspells, board wipes), theme (name the theme), wins (ways to end the game), protection.
 - Pick only cards a search returned, by their exact name. A card a search didn't return can't be used.
@@ -164,8 +164,8 @@ This is one conversation. On every list after the first:
 export const FINISH_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: 'search',
-    description: 'Search the owner\'s cards that may go in this deck. Words match the name, type line and rules text (all must match). t:<type> narrows by type, mv<=N by mana value. Returns up to 40 cards with rules text and the total count.',
-    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'e.g. "draw a card t:instant mv<=2"' } }, required: ['query'] },
+    description: 'Search the owner\'s cards that may go in this deck. Words match the name, type line and rules text (all must match). t:<type> narrows by type; mv<=N, mv>=N or mv=N by mana value; -word leaves out cards with that word. Returns up to 40 cards with rules text and the total count.',
+    input_schema: { type: 'object', properties: { query: { type: 'string', description: 'e.g. "draw a card t:instant mv<=2" or "treasure -creature mv>=3"' } }, required: ['query'] },
   },
   {
     name: 'give_picks',
@@ -387,6 +387,10 @@ export async function runFinish(call: Call, model: string, list: List, profileId
       progress(`Search ${used} of ${limit}: ${q}`);
       results.push({ type: 'tool_result', tool_use_id: use.id, content: searchText(r) + (used >= limit ? '\n\nThat was your last search: give your picks now.' : '') });
     }
+    // Every call re-sends the searches so far. Mark the newest result (and only it) as the cache point, so the next
+    // call reads everything before it from the cache instead of paying for it again.
+    for (const m of messages) if (m.role === 'user' && Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
+    if (results.length) results[results.length - 1] = { ...results[results.length - 1], cache_control: { type: 'ephemeral' } };
     messages.push({ role: 'user', content: results });
   }
   if (answer === null) throw new ModelError('Claude didn’t give its picks. Nothing was changed; try again.');

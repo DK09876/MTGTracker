@@ -67,6 +67,8 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const [wantText, setWantText] = useState('');
   const dirty = useRef(false);
   const runId = useRef<string | null>(null);
+  /** A number saved on leaving its box, still on its way: the next action waits for it. */
+  const saving = useRef<Promise<unknown>>(Promise.resolve());
 
   const take = useCallback((v: FinishView) => {
     setView(v);
@@ -107,6 +109,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     setBusy(true);
     setError(null);
     try {
+      await saving.current;
       if (dirty.current) { dirty.current = false; await api.finishAct(listId, { action: 'choices', choices }); }
       take(await api.finishAct(listId, action));
       await after?.();
@@ -115,6 +118,12 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     } finally {
       setBusy(false);
     }
+  };
+
+  // A number typed in a box is saved on leaving it without locking the page: leaving the box by pressing a button
+  // must not disable that button under the click. The button's own action waits for the save (act).
+  const save = (action: api.FinishAction) => {
+    saving.current = api.finishAct(listId, action).then(take).catch((e) => { setError(e instanceof Error ? e.message : 'Could not save that'); });
   };
 
   const items = useMemo(() => view?.run?.items ?? [], [view]);
@@ -194,7 +203,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm">Add</span>
           <input id="finish-howmany" type="number" min={1} inputMode="numeric" value={wantText} onChange={(e) => setWantText(e.target.value)}
-            onBlur={() => { if (wanted !== (view.want ?? full)) setWant(wanted); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            onBlur={() => { if (wanted !== (view.want ?? full)) save({ action: 'settings', want: wanted === full ? null : wanted }); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
             className={`${C.input} w-20 text-center font-semibold tabular-nums`} />
           {QUICK.map((n) => <button key={n} type="button" aria-pressed={wanted === n && !isFull} className={`${C.pill} min-h-10 ${wanted === n && !isFull ? C.on : C.off}`} onClick={() => setWant(n)}>{n}</button>)}
           <button type="button" aria-pressed={isFull} disabled={!full} className={`${C.pill} min-h-10 disabled:opacity-40 ${isFull ? C.on : C.off}`} onClick={() => setWant(null)}>Fill to 100</button>
@@ -207,7 +216,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           <div className="flex flex-wrap items-center gap-2" data-finish-landtotal>
             <label htmlFor="finish-lands" className="text-sm">Lands in the deck when it’s done</label>
             <input id="finish-lands" type="number" min={0} max={99} inputMode="numeric" defaultValue={view.howMany.target} key={`${view.howMany.target}`}
-              onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== view.howMany.target) void act({ action: 'settings', lands: n }); }}
+              onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== view.howMany.target) save({ action: 'settings', lands: n }); }}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               className={`${C.input} w-20 text-center font-semibold tabular-nums`} />
             <span className="text-[13px] text-[var(--muted)]">{view.howMany.mine ? 'your number' : 'the plan’s number'} · the plan says {view.howMany.plan[0]}–{view.howMany.plan[1]} · the deck has {view.howMany.have} now. Claude is told the total.</span>
@@ -394,7 +403,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         })}
       </div>
 
-      {run.full && run.lands && <Lands lands={run.lands} size={view.size + adds.length} busy={busy || running} onLands={(change) => act({ action: 'lands', ...change })} />}
+      {run.full && run.lands && <Lands lands={run.lands} size={view.size + adds.length} busy={busy || running} onLands={(change) => act({ action: 'lands', ...change })} onSave={(change) => save({ action: 'lands', ...change })} />}
     </section>
   );
 }
@@ -403,7 +412,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
  * The app's lands on a fill to 100, to take as they are or change: a dual
  * in or out, and how many of each basic. The total and the deck size follow.
  */
-function Lands({ lands, size, busy, onLands }: { lands: NonNullable<NonNullable<FinishView['run']>['lands']>; size: number; busy: boolean; onLands: (change: { skip?: string[]; basics?: Record<string, number> }) => void }) {
+function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonNullable<FinishView['run']>['lands']>; size: number; busy: boolean; onLands: (change: { skip?: string[]; basics?: Record<string, number> }) => void; /** A typed count, saved without locking the page. */ onSave: (change: { basics?: Record<string, number> }) => void }) {
   const skip = lands.duals.filter((d) => !d.on).map((d) => d.name);
   const end = size + lands.total;
   return (
@@ -429,7 +438,7 @@ function Lands({ lands, size, busy, onLands }: { lands: NonNullable<NonNullable<
           {lands.basics.map((b) => (
             <label key={b.name} className="flex items-center gap-2 text-sm">
               <input type="number" min={0} max={99} inputMode="numeric" defaultValue={b.n} key={`${b.name}:${b.n}`} disabled={busy} aria-label={`How many ${b.name}`}
-                onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== b.n) onLands({ basics: { [b.name]: n } }); }}
+                onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n >= 0 && n !== b.n) onSave({ basics: { [b.name]: n } }); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                 className={`${C.input} w-16 text-center font-semibold tabular-nums`} />
               {b.name}{b.n !== b.suggested && <span className="text-xs text-[var(--faint)]">(app: {b.suggested})</span>}

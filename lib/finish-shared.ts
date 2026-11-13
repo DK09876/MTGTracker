@@ -38,35 +38,61 @@ export interface PoolLine {
   deck?: string;
 }
 
-export interface Query { words: string[]; type: string | null; mv: number | null }
+export interface Query {
+  words: string[];
+  /** Words a card must not have (-word). */
+  not: string[];
+  type: string | null;
+  /** Mana value at most / at least. */
+  mv: number | null;
+  mvMin: number | null;
+  /** Filters the search doesn't know (c:r, pow>=3): left out of the match and named in the answer. */
+  ignored: string[];
+}
 
-/** A search as Claude writes it: words that must all match, `t:<type>`, `mv<=N`. */
+/** A search as Claude writes it: words that must all match, `-word`, `t:<type>`, `mv<=N`, `mv>=N`, `mv=N`. */
 export function parseQuery(q: string): Query {
-  const out: Query = { words: [], type: null, mv: null };
-  for (const w of q.toLowerCase().replace(/["“”]/g, ' ').split(/\s+/).filter(Boolean)) {
-    if (w.startsWith('t:') && w.length > 2) out.type = w.slice(2);
-    else if (/^(mv|cmc)<=\d+$/.test(w)) out.mv = Number(w.replace(/^(mv|cmc)<=/, ''));
-    else if (/^(mv|cmc)<\d+$/.test(w)) out.mv = Number(w.replace(/^(mv|cmc)</, '')) - 1;
+  const out: Query = { words: [], not: [], type: null, mv: null, mvMin: null, ignored: [] };
+  for (const w of q.toLowerCase().replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
+    const mv = w.match(/^(?:mv|cmc|manavalue)(<=|>=|<|>|=|:)(\d+)$/);
+    const text = w.match(/^(?:o|oracle|text|name|n):(.+)$/);
+    const type = w.match(/^(?:t|type):(.+)$/);
+    if (type) out.type = type[1];
+    else if (mv) {
+      const n = Number(mv[2]);
+      if (mv[1] === '<=') out.mv = n;
+      else if (mv[1] === '<') out.mv = n - 1;
+      else if (mv[1] === '>=') out.mvMin = n;
+      else if (mv[1] === '>') out.mvMin = n + 1;
+      else { out.mv = n; out.mvMin = n; }
+    } else if (text) out.words.push(text[1]);
+    else if (/^-?[a-z]+(:|<=|>=|<|>|=)/.test(w)) out.ignored.push(w);
+    else if (w.startsWith('-') && w.length > 1) out.not.push(w.slice(1));
     else out.words.push(w);
   }
   return out;
 }
 
-/** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value at most N. */
-export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[] } {
-  const { words, type, mv } = parseQuery(q);
+/** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value in range. */
+export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[] } {
+  const { words, not, type, mv, mvMin, ignored } = parseQuery(q);
   const hits = pool.filter((c) => {
     const l = c.line.toLowerCase();
     if (type && !c.typeLine.toLowerCase().includes(type)) return false;
     if (mv !== null && c.cmc > mv) return false;
-    return words.every((w) => l.includes(w));
+    if (mvMin !== null && c.cmc < mvMin) return false;
+    return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
   });
-  return { total: hits.length, lines: hits.slice(0, shown) };
+  return { total: hits.length, lines: hits.slice(0, shown), ignored };
 }
 
-/** What the search tool answers, in search.py's format. */
-export function searchText(r: { total: number; lines: PoolLine[] }): string {
-  return [`${r.total} match${r.total > r.lines.length ? `, first ${r.lines.length} shown` : ''}`, ...r.lines.map((c) => c.line)].join('\n');
+/** What the search tool answers, in search.py's format; a filter it couldn't use is named, so a "0 match" is never a silent misread. */
+export function searchText(r: { total: number; lines: PoolLine[]; ignored?: string[] }): string {
+  return [
+    `${r.total} match${r.total > r.lines.length ? `, first ${r.lines.length} shown` : ''}`,
+    ...(r.ignored?.length ? [`Ignored, not understood: ${r.ignored.join(' ')}. The search takes plain words, -word, t:<type>, mv<=N, mv>=N and mv=N only.`] : []),
+    ...r.lines.map((c) => c.line),
+  ].join('\n');
 }
 
 // --- how many ------------------------------------------------------------------------

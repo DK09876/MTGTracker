@@ -139,10 +139,16 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   }, [choices, listId]);
 
   const saved = view?.approach?.text ?? '';
+  /** "How many" typed and saved on leaving its box, still on its way: the next action waits for it. */
+  const saving = useRef<Promise<unknown>>(Promise.resolve());
+  const saveTarget = (target: TrimTarget | null) => {
+    saving.current = api.trimAct(listId, { action: 'target', target }).then(take).catch((e) => { setError(e instanceof Error ? e.message : 'Could not save that'); });
+  };
   const act = async (action: api.TrimAction, after?: () => Promise<void> | void) => {
     setBusy(true);
     setError(null);
     try {
+      await saving.current;
       // Anything typed or chosen goes first, so the request reads it.
       if (dirty.current) { dirty.current = false; await api.trimAct(listId, { action: 'choices', choices }); }
       if (box.trim() !== saved.trim() && !(action.action === 'approach')) { sentBox.current = box.trim(); take(await api.trimAct(listId, { action: 'approach', text: box })); }
@@ -260,7 +266,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             </button>
             <Tip label="About the two links">The draft is worked out by the app from the deck’s numbers and replaces the box. Claude keeps what you wrote, word for word, and adds its own lines below.</Tip>
           </div>
-          <HowMany key={`${view.target?.kind ?? ''}:${view.target?.n ?? ''}:${over}`} size={view.size} target={view.target} over={over} disabled={busy || cutsRunning} onTarget={(target) => act({ action: 'target', target })} />
+          <HowMany key={`${view.target?.kind ?? ''}:${view.target?.n ?? ''}:${over}`} size={view.size} target={view.target} over={over} disabled={busy || cutsRunning} onTarget={(target) => act({ action: 'target', target })} onSave={saveTarget} />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-[var(--border)] pt-3">
             <p className="min-w-0 flex-[1_1_16rem] text-[13px] text-[var(--muted)]">
               You can leave it empty. Claude also reads your confirmed plan, your notes, your never-cut cards and what you kept or cut on this deck before.{' '}
@@ -406,12 +412,12 @@ const fmt = (x: number) => (Math.round(x * 10) / 10).toString();
  * How many to cut: a number of cuts or a size to reach, the same box as
  * Finish's. Down to 100 by default; under 100 too, when the owner asks.
  */
-function HowMany({ size, target, over, disabled, onTarget }: { size: number; target: TrimTarget | null; over: number; disabled: boolean; onTarget: (t: TrimTarget | null) => void }) {
+function HowMany({ size, target, over, disabled, onTarget, onSave }: { size: number; target: TrimTarget | null; over: number; disabled: boolean; onTarget: (t: TrimTarget | null) => void; /** A typed number, saved without locking the page, so a button pressed straight after still takes the click. */ onSave: (t: TrimTarget | null) => void }) {
   // Keyed by the saved target in the parent, so it starts again from what was saved.
   const [text, setText] = useState(String(target?.kind === 'to' ? target.n : over || 5));
   const [kind, setKind] = useState<'cut' | 'to'>(target?.kind ?? 'cut');
   const n = Math.round(Number(text));
-  const save = () => { if (Number.isFinite(n) && n >= 1 && !(target?.kind === kind && target.n === n)) onTarget(kind === 'to' && n === 100 ? null : { kind, n }); };
+  const save = () => { if (Number.isFinite(n) && n >= 1 && !(target?.kind === kind && target.n === n)) onSave(kind === 'to' && n === 100 ? null : { kind, n }); };
   const quick: Array<[string, TrimTarget | null]> = [['Cut 5', { kind: 'cut', n: 5 }], ['Cut 10', { kind: 'cut', n: 10 }], ['Cut to 100', null], ['Cut to 95', { kind: 'to', n: 95 }]];
   const same = (a: TrimTarget | null, b: TrimTarget | null) => (a?.kind ?? null) === (b?.kind ?? null) && (a?.n ?? null) === (b?.n ?? null);
   return (
