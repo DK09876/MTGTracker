@@ -141,7 +141,7 @@ start_release() {
   local strict="${2:-1}"
   ln -sfn "$1" "$CURRENT"
   # The flag stays while the new build is checked (round 2, item 20): no job starts until it passes.
-  eval "$START_CMD"
+  eval "$START_CMD" 3>&-
   # Up when the status answers with this release's build, from the expected database with profiles in it, and the
   # scanner's files are served (60 s at most).
   local want expect b got n
