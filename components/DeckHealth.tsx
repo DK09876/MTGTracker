@@ -257,7 +257,7 @@ function Bracket({ insights, aim }: { insights: api.DeckInsights | 'loading' | '
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-lg font-semibold">{aim ? `You’re aiming for ${aim}` : bracket.label}</p>
       </div>
-      {aim !== null && <p className="text-sm" data-bracket-aim>You’re aiming for {aim}. The bracket rules alone read this list as {rulesRead}.</p>}
+      {aim !== null && <p className="text-sm" data-bracket-aim>The bracket rules alone read this list as {rulesRead}.</p>}
       <p className="text-sm text-[var(--muted)]">
         {bracket.floor === 1
           ? 'Nothing the bracket rules name: no Game Changers, mass land denial or two-card combos. Between 1 and 2 is down to how the deck plays.'
