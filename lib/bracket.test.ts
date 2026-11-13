@@ -64,3 +64,12 @@ describe('the owner outranks the flag (Part D 17)', () => {
     expect(b.why!.Armageddon).toBe('Destroy all lands.');
   });
 });
+
+describe('round 2, item 14: the last-ability rule needs every land line to cost 6 or more', () => {
+  it('a walker with a small land lock keeps the floor; one whose only land line is its ultimate is a caution', async () => {
+    const { onlyUltimate } = await import('./bracket');
+    expect(onlyUltimate('+1: Draw a card.\n−2: Lands don\'t untap during their controllers\' next untap steps.\n−8: Destroy all lands.')).toBe(false);
+    expect(onlyUltimate('+1: Draw a card.\n−3: Exile all lands.\n−9: Each opponent sacrifices the rest.')).toBe(false);
+    expect(onlyUltimate('+1: Create a Zombie.\n−9: Each opponent chooses a permanent of each type and sacrifices the rest.')).toBe(true);
+  });
+});

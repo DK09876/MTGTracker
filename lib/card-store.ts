@@ -427,7 +427,7 @@ export async function refreshCardData(progress: (detail: string, done?: number, 
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setSetting('cards.refreshError', message.slice(0, 300));
-    recordError({ source: 'Nightly card refresh', message: `${message}. Yesterday's data is kept.`, detail: error });
+    recordError({ source: 'Card data refresh', message: `${message}. The last data is kept.`, detail: error });
     throw error;
   }
 }

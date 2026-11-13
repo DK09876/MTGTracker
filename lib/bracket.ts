@@ -48,8 +48,11 @@ export function flagWhy(text: string, kind: FlagKind): string | null {
  */
 export function onlyUltimate(text: string): boolean {
   const lines = text.split('\n').map((l) => l.trim());
-  const denies = (l: string) => /\b(destroy|sacrifice)s?\b[^.]*\b(lands?|permanents?|the rest)\b/i.test(l);
-  const hits = lines.filter(denies);
+  // Every line that touches lands counts, not only destroy and sacrifice (round 2, item 14): "Lands don't untap",
+  // "Exile all lands", "Return all lands", "Tap all lands" on a small ability keep the card's floor.
+  const touches = (l: string) => /\b(destroy|sacrifice|exile|return|bounce)s?\b[^.]*\b(lands?|permanents?|the rest)\b/i.test(l)
+    || /\blands?\b[^.]*\b(don'?t|doesn'?t|can'?t) untap\b/i.test(l) || /\btap all lands\b/i.test(l);
+  const hits = lines.filter(touches);
   return hits.length > 0 && hits.every((l) => { const m = l.match(/^[−-](\d+):/); return !!m && Number(m[1]) >= 6; });
 }
 
