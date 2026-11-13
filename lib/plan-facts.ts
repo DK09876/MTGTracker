@@ -7,6 +7,8 @@
  * card. Server only.
  */
 
+import { asideOf } from './bracket-aside';
+import { onlyUltimate } from './bracket';
 import { cardsInList, type List } from './db';
 import { jobsOnDeck } from './categories';
 import { deckRolesKnown } from './deck-roles';
@@ -49,8 +51,13 @@ export async function planFacts(list: List, slug: string, name: string, commande
       oracleId: c.card.oracle_id ?? null, identity: c.card.color_identity ?? [],
     })).sort((a, b) => a.name.localeCompare(b.name));
     const identity = [...new Set(cmdCards.flatMap((c) => c.color_identity ?? []))].sort();
-    const extraTurns = bracket ? bracket.cards.filter((c) => c.extraTurn).map((c) => c.name) : (roles.find((r) => r.id === 'extra-turn')?.cards ?? []);
-    const mld = bracket ? bracket.cards.filter((c) => c.massLandDenial).map((c) => c.name) : [];
+    // Cards the owner set aside on the bracket box, and a planeswalker whose land denial is only its last ability,
+    // aren't sent as land denial or extra turns (Part D 17).
+    const aside = asideOf(list.id);
+    const byName = new Map([...main.map((c) => c.card), ...cmdCards].map((c) => [front(c.name), c]));
+    const ultimate = (n: string) => { const c = byName.get(front(n)); return !!c && /\bPlaneswalker\b/.test(c.type_line ?? '') && onlyUltimate(oracleTextOf(c)); };
+    const extraTurns = (bracket ? bracket.cards.filter((c) => c.extraTurn).map((c) => c.name) : (roles.find((r) => r.id === 'extra-turn')?.cards ?? [])).filter((n) => !aside.has(front(n).toLowerCase()));
+    const mld = bracket ? bracket.cards.filter((c) => c.massLandDenial).map((c) => c.name).filter((n) => !aside.has(front(n).toLowerCase()) && !ultimate(n)) : [];
 
     const facts = {
       slug, name: key.deck.name, commanders: cmdCards.map((c) => ({ name: c.name, cost: costOf(c), type: typeOf(c), text: oracleTextOf(c), identity: c.color_identity ?? [] })),

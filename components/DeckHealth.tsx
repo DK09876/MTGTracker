@@ -83,7 +83,10 @@ export default function DeckHealth({ listId, commander, cards, version }: Props)
       <Warnings warnings={health.warnings} />
       {untracked.length > 0 && <p className="-mt-4 text-sm text-[var(--muted)]">Not tracked on this deck, so not counted or checked: {untracked.join(', ')}. {untracked.includes('Card draw') ? 'The no-card-draw check is skipped. ' : ''}Add them on the Tags tab.</p>}
 
-      <div data-tour="bracket"><Bracket insights={insights} aim={plan?.bracket.value ?? null} /></div>
+      <div data-tour="bracket"><Bracket insights={insights} aim={plan?.bracket.value ?? null} onAside={async (name, aside) => {
+        await api.setBracketAside(listId, name, aside);
+        setInsights(await api.deckInsights(listId));
+      }} /></div>
 
       <WinRead insights={insights} wins={plan?.wins ?? []} />
 
@@ -240,7 +243,14 @@ function WinRead({ insights, wins }: { insights: api.DeckInsights | 'loading' | 
   );
 }
 
-function Bracket({ insights, aim }: { insights: api.DeckInsights | 'loading' | 'failed'; aim: number | null }) {
+/**
+ * The bracket floor, its reasons and cautions. A land-denial or extra-turn card (the classifier's flags, not an
+ * official list) says why it is flagged and can be set aside for this deck; the floor is worked out without it,
+ * and the box lists what was set aside with a way to put each back (Part D 17).
+ */
+function Bracket({ insights, aim, onAside }: { insights: api.DeckInsights | 'loading' | 'failed'; aim: number | null; onAside: (name: string, aside: boolean) => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const press = async (name: string, aside: boolean) => { setBusy(name); try { await onAside(name, aside); } finally { setBusy(null); } };
   if (insights === 'loading') {
     return <p className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">Reading the bracket…{aim ? ` You’re aiming for ${aim}.` : ''}</p>;
   }
@@ -268,22 +278,44 @@ function Bracket({ insights, aim }: { insights: api.DeckInsights | 'loading' | '
           {bracket.reasons.map((r) => (
             <li key={r.text}>
               <span className="font-medium">{r.text}</span>
-              <span className="text-[var(--muted)]"> — {r.cards.join(', ')}</span>
+              {r.kind ? <Flagged cards={r.cards} why={bracket.why ?? {}} busy={busy} onAside={(n) => press(n, true)} /> : <span className="text-[var(--muted)]"> — {r.cards.join(', ')}</span>}
             </li>
           ))}
         </ul>
+      )}
+      {(bracket.aside?.length ?? 0) > 0 && (
+        <p className="mt-2 text-sm text-[var(--muted)]" data-bracket-aside>
+          {bracket.aside!.length === 1 ? '1 card you set aside' : `${bracket.aside!.length} cards you set aside`}, not counted here: {bracket.aside!.map((n, k) => (
+            <span key={n}>{k ? ', ' : ''}{n} <button type="button" disabled={busy === n} onClick={() => press(n, false)} className="underline underline-offset-[3px] hover:text-[var(--foreground)] disabled:opacity-50">put it back</button></span>
+          ))}
+        </p>
       )}
       {cautions.length > 0 && (
         <ul className="mt-2 flex flex-col gap-1 text-sm">
           {cautions.map((c) => (
             <li key={c.text} className="flex gap-2">
               <span aria-hidden className="font-bold" style={{ color: STATUS.warning }}>▲</span>
-              <span><span className="sr-only">Check: </span>{c.text}<span className="text-[var(--muted)]"> — {c.cards.join(', ')}</span></span>
+              <span><span className="sr-only">Check: </span>{c.text}{c.kind ? <Flagged cards={c.cards} why={bracket.why ?? {}} busy={busy} onAside={(n) => press(n, true)} /> : <span className="text-[var(--muted)]"> — {c.cards.join(', ')}</span>}</span>
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+/** Flagged cards under a reason: each with why it's flagged, and "Doesn't count in this deck". */
+function Flagged({ cards, why, busy, onAside }: { cards: string[]; why: Record<string, string>; busy: string | null; onAside: (name: string) => void }) {
+  return (
+    <ul className="mt-1 flex flex-col gap-1 pl-3" data-bracket-flagged>
+      {cards.map((n) => (
+        <li key={n} className="flex flex-wrap items-baseline gap-x-2">
+          <span>{n}</span>
+          {why[n] && <span className="text-xs text-[var(--muted)]">“{why[n]}”</span>}
+          <button type="button" disabled={busy === n} onClick={() => onAside(n)} className="text-xs text-[var(--muted)] underline underline-offset-[3px] hover:text-[var(--foreground)] disabled:opacity-50" data-aside={n}>Doesn’t count in this deck</button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

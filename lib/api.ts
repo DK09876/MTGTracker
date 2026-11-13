@@ -573,6 +573,8 @@ export interface DeckInsights {
 }
 
 export const deckInsights = (listId: string) => get<DeckInsights>(paths.insights(listId));
+/** Set a flagged card aside on the bracket box ("Doesn't count in this deck"), or put it back. */
+export const setBracketAside = (listId: string, name: string, aside: boolean) => send(`lists/${listId}/bracket`, 'POST', { name, aside }).then(json<{ ok: true }>);
 
 // --- deck tags -----------------------------------------------------------
 

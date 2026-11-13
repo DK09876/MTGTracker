@@ -6,6 +6,7 @@
  * proposals from its last read, to accept or skip. Server only.
  */
 
+import { asideOf } from './bracket-aside';
 import { cardTags } from './card-store';
 import { CUT_RULES, ruleOn, weightOf } from './cut-rules';
 import { cardsInList, createTag, deckTags, deleteTag, setCardTag, setTagBrief, type List } from './db';
@@ -138,7 +139,7 @@ export async function planState(list: List): Promise<PlanState> {
   const withCommander = [...main, ...commanders.map((card) => ({ card, quantity: 1 }))];
 
   // Detected, every part.
-  const bracketD = detectBracket(main, commanders, f.bracket);
+  const bracketD = detectBracket(main, commanders, f.bracket, asideOf(list.id));
   const styleD = detectStyleParts(commander, main);
   const roleD = detectCommanderRole(commander, main, roles, jobs, cmdRoles);
   const role = s.role?.v ?? roleD.value;

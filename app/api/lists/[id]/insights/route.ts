@@ -11,6 +11,7 @@ import { deckRoles } from '@/lib/deck-roles';
 import { NextResponse } from 'next/server';
 
 import { bracketFloor } from '@/lib/bracket';
+import { asideOf, textLookup } from '@/lib/bracket-aside';
 import { cardsInList } from '@/lib/db';
 import { requireList } from '@/lib/profile-route';
 import { guessWinRoutes } from '@/lib/wincons';
@@ -32,7 +33,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (owned instanceof NextResponse) return owned;
   const { list } = owned;
 
-  const key = `${id}:${list.updatedAt}:${list.commander?.id ?? ''}`;
+  const aside = asideOf(id);
+  const key = `${id}:${list.updatedAt}:${list.commander?.id ?? ''}:${[...aside].sort().join('|')}`;
   if (cache.has(key)) return NextResponse.json(cache.get(key));
 
   const main = cardsInList(id).filter((c) => c.board === 'main');
@@ -80,7 +82,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const body = {
-    bracket: bracket && { ...bracketFloor(bracket), spellbook: { tag: bracket.tag, label: SPELLBOOK_TAGS[bracket.tag] } },
+    bracket: bracket && { ...bracketFloor(bracket, { aside, textOf: textLookup([...main.map((c) => c.card), ...(list.commander ? [list.commander] : [])]) }), spellbook: { tag: bracket.tag, label: SPELLBOOK_TAGS[bracket.tag] } },
     combos: combos && { included: combos.included, toAdd },
     // How it wins, from the cards alone (no model): combos, finishers, shape.
     wincons: roles ? guessWinRoutes({ cards: [...main, ...(list.commander ? [{ card: list.commander, quantity: 1 }] : [])], roles, combos: combos?.included ?? null }) : null,

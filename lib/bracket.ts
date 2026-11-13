@@ -14,26 +14,71 @@
 
 import type { BracketReport } from './spellbook';
 
+/** What can be set aside by the owner: the classifier's land-denial and extra-turn flags. Game Changers are an official list. */
+export type FlagKind = 'land' | 'turns';
+
 export interface BracketFloor {
   /** 1 means "1 or 2": the difference between them is intent, not cards. */
   floor: 1 | 3 | 4;
   label: string;
-  reasons: Array<{ floor: 3 | 4; text: string; cards: string[] }>;
-  cautions: Array<{ text: string; cards: string[] }>;
+  reasons: Array<{ floor: 3 | 4; text: string; cards: string[]; kind?: FlagKind }>;
+  cautions: Array<{ text: string; cards: string[]; kind?: FlagKind }>;
+  /** Why each flagged card is flagged, in a few words from its own text (Part D 17). */
+  why?: Record<string, string>;
+  /** Flagged cards the owner said don't count in this deck: left out of the floor, and listed so they can go back. */
+  aside?: string[];
 }
 
-export function bracketFloor(report: Pick<BracketReport, 'cards' | 'combos'>): BracketFloor {
+const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+
+/** The line of a card's text that does the flagged thing, short: a planeswalker's loyalty ability with its cost. */
+export function flagWhy(text: string, kind: FlagKind): string | null {
+  const lines = text.split('\n').map((l) => l.replace(/\([^)]*\)/g, '').trim()).filter(Boolean);
+  const hit = kind === 'land'
+    ? lines.find((l) => /\b(destroy|sacrifice|exile|return)s?\b[^.]*\b(lands?|permanents?|the rest)\b/i.test(l) || /\blands? (don't|doesn't) untap\b/i.test(l))
+    : lines.find((l) => /\bextra turn\b/i.test(l));
+  if (!hit) return null;
+  const short = hit.length > 110 ? `${hit.slice(0, 107).replace(/\s+\S*$/, '')}…` : hit;
+  return short;
+}
+
+/**
+ * A planeswalker whose land denial sits only on a loyalty ability costing 6 or more (Liliana, Dreadhorde General's
+ * −9): the last ability, rarely reached, so a caution and not a floor.
+ */
+export function onlyUltimate(text: string): boolean {
+  const lines = text.split('\n').map((l) => l.trim());
+  const denies = (l: string) => /\b(destroy|sacrifice)s?\b[^.]*\b(lands?|permanents?|the rest)\b/i.test(l);
+  const hits = lines.filter(denies);
+  return hits.length > 0 && hits.every((l) => { const m = l.match(/^[−-](\d+):/); return !!m && Number(m[1]) >= 6; });
+}
+
+export function bracketFloor(report: Pick<BracketReport, 'cards' | 'combos'>, opts: { aside?: Set<string>; textOf?: (name: string) => { text: string; planeswalker: boolean } | null } = {}): BracketFloor {
   const names = (pick: (c: BracketReport['cards'][number]) => boolean) => report.cards.filter(pick).map((c) => c.name);
+  const aside = opts.aside ?? new Set<string>();
+  const isAside = (n: string) => aside.has(front(n));
   const gameChangers = names((c) => c.gameChanger);
-  const landDenial = names((c) => c.massLandDenial);
-  const extraTurns = names((c) => c.extraTurn);
+  const flaggedLand = names((c) => c.massLandDenial);
+  const flaggedTurns = names((c) => c.extraTurn);
+  // A planeswalker's last ability is a caution, not a floor.
+  const ultimate = flaggedLand.filter((n) => { const t = opts.textOf?.(n); return !!t && t.planeswalker && onlyUltimate(t.text); });
+  const landDenial = flaggedLand.filter((n) => !isAside(n) && !ultimate.includes(n));
+  const extraTurns = flaggedTurns.filter((n) => !isAside(n));
+  const why: Record<string, string> = {};
+  for (const [list, kind] of [[flaggedLand, 'land'], [flaggedTurns, 'turns']] as const) {
+    for (const n of list) { const t = opts.textOf?.(n); const w = t ? flagWhy(t.text, kind) : null; if (w) why[n] = w; }
+  }
   const twoCard = report.combos.filter((c) => c.twoCard);
 
   const reasons: BracketFloor['reasons'] = [];
   const cautions: BracketFloor['cautions'] = [];
 
   if (landDenial.length) {
-    reasons.push({ floor: 4, text: 'Mass land denial is only for bracket 4 and up', cards: landDenial });
+    reasons.push({ floor: 4, text: 'Mass land denial is only for bracket 4 and up', cards: landDenial, kind: 'land' });
+  }
+  const ultimateShown = ultimate.filter((n) => !isAside(n));
+  if (ultimateShown.length) {
+    cautions.push({ text: 'Can wipe lands with its last ability: count it if your table would', cards: ultimateShown, kind: 'land' });
   }
   if (gameChangers.length > 3) {
     reasons.push({ floor: 4, text: `${gameChangers.length} Game Changers: bracket 3 allows three`, cards: gameChangers });
@@ -55,10 +100,12 @@ export function bracketFloor(report: Pick<BracketReport, 'cards' | 'combos'>): B
     cautions.push({
       text: `${extraTurns.length} extra-turn card${extraTurns.length === 1 ? '' : 's'}: chaining extra turns is bracket 4 only`,
       cards: extraTurns,
+      kind: 'turns',
     });
   }
 
   const floor = reasons.reduce<number>((max, r) => Math.max(max, r.floor), 1) as BracketFloor['floor'];
   const label = floor === 1 ? 'Bracket 1–2' : floor === 3 ? 'At least bracket 3' : 'Bracket 4 or 5';
-  return { floor, label, reasons, cautions };
+  const set = [...new Set([...flaggedLand, ...flaggedTurns])].filter(isAside);
+  return { floor, label, reasons, cautions, ...(Object.keys(why).length ? { why } : {}), ...(set.length ? { aside: set } : {}) };
 }

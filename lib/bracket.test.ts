@@ -38,3 +38,29 @@ describe('bracketFloor', () => {
     expect(b.cautions[0]).toMatchObject({ cards: ['Time Warp'] });
   });
 });
+
+describe('the owner outranks the flag (Part D 17)', () => {
+  const liliana = {
+    text: '+1: Create a 2/2 black Zombie creature token.\n−4: Each player sacrifices two creatures.\n−9: Each opponent chooses a permanent they control of each permanent type and sacrifices the rest.',
+    planeswalker: true,
+  };
+  const armageddon = { text: 'Destroy all lands.', planeswalker: false };
+  const textOf = (n: string) => (n === 'Liliana, Dreadhorde General' ? liliana : n === 'Armageddon' ? armageddon : null);
+
+  it('a planeswalker whose land denial is only its last ability is a caution, not a floor, and says why', () => {
+    const b = bracketFloor({ cards: [card('Liliana, Dreadhorde General', { massLandDenial: true })], combos: [] }, { textOf });
+    expect(b.floor).toBe(1);
+    expect(b.cautions[0]).toMatchObject({ text: 'Can wipe lands with its last ability: count it if your table would', cards: ['Liliana, Dreadhorde General'], kind: 'land' });
+    expect(b.why!['Liliana, Dreadhorde General']).toMatch(/^−9: Each opponent chooses/);
+  });
+
+  it('a card set aside doesn\'t count, and is listed so it can go back', () => {
+    const cards = [card('Armageddon', { massLandDenial: true }), card('Time Warp', { extraTurn: true })];
+    expect(bracketFloor({ cards, combos: [] }, { textOf }).floor).toBe(4);
+    const b = bracketFloor({ cards, combos: [] }, { textOf, aside: new Set(['armageddon', 'time warp']) });
+    expect(b.floor).toBe(1);
+    expect(b.cautions).toEqual([]);
+    expect(b.aside).toEqual(['Armageddon', 'Time Warp']);
+    expect(b.why!.Armageddon).toBe('Destroy all lands.');
+  });
+});
