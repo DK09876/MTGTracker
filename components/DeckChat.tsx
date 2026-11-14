@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CardName from './CardName';
-import { cardLookup, exactName } from '@/lib/card-lookup';
+import { cardLookup, exactName, foldName } from '@/lib/card-lookup';
 import ChatText from './ChatText';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
@@ -68,15 +68,21 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const end = useRef<HTMLDivElement>(null);
   // Marked names the app couldn't find (item 39): looked up once per name per page view, on hover or tap, through
   // the app's own card search by exact name; a found card is kept with its message.
-  const finder = useRef(cardLookup<ScryfallCard>(async (n) => (await api.search(exactName(n))).cards.find((c) => c.name.split(' // ')[0].toLowerCase() === n.split(' // ')[0].trim().toLowerCase()) ?? null));
+  const finder = useRef(cardLookup<ScryfallCard>(async (n) => (await api.search(exactName(n))).cards.find((c) => foldName(c.name) === foldName(n)) ?? null));
   const [, setLooked] = useState(0);
+  // The chat open now: a lookup's answer for a chat that is no longer open is ignored (review PR56, 16).
+  const openChat = useRef<string | null>(null);
+  useEffect(() => { openChat.current = chat?.id ?? null; }, [chat?.id]);
   const look = (m: number, name: string, retry = false) => {
+    // Not while the next answer is being written (review 15).
+    if (replying) return;
     const was = finder.current.state(name).status;
+    const forChat = chat?.id ?? null;
     const p = finder.current.look(name, retry);
     if (finder.current.state(name).status !== was) setLooked((x) => x + 1);
     void p.then((st) => {
       setLooked((x) => x + 1);
-      if (st.status === 'found' && chat) void api.keepFoundCard(listId, chat.id, m, { id: st.card.id, name }).then((r) => setChat(r.chat)).catch(() => {});
+      if (st.status === 'found' && forChat) void api.keepFoundCard(listId, forChat, m, { id: st.card.id, name }).then((r) => { if (openChat.current === forChat) setChat(r.chat); }).catch(() => {});
     });
   };
 
@@ -187,9 +193,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const cardIn = (m: Chat['messages'][number]) => (n: string): ScryfallCard | undefined => {
     const own = byName(n);
     if (own) return own;
-    const f = n.split(' // ')[0].toLowerCase();
-    const c = m.cards?.find((x) => x.name.split(' // ')[0].toLowerCase() === f)
-      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => x.name.split(' // ')[0].toLowerCase() === f);
+    const f = foldName(n);
+    const c = m.cards?.find((x) => foldName(x.name) === f)
+      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => foldName(x.name) === f);
     return c ? partial(c) : undefined;
   };
   const openCard = (card: ScryfallCard) => {

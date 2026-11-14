@@ -20,7 +20,7 @@ import { isLand, type Held } from './finish-pool';
 import { FINISH_GROUPS, type FinishGroup } from './finish-shared';
 import { planContext } from './plan-context';
 import { manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
-import { whyNotAddable, type Context } from './tune';
+import { gcRoomOf, whyNotAddable, type Context } from './tune';
 import { ownOf } from './upgrades';
 import type { UpgradeOwn } from './upgrades-shared';
 
@@ -34,17 +34,20 @@ export const ESSENTIALS_MAX = 15;
 export interface Named { card: ScryfallCard; group: FinishGroup; theme?: string; why: string; own: UpgradeOwn }
 
 /**
- * Names checked by the app: resolved (stored cards, then the card data), Tune's checks, not a land, not taken or
- * left out, then where the owner's copy is and the price for one they don't have. With a budget per card, a card
- * with no price can't be shown as within it and is dropped, with why.
+ * Names checked by the app: resolved (stored cards, then the card data), not a land, not taken or left out, then
+ * Tune's checks on what the row will show: owned by heldCards (the chip's own definition) and, for a card to buy,
+ * the price shown (review PR56, 3-4), so a card to buy is within the budget at its shown price and one with no
+ * price is dropped when there is a budget. The bracket's room (`gcRoom`) is counted across the named cards, and
+ * the caller carries what is left to the searched picks (review 2).
  */
-export function checkNamed(ctx: Context, held: Map<string, Held>, raw: Array<{ name?: unknown; group?: unknown; theme?: unknown; why?: unknown }>, opts: { need: number; taken: Set<string>; leaveOut: Set<string>; resolve?: (names: string[]) => Map<string, ScryfallCard> }): { picks: Named[]; dropped: Array<{ name: string; why: string }> } {
+export function checkNamed(ctx: Context, held: Map<string, Held>, raw: Array<{ name?: unknown; group?: unknown; theme?: unknown; why?: unknown }>, opts: { need: number; taken: Set<string>; leaveOut: Set<string>; resolve?: (names: string[]) => Map<string, ScryfallCard>; gcRoom?: number | null }): { picks: Named[]; dropped: Array<{ name: string; why: string }> } {
   const names = raw.map((r) => String(r?.name ?? '').trim()).filter(Boolean);
   const found = (opts.resolve ?? cardsNamed)(names);
   const owned = new Map([...held.values()].map((h) => [keyOf(h.card), h]));
   const picks: Named[] = [];
   const dropped: Array<{ name: string; why: string }> = [];
   const used = new Set(opts.taken);
+  let room = opts.gcRoom !== undefined ? opts.gcRoom : gcRoomOf(ctx);
   for (const r of raw) {
     const name = String(r?.name ?? '').trim();
     if (!name) continue;
@@ -54,28 +57,23 @@ export function checkNamed(ctx: Context, held: Map<string, Held>, raw: Array<{ n
     if (used.has(k)) continue;
     if (opts.leaveOut.has(k)) { dropped.push({ name: card.name, why: 'skipped on this deck before' }); continue; }
     if (isLand(card)) { dropped.push({ name: card.name, why: 'a land: the app chooses those' }); continue; }
-    const why = whyNotAddable(ctx, card);
+    const own: UpgradeOwn = ownOf(owned.get(keyOf(card))) ?? { kind: 'buy', price: cardPrices([card], owned).get(keyOf(card)) ?? null };
+    const why = whyNotAddable(ctx, card, null, { as: { owned: own.kind !== 'buy', price: own.kind === 'buy' ? own.price : null }, gcRoom: room, basicAgain: false });
     if (why) { dropped.push({ name: card.name, why: why.replace(`${card.name} `, '') }); continue; }
     if (picks.length >= opts.need) continue;
+    if (card.game_changer && room !== null) room -= 1;
     used.add(k);
     const group = (FINISH_GROUPS as readonly string[]).includes(String(r.group)) ? r.group as FinishGroup : 'theme';
     const theme = group === 'theme' && typeof r.theme === 'string' && r.theme.trim() ? r.theme.trim().slice(0, 40) : undefined;
-    picks.push({ card, group, ...(theme ? { theme } : {}), why: String(r.why ?? '').trim().slice(0, 300) || 'Claude’s pick', own: ownOf(owned.get(keyOf(card))) ?? { kind: 'buy', price: null } });
+    picks.push({ card, group, ...(theme ? { theme } : {}), why: String(r.why ?? '').trim().slice(0, 300) || 'Claude’s pick', own });
   }
-  const prices = cardPrices(picks.filter((p) => p.own.kind === 'buy').map((p) => p.card), owned);
-  const out: Named[] = [];
-  for (const p of picks) {
-    if (p.own.kind !== 'buy') { out.push(p); continue; }
-    const price = prices.get(keyOf(p.card)) ?? null;
-    if (price === null && ctx.plan.budget !== null) { dropped.push({ name: p.card.name, why: `has no price, so it can’t be checked against your $${ctx.plan.budget} budget` }); continue; }
-    out.push({ ...p, own: { kind: 'buy', price } });
-  }
-  return { picks: out, dropped };
+  return { picks, dropped };
 }
 
 /**
  * Cards to buy taken in Claude's order until the total is reached (item 32): the rest are listed as over the
- * limit with their prices, not dropped silently. A card with no price doesn't count toward the total.
+ * limit with their prices, not dropped silently. A card with no price is unknown, never free: with a total set it
+ * is listed as "no price" and left out (review PR56, 5); with no total it is taken and marked "no price".
  */
 export function withinTotal<T extends { own: UpgradeOwn }>(picks: T[], limit: number | null): { taken: T[]; over: T[] } {
   if (limit === null) return { taken: picks, over: [] };
@@ -83,7 +81,8 @@ export function withinTotal<T extends { own: UpgradeOwn }>(picks: T[], limit: nu
   const taken: T[] = [];
   const over: T[] = [];
   for (const p of picks) {
-    if (p.own.kind !== 'buy' || p.own.price === null) { taken.push(p); continue; }
+    if (p.own.kind !== 'buy') { taken.push(p); continue; }
+    if (p.own.price === null) { over.push(p); continue; }
     if (spent + p.own.price <= limit + 1e-9) { spent += p.own.price; taken.push(p); } else over.push(p);
   }
   return { taken, over };
@@ -106,6 +105,7 @@ export const ESSENTIALS_TOOLS: Anthropic.Beta.BetaTool[] = [{
     properties: {
       cards: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, group: { type: 'string', enum: [...FINISH_GROUPS] }, theme: { type: 'string' }, why: { type: 'string' } }, required: ['name', 'group', 'why'] } },
       reply: { type: 'string', description: 'One or two sentences on the build.' },
+      out: { type: 'array', items: { type: 'string' }, description: 'Later lists only: kept cards the owner\'s words say should go. Name a replacement for each in "cards". Leave empty otherwise.' },
     },
     required: ['cards', 'reply'],
   },
@@ -114,7 +114,7 @@ export const ESSENTIALS_TOOLS: Anthropic.Beta.BetaTool[] = [{
 export type Call = (params: ClaudeParams, step: string) => Promise<Anthropic.Beta.BetaMessage>;
 
 /** One naming call: "matter" (the essentials) or "all" (the whole list); `extra` is the conversation for a later round. */
-export async function nameCards(call: Call, model: string, ctx: Context, list: List, input: { kind: 'matter' | 'all'; count: number; skipped: Array<{ name: string; why: string }>; chosen: string[]; extra?: string[] }): Promise<{ raw: Array<Record<string, unknown>>; reply: string }> {
+export async function nameCards(call: Call, model: string, ctx: Context, list: List, input: { kind: 'matter' | 'all'; count: number; skipped: Array<{ name: string; why: string }>; chosen: string[]; extra?: string[]; /** A later list with the owner's words: kept cards may go ("out"). */ allowOut?: boolean }): Promise<{ raw: Array<Record<string, unknown>>; reply: string; out: string[] }> {
   if (!list.commander) throw new ModelError('Set the commander first.');
   const deck = [
     `Commander: ${list.commander.name} ${manaCostOf(list.commander)} - ${typeLineOf(list.commander)}: ${oracleTextOf(list.commander).replace(/\n+/g, ' | ')}`,
@@ -129,7 +129,8 @@ export async function nameCards(call: Call, model: string, ctx: Context, list: L
     ...(input.chosen.length ? ['', `## Already chosen (count them as in the deck; don't name them again)\n${input.chosen.join('; ')}`] : []),
     '',
     '## The task',
-    input.kind === 'matter' ? `Name up to ${input.count} cards that matter most for this deck ("matter").` : `Name ${input.count} non-land cards for the deck ("all").`,
+    input.kind === 'matter' ? `Name up to ${input.count} cards that matter most for this deck ("matter").` : `Name ${input.count} more non-land cards for the deck ("all").`,
+    ...(input.allowOut ? ['Follow what the owner said. If it means kept cards should go, name them in "out" and name a replacement for each in "cards" as well. Say in "reply" what you changed and which of their words changed it.'] : []),
   ].join('\n').trim();
   const message = await call({
     model, max_tokens: 16_000,
@@ -138,7 +139,7 @@ export async function nameCards(call: Call, model: string, ctx: Context, list: L
     messages: [{ role: 'user', content: task }],
   } as ClaudeParams, `essentials: ${input.kind === 'matter' ? 'the ones that matter' : 'any card'}`);
   const use = message.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use' && b.name === 'give_cards');
-  const data = (use?.input ?? {}) as { cards?: unknown; reply?: unknown };
+  const data = (use?.input ?? {}) as { cards?: unknown; reply?: unknown; out?: unknown };
   if (!use || !Array.isArray(data.cards)) throw new ModelError('Claude didn’t name its cards. Nothing was changed; try again.');
-  return { raw: data.cards as Array<Record<string, unknown>>, reply: typeof data.reply === 'string' ? data.reply.trim().slice(0, 1200) : '' };
+  return { raw: data.cards as Array<Record<string, unknown>>, reply: typeof data.reply === 'string' ? data.reply.trim().slice(0, 1200) : '', out: (Array.isArray(data.out) ? data.out : []).map((x) => String(x).trim()).filter(Boolean).slice(0, 60) };
 }

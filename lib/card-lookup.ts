@@ -8,10 +8,19 @@
 
 export type LookupState<T> = { status: 'idle' } | { status: 'loading' } | { status: 'found'; card: T } | { status: 'missing' };
 
+/**
+ * A card name for comparing: its front face, lower case, accents folded and curly apostrophes and quotes made
+ * straight, so "Lim-Dûl" and "Lim-Dul", "Urza’s" and "Urza's" are one name (review PR56, 17).
+ */
+export const foldName = (n: string) => n.split(' // ')[0].normalize('NFD').replace(/\p{M}/gu, '').replace(/[’‘`´]/g, "'").replace(/[“”]/g, '"').trim().toLowerCase();
+
+/** Whether an answer marked this name [[like this]]. */
+export const markedIn = (text: string, name: string) => [...text.matchAll(/\[\[+([^[\]]{1,120})\]\]+/g)].some((m) => foldName(m[1]) === foldName(name));
+
 export function cardLookup<T>(find: (name: string) => Promise<T | null>) {
   const known = new Map<string, LookupState<T>>();
   const pending = new Map<string, Promise<LookupState<T>>>();
-  const key = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+  const key = foldName;
   return {
     state: (name: string): LookupState<T> => known.get(key(name)) ?? { status: 'idle' },
     /** Look the name up, once: a found or a running lookup is reused; `retry` asks again after a miss. */

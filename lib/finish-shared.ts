@@ -207,6 +207,10 @@ export interface FinishView {
   spend: number | null;
   /** None of the owner's cards can go in: Finish runs as "any card" (Part C, item 31). */
   noCollection: boolean;
+  /** "Only cards I own" on the plan: buying is off (review PR56, 14). */
+  ownOnly?: boolean;
+  /** None of the owner's cards is on offer under these settings: "the ones that matter" runs as "any card" (review 11). */
+  emptyPool?: boolean;
   /** The number asked for; null is a fill to 100. */
   want: number | null;
   /** Cards on offer under each setting, and the funnel behind them. */

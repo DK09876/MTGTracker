@@ -240,7 +240,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
           onVerdict={(id, verdict) => act(() => api.tuneAct(listId, { action: 'verdict', id, verdict }), verdict === 'worse' ? 'The fix is staged to be undone in Your changes.' : 'Noted.')} />}
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
 
-        {current === 'upgrades' && <DeckUpgrades listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : onTab(t))}
+        {current === 'upgrades' && <DeckUpgrades listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : t === 'finish' ? pick('finish') : onTab(t))}
           onChanged={async () => { await onChanged(); await load(intent, symptom); }}
           showFree={!!state.upgrades?.showFree} onFree={(showFree) => act(() => api.tuneAct(listId, { action: 'upgradesFree', showFree }))} />}
 

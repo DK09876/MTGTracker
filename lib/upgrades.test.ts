@@ -37,7 +37,7 @@ const card = (name: string, over: Partial<ScryfallCard> = {}) =>
 const commander = card('The Ghoul', { type_line: 'Legendary Creature — Zombie', cmc: 3, mana_cost: '{2}{B}', oracle_text: 'Whenever a creature dies, make a Treasure.' });
 const swamp = card('Swamp', { type_line: 'Basic Land — Swamp', cmc: 0, mana_cost: '', oracle_text: '', color_identity: [] });
 
-/** The Ghoul's deck: the commander, 5 Swamps and 10 spells; another deck; the owner's boxes; cards in the card data. */
+/** The Ghoul's deck at 100: the commander, 89 Swamps and 10 spells; another deck; the owner's boxes; cards in the card data. */
 async function setup(opts: { boxed?: ScryfallCard[]; other?: ScryfallCard[]; data?: ScryfallCard[] } = {}) {
   const db = await import('./db');
   const col = await import('./collection');
@@ -48,7 +48,7 @@ async function setup(opts: { boxed?: ScryfallCard[]; other?: ScryfallCard[]; dat
   cdb.close();
   db.addProfile('dk', 'DK');
   const list = db.createList('dk', 'War Never Changes', '', { kind: 'deck', commander });
-  db.addCardToList(list.id, swamp, 5);
+  db.addCardToList(list.id, swamp, 89);
   for (let i = 1; i <= 10; i++) db.addCardToList(list.id, card(`Deck Spell ${i}`));
   const second = db.createList('dk', 'Treasures!', '', { kind: 'deck', commander: card('Other', { type_line: 'Legendary Creature' }) });
   for (const c of opts.other ?? []) db.addCardToList(second.id, c);
@@ -228,6 +228,7 @@ describe('later rounds and "Not for me"', { timeout: 180_000 }, () => {
     expect(v.run!.items.map((i) => i.name)).toEqual(['Up D']);
     // Another deck doesn't share it.
     const other = db.createList('dk', 'Second Ghoul', '', { kind: 'deck', commander });
+    db.addCardToList(other.id, swamp, 96);
     for (let i = 1; i <= 3; i++) db.addCardToList(other.id, card(`Other Spell ${i}`));
     const o = db.getList(other.id, 'dk')!;
     await runUpgrades(stand([{ give: give([s('Up B', 'Other Spell 1')]) }]).call, 'claude-opus-5-5', o, 'dk');
@@ -246,7 +247,7 @@ describe('apply and undo', { timeout: 180_000 }, () => {
     await runUpgrades(stand([{ give: give([s('Bought Card', 'Deck Spell 1'), s('Boxed Card', 'Deck Spell 2', 'mine'), s('Maybe Card', 'Deck Spell 3')]) }]).call, 'claude-opus-5-5', list, 'dk');
     setUpgradeChoices(list.id, { 'Maybe Card': { choice: 'in', text: '', where: 'maybe' } });
     const done = await applyUpgrades(list, 'dk');
-    expect(done).toMatchObject({ swapped: 2, maybe: 1, size: 16, cutsTo: 'Sideboard', buy: [{ name: 'Bought Card', price: 3 }] });
+    expect(done).toMatchObject({ swapped: 2, maybe: 1, size: 100, cutsTo: 'Sideboard', buy: [{ name: 'Bought Card', price: 3 }] });
     const rows = db.cardsInList(list.id);
     const at = (n: string) => rows.find((c) => c.card.name === n)?.board;
     expect([at('Bought Card'), at('Boxed Card'), at('Maybe Card'), at('Deck Spell 1'), at('Deck Spell 2'), at('Deck Spell 3')]).toEqual(['main', 'main', 'maybe', 'side', 'side', 'main']);
@@ -283,5 +284,125 @@ describe('the free list (Part B)', { timeout: 180_000 }, () => {
     expect(ramp?.why).toMatch(/not judged/);
     const maybe = s.groups.filter((g) => g.key.startsWith('free:maybe')).map((g) => g.key);
     expect(maybe.some((k) => /Dear Waiting|Rhystic Waiting/.test(k))).toBe(false);
+  });
+});
+
+describe('review PR56: the deck\'s limits hold in every path', { timeout: 180_000 }, () => {
+  const gc = (name: string) => card(name, { game_changer: true });
+
+  it('1: the bracket counts the rows kept on Swap in, a Game Changer going out frees room only for its own row, and apply checks again', async () => {
+    const { db, list } = await setup({ data: [gc('GC One'), gc('GC Two'), card('Plain One'), gc('GC Three')] });
+    // Bracket 3 allows three Game Changers; the deck has two.
+    db.addCardToList(list.id, gc('Deck GC A'));
+    db.addCardToList(list.id, gc('Deck GC B'));
+    db.setQuantity(list.id, 'Swamp', 87);
+    // Roles known for every card the test adds (as setup does), so nothing is looked up online.
+    const { ROLES_VERSION } = await import('./roles');
+    db.saveRoles(new Map(['Deck GC A', 'Deck GC B', 'Deck GC C'].map((n) => [`o-${n}`, []] as [string, string[]])), ROLES_VERSION);
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { bracket: 3 });
+    const { runUpgrades, upgradesView, setUpgrades } = await import('./upgrades');
+    setUpgrades(list.id, { count: 2 });
+    // Round 1: GC One takes the last room. Plain One for Deck GC A frees one, but only for its own row: GC Two after it is still refused.
+    await runUpgrades(stand([{ give: give([s('GC One', 'Deck Spell 1'), s('Plain One', 'Deck GC A'), s('GC Two', 'Deck Spell 2')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    let v = await upgradesView(list, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['GC One', 'Plain One']);
+    expect(v.run!.dropped.find((d) => d.name === 'GC Two')?.why).toMatch(/bracket 3/);
+    // Round 2: GC One stays on Swap in, so GC Three has no room either.
+    const { setUpgradeChoices } = await import('./upgrades');
+    setUpgradeChoices(list.id, { 'Plain One': { choice: 'skip', text: '' } });
+    await runUpgrades(stand([{ give: give([s('GC Three', 'Deck Spell 3')]) }]).call, 'claude-opus-5-5', list, 'dk', { rerun: true });
+    v = await upgradesView(list, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['GC One']);
+    expect(v.run!.dropped.find((d) => d.name === 'GC Three')?.why).toMatch(/bracket 3/);
+    // The deck takes a third Game Changer by hand: apply leaves GC One out and says why.
+    db.addCardToList(list.id, gc('Deck GC C'));
+    db.setQuantity(list.id, 'Swamp', 86);
+    const { applyUpgrades } = await import('./upgrades');
+    await expect(applyUpgrades(db.getList(list.id, 'dk')!, 'dk')).rejects.toThrow(/GC One \(it would put the deck past bracket 3\)/);
+  });
+
+  it('3-4: owned means what the chip says, and the budget is tested on the price the row shows', async () => {
+    // A card in another deck's Maybeboard isn't "yours" for the chip: it's one to buy, and over a $5 budget it is dropped.
+    const dear = card('Dear Elsewhere', { prices: { usd: '20.00' } });
+    // A card whose stored printing is $10 but whose cheapest printing (the one shown) is $1: within a $5 budget.
+    const cheapToo = card('Two Printings', { prices: { usd: '1.00' } });
+    const { db, list, second } = await setup({ data: [dear, cheapToo] });
+    db.addCardToList(second.id, dear, 1, 'nonfoil', 'maybe');
+    db.storeCard({ ...cheapToo, id: 'Two Printings dear', prices: { usd: '10.00' } } as ScryfallCard);
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { budget: 5 });
+    const { runUpgrades, upgradesView } = await import('./upgrades');
+    await runUpgrades(stand([{ give: give([s('Dear Elsewhere', 'Deck Spell 1'), s('Two Printings', 'Deck Spell 2')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    const v = await upgradesView(list, 'dk');
+    expect(v.run!.items.map((i) => [i.name, i.own])).toEqual([['Two Printings', { kind: 'buy', price: 1 }]]);
+    expect(v.run!.dropped.map((d) => [d.name, /budget/.test(d.why)])).toEqual([['Dear Elsewhere', true]]);
+  });
+
+  it('6: a deck not at 100 is refused; apply skips a row whose replaced card left, and refuses a new commander', async () => {
+    const { db, list } = await setup({ data: [card('Up A'), card('Up B')] });
+    const { runUpgrades, applyUpgrades, upgradesNot100 } = await import('./upgrades');
+    db.setQuantity(list.id, 'Swamp', 88);
+    await expect(runUpgrades(stand([{ give: give([]) }]).call, 'claude-opus-5-5', db.getList(list.id, 'dk')!, 'dk')).rejects.toThrow(upgradesNot100(99));
+    db.setQuantity(list.id, 'Swamp', 89);
+    await runUpgrades(stand([{ give: give([s('Up A', 'Deck Spell 1'), s('Up B', 'Deck Spell 2')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    // Deck Spell 1 leaves the deck (and a Swamp comes in, so it stays at 100) before the apply.
+    db.setQuantity(list.id, 'Deck Spell 1', 0);
+    db.setQuantity(list.id, 'Swamp', 90);
+    const done = await applyUpgrades(db.getList(list.id, 'dk')!, 'dk');
+    expect(done.swapped).toBe(1);
+    expect(done.skipped).toEqual([{ name: 'Up A', why: 'Deck Spell 1 is no longer in the main deck' }]);
+    expect(done.size).toBe(100);
+    const { undoUpgrades } = await import('./upgrades');
+    undoUpgrades(db.getList(list.id, 'dk')!);
+    db.setCommander(list.id, card('Another Ghoul', { type_line: 'Legendary Creature' }));
+    await expect(applyUpgrades(db.getList(list.id, 'dk')!, 'dk')).rejects.toThrow(/commander changed/);
+  });
+
+  it('7: a waiting card with two copies sends one copy into the deck; the deck stays at 100', async () => {
+    const waiting = card('Waiting Card');
+    const { db, list } = await setup({ data: [{ ...waiting, id: 'Waiting Card (other printing)' } as ScryfallCard] });
+    db.addCardToList(list.id, waiting, 2, 'nonfoil', 'maybe');
+    const { runUpgrades, applyUpgrades } = await import('./upgrades');
+    await runUpgrades(stand([{ give: give([s('Waiting Card', 'Deck Spell 1', 'mine')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    const done = await applyUpgrades(db.getList(list.id, 'dk')!, 'dk');
+    expect(done.size).toBe(100);
+    const rows = db.cardsInList(list.id).filter((c) => c.card.name === 'Waiting Card').map((c) => `${c.board}:${c.quantity}`).sort();
+    expect(rows).toEqual(['main:1', 'maybe:1']);
+  });
+
+  it('8: a basic land already in the deck is dropped with a reason, not shown as a row that does nothing', async () => {
+    const { list } = await setup({ data: [card('Up A'), card('Up B')] });
+    const { runUpgrades, upgradesView, setUpgradeChoices } = await import('./upgrades');
+    await runUpgrades(stand([{ give: give([s('Up A', 'Deck Spell 1')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    setUpgradeChoices(list.id, { 'Up A': { choice: 'skip', text: '' } });
+    // The owner asks about lands, so lands may be suggested: a Swamp, already in the deck, is dropped and said.
+    await runUpgrades(stand([{ give: give([{ ...s('Swamp', 'Swamp'), source: 'mine' }, s('Up B', 'Deck Spell 2')]) }]).call, 'claude-opus-5-5', list, 'dk', { rerun: true, message: 'what about the lands?' });
+    const v = await upgradesView(list, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['Up B']);
+    expect(v.run!.dropped).toEqual([{ name: 'Swamp', why: 'a basic land already in the deck: add copies on the Lands tab' }]);
+  });
+
+  it('19: from my cards, under spare copies only, a card held only in another deck is left out with why', async () => {
+    const elsewhere = card('In Another Deck');
+    const { list } = await setup({ other: [elsewhere], boxed: [card('Boxed Spare')] });
+    const f = await import('./finish');
+    f.setFinish(list.id, { copies: 'spare' });
+    const { runUpgrades, upgradesView, setUpgrades } = await import('./upgrades');
+    setUpgrades(list.id, { sources: 'mine' });
+    await runUpgrades(stand([{ search: ['spare'] }, { give: give([s('In Another Deck', 'Deck Spell 1', 'mine'), s('Boxed Spare', 'Deck Spell 2', 'mine')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    const v = await upgradesView(list, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['Boxed Spare']);
+    expect(v.run!.dropped).toEqual([{ name: 'In Another Deck', why: 'only in Treasures!, and this deck uses spare copies only' }]);
+  });
+
+  it('22: a search that is only the name of a card the owner can\'t use is refused and not counted', async () => {
+    const { list } = await setup({ boxed: [card('Owned Draw')], data: [card('Blood Artist')] });
+    const { runUpgrades, upgradesView } = await import('./upgrades');
+    const st = stand([{ search: ['Blood Artist', 'Owned Draw'] }, { give: give([s('Blood Artist', 'Deck Spell 1')]) }]);
+    await runUpgrades(st.call, 'claude-opus-5-5', list, 'dk');
+    const results = JSON.stringify(st.asked[1].messages);
+    expect(results).toMatch(/name it as one to buy/);
+    expect((await upgradesView(list, 'dk')).searches.map((x) => x.q)).toEqual(['Owned Draw']);
   });
 });

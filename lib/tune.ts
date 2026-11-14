@@ -273,17 +273,24 @@ function planOf(ctx: Context, card: ScryfallCard): string[] {
  * across a whole list (addable) or for one card (whyNotAddable). Tune's
  * suggestions and Chat's Apply read the same checks.
  */
-function addReason(ctx: Context, c: ScryfallCard, inDeck: Set<string>): string | null {
+/**
+ * `as`: what the caller will show for this card (Upgrades, Finish's cards to buy, review PR56 items 3-4): whether
+ * the owner has it, by the caller's own definition, and the price it will show. The budget and "only cards I own"
+ * are then tested on exactly that, so a row shown as "to buy" is always within the budget at the price shown.
+ */
+export interface AddAs { owned: boolean; price: number | null }
+
+function addReason(ctx: Context, c: ScryfallCard, inDeck: Set<string>, as?: AddAs): string | null {
   if (!(c.color_identity ?? []).every((x) => ctx.identity.has(x))) return `${c.name} is outside this deck's colours`;
   if (c.legalities?.commander !== 'legal') return `${c.name} isn't legal in Commander`;
   if (inDeck.has(front(c.name))) return `${c.name} is already in the deck`;
-  const owned = ctx.where.has(c.oracle_id ?? '') || ctx.pool.some((p) => p.card.name === c.name);
+  const owned = as ? as.owned : ctx.where.has(c.oracle_id ?? '') || ctx.pool.some((p) => p.card.name === c.name);
   if (ctx.plan.own && !owned) return `${c.name} isn't in your collection, and this deck is set to only cards you own`;
   const budget = ctx.plan.budget;
   // A missing price is unknown, not free (handoff 10, item 26): a card the owner doesn't have can't be checked
   // against the budget without one. The owner's own cards are never over it.
   if (budget !== null && !owned) {
-    const p = c.prices?.usd == null ? null : Number(c.prices.usd);
+    const p = as ? as.price : c.prices?.usd == null ? null : Number(c.prices.usd);
     if (p === null || !Number.isFinite(p)) return `${c.name} has no price, so it can't be checked against your $${budget} budget`;
     if (p > budget) return `${c.name} is over your $${budget} budget`;
   }
@@ -313,15 +320,17 @@ export function addable(ctx: Context, cards: ScryfallCard[], gcRoom: number | nu
  * checks as addable, or null when it may. `leaving`: a card going out in the
  * same move (a swap), which frees its place and any Game Changer room.
  */
-export function whyNotAddable(ctx: Context, card: ScryfallCard, leaving?: ScryfallCard | null): string | null {
+export function whyNotAddable(ctx: Context, card: ScryfallCard, leaving?: ScryfallCard | null, opts: { as?: AddAs; gcRoom?: number | null; basicAgain?: boolean } = {}): string | null {
   const inDeck = inDeckOf(ctx);
   if (leaving) inDeck.delete(front(leaving.name));
   const basic = /\bBasic\b/.test(card.type_line ?? '') || /any number of cards named/i.test(card.oracle_text ?? '');
-  if (basic) inDeck.delete(front(card.name));
-  const why = addReason(ctx, card, inDeck);
+  // A basic may go in again (Chat adds copies); a caller whose rows add a new card (Upgrades) says basicAgain: false.
+  if (basic && opts.basicAgain !== false) inDeck.delete(front(card.name));
+  const why = addReason(ctx, card, inDeck, opts.as);
   if (why) return why;
   if (!ruleKeeps(ctx, [card]).length) return `${card.name} doesn't fit this deck's rule${ctx.plan.rule.text?.trim() ? `: ${ctx.plan.rule.text.trim()}` : ''}`;
-  const room = gcRoomOf(ctx);
+  // The room the caller worked out over more than the deck (rows already chosen), else the deck's own.
+  const room = opts.gcRoom !== undefined ? opts.gcRoom : gcRoomOf(ctx);
   if (card.game_changer && room !== null && room + (leaving?.game_changer ? 1 : 0) <= 0) return `${card.name} would put the deck past bracket ${ctx.plan.bracket}`;
   return null;
 }
@@ -483,7 +492,9 @@ export async function freeGroups(ctx: Context): Promise<SuggestionGroup[]> {
   const cut = full ? await deckCutList(ctx.list).catch(() => null) : null;
   const outs = (cut?.candidates ?? []).map((c) => ({ c, card: ctx.main.find((m) => m.card.id === c.cardId)?.card }))
     .filter((x): x is { c: (typeof x)['c']; card: ScryfallCard } => !!x.card && !isLand(x.card) && !ctx.protectedWhy.has(x.card.name) && !cardJobs(x.card, ctx.rolesOf(x.card)).some((j) => short.has(j)));
-  const usedOut = new Set<string>();
+  // One cut per add (review PR56, 9): cuts already staged are taken, and the Maybeboard pairs below skip any cut an
+  // add above was paired with.
+  const usedOut = new Set<string>(ctx.store.changes.cut.map((c) => c.card.name));
   const taken = new Set<string>();
   const pair = (card: ScryfallCard, key: string, why?: string): Suggestion => {
     const item = addItem(ctx, key, card, why);
@@ -546,7 +557,7 @@ export async function freeGroups(ctx: Context): Promise<SuggestionGroup[]> {
     if (items.length) groups.push({ key: 'free:combos', title: `One card from a combo · ${items.length}`, why: 'Combos the deck is one card away from, from Commander Spellbook.', source: 'rules', items });
   } catch { /* Spellbook is optional */ }
   // (c) The Maybeboard's cards, each with the deck cards it could replace.
-  groups.push(...poolSwaps(ctx, 'free:maybe', 12));
+  groups.push(...poolSwaps(ctx, 'free:maybe', 12, usedOut));
   // One price per card (item 26): the printing the owner holds, else the cheapest the app knows.
   const { heldCards } = await import('./finish-pool');
   const held = heldCards(ctx.profileId, ctx.list.id);
@@ -565,7 +576,7 @@ export async function freeGroups(ctx: Context): Promise<SuggestionGroup[]> {
  * recommendation: rules-ranked swaps made decks worse three times in four.
  * The section's cards are in the order they sit there, by name.
  */
-function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[] {
+function poolSwaps(ctx: Context, prefix: string, max: number, usedOut: Set<string> = new Set()): SuggestionGroup[] {
   const cards = deckCards(ctx);
   const jobs = ctx.jobs.map((j) => ({ id: j.id, label: j.label, count: j.count, range: j.range }));
   const pool = ctx.pool.filter((p) => !isLand(p.card)).sort((a, b) => a.card.name.localeCompare(b.card.name));
@@ -577,7 +588,7 @@ function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[]
     const roles = ctx.rolesOf(p.card);
     const options = sameJob({ card: p.card, roles, jobs: cardJobs(p.card, roles), plan: planOf(ctx, p.card) }, cards, jobs, 3)
       // A Game Changer for a Game Changer is fine; any other trade must leave the bracket's room.
-      .filter((o) => !whyNotAddable(ctx, p.card, o.out.card));
+      .filter((o) => !whyNotAddable(ctx, p.card, o.out.card) && !usedOut.has(o.out.card.name));
     if (!options.length) continue;
     const section = ctx.sections.find((s) => s.id === p.board)?.name ?? 'Maybeboard';
     groups.push({
@@ -891,6 +902,12 @@ export async function stage(list: List, profileId: string, items: Suggestion[]):
     if (item.add && !addCard) continue;
     if (item.cut && !cutCard) continue;
     if (cutCard && ctx.protectedWhy.get(cutCard.name) === 'commander') continue;
+    // One cut can pair with one add (review PR56, 9): a second swap on a card already staged to go out is refused.
+    if (cutCard && addCard) {
+      const staged = changes.cut.filter((c) => c.card.id === cutCard.id || c.card.name === cutCard.name).reduce((n, c) => n + c.quantity, 0);
+      const inDeck = ctx.main.filter((c) => c.card.name === cutCard.name).reduce((n, c) => n + c.quantity, 0);
+      if (staged + (item.cut?.quantity ?? 1) > inDeck) { blocked += 1; continue; }
+    }
     // The guards, whatever offered the cut: never a never-cut card; never a land under the floor unless a land comes in.
     if (cutCard && !item.keep && ctx.protectedWhy.has(cutCard.name)) { blocked += 1; continue; }
     if (cutCard && isLand(cutCard) && !(addCard && isLand(addCard))) {

@@ -114,3 +114,117 @@ describe('cards to buy', { timeout: 180_000 }, () => {
     expect(st.asked.map((a) => a.step)).toEqual(['essentials: any card']);
   });
 });
+
+describe('review PR56: Finish with cards to buy', { timeout: 180_000 }, () => {
+  const gc = (name: string) => card(name, { game_changer: true });
+  const roles = async (db: typeof import('./db'), names: string[]) => { const { ROLES_VERSION } = await import('./roles'); db.saveRoles(new Map(names.map((n) => [`o-${n}`, []] as [string, string[]])), ROLES_VERSION); };
+
+  it('2: the bracket is counted across the named cards and the searched picks together', async () => {
+    const owned = [gc('Owned GC'), card('Owned Plain')];
+    const { db, list } = await setup({ boxed: owned, data: [gc('Shop GC 1'), gc('Shop GC 2')] });
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { bracket: 3 });
+    db.addCardToList(list.id, gc('Deck GC A'));
+    db.addCardToList(list.id, gc('Deck GC B'));
+    await roles(db, ['Deck GC A', 'Deck GC B']);
+    const f = await import('./finish');
+    f.setFinish(list.id, { buy: 'matter', want: 4 });
+    // One Game Changer of room: the first named one takes it; the second named one and the searched one are refused.
+    await f.runFinish(stand([named(['Shop GC 1', 'Shop GC 2']), { input: ['owned'] }, picks(['Owned GC', 'Owned Plain'])]).call, 'claude-opus-5-5', db.getList(list.id, 'dk')!, 'dk');
+    const v = await f.finishView(db.getList(list.id, 'dk')!, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['Shop GC 1', 'Owned Plain']);
+    expect(v.run!.buy!.dropped.find((d) => d.name === 'Shop GC 2')?.why).toMatch(/bracket 3/);
+  });
+
+  it('5: with a total set, a card to buy with no price is listed as over (no price), not taken', async () => {
+    const { list } = await setup({ data: [card('Priced', { prices: { usd: '1.00' } }), card('Unpriced', { prices: {} as ScryfallCard['prices'] })] });
+    const f = await import('./finish');
+    f.setFinish(list.id, { buy: 'any', spend: 0, want: 2 });
+    await expect(f.runFinish(stand([named(['Unpriced', 'Priced'])]).call, 'claude-opus-5-5', list, 'dk')).rejects.toThrow('over your $0 total or had no price: Unpriced (no price); Priced ($1.00)');
+    f.setFinish(list.id, { spend: 5 });
+    await f.runFinish(stand([named(['Unpriced', 'Priced'])]).call, 'claude-opus-5-5', list, 'dk');
+    const v = await f.finishView(list, 'dk');
+    expect(v.run!.items.map((i) => i.name)).toEqual(['Priced']);
+    expect(v.run!.buy!.over).toEqual([{ name: 'Unpriced', price: null }]);
+    const { withinTotal } = await import('./essentials');
+    const b = (price: number | null) => ({ own: { kind: 'buy' as const, price } });
+    expect(withinTotal([b(null), b(2)], 5)).toEqual({ taken: [b(2)], over: [b(null)] });
+    expect(withinTotal([b(null)], null)).toEqual({ taken: [b(null)], over: [] });
+  });
+
+  it('10: on a later round a kept pick that left the owner\'s cards opens its slot again', async () => {
+    const owned = [card('Owned A'), card('Owned B'), card('Owned C')];
+    const { db, list } = await setup({ boxed: owned });
+    const f = await import('./finish');
+    f.setFinish(list.id, { want: 2 });
+    await f.runFinish(stand([{ input: ['owned'] }, picks(['Owned A', 'Owned B'])]).call, 'claude-opus-5-5', list, 'dk');
+    // Owned A goes into the deck by hand: no longer on offer, so the next round refills its slot.
+    db.addCardToList(list.id, owned[0]);
+    f.setChoices(list.id, { 'Owned B': { choice: 'add', text: 'good' } });
+    const st = stand([{ input: ['owned'] }, picks(['Owned C'])]);
+    await f.runFinish(st.call, 'claude-opus-5-5', db.getList(list.id, 'dk')!, 'dk', { rerun: true, message: 'more draw' });
+    expect(f.finishStore(list.id).run!.items.map((i) => i.name)).toEqual(['Owned B', 'Owned C']);
+  });
+
+  it('11: "the ones that matter" with none of the owner\'s cards on offer runs as any card', async () => {
+    const { buyModeFor } = await import('./finish');
+    const pool = (lines: number, any: number) => ({ lines: Array.from({ length: lines }) as never[], counts: { held: 0, fit: 0, spare: 0, any, otherOnly: 0 } });
+    expect(buyModeFor('matter', false, pool(0, 5))).toBe('any');
+    expect(buyModeFor('none', false, pool(0, 0))).toBe('any');
+    expect(buyModeFor('none', false, pool(0, 5))).toBe('none');
+    expect(buyModeFor('matter', false, pool(3, 3))).toBe('matter');
+    // 14: "only cards I own" turns buying off.
+    expect(buyModeFor('matter', true, pool(3, 3))).toBe('none');
+    expect(buyModeFor('any', true, pool(0, 0))).toBe('none');
+  });
+
+  it('12: "Add anyway" brings back a card that was over the total, as one to buy, with no paid round', async () => {
+    const { list } = await setup({ data: [card('Cheap', { prices: { usd: '1.00' } }), card('Dear', { prices: { usd: '30.00' } })] });
+    const f = await import('./finish');
+    f.setFinish(list.id, { buy: 'any', spend: 5, want: 2 });
+    await f.runFinish(stand([named(['Dear', 'Cheap'])]).call, 'claude-opus-5-5', list, 'dk');
+    expect((await f.finishView(list, 'dk')).run!.buy!.over).toEqual([{ name: 'Dear', price: 30 }]);
+    await f.takeOver(list, 'dk', 'Dear');
+    const v = await f.finishView(list, 'dk');
+    expect(v.run!.items.map((i) => [i.name, i.src, i.price])).toEqual([['Cheap', 'buy', 1], ['Dear', 'buy', 30]]);
+    expect(v.run!.buy!.over).toEqual([]);
+  });
+
+  it('13: "any card" with every pick on Add and a message asks Claude, which can take a kept card out and replace it', async () => {
+    const { list } = await setup({ data: ['One', 'Two', 'Three'].map((n) => card(n)) });
+    const f = await import('./finish');
+    f.setFinish(list.id, { buy: 'any', want: 2 });
+    await f.runFinish(stand([named(['One', 'Two'])]).call, 'claude-opus-5-5', list, 'dk');
+    const st = stand([{ name: 'give_cards', input: { cards: [{ name: 'Three', group: 'draw', why: 'better' }], reply: 'Swapped Two for Three.', out: ['Two'] } }]);
+    await f.runFinish(st.call, 'claude-opus-5-5', list, 'dk', { rerun: true, message: 'Two is too slow' });
+    expect(JSON.stringify(st.asked[0].params.messages)).toMatch(/Two is too slow/);
+    const run = f.finishStore(list.id).run!;
+    expect(run.items.map((i) => i.name)).toEqual(['One', 'Three']);
+    expect(run.changes!.out).toEqual([{ name: 'Two', because: 'message' }]);
+  });
+
+  it('14: the view says buying is off when the plan says only cards I own', async () => {
+    const { list } = await setup({ boxed: [card('Mine')] });
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { own: true });
+    const f = await import('./finish');
+    f.setFinish(list.id, { buy: 'matter' });
+    const v = await f.finishView(list, 'dk');
+    expect(v.ownOnly).toBe(true);
+    expect(v.noCollection).toBe(false);
+  });
+});
+
+describe('review PR56, 9: one cut pairs with one add', { timeout: 120_000 }, () => {
+  it('staging refuses a second swap on a card already staged to go out', async () => {
+    const { db, list } = await setup({ data: [card('In One'), card('In Two')] });
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { confirm: true });
+    const tune = await import('./tune');
+    const ref = (c: ScryfallCard) => ({ id: c.id, name: c.name, cmc: 2, manaCost: '', typeLine: '', image: null, quantity: 1 });
+    const out = db.cardsInList(list.id).find((c) => c.card.name === 'Deck Spell 1')!.card;
+    const r1 = await tune.stage(list, 'dk', [{ key: 'a', add: ref(card('In One')), cut: ref(out), why: '' }]);
+    const r2 = await tune.stage(list, 'dk', [{ key: 'b', add: ref(card('In Two')), cut: ref(out), why: '' }]);
+    expect([r1.staged, r2.staged, r2.blocked]).toEqual([1, 0, 1]);
+  });
+});

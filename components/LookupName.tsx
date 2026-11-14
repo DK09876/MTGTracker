@@ -41,7 +41,7 @@ export default function LookupName({ name, state, onLook, onOpen }: {
   return (
     <>
       <button type="button" data-lookup-name={name} data-lookup={state.status}
-        onMouseEnter={(e) => { place(e.clientX, e.clientY); onLook(); }} onMouseMove={(e) => { if (at && !pinned) place(e.clientX, e.clientY); }} onMouseLeave={() => { if (!pinned) setAt(null); }}
+        onPointerEnter={(e) => { if (e.pointerType !== 'mouse') return; place(e.clientX, e.clientY); onLook(); }} onMouseMove={(e) => { if (at && !pinned) place(e.clientX, e.clientY); }} onMouseLeave={() => { if (!pinned) setAt(null); }}
         onFocus={(e) => { if (!e.currentTarget.matches(':focus-visible')) return; const r = e.currentTarget.getBoundingClientRect(); place(r.right, r.top + r.height / 2); onLook(); }}
         onBlur={() => { if (!pinned) setAt(null); }}
         onClick={(e) => {
@@ -49,7 +49,8 @@ export default function LookupName({ name, state, onLook, onOpen }: {
           const r = e.currentTarget.getBoundingClientRect();
           place(r.left, r.bottom + WIDTH * 0.7);
           setPinned(true);
-          onLook(state.status === 'missing');
+          // A tap shows the box and looks up once; after a miss, only "Try again" asks again (review PR56, 17).
+          if (state.status === 'idle') onLook();
         }}
         className="inline text-left underline decoration-dotted decoration-[var(--muted)] underline-offset-[3px] hover:text-[var(--accent)]">
         {name}

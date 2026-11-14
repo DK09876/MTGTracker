@@ -219,17 +219,19 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <h4 className={H3}>Cards you’d buy for this deck</h4>
         <div role="radiogroup" aria-label="Cards you’d buy for this deck" className="grid gap-2 sm:grid-cols-3">
           {BUYS.map((o) => {
-            const on = (view.noCollection && view.buy === 'none' ? 'any' : view.buy) === o.id;
+            const on = (view.ownOnly ? 'none' : view.noCollection && view.buy === 'none' ? 'any' : view.buy) === o.id;
             return (
-              <button key={o.id} type="button" role="radio" aria-checked={on} disabled={busy || (view.noCollection && o.id === 'none')} onClick={() => act({ action: 'settings', buy: o.id })} data-buy={o.id}
+              <button key={o.id} type="button" role="radio" aria-checked={on} disabled={busy || (view.noCollection && o.id === 'none') || (!!view.ownOnly && o.id !== 'none')} onClick={() => act({ action: 'settings', buy: o.id })} data-buy={o.id}
                 className={`flex flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-left disabled:opacity-40 ${on ? 'border-[#d6aa2e] bg-[#d6aa2e]/[0.06]' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
                 <b className="text-sm">{o.label}</b><span className="text-[13px] text-[var(--muted)]">{o.why}</span>
               </button>
             );
           })}
         </div>
+        {view.ownOnly && <p className="text-[13px] text-[var(--muted)]" data-finish-ownonly>Your plan says only cards you own, so buying is off. <button type="button" className="underline underline-offset-[3px] hover:text-[var(--foreground)]" onClick={() => onTab('plan')}>Change it on the Plan tab</button></p>}
+        {!view.ownOnly && !view.noCollection && view.emptyPool && view.buy === 'matter' && <p className="text-[13px] text-amber-300" data-finish-emptypool>None of your cards is on offer under these settings, so this runs as Any card: Claude names the whole list.</p>}
         {view.noCollection && <p className="text-[13px] text-amber-300" data-finish-nocollection>None of your cards can go in this deck, so Finish names any card and marks the ones to buy.</p>}
-        {(view.buy !== 'none' || view.noCollection) && (
+        {!view.ownOnly && (view.buy !== 'none' || view.noCollection) && (
           <div className="flex flex-wrap items-center gap-2" data-finish-spend>
             <label htmlFor="finish-spend" className="text-sm">Up to $</label>
             <input id="finish-spend" type="number" min={0} step="any" inputMode="decimal" defaultValue={view.spend ?? ''} key={`${view.spend}`} placeholder="no limit"
@@ -420,7 +422,18 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       <div className={`${CARD} flex flex-col gap-2`} data-finish-say>
         {run.reply && <p className="text-[13px] text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <SymbolText text={run.reply} /></p>}
         {(run.short > 0 || run.dropped > 0) && <p className="text-[13px] text-amber-300">{run.short > 0 ? `${plural(run.short, 'pick')} short of what you asked for: Claude found no more it would put in. ` : ''}{run.dropped > 0 ? `${plural(run.dropped, 'name')} Claude gave ${run.dropped === 1 ? 'wasn’t' : 'weren’t'} among your cards on offer and ${run.dropped === 1 ? 'was' : 'were'} left out.` : ''}</p>}
-        {run.buy && run.buy.over.length > 0 && <p className="text-[13px] text-amber-300" data-finish-over>Over your ${run.buy.limit ?? 0} limit, so not taken: {run.buy.over.map((o) => `${o.name} (${o.price === null ? 'no price' : `$${o.price.toFixed(2)}`})`).join('; ')}. Raise the limit and send to have them, or mark cards Skip.</p>}
+        {run.buy && run.buy.over.length > 0 && (
+          <div className="flex flex-col gap-1.5" data-finish-over>
+            <p className="text-[13px] text-amber-300">Over your ${(run.buy.limit ?? 0).toFixed((run.buy.limit ?? 0) % 1 ? 2 : 0)} in all, or with no price, so not taken. Add one anyway (no paid round), then Skip something if you like.</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {run.buy.over.map((o) => (
+                <li key={o.name}><button type="button" disabled={busy || running} onClick={() => act({ action: 'takeOver', name: o.name })} aria-label={`Add ${o.name} anyway`} data-finish-over-add={o.name}
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2.5 text-[13px] hover:bg-[var(--surface-hover)] disabled:opacity-50">
+                  <span aria-hidden="true">+</span>{o.name}<span className="text-[var(--muted)]">{o.price === null ? 'no price' : `$${o.price.toFixed(2)}`}</span></button></li>
+              ))}
+            </ul>
+          </div>
+        )}
         {run.buy && run.buy.dropped.length > 0 && <p className="text-[13px] text-amber-300" title={run.buy.dropped.map((d) => `${d.name}: ${d.why}`).join('\n')}>{plural(run.buy.dropped.length, 'name')} Claude gave {run.buy.dropped.length === 1 ? 'wasn’t' : 'weren’t'} usable: {run.buy.dropped.slice(0, 4).map((d) => `${d.name} (${d.why})`).join('; ')}{run.buy.dropped.length > 4 ? '…' : ''}.</p>}
         <label htmlFor="finish-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say what to change <span className="text-[13px] font-normal text-[var(--muted)]">optional{run.round > 1 ? ' · the earlier rounds are part of the conversation' : ''}</span></label>
         <textarea id="finish-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}

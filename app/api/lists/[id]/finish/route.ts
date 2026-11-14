@@ -17,6 +17,7 @@
  *       many of each basic to take, and "+" for another land a search found
  *   unskip {name}              take a card off the deck's skipped-before list
  *   take {name, group}         "+" from a search's results: no paid round
+ *   takeOver {name}            "Add anyway" on a card to buy that was over the total: no paid round
  *   apply                      add the cards on Add (and, on a full fill, the
  *       app's lands), after a snapshot
  *   undo                       put every row back as it was
@@ -29,7 +30,7 @@ import { claudeCall, ModelError } from '@/lib/ai';
 import { localCards } from '@/lib/card-store';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
-import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish, unskip } from '@/lib/finish';
+import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, takeOver, undoFinish, unskip } from '@/lib/finish';
 import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
@@ -65,7 +66,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
   // While Claude works on a round, the list it will replace can't be changed from another tab (round 2, item 6).
-  if ((b.action === 'take' || b.action === 'lands' || b.action === 'unskip') && latestJob('finish', id)?.status === 'running') {
+  if ((b.action === 'take' || b.action === 'takeOver' || b.action === 'lands' || b.action === 'unskip') && latestJob('finish', id)?.status === 'running') {
     return NextResponse.json({ error: 'Claude is working on this list: wait for the round to finish' }, { status: 409 });
   }
   try {
@@ -91,6 +92,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       case 'unskip':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
         unskip(id, b.name);
+        break;
+      case 'takeOver':
+        if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
+        await takeOver(list, profile, b.name);
         break;
       case 'take':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });

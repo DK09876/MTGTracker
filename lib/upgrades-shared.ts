@@ -83,7 +83,7 @@ export interface UpgradesView {
   offer: { n: number; colours: string; searched: boolean } | null;
   searches: Array<{ q: string; n: number; round: number }>;
   job: { status: 'running' | 'failed'; detail: string | null; error: string | null } | null;
-  done: { at: string; swapped: number; maybe: number; size: number; cutsTo: string; buy: Array<{ name: string; price: number | null }> } | null;
+  done: { at: string; swapped: number; maybe: number; size: number; cutsTo: string; buy: Array<{ name: string; price: number | null }>; skipped?: Array<{ name: string; why: string }> } | null;
   cost: { first: RoundCost; later: RoundCost };
   noKey: boolean;
 }

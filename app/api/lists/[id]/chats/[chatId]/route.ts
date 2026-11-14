@@ -15,6 +15,7 @@ import { deleteChat, getChat, saveChat, unreplace } from '@/lib/deck-chat';
 import { storeCard } from '@/lib/db';
 import { latestJob } from '@/lib/jobs';
 import { getCard, imageOf } from '@/lib/scryfall';
+import { foldName, markedIn } from '@/lib/card-lookup';
 import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -45,20 +46,27 @@ export async function PATCH(request: Request, { params }: Ctx) {
   const chat = getChat(id, chatId);
   const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo'; card?: { id?: unknown; name?: unknown } };
   if (body.card) {
-    const m = chat?.messages[body.message ?? -1];
+    const at = body.message ?? -1;
+    const m = chat?.messages[at];
     const name = typeof body.card.name === 'string' ? body.card.name.trim() : '';
-    const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
     // Only a name this answer marked, and the card as the card data has it (not the page's word).
-    if (!m || m.role !== 'assistant' || !name || !m.text.toLowerCase().includes(`[[${front(name)}`)) return NextResponse.json({ error: 'No such name in that answer' }, { status: 404 });
+    if (!m || m.role !== 'assistant' || !name || !markedIn(m.text, name)) return NextResponse.json({ error: 'No such name in that answer' }, { status: 404 });
+    // Not while Claude writes the next answer: its job saves the whole chat when it ends (review PR56, 15).
+    if (chat!.messages.at(-1)?.role === 'user' && latestJob('chat', id)?.status === 'running') return NextResponse.json({ error: 'Claude is answering: look it up again when the answer is in' }, { status: 409 });
     const card = typeof body.card.id === 'string' ? await getCard(body.card.id).catch(() => null) : null;
-    if (!card || front(card.name) !== front(name)) return NextResponse.json({ error: 'Couldn’t find this card' }, { status: 404 });
+    if (!card || foldName(card.name) !== foldName(name)) return NextResponse.json({ error: 'Couldn’t find this card' }, { status: 404 });
     storeCard(card);
-    if (!(m.cards ?? []).some((c) => front(c.name) === front(card.name))) {
-      m.cards = [...(m.cards ?? []), { name: card.name, id: card.id, image: imageOf(card, 'normal') }];
-      if (m.unresolved) m.unresolved = Math.max(0, m.unresolved - 1) || undefined;
+    // After the outside lookup, read the chat again and change only that message's cards, in one synchronous step,
+    // so an answer saved meanwhile is never written over with the old copy (review 15).
+    const fresh = getChat(id, chatId);
+    const fm = fresh?.messages[at];
+    if (!fresh || !fm || fm.role !== 'assistant' || fm.text !== m.text) return NextResponse.json({ error: 'That answer changed' }, { status: 409 });
+    if (!(fm.cards ?? []).some((c) => foldName(c.name) === foldName(card.name))) {
+      fm.cards = [...(fm.cards ?? []), { name: card.name, id: card.id, image: imageOf(card, 'normal') }];
+      if (fm.unresolved) fm.unresolved = Math.max(0, fm.unresolved - 1) || undefined;
+      saveChat(fresh);
     }
-    saveChat(chat!);
-    return NextResponse.json({ chat });
+    return NextResponse.json({ chat: fresh });
   }
   const change = chat?.messages[body.message ?? -1]?.changes?.[body.change ?? -1];
   if (!chat || !change) return NextResponse.json({ error: 'No such change' }, { status: 404 });

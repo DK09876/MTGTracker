@@ -38,11 +38,12 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { ModelError } from './ai';
 import type { ClaudeParams } from './ai-claude';
 import { cardPrices } from './card-price';
+import { localCards } from './card-store';
 import { addCardToList, aiCalls, cardsInList, database, getSetting, setQuantity, setSetting, updateListCard, type CardBefore, type List } from './db';
 import { cardsNamed } from './cards-named';
 import { finishStore } from './finish';
-import { finishPool, heldCards, isLand, type Held } from './finish-pool';
-import { averageRounds, colourWords, parseQuery, searchLines, searchText, type MeasuredRound } from './finish-shared';
+import { finishPool, heldCards, isLand, type Held, type Pool } from './finish-pool';
+import { averageRounds, colourWords, parseQuery, searchLines, searchText, type Copies, type MeasuredRound } from './finish-shared';
 import { latestJob } from './jobs';
 import { planContext } from './plan-context';
 import { owner as planOwner } from './plan-help';
@@ -69,9 +70,15 @@ interface StoredItem extends Omit<UpgradeItem, 'card' | 'out'> { cardId: string;
 type Turn =
   | { kind: 'claude'; round: number; names: string[]; read: string; at: string }
   | { kind: 'owner'; marks: Array<{ name: string; choice: UpgradeChoice; text: string }>; message: string; at: string };
-interface Run { id: string; at: string; model: string; round: number; want: number; read: string; items: StoredItem[]; dropped: Array<{ name: string; why: string }>; changes?: UpgradeChanges }
+interface Run {
+  id: string; at: string; model: string; round: number; want: number; read: string; items: StoredItem[]; dropped: Array<{ name: string; why: string }>; changes?: UpgradeChanges;
+  /** The commander the list was made for: apply refuses a list made for another (review PR56, 6). */
+  commanderId?: string;
+}
 interface Done {
   at: string; swapped: number; maybe: number; size: number; cutsTo: string; buy: Array<{ name: string; price: number | null }>;
+  /** Rows not applied because the deck changed since the list (review PR56, 6), with why. */
+  skipped?: Array<{ name: string; why: string }>;
   remembered: string[];
   undo: Array<{ cardId: string; before: CardBefore }>;
   session: Pick<UpgradesStore, 'run' | 'choices' | 'skipped' | 'turns' | 'searches' | 'seen'>;
@@ -181,11 +188,12 @@ Two sources, as the task says:
 - Search broadly: two or three words that any card doing the job must have ("opponent loses", "sacrifice a creature", "dies"), with no type filter unless you need one. Cards word the same effect differently, so a long search or a t: filter misses good ones (an artifact sac outlet, a drain on "creature or artifact"). Spend one search on each of the deck's own categories and each job under its range. Search by name for the well-known staples in these colours and the commander's best-known partners: owned copies of those are easy to miss.
 - Cards the owner doesn't have: name well-known cards from memory, by their exact name. Don't spend searches checking whether the owner has them: the app checks every name (colours, legality, budget, bracket, whether the owner has it) and drops any that don't pass, so name only real cards you are sure of.
 - When a spare copy and a copy in another deck would do the same job, suggest the spare copy.
+- For a job under its range (ramp short of its range, say), search the owner's cards for that job first and suggest their spare cards for it before naming a card to buy or one that sits in another deck.
 
 Give your answer with give_upgrades, once:
 - "read": two or three sentences on the deck as it stands: what works, and where it is short ("the engine is fine; the deck is short of ways to end the game").
 - Up to the number asked for, the most important first. Each: the exact card name; the job it does in this deck; one sentence why, as a player would say it at the table; the card in the main deck it replaces, by its exact name, with one short clause why that one goes. Never the commander, never a card the owner marked never cut.
-- The card going out matters as much as the card coming in: take out the weakest card in the deck, not the card most like the new one. Good places to look: the app's cut list, and jobs over their range. Don't cut a good card just because the new one does the same job: two good cards in a job the plan wants are both worth keeping, so cut something weaker elsewhere. Don't cut from what the plan is built on (its engine, its themes, the deck's own categories) unless the new card does that job better.
+- The card going out matters as much as the card coming in: take out the weakest card in the deck, not the card most like the new one. Good places to look: the app's cut list, and jobs over their range. Don't cut a good card just because the new one does the same job: two good cards in a job the plan wants are both worth keeping, so cut something weaker elsewhere (an outlet doesn't replace an outlet when both are good). A card in the plan's engine jobs (sacrifice outlets, recursion, payoffs, the deck's own categories) comes out only for a clearly better card in the same job, and then "replaces_why" says which job and why the new card is better. Never cut an engine card to make room for ramp, draw or removal.
 - Weigh real upgrades: a card that does the job better, fixes a job under its range, completes a combo the plan wants, or plays to the plan's themes. A like-for-like trade is only worth it when the new card is clearly stronger.
 - No lands unless the owner asks for them; a land replaces a land.
 - Say "mine" for a card a search returned and "buy" for one you named from memory. The app works out the truth either way.
@@ -236,17 +244,30 @@ export function ownOf(h: Held | undefined): Exclude<UpgradeOwn, { kind: 'buy' }>
   return null;
 }
 
+/**
+ * The Game Changers a set of rows adds to the deck: one for each incoming Game Changer whose replaced card isn't
+ * one, less one for each Game Changer going out for a card that isn't one.
+ */
+export const gcNet = (rows: Array<{ card?: ScryfallCard | null; outCard?: ScryfallCard | null }>) =>
+  rows.reduce((n, r) => n + (r.card?.game_changer ? 1 : 0) - (r.outCard?.game_changer ? 1 : 0), 0);
+
 interface Raw { name?: unknown; job?: unknown; why?: unknown; replaces?: unknown; replaces_why?: unknown; source?: unknown }
 
 /**
  * Claude's suggestions, checked by the app (items 8 to 12). Every name is resolved (stored cards, then the card
- * data) and run through Tune's checks with the card it replaces leaving; ownership and price are the app's; a
- * replaced card that is the commander, never cut, or not in the main deck turns the row into an add. A name that
- * fails is dropped with why, and the count is shown; nothing is padded.
+ * data) and run through Tune's checks with the card it replaces leaving, tested on what the row will show: owned
+ * by heldCards (the same definition the chip uses) and, for a card to buy, the price shown (review PR56, 3-4).
+ * A replaced card that is the commander, never cut, or not in the main deck turns the row into an add. The
+ * bracket's room is worked out over the deck and the rows kept on Swap in (`gcRoom`), and a Game Changer going out
+ * frees room only for its own row (review 1). A name that fails is dropped with why, and the count is shown.
  */
 export function checkUpgrades(raw: unknown, input: {
   ctx: Context; held: Map<string, Held>; need: number; taken: Set<string>; outsTaken: Set<string>;
   notForMe: Set<string>; sources: UpgradeSources; landsOk: boolean; resolve?: (names: string[]) => Map<string, ScryfallCard>;
+  /** The deck's copies setting: under spare copies only, a card held only in another deck isn't one of "my cards". */
+  copies?: Copies;
+  /** The bracket's room over the deck and the rows kept on Swap in; undefined is the deck's own. */
+  gcRoom?: number | null;
 }): { items: Array<Omit<StoredItem, 'mark'> & { card: ScryfallCard; outCard: ScryfallCard | null }>; dropped: Array<{ name: string; why: string }> } {
   const { ctx } = input;
   const list = (Array.isArray((raw as { suggestions?: unknown })?.suggestions) ? (raw as { suggestions: unknown[] }).suggestions : []) as Raw[];
@@ -259,7 +280,8 @@ export function checkUpgrades(raw: unknown, input: {
   const used = new Set(input.taken);
   const outUsed = new Set(input.outsTaken);
   const owned = new Map([...input.held.values()].map((h) => [keyOf(h.card), h]));
-  let gcRoom = gcRoomOf(ctx);
+  const room0 = input.gcRoom !== undefined ? input.gcRoom : gcRoomOf(ctx);
+  let consumed = 0;
   const commanders = new Set(ctx.commanders.map((c) => front(c.name)));
   for (const s of list) {
     const name = String(s?.name ?? '').trim();
@@ -280,41 +302,53 @@ export function checkUpgrades(raw: unknown, input: {
     else if (outCard0 && outUsed.has(front(outCard0.name))) { outNote = `Claude named ${outCard0.name}, which another suggestion already replaces`; outCard = null; }
     else if (outCard0 && isLand(card) !== isLand(outCard0)) { outNote = `Claude named ${outCard0.name}; ${isLand(card) ? 'a land replaces a land' : 'a land is replaced only by a land'}`; outCard = null; }
     else if (!outName) outNote = 'Claude didn’t name a card to take out';
-    const why = whyNotAddable(ctx, card, outCard);
-    if (why) { dropped.push({ name: card.name, why: why.replace(`${card.name} `, '') }); continue; }
+    // A basic land already in the deck adds nothing as a row, whatever it "replaces" (review PR56, 8).
+    if (/\bBasic\b/.test(card.type_line ?? '') && byFront.has(k)) { dropped.push({ name: card.name, why: 'a basic land already in the deck: add copies on the Lands tab' }); continue; }
+    // Where the copy is, by the copies setting (review 19): under spare copies only, a card only another deck holds
+    // is labelled with that deck, and isn't offered when the run is from the owner's cards only.
     const mine = ownOf(owned.get(keyOf(card)));
+    if (mine?.kind === 'deck' && input.sources === 'mine' && input.copies === 'spare') { dropped.push({ name: card.name, why: `only in ${mine.deck}, and this deck uses spare copies only` }); continue; }
     if (!mine && input.sources === 'mine') { dropped.push({ name: card.name, why: 'not one of your cards, and this run is from your cards only' }); continue; }
-    if (card.game_changer && gcRoom !== null) {
-      const room = gcRoom + (outCard?.game_changer ? 1 : 0);
-      if (room <= 0) { dropped.push({ name: card.name, why: `would put the deck past bracket ${ctx.plan.bracket}` }); continue; }
-      gcRoom = room - 1;
-    } else if (outCard?.game_changer && gcRoom !== null) gcRoom += 1;
+    const price = mine ? null : cardPrices([card], owned).get(keyOf(card)) ?? null;
+    // A Game Changer for a card that isn't one needs room the deck and the rows before it haven't used.
+    const room = room0 === null ? null : room0 - consumed;
+    const why = whyNotAddable(ctx, card, outCard, { as: { owned: !!mine, price }, gcRoom: room, basicAgain: false });
+    if (why) {
+      dropped.push({ name: card.name, why: why.replace(`${card.name} `, '').replace(/^is already in the deck$/, isLand(card) ? 'a basic land already in the deck: add copies on the Lands tab' : 'is already in the deck') });
+      continue;
+    }
     if (items.length >= input.need) continue;
+    if (card.game_changer && !outCard?.game_changer) consumed += 1;
     used.add(k);
     if (outCard) outUsed.add(front(outCard.name));
     items.push({
       name: card.name, cardId: card.id, card, outCard,
       job: String(s.job ?? '').trim().slice(0, 60) || 'upgrade',
       why: String(s.why ?? '').trim().slice(0, 300) || 'Claude’s pick',
-      own: mine ?? { kind: 'buy', price: null },
+      own: mine ?? { kind: 'buy', price },
       ...(mine && s.source === 'buy' ? { wasBuy: true } : {}),
       out: outCard ? { name: outCard.name, id: outCard.id, why: String(s.replaces_why ?? '').trim().slice(0, 200) } : null,
       ...(outNote && !outCard ? { outNote } : {}),
       warn: swapEffects(ctx, card, outCard),
     });
   }
-  // Prices for the cards to buy, one helper for every screen (item 26). With a budget per card, a card with no
-  // price can't be shown as within it (item 11): dropped and said.
-  const buys = items.filter((i) => i.own.kind === 'buy');
-  const prices = cardPrices(buys.map((i) => i.card), owned);
-  const out: typeof items = [];
-  for (const i of items) {
-    if (i.own.kind !== 'buy') { out.push(i); continue; }
-    const p = prices.get(keyOf(i.card)) ?? null;
-    if (p === null && ctx.plan.budget !== null) { dropped.push({ name: i.name, why: `has no price, so it can’t be checked against your $${ctx.plan.budget} budget` }); continue; }
-    out.push({ ...i, own: { kind: 'buy', price: p } });
-  }
-  return { items: out, dropped };
+  return { items, dropped };
+}
+
+/** Why Upgrades can't run on a deck of this size, in words. */
+export const upgradesNot100 = (size: number) => (size < 100
+  ? `Upgrades swaps cards in a deck at 100, and this one has ${size}. Finish the deck first.`
+  : `Upgrades swaps cards in a deck at 100, and this one has ${size}. Trim it to 100 first.`);
+
+/** A search whose whole query is the exact name of a card that isn't on offer among the owner's cards. */
+export function notYours(q: string, pool: Pick<Pool, 'cards' | 'lands'>): boolean {
+  const p = parseQuery(q);
+  if (p.types.length || p.notTypes.length || p.not.length || p.mv !== null || p.mvMin !== null || p.ignored.length) return false;
+  const name = q.replace(/^(?:name|n):/i, '').replace(/["“”]/g, '').trim();
+  if (name.length < 3) return false;
+  const card = cardsNamed([name]).get(front(name));
+  if (!card || front(card.name) !== front(name)) return false;
+  return !pool.cards.has(front(card.name)) && !pool.lands.cards.has(front(card.name));
 }
 
 /** The conversation so far, in plain lines; nothing before the first list. */
@@ -371,6 +405,8 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
   const newNot = before.notForMe.filter((x) => !hadNot.has(front(x.name)));
   const ctx = await tuneContext(list, profileId);
   if (!list.commander) throw new ModelError('Set the commander first: what may go in follows its colours.');
+  // Upgrades is for a deck at 100: every suggestion is a swap (review 6). Under 100 Finish fills it; over, Trim.
+  if (ctx.size !== 100) throw new ModelError(upgradesNot100(ctx.size));
   const held = heldCards(profileId, list.id);
   const ownOnly = ctx.plan.own;
   const sources: UpgradeSources = ownOnly ? 'mine' : before.sources;
@@ -477,6 +513,9 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
       const q = String((use.input as { query?: unknown })?.query ?? '').trim().slice(0, 200);
       if (use.name !== 'search' || !pool) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'Unknown tool.', is_error: true }); continue; }
       if (used >= limit) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'No searches left, give your answer now.' }); continue; }
+      // A search that is only the name of a card the owner can't use here is refused and not counted (review 22):
+      // the app checks every name given as one to buy.
+      if (notYours(q, pool)) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'That card isn\'t one of the owner\'s cards that can go in this deck. If you want it, name it as one to buy; the app checks it. That search wasn\'t counted.' }); continue; }
       used += 1;
       const landAsk = parseQuery(q).types.some((t) => t.startsWith('land'));
       const r = searchLines(landAsk ? pool.lands.lines : pool.lines, q);
@@ -492,9 +531,14 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
   }
   if (answer === null) throw new ModelError('Claude didn’t give its suggestions. Nothing was changed; try again.');
 
+  // The bracket's room over the deck and the rows kept on Swap in, so a later round can't pass it (review 1).
+  const keptCards = cardsNamed(kept.map((i) => i.name));
+  const outOf = (i: StoredItem) => (i.out ? ctx.main.find((m) => front(m.card.name) === front(i.out!.name))?.card ?? null : null);
+  const roomDeck = gcRoomOf(ctx);
+  const gcRoom = roomDeck === null ? null : roomDeck - gcNet(kept.map((i) => ({ card: keptCards.get(front(i.name)), outCard: outOf(i) })));
   const checked = checkUpgrades(answer, {
     ctx, held, need, taken: new Set(kept.map((i) => front(i.name))), outsTaken: new Set(kept.filter((i) => i.out).map((i) => front(i.out!.name))),
-    notForMe: new Set([...notForMe, ...skipped]), sources, landsOk,
+    notForMe: new Set([...notForMe, ...skipped]), sources, landsOk, copies, gcRoom,
   });
   if (!checked.items.length && !kept.length) {
     throw new ModelError(`None of Claude’s suggestions could be used${checked.dropped.length ? ` (${checked.dropped.slice(0, 4).map((d) => `${d.name}: ${d.why}`).join('; ')})` : ''}. Nothing was saved; try again.`);
@@ -518,7 +562,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
       back: fresh.filter((i) => i.mark === 'back').map((i) => i.name),
     };
   }
-  const run: Run = { id: randomUUID(), at: now(), model, round, want, read, items, dropped: checked.dropped, ...(changes ? { changes } : {}) };
+  const run: Run = { id: randomUUID(), at: now(), model, round, want, read, items, dropped: checked.dropped, ...(changes ? { changes } : {}), commanderId: list.commander.id };
   update(list.id, (s) => {
     s.run = run;
     s.choices = {};
@@ -549,6 +593,8 @@ function cardFor(item: StoredItem): ScryfallCard | null {
 export async function applyUpgrades(list: List, profileId: string): Promise<NonNullable<UpgradesView['done']>> {
   const s = upgradesStore(list.id);
   if (!s.run) throw new Error('There are no suggestions to apply');
+  // The list was made for this deck as it was: a new commander makes it a different deck (review PR56, 6).
+  if (s.run.commanderId && list.commander?.id !== s.run.commanderId) throw new Error('The commander changed since this list was made: start over for the new one');
   const names = new Set(chosenIn(s.run.items, s.choices));
   const rows = s.run.items.filter((i) => names.has(i.name));
   if (!rows.length) throw new Error('Nothing to apply: put at least one card on Swap in');
@@ -562,42 +608,62 @@ export async function applyUpgrades(list: List, profileId: string): Promise<NonN
   let swapped = 0;
   let maybe = 0;
   const buy: Done['buy'] = [];
+  const skipped: Array<{ name: string; why: string }> = [];
+  // The bracket, over what is actually applied, in order: each Game Changer coming in for one that isn't needs room.
+  let room = gcRoomOf(ctx);
   for (const i of rows) {
     const card = cardFor(i);
-    if (!card) continue;
+    if (!card) { skipped.push({ name: i.name, why: 'the app couldn’t find the card' }); continue; }
     const where: UpgradeWhere = s.choices[i.name]?.where ?? 'swap';
     const all = cardsInList(list.id);
     if (where === 'maybe') {
-      if (all.some((c) => front(c.card.name) === front(card.name))) continue;
+      if (all.some((c) => front(c.card.name) === front(card.name))) { skipped.push({ name: i.name, why: 'already in this deck' }); continue; }
       keep(card.id, addCardToList(list.id, card, 1, 'nonfoil', maybeTo));
       maybe += 1;
       continue;
     }
-    if (all.some((c) => c.board === 'main' && front(c.card.name) === front(card.name))) continue;
-    // In: from the section it waits in, as it is; anything else a new row.
+    if (all.some((c) => c.board === 'main' && front(c.card.name) === front(card.name))) { skipped.push({ name: i.name, why: 'already in the main deck' }); continue; }
+    // The card it replaces, as the deck is now: still in the main deck, and not starred never cut since.
+    const o = i.out ? all.find((c) => c.board === 'main' && front(c.card.name) === front(i.out!.name)) ?? null : null;
+    if (i.out && !o) { skipped.push({ name: i.name, why: `${i.out.name} is no longer in the main deck` }); continue; }
+    if (o && ctx.protectedWhy.has(o.card.name)) { skipped.push({ name: i.name, why: `${o.card.name} is now ${ctx.protectedWhy.get(o.card.name) === 'commander' ? 'the commander' : 'never cut'}` }); continue; }
+    // Tune's checks again on the deck as it is (colours, legal, budget at the price shown, the deck rule).
+    const why = whyNotAddable(ctx, card, o?.card ?? null, { as: { owned: i.own.kind !== 'buy', price: i.own.kind === 'buy' ? i.own.price : null }, gcRoom: null, basicAgain: false });
+    if (why) { skipped.push({ name: i.name, why: why.replace(`${card.name} `, '') }); continue; }
+    if (room !== null && card.game_changer && !o?.card.game_changer) {
+      if (room <= 0) { skipped.push({ name: i.name, why: `it would put the deck past bracket ${ctx.plan.bracket}` }); continue; }
+      room -= 1;
+    } else if (room !== null && o?.card.game_changer && !card.game_changer) room += 1;
+    // In: from the section it waits in, one copy (review 7); anything else a new row.
     const row = all.find((c) => front(c.card.name) === front(card.name) && c.board !== 'main');
-    if (row) { keep(row.card.id, { quantity: row.quantity, board: row.board }); updateListCard(list.id, row.card.id, { board: 'main' }); }
+    if (row && row.quantity > 1) {
+      // A printing sits on one board at a time: another printing goes in, and the section keeps the rest.
+      const other = [...localCards([card.name]), card].find((c) => c && front(c.name) === front(card.name) && c.id !== row.card.id && !all.some((x) => x.card.id === c.id));
+      keep(row.card.id, { quantity: row.quantity, board: row.board });
+      if (other) { setQuantity(list.id, row.card.id, row.quantity - 1); keep(other.id, addCardToList(list.id, other, 1, 'nonfoil', 'main')); }
+      else { updateListCard(list.id, row.card.id, { board: 'main' }); setQuantity(list.id, row.card.id, 1); skipped.push({ name: i.name, why: `went in; the other ${row.quantity - 1} cop${row.quantity === 2 ? 'y' : 'ies'} in your ${boardLabel(sections, row.board)} left with it (Undo brings them back)` }); }
+    } else if (row) { keep(row.card.id, { quantity: row.quantity, board: row.board }); updateListCard(list.id, row.card.id, { board: 'main' }); }
     else keep(card.id, addCardToList(list.id, card, 1, 'nonfoil', 'main'));
     // Out: to the cuts section (one copy of a card held in several just lowers the count).
-    if (i.out && !ctx.protectedWhy.has(i.out.name)) {
-      const o = cardsInList(list.id).find((c) => c.board === 'main' && front(c.card.name) === front(i.out!.name));
-      if (o) {
-        keep(o.card.id, { quantity: o.quantity, board: 'main' });
-        if (o.quantity > 1) setQuantity(list.id, o.card.id, o.quantity - 1);
-        else updateListCard(list.id, o.card.id, { board: cutsTo });
-      }
+    if (o) {
+      keep(o.card.id, { quantity: o.quantity, board: 'main' });
+      if (o.quantity > 1) setQuantity(list.id, o.card.id, o.quantity - 1);
+      else updateListCard(list.id, o.card.id, { board: cutsTo });
     }
     swapped += 1;
     if (i.own.kind === 'buy') buy.push({ name: i.name, price: i.own.price });
   }
+  if (!swapped && !maybe) throw new Error(`Nothing could be applied: ${skipped.map((x) => `${x.name} (${x.why})`).join('; ')}`);
   const size = cardsInList(list.id).filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (list.commander ? 1 : 0);
   const done: Done = {
-    at: now(), swapped, maybe, size, cutsTo: sections.find((x) => x.id === cutsTo)?.name ?? 'Sideboard', buy, remembered: [], undo,
+    at: now(), swapped, maybe, size, cutsTo: sections.find((x) => x.id === cutsTo)?.name ?? 'Sideboard', buy, skipped, remembered: [], undo,
     session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen },
   };
   update(list.id, (x) => { done.remembered = remember(x); x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
-  return { at: done.at, swapped, maybe, size, cutsTo: done.cutsTo, buy };
+  return { at: done.at, swapped, maybe, size, cutsTo: done.cutsTo, buy, skipped };
 }
+
+const boardLabel = (sections: Array<{ id: string; name: string }>, board: string) => sections.find((x) => x.id === board)?.name ?? (board === 'maybe' ? 'Maybeboard' : 'section');
 
 /** Put every row the apply touched back exactly as it was, and bring the conversation back. */
 export function undoUpgrades(list: List): { moved: number } {
@@ -671,7 +737,7 @@ export async function upgradesView(list: List, profileId: string): Promise<Upgra
     offer: s.offer,
     searches: s.searches.filter((x) => x.round === (running && s.pending ? s.pending : s.run?.round ?? 1)).map(({ q, n, round }) => ({ q, n, round })),
     job: job && (running || (job.status === 'failed' && (!s.run || job.startedAt > s.run.at))) ? { status: job.status as 'running' | 'failed', detail: job.detail || null, error: job.status === 'failed' ? job.error ?? 'Claude didn’t finish' : null } : null,
-    done: s.done ? { at: s.done.at, swapped: s.done.swapped, maybe: s.done.maybe, size: s.done.size, cutsTo: s.done.cutsTo, buy: s.done.buy } : null,
+    done: s.done ? { at: s.done.at, swapped: s.done.swapped, maybe: s.done.maybe, size: s.done.size, cutsTo: s.done.cutsTo, buy: s.done.buy, skipped: s.done.skipped ?? [] } : null,
     cost: roundCosts(),
     noKey: !process.env.ANTHROPIC_API_KEY,
   };

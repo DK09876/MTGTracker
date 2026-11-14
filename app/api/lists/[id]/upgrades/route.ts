@@ -22,7 +22,8 @@ import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
-import { applyUpgrades, resetUpgrades, runUpgrades, setUpgradeChoices, setUpgrades, undoUpgrades, unskipUpgrade, upgradesView } from '@/lib/upgrades';
+import { cardsInList } from '@/lib/db';
+import { applyUpgrades, resetUpgrades, runUpgrades, setUpgradeChoices, setUpgrades, undoUpgrades, unskipUpgrade, upgradesNot100, upgradesView } from '@/lib/upgrades';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
-  if ((b.action === 'unskip' || b.action === 'apply') && latestJob('upgrades', id)?.status === 'running') {
+  // While Claude works on a round, the list it will replace can't be changed (review PR56, 18).
+  if ((b.action === 'unskip' || b.action === 'apply' || b.action === 'reset' || b.action === 'choices') && latestJob('upgrades', id)?.status === 'running') {
     return NextResponse.json({ error: 'Claude is working on this list: wait for the round to finish' }, { status: 409 });
   }
   try {
@@ -55,6 +57,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       case 'find': {
         if (!process.env.ANTHROPIC_API_KEY || profile === 'tour') return NextResponse.json({ error: NO_KEY }, { status: 503 });
         if (latestJob('upgrades', id)?.status === 'running') return NextResponse.json({ error: 'Claude is already working on this list' }, { status: 409 });
+        // Upgrades swaps cards in a deck at 100: said before the paid call (review 6).
+        const size = cardsInList(id).filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (list.commander ? 1 : 0);
+        if (size !== 100) return NextResponse.json({ error: upgradesNot100(size) }, { status: 400 });
         // Every AI step on the deck pages runs on Opus.
         const model = TRIM_MODELS.opus.id;
         const call = claudeCall(model, { profile, feature: 'upgrades', label: list.name });

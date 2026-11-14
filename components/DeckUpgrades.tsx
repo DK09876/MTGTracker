@@ -160,6 +160,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       <section className={`${CARD} flex flex-col gap-3`} data-upgrades-done>
         <h3 className="font-display text-2xl font-semibold">{d.swapped ? `Swapped in ${plural(d.swapped, 'card')}.` : ''}{d.maybe ? ` ${plural(d.maybe, 'card')} put in the Maybeboard.` : ''} The deck is at {d.size}.</h3>
         <p className="text-sm text-[var(--muted)]">{d.swapped ? `The cards they replaced are in ${d.cutsTo}, so you can bring one back. ` : ''}A snapshot from before is in History.</p>
+        {(d.skipped?.length ?? 0) > 0 && <p className="text-sm text-amber-300" data-upgrades-skipped>Not applied, because the deck changed since the list: {d.skipped!.map((x) => `${x.name} (${x.why})`).join('; ')}.</p>}
         {d.buy.length > 0 && <BuyList rows={d.buy} copied={copied} onCopy={() => copy(d.buy)} />}
         {d.buy.length > 0 && <p className="text-[13px] text-[var(--muted)]">{plural(d.buy.length, 'card')} to buy went into the deck: {money(t.total)}{t.unpriced ? `, and ${t.unpriced} with no price` : ''}. The Cards tab marks the ones you don’t have.</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
@@ -199,13 +200,14 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       </div>
       <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and the deck.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <button className={C.go} disabled={busy || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-upgrades-go>
+        <button className={C.go} disabled={busy || view.noKey || updating || view.size !== 100} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-upgrades-go>
           ✦ Find {view.count} upgrades · Claude Opus · {cost}
         </button>
         {freeLink}
         <Tip label="What Claude reads"><span className="flex flex-col gap-1">{AI_READS.upgrades.map((r) => <span key={r}>• {r}</span>)}<span>At most {UPGRADE_SEARCHES} searches on the first list and {UPGRADE_SEARCHES_LATER} on each later one, counted by the app.</span></span></Tip>
       </div>
       {view.noKey && <p className="text-xs text-amber-300">No Claude key is set on the server. The free list works without one.</p>}
+      {view.size !== 100 && <p className="text-[13px] text-amber-300" data-upgrades-not100>Upgrades swaps cards in a deck at 100, and this one has {view.size}. {view.size < 100 ? <button type="button" className="underline underline-offset-[3px]" onClick={() => onTab('finish')}>Finish the deck first</button> : <button type="button" className="underline underline-offset-[3px]" onClick={() => onTab('tune')}>Trim it to 100 first</button>}.</p>}
     </div>
   );
 
