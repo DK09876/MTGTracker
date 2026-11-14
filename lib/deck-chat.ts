@@ -275,7 +275,10 @@ Doing it here, or opening a page:
     plan carries it into Finish.
   - upgrades: what would make a finished deck better, from their cards or
     to buy ("what should I buy", "what am I missing", "upgrade this deck").
-    Answer in a sentence or two first: what the deck is short of.
+    Answer in at most three sentences, under 60 words: what the deck is
+    short of, naming at most two cards. No card-by-card list, no costs or
+    ownership notes, no proposed swaps: the Upgrades button does that, each
+    with the card it replaces.
   - tags: sorting the deck into groups, retagging it.
   - check: the mana, the curve, how the deck plays.
   - plan: what the deck is trying to do, its bracket or budget.

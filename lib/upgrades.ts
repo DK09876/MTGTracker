@@ -50,6 +50,7 @@ import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from
 import { sectionsOf } from './sections';
 import { cutBoard } from './sections-shared';
 import { combosInDeck } from './spellbook';
+import { deckCutList } from './cut-list';
 import { gcRoomOf, swapEffects, tuneContext, whyNotAddable, type Context } from './tune';
 import {
   asksForLands, chosenIn, UPGRADE_DEFAULT, UPGRADE_SEARCHES, UPGRADE_SEARCHES_LATER,
@@ -176,12 +177,15 @@ export const UPGRADES_SYSTEM = `You help a Magic: The Gathering player improve a
 You get the deck's plan (each part with who set it, the owner's notes word for word, every category and the job counts against the plan's ranges), every card in the main deck with its rules text (and, for cards an earlier Finish picked, why), the combos the deck is one card away from, cards the owner said "not for me" with their reasons, and how many suggestions to give.
 
 Two sources, as the task says:
-- The owner's cards: find them with the search tool. It searches only the owner's cards that may go in this deck (in its colours, legal, within the budget, deck rule and bracket). Words must all match the name, type line or rules text; add t:<type>, mv<=N, mv>=N or mv=N to narrow, -word or -t:<type> to leave cards out. Nothing else is understood. A search with t:land looks only at the owner's lands. Searches are limited; when none are left, give your answer. Search by name for the well-known staples in these colours and the commander's best-known partners: owned copies of those are easy to miss.
-- Cards the owner doesn't have: name well-known cards from memory, by their exact name. The app checks every name (colours, legality, budget, bracket, whether the owner has it) and drops any that don't pass, so name only real cards you are sure of.
+- The owner's cards: find them with the search tool. It searches only the owner's cards that may go in this deck (in its colours, legal, within the budget, deck rule and bracket). Words must all match the name, type line or rules text; add t:<type>, mv<=N, mv>=N or mv=N to narrow, -word or -t:<type> to leave cards out. Nothing else is understood. A search with t:land looks only at the owner's lands. Searches are limited; when none are left, give your answer.
+- Search broadly: two or three words that any card doing the job must have ("opponent loses", "sacrifice a creature", "dies"), with no type filter unless you need one. Cards word the same effect differently, so a long search or a t: filter misses good ones (an artifact sac outlet, a drain on "creature or artifact"). Spend one search on each of the deck's own categories and each job under its range. Search by name for the well-known staples in these colours and the commander's best-known partners: owned copies of those are easy to miss.
+- Cards the owner doesn't have: name well-known cards from memory, by their exact name. Don't spend searches checking whether the owner has them: the app checks every name (colours, legality, budget, bracket, whether the owner has it) and drops any that don't pass, so name only real cards you are sure of.
+- When a spare copy and a copy in another deck would do the same job, suggest the spare copy.
 
 Give your answer with give_upgrades, once:
 - "read": two or three sentences on the deck as it stands: what works, and where it is short ("the engine is fine; the deck is short of ways to end the game").
 - Up to the number asked for, the most important first. Each: the exact card name; the job it does in this deck; one sentence why, as a player would say it at the table; the card in the main deck it replaces, by its exact name, with one short clause why that one goes. Never the commander, never a card the owner marked never cut.
+- The card going out matters as much as the card coming in: take out the weakest card in the deck, not the card most like the new one. Good places to look: the app's cut list, and jobs over their range. Don't cut a good card just because the new one does the same job: two good cards in a job the plan wants are both worth keeping, so cut something weaker elsewhere. Don't cut from what the plan is built on (its engine, its themes, the deck's own categories) unless the new card does that job better.
 - Weigh real upgrades: a card that does the job better, fixes a job under its range, completes a combo the plan wants, or plays to the plan's themes. A like-for-like trade is only worth it when the new card is clearly stronger.
 - No lands unless the owner asks for them; a land replaces a land.
 - Say "mine" for a card a search returned and "buy" for one you named from memory. The app works out the truth either way.
@@ -405,6 +409,10 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
 
   progress('Looking up combos one card away');
   const combos = await almostCombos(ctx);
+  // The app's cut list as a guide for the card going out (the owner, 2026-11-13: the cards coming in were good, the
+  // card going out was the weak part). Never-cut cards and lands are left out.
+  const cutList = await deckCutList(list).then((r) => r.candidates.filter((c) => !ctx.protectedWhy.has(c.name) && !ctx.main.some((m) => m.card.name === c.name && isLand(m.card))).slice(0, 20)
+    .map((c) => `- ${c.name}${c.reasons[0] ? `: ${c.reasons[0]}` : ''}`)).catch(() => [] as string[]);
   const fs = finishStore(list.id);
   const finishWhy = new Map((fs.run?.items ?? fs.done?.session.run?.items ?? []).map((i) => [i.name, i.why] as const));
   const leaveOut = [...new Set([...before.notForMe.map((x) => x.name), ...(rerun ? [...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)] : [])])];
@@ -415,6 +423,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
     '',
     `## The main deck (${ctx.size} with the commander), with rules text`,
     ...deckLines(ctx, finishWhy),
+    ...(cutList.length ? ['', '## The app\'s cut list: its rules\' weakest cards first, with their main reason (a guide, not a judgement; never cut, the commander and lands left out)', ...cutList] : []),
     ...(combos.length ? ['', '## Combos the deck is one card away from (found by the app)', ...combos.map((c) => `- ${c.missing} completes ${c.cards.join(' + ')} => ${c.produces.join(', ')}`)] : []),
     ...(before.notForMe.length ? ['', '## Not for me on this deck, with the owner\'s reasons (never suggest these; apply the reasons to similar cards)', ...before.notForMe.map((x) => `- ${x.name}${x.why ? `: ${quote(x.why)}` : ''}`)] : []),
   ].join('\n');
