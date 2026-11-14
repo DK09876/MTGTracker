@@ -2,8 +2,7 @@
 
 /**
  * The Tune tab: change the deck toward its plan. Pick what you want to do -
- * finish the deck, find cards, swaps, cuts, fix a problem,
- * lands; the deck's state picks one for you. Suggestions wait in groups
+ * finish the deck, upgrades, cuts, fix a problem, lands; the deck's state picks one for you. Suggestions wait in groups
  * until you accept a group or a single card, save it to a section, or
  * dismiss it. Accepted cards go to Your changes, which shows what they
  * would do to the deck and touches nothing until you apply it.
@@ -12,20 +11,21 @@
  * Claude's ideas join the same groups, read against the plan.
  */
 
-import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
+import { useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CutRules from './CutRules';
 import DeckFinish from './DeckFinish';
 import DeckTrim from './DeckTrim';
+import DeckUpgrades from './DeckUpgrades';
 import ManaCost from './ManaCost';
 import PlanLine from './PlanLine';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { CutSettings } from '@/lib/cut-rules';
-import { capToHundred, CUT_FILTERS, INTENTS, SYMPTOMS, type CutFilter, type Intent, type Staged, type Suggestion, type SuggestionGroup, type Symptom } from '@/lib/tune-shared';
+import { capToHundred, CUT_FILTERS, intentOf, INTENTS, SYMPTOMS, type CutFilter, type Intent, type Staged, type Suggestion, type SuggestionGroup, type Symptom } from '@/lib/tune-shared';
 import type { DeckSection } from '@/lib/sections-shared';
 import type { DeckTab } from '@/lib/deck-tabs';
 import type { Job } from '@/lib/jobs';
@@ -52,7 +52,8 @@ const GHOST = 'rounded-full px-2.5 py-1 text-xs text-[var(--muted)] hover:text-[
 const POLL_MS = 2_500;
 
 const remembered = (listId: string): Intent | null => {
-  try { const v = sessionStorage.getItem(`mtg-tune:${listId}`); return INTENTS.some((i) => i.id === v) ? v as Intent : null; } catch { return null; }
+  // A tab remembered from before handoff 10 (Find cards, Swaps) opens Upgrades.
+  try { return intentOf(sessionStorage.getItem(`mtg-tune:${listId}`)) ?? null; } catch { return null; }
 };
 
 export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk, onCard }: Props) {
@@ -215,7 +216,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         })}
       </div>
 
-      {!((current === 'cuts' || (current === 'finish' && !state.finish?.showRules)) && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
+      {!((current === 'cuts' || (current === 'finish' && !state.finish?.showRules) || (current === 'upgrades' && !state.groups.length)) && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
         onUnstage={(k) => unstage([k])} onClear={() => act(() => api.tuneAct(listId, { action: 'clear' }))} onApply={apply} />}
 
       {note && (
@@ -238,13 +239,16 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         {current === 'fix' && <FixBar state={state} symptom={symptom} onSymptom={setSymptom} busy={busy}
           onVerdict={(id, verdict) => act(() => api.tuneAct(listId, { action: 'verdict', id, verdict }), verdict === 'worse' ? 'The fix is staged to be undone in Your changes.' : 'Noted.')} />}
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
-        {current === 'find' && state.pile && <PileQuestion pile={state.pile} busy={busy} onPick={(choice) => choice === 'cut' ? pick('cuts') : act(() => api.tuneAct(listId, { action: 'pile', choice }))} />}
 
-        {current === 'finish' && <DeckFinish listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : onTab(t))}
+        {current === 'upgrades' && <DeckUpgrades listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : t === 'finish' ? pick('finish') : onTab(t))}
+          onChanged={async () => { await onChanged(); await load(intent, symptom); }}
+          showFree={!!state.upgrades?.showFree} onFree={(showFree) => act(() => api.tuneAct(listId, { action: 'upgradesFree', showFree }))} />}
+
+        {current === 'finish' && <DeckFinish listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : t === 'upgrades' ? pick('upgrades') : onTab(t))}
           onChanged={async () => { await onChanged(); await load(intent, symptom); }}
           showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
-        {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
+        {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
           onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
 
         {current === 'cuts' ? (
@@ -265,10 +269,9 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
             </div>
           </details>
         ) : (<>
-        {groups.length === 0 && current !== 'finish' && !(current === 'find' && state.pile && !state.pile.choice) && (
+        {groups.length === 0 && current !== 'finish' && current !== 'upgrades' && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">
-            {current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”. Find cards can save some to your Maybeboard, or ask Claude for swaps.'
-                : 'Nothing to suggest here right now.'}
+            Nothing to suggest here right now.
           </p>
         )}
         <div className="flex flex-col gap-3" data-tour="tune-groups">
@@ -446,26 +449,6 @@ function LandsBar({ lands }: { lands: NonNullable<api.TuneState['lands']> }) {
         </ul>
         <span className="text-xs text-[var(--muted)]">Share of each colour’s symbols in your spells’ costs. Basics follow it, and the colour furthest from what its hungriest spell needs comes first.</span>
       </div>
-    </div>
-  );
-}
-
-function PileQuestion({ pile, busy, onPick }: { pile: NonNullable<api.TuneState['pile']>; busy: boolean; onPick: (c: 'fill' | 'best' | 'cut' | null) => void }) {
-  const options: Array<[string, string, string]> = pile.over
-    ? [['cut', 'Cut down to 100', `Keep what you have and trim the ${pile.main - 100} extra in Cuts.`], ['best', `Pick the best 100 from all ${pile.main + pile.pool}`, 'Everything is up for grabs: cards you might add can replace cards in the deck.']]
-    : [['fill', 'Fill to 100', `Keep the ${pile.main} and add ${100 - pile.main}, from the cards you set aside first.`], ['best', `Pick the best 100 from all ${pile.main + pile.pool}`, 'Everything is up for grabs: cards you might add can replace cards in the deck.']];
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3.5">
-      <b>{pile.main} in the deck, {pile.pool} you might add. What should happen?</b>
-      <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="What should happen">
-        {options.map(([id, title, sub]) => (
-          <button key={id} role="radio" aria-checked={pile.choice === id} disabled={busy} onClick={() => onPick(id as 'fill' | 'best' | 'cut')} data-pile={id}
-            className={`flex flex-col rounded-xl border px-3 py-2.5 text-left text-sm ${pile.choice === id ? 'border-[var(--accent)] bg-[var(--surface-hover)]' : 'border-[var(--border)]'}`}>
-            <b>{title}</b><span className="text-xs text-[var(--muted)]">{sub}</span>
-          </button>
-        ))}
-      </div>
-      {pile.choice ? <button className={`${GHOST} self-start px-0`} onClick={() => onPick(null)}>Ask again</button> : <p className="text-xs text-[var(--muted)]">Nothing is suggested until you choose.</p>}
     </div>
   );
 }

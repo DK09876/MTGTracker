@@ -680,11 +680,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           onChanged={load}
           planConfirmed={planConfirmed}
           onGo={async (go) => {
-            // Trim and Finish live in Tune: set the page's number first (a failure still opens the page), then open it.
-            if (go.page === 'trim' || go.page === 'finish') {
+            // Trim, Finish and Upgrades live in Tune: set the page's number first (a failure still opens the page), then open it.
+            if (go.page === 'trim' || go.page === 'finish' || go.page === 'upgrades') {
               if (go.page === 'trim' && (go.cut || go.cutTo)) await api.trimAct(id, { action: 'target', target: go.cut ? { kind: 'cut', n: go.cut } : { kind: 'to', n: go.cutTo! } }).catch(() => {});
               if (go.page === 'finish' && (go.add || go.fill)) await api.finishAct(id, { action: 'settings', want: go.fill ? null : finishWant(go.add, deckSize) ?? null }).catch(() => {});
-              try { sessionStorage.setItem(`mtg-tune:${id}`, go.page === 'trim' ? 'cuts' : 'finish'); } catch { /* opens Tune's last page instead */ }
+              try { sessionStorage.setItem(`mtg-tune:${id}`, go.page === 'trim' ? 'cuts' : go.page); } catch { /* opens Tune's last page instead */ }
               setSection('tune');
             } else setSection(go.page);
             window.scrollTo({ top: 0, behavior: 'smooth' });

@@ -36,16 +36,18 @@ import { latestJob } from './jobs';
 import { ownedCombos } from './finish-combos';
 import { BASIC, dualCandidates, finishLands, finishPool, splitBasics, heldCards, isLand, nonbasicLimit, sourceOf, type Held, type LandPick, type Pool } from './finish-pool';
 import { localCards } from './card-store';
+import { checkNamed, ESSENTIALS_MAX, nameCards, withinTotal, type Named } from './essentials';
 import {
   averageRounds, chosenAdds, colourWords, finishCount, FINISH_GROUPS, parseQuery, type MeasuredRound, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
-  type Copies, type FinishChanges, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
+  type Buy, type Copies, type FinishChanges, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
 } from './finish-shared';
 import { planContext } from './plan-context';
 import { owner as planOwner } from './plan-help';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
 import { combosInDeck } from './spellbook';
-import { gcRoomOf, landPlan, tuneContext, type Context } from './tune';
+import { gcRoomOf, landPlan, tuneContext, whyNotAddable, type Context } from './tune';
+import { cardsNamed } from './cards-named';
 
 const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
 const fmt = (x: number) => String(Math.round(x * 10) / 10);
@@ -58,7 +60,7 @@ const NAMES = '; ';
 
 // --- kept with the deck ---------------------------------------------------------------
 
-interface StoredItem extends Omit<FinishItem, 'card'> { cardId: string }
+interface StoredItem extends Omit<FinishItem, 'card'> { cardId: string; /** Named by Claude rather than searched (Part C): checked by name, not against the pool. */ named?: true }
 interface StoredSearch { q: string; n: number; round: number; names: string[] }
 interface Run {
   id: string; at: string; model: string; round: number; want: number; full: boolean; short: number; reply: string;
@@ -73,12 +75,16 @@ interface Run {
   landsLimit?: number;
   /** A later round: what changed since the last list. */
   changes?: FinishChanges;
+  /** Part C: how this list bought cards. */
+  buy?: NonNullable<NonNullable<FinishView['run']>['buy']>;
 }
 interface StoredLand { name: string; why: string }
 interface Done {
   at: string; added: number; lands: number; size: number; borrowed: string[];
   /** Picks on Add that were no longer on offer at apply time, so not added. */
   left?: string[];
+  /** Cards to buy that went in (Part C), with their prices. */
+  buy?: Array<{ name: string; price: number | null }>;
   /** Cards this apply added to the skipped-before list: Undo takes them off again (review 16). */
   remembered?: string[];
   /** Each row the apply touched, and how it was before. */
@@ -88,6 +94,9 @@ interface Done {
 
 export interface FinishStore {
   copies: Copies;
+  /** Cards the owner would buy for this deck (Part C), and the most to spend on them in all (null: no limit). */
+  buy: Buy;
+  spend: number | null;
   /** The number asked for; null is a full fill. */
   want: number | null;
   /** Lands in the deck when a fill to 100 is done, the owner's number; null is the plan's land number. */
@@ -111,7 +120,7 @@ export interface FinishStore {
   pending: number | null;
 }
 
-const EMPTY: FinishStore = { copies: 'spare', want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], skippedBefore: [], offer: null, seen: [], searches: [], turns: [], done: null, pending: null };
+const EMPTY: FinishStore = { copies: 'spare', buy: 'none', spend: null, want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], skippedBefore: [], offer: null, seen: [], searches: [], turns: [], done: null, pending: null };
 
 let ready = false;
 function db() {
@@ -166,9 +175,12 @@ export function resetFinish(listId: string): void {
 }
 
 /** The copies setting and the number, per deck. A new commander starts the conversation over. */
-export function setFinish(listId: string, input: { copies?: unknown; want?: unknown; lands?: unknown }): void {
+export function setFinish(listId: string, input: { copies?: unknown; want?: unknown; lands?: unknown; buy?: unknown; spend?: unknown }): void {
   update(listId, (s) => {
     if (input.copies === 'spare' || input.copies === 'any') s.copies = input.copies;
+    if (input.buy === 'none' || input.buy === 'matter' || input.buy === 'any') s.buy = input.buy;
+    if (input.spend === null) s.spend = null;
+    else if (typeof input.spend === 'number' && Number.isFinite(input.spend) && input.spend >= 0) s.spend = Math.min(100_000, Math.round(input.spend * 100) / 100);
     if (input.lands === null) s.lands = null;
     else if (typeof input.lands === 'number' && Number.isFinite(input.lands) && input.lands >= 0) s.lands = Math.min(99, Math.round(input.lands));
     if (input.want === null) s.want = null;
@@ -190,6 +202,8 @@ Give your picks with give_picks, sorted into groups: ramp, draw (real card draw,
 - Give every card one short sentence why, as a player would say it at the table, about this card in this deck.
 - A line that ends "(in <deck>)" is a card the owner has only in another deck. Pick it only when it is clearly better than what their spare copies offer.
 - Judge by the plan first and by what the owner wants. Think it through privately.
+- Before giving picks, search by name for the well-known colourless staples (Sol Ring, Arcane Signet, Lightning Greaves and the like) and the commander's best-known partners: owned copies of those are easy to miss.
+- Cards listed as already chosen are in the deck as far as you are concerned: build around them, and don't spend picks on weaker cards for the same job.
 
 This is one conversation. On every list after the first:
 - Cards the owner kept stay; don't pick them again.
@@ -307,6 +321,20 @@ const toItem = (card: ScryfallCard, held: Held | undefined, copies: Copies, rest
   return { name: card.name, cardId: card.id, src: s.src, ...(s.deck ? { deck: s.deck } : {}), ...(s.section ? { section: s.section } : {}), ...rest };
 };
 
+/** What a run buys: "only cards I own" turns buying off; no card that fits at all, or "the ones that matter" with
+ * nothing for the search to fill the rest with, runs as "any card". */
+export function buyModeFor(buy: Buy, ownOnly: boolean, pool: Pick<Pool, 'lines' | 'counts'>): Buy {
+  if (ownOnly) return 'none';
+  if (!pool.lines.length && (buy === 'matter' || pool.counts.any === 0)) return 'any';
+  return buy;
+}
+
+/** A card Claude named (Part C) as a row: where the copy is comes from the app's check, never the model. */
+const namedItem = (p: Named, mark: StoredItem['mark'], themeNow: string): StoredItem => ({
+  name: p.card.name, cardId: p.card.id, named: true, group: p.group, ...(p.group === 'theme' && (themeNow || p.theme) ? { theme: themeNow || p.theme } : {}), why: p.why, mark,
+  ...(p.own.kind === 'buy' ? { src: 'buy' as const, price: p.own.price } : p.own.kind === 'spare' ? { src: 'spare' as const } : p.own.kind === 'section' ? { src: 'maybe' as const, section: p.own.section } : { src: 'other' as const, deck: p.own.deck }),
+});
+
 /** The combos complete among the commander, the deck and these picks: one lookup, failing soft. */
 async function combosFound(ctx: Context, picks: string[]): Promise<OwnedCombo[] | null> {
   if (!ctx.list.commander) return [];
@@ -337,25 +365,34 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   // Skipped on this deck before, and lands the owner took out this conversation: never on offer.
   const leaveOut = new Set([...before.skippedBefore.map((x) => front(x.name)), ...(rerun ? before.landPicks.skip.map(front) : [])]);
   const pool = finishPool(ctx, before.copies, held, { leaveOut });
-  if (!pool.lines.length) throw new ModelError('None of your cards can go in this deck under these settings. Try “Take from other decks too”, or check the budget and deck rule on the Plan tab.');
+  // "Only cards I own" on the plan turns buying off (review PR56, 14). A profile whose cards can't go in at all gets
+  // "any card" (Part C, item 31), and so does "the ones that matter" when the search has nothing to fill the rest
+  // with (review 11): the screen says so before the paid call.
+  const buyMode = buyModeFor(before.buy, ctx.plan.own, pool);
+  if (!pool.lines.length && buyMode === 'none') {
+    throw new ModelError(ctx.plan.own
+      ? 'None of your cards can go in this deck, and the plan says only cards you own. Check the budget and deck rule on the Plan tab, or turn “only cards I own” off to buy cards.'
+      : 'None of your cards can go in this deck under these settings. Try “Take from other decks too”, or “Cards you’d buy: Any card”, or check the budget and deck rule on the Plan tab.');
+  }
   const lp = landPlan(ctx);
   const landsTarget = before.lands ?? lp.range[0];
   const count = finishCount(ctx.size, landsToAdd(lp, landsTarget), before.want);
   const at = now();
   const round = rerun ? before.run!.round + 1 : 1;
   // Part E: on a full fill Claude also chooses which of the owner's nonbasic lands are worth a slot, up to a limit.
-  const landLimit = count.full ? Math.min(count.lands, nonbasicLimit(ctx, landsTarget)) : 0;
+  // "Any card" has no search, so the app picks the owner's lands that fix the colours, and basics (Part C, item 36).
+  const landLimit = count.full && buyMode !== 'any' ? Math.min(count.lands, nonbasicLimit(ctx, landsTarget)) : 0;
   const askLands = landLimit > 0 && pool.lands.lines.length > 0;
   const prevLands = rerun ? (before.run!.landPicks ?? []).filter((l) => !before.landPicks.skip.some((x) => front(x) === front(l.name))) : [];
   // A run stored before Claude chose lands (review 12): its next round asks for them as a first list would.
-  const legacyLands = rerun && before.run!.full && before.run!.landPicks === undefined;
+  const legacyLands = rerun && before.run!.full && before.run!.landPicks === undefined && buyMode !== 'any';
 
   // What the owner's answer changes: the picks on Add stay, the rest open their slots.
   let turns: FinishTurn[];
   let kept: StoredItem[] = [];
   let skipped = new Set(rerun ? before.skipped.map(front) : []);
   let reply: Extract<FinishTurn, { kind: 'owner-reply' }> | null = null;
-  if (!rerun) turns = [{ kind: 'owner-start', want: count.want, copies: before.copies, at }];
+  if (!rerun) turns = [{ kind: 'owner-start', want: count.want, copies: before.copies, ...(buyMode !== 'none' ? { buy: buyMode } : {}), at }];
   else {
     const items = before.run!.items;
     const choiceOf = (n: string) => before.choices[n]?.choice ?? 'add';
@@ -366,8 +403,11 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     kept = items.filter((i) => choiceOf(i.name) === 'add').map((i) => ({ ...i, mark: i.mark === 'yours' ? 'yours' : null }));
     for (const i of items) if (choiceOf(i.name) === 'skip') skipped.add(front(i.name));
   }
-  // The pool may have changed since (the deck, the setting): what is no longer on offer opens its slot too.
-  kept = kept.filter((i) => pool.cards.has(i.name.toLowerCase()) || pool.cards.has(front(i.name)));
+  // The pool may have changed since (the deck, the setting): what is no longer on offer opens its slot too. A card
+  // named rather than searched (to buy, or owned outside the copies setting) stays while Tune's checks pass.
+  const named = (i: StoredItem) => i.src === 'buy' || !!i.named;
+  const nameChecks = new Map([...cardsNamed(kept.filter(named).map((i) => i.name))].map(([k, c]) => [k, !whyNotAddable(ctx, c)]));
+  kept = kept.filter((i) => (named(i) ? nameChecks.get(front(i.name)) === true : pool.cards.has(i.name.toLowerCase()) || pool.cards.has(front(i.name))));
   skipped = new Set([...skipped].filter(Boolean));
   const need = Math.max(0, count.want - kept.length);
   if (rerun && !need && !reply?.message) throw new ModelError('Nothing to change: every pick is on Add. Mark a card Rethink or Skip, or say something.');
@@ -403,6 +443,44 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     : ` Also choose up to ${landLimit} of the owner's nonbasic lands worth a slot, in "lands" (search with t:land; ${pool.lands.lines.length} are on offer). The app adds the basics for the rest.`;
   // The list's theme group, when it has one: a later round keeps it rather than opening a second.
   const themeNow = rerun ? before.run!.items.find((i) => i.group === 'theme' && i.theme)?.theme ?? '' : '';
+
+  // Part C: cards to buy. "The ones that matter": Claude names the essentials first (no search), the app checks
+  // each and marks it owned or to buy, takes the ones to buy up to the total, and the search then fills the rest
+  // around them. "Any card": Claude names the whole list and nothing is searched. On a later round, the slots that
+  // a card to buy left (Rethink, Skip) are named again, so it can come back as an owned card or another to buy.
+  let chosen: StoredItem[] = [];
+  let buyInfo: Run['buy'] | undefined;
+  let buyReply = '';
+  const openedBuy = rerun ? before.run!.items.filter((i) => i.src === 'buy' && (before.choices[i.name]?.choice ?? 'add') !== 'add').length : 0;
+  const buySlots = buyMode === 'any' ? need : buyMode === 'matter' ? Math.min(need, rerun ? openedBuy : Math.min(ESSENTIALS_MAX, count.want)) : 0;
+  // The bracket's room over the deck, the kept picks, then the named cards, then the searched picks (review 2).
+  const keptCard = (i: StoredItem) => (named(i) ? cardsNamed([i.name]).get(front(i.name)) : pool.cards.get(i.name.toLowerCase()) ?? pool.cards.get(front(i.name)));
+  const roomDeck = gcRoomOf(ctx);
+  let gcRoom = roomDeck === null ? null : Math.max(0, roomDeck - kept.filter((i) => keptCard(i)?.game_changer).length);
+  // "Any card" names everything, so the owner's words on a later round always go to it, even with no slot open
+  // (review 13): it may name kept cards to take "out", with a replacement for each.
+  const anyWords = buyMode === 'any' && rerun && !!reply?.message;
+  let namedOut: string[] = [];
+  if (buySlots > 0 || anyWords) {
+    progress(buyMode === 'any' ? `Claude is naming ${buySlots} cards` : 'Claude is naming the cards that matter');
+    const leave = new Set([...leaveOut, ...skipped]);
+    const named = await nameCards(call, model, ctx, list, {
+      kind: buyMode === 'any' ? 'all' : 'matter', count: buySlots, skipped: before.skippedBefore,
+      chosen: kept.map((i) => i.name), allowOut: anyWords, extra: rerun ? [...sessionLines(turns), ...(skipped.size ? ['', `## Skipped by the owner: never name these\n${[...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)].join(NAMES)}`] : [])] : [],
+    });
+    namedOut = anyWords ? checkOut({ out: named.out }, kept) : [];
+    const checkedNames = checkNamed(ctx, held, named.raw, { need: buySlots + namedOut.length, taken: new Set(kept.map((i) => front(i.name))), leaveOut: leave, gcRoom: gcRoom === null ? null : gcRoom + kept.filter((i) => namedOut.includes(i.name) && keptCard(i)?.game_changer).length });
+    const spentKept = kept.reduce((n, i) => n + (i.src === 'buy' ? i.price ?? 0 : 0), 0);
+    const { taken, over } = withinTotal(checkedNames.picks, before.spend === null ? null : Math.max(0, before.spend - spentKept));
+    const asked0 = new Set((reply?.marks ?? []).filter((m) => m.choice === 'ask').map((m) => front(m.name)));
+    chosen = taken.map((p) => namedItem(p, rerun ? (asked0.has(front(p.card.name)) ? 'back' : 'new') : null, themeNow));
+    if (gcRoom !== null) gcRoom = Math.max(0, gcRoom + kept.filter((i) => namedOut.includes(i.name) && keptCard(i)?.game_changer).length - taken.filter((p) => p.card.game_changer).length);
+    buyInfo = { kind: buyMode, limit: before.spend, over: over.map((p) => ({ name: p.card.name, price: p.own.kind === 'buy' ? p.own.price : null })), dropped: checkedNames.dropped };
+    buyReply = named.reply;
+  } else if (buyMode !== 'none') buyInfo = { kind: buyMode, limit: before.spend, over: rerun ? before.run!.buy?.over ?? [] : [], dropped: [] };
+  const searchNeed = Math.max(0, need - chosen.length);
+  // A message may take kept picks out ("out") even when no slot is open, so a later round with words always asks.
+  const searching = buyMode !== 'any' && (searchNeed > 0 || !!reply?.message || (askLands && (!rerun || legacyLands)));
   const task = [
     ...sessionLines(turns),
     ...(rerun ? [
@@ -413,20 +491,21 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     ] : []),
     '',
     '## The task',
+    ...(chosen.length ? ['', `## Already chosen (count them as in the deck; don't pick them again)\n${chosen.map((i) => i.name).join(NAMES)}`] : []),
     rerun
-      ? `This is list ${round}. Pick exactly ${need} more non-land card${need === 1 ? '' : 's'} for the slots that opened${reply?.message ? ' (and the replacements for any you name in "out")' : ''}, in groups. No lands in the groups.${landTask} You have ${limit} searches.`
-      : `Pick exactly ${count.want} non-land cards, in groups. No lands in the groups${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100, so it will hold ${landsTarget} lands when done (${before.lands !== null ? 'the number the owner chose' : "the plan's land number"}). Weigh ramp and mana costs with that in mind` : ''}.${landTask} You have ${limit} searches.`,
+      ? `This is list ${round}. Pick exactly ${searchNeed} more non-land card${need === 1 ? '' : 's'} for the slots that opened${reply?.message ? ' (and the replacements for any you name in "out")' : ''}, in groups. No lands in the groups.${landTask} You have ${limit} searches.`
+      : `Pick exactly ${searchNeed} non-land cards, in groups. No lands in the groups${count.full ? `: the app adds ${count.lands} lands to bring the deck to 100, so it will hold ${landsTarget} lands when done (${before.lands !== null ? 'the number the owner chose' : "the plan's land number"}). Weigh ramp and mana costs with that in mind` : ''}.${landTask} You have ${limit} searches.`,
   ].join('\n').trim();
 
   const offer = { n: pool.lines.length, lands: askLands ? pool.lands.lines.length : 0, colours: colourWords(ctx.identity) };
   update(list.id, (s) => { if (!rerun) { s.searches = []; s.seen = []; } s.done = null; s.pending = round; s.offer = offer; });
-  progress(rerun ? `Claude is reading your answer (list ${round})` : `Claude is searching your cards (${count.want} to find)`);
+  if (searching) progress(rerun ? `Claude is reading your answer (list ${round})` : `Claude is searching your cards (${searchNeed} to find)`);
 
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: task }];
   let used = 0;
-  let answer: unknown = null;
+  let answer: unknown = searching ? null : { groups: [], reply: buyReply, out: namedOut };
   const seen = new Set(rerun ? before.seen.map(front) : []);
-  for (let step = 0; step < limit + 6 && answer === null; step++) {
+  for (let step = 0; searching && step < limit + 6 && answer === null; step++) {
     const message = await call({
       model,
       max_tokens: 16_000,
@@ -473,17 +552,21 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   // The owner's words may take kept picks out ("out"); only Claude's own picks, never one the owner took.
   const outs = rerun && reply?.message ? new Set(checkOut(answer, kept)) : new Set<string>();
   kept = kept.filter((i) => !outs.has(i.name));
-  const need2 = Math.max(0, count.want - kept.length);
+  const need2 = Math.max(0, count.want - kept.length - chosen.length);
   const checked = checkPicks(answer, {
-    pool, seen, skipped, taken: new Set(kept.map((i) => front(i.name))), need: need2,
-    gcRoom: (() => { const r = gcRoomOf(ctx); return r === null ? null : Math.max(0, r - kept.filter((i) => pool.cards.get(i.name.toLowerCase())?.game_changer).length); })(),
+    pool, seen, skipped, taken: new Set([...kept, ...chosen].map((i) => front(i.name))), need: need2,
+    // What the kept and named picks left, plus any a message took out (review 2).
+    gcRoom: gcRoom === null ? null : gcRoom + [...outs].filter((n) => pool.cards.get(n.toLowerCase())?.game_changer).length,
   });
-  if (!checked.picks.length && !kept.length) throw new ModelError(`None of Claude’s ${checked.dropped} picks could be used (not among your cards on offer, or not from its searches). Nothing was saved; try again.`);
+  if (!checked.picks.length && !kept.length && !chosen.length && buyInfo?.over.length) {
+    throw new ModelError(`Every card Claude named was over your $${(before.spend ?? 0).toFixed((before.spend ?? 0) % 1 ? 2 : 0)} total or had no price: ${buyInfo.over.slice(0, 6).map((o) => `${o.name} (${o.price === null ? 'no price' : `$${o.price.toFixed(2)}`})`).join('; ')}. Raise the total, or empty it for no limit, and try again.`);
+  }
+  if (!checked.picks.length && !kept.length && !chosen.length) throw new ModelError(`None of Claude’s ${checked.dropped} picks could be used (not among your cards on offer, or not from its searches). Nothing was saved; try again.`);
   // A card the owner asked Claude to rethink that it picked again comes back with a new reason (D 15).
   const asked = new Set([...(rerun ? (reply?.marks ?? []).filter((m) => m.choice === 'ask').map((m) => front(m.name)) : []), ...[...outs].map(front)]);
   // A later round's theme picks go in the list's theme group, whatever name the model gave them (real runs, item 4).
   const fresh = checked.picks.map((p) => toItem(p.card, held.get(keyOf(p.card)), before.copies, { group: p.group, ...(p.group === 'theme' && (themeNow || p.theme) ? { theme: themeNow || p.theme } : {}), why: p.why, mark: rerun ? (asked.has(front(p.card.name)) ? 'back' : 'new') : null }));
-  const items = [...kept, ...fresh];
+  const items = [...kept, ...chosen, ...fresh];
   // Lands (Part E): Claude's picks, checked like the others and cut to the limit; on a later list they stay unless given again.
   const given = (answer as { lands?: unknown }).lands;
   const landPicks: StoredLand[] | undefined = !askLands ? undefined
@@ -506,16 +589,16 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     changes = {
       round,
       out: before.run!.items.filter((i) => !now2.has(front(i.name))).map((i) => ({ name: i.name, because: because(i.name) })),
-      in: fresh.filter((i) => !was.has(front(i.name))).map((i) => ({ name: i.name, group: i.group === 'theme' && i.theme ? `theme:${i.theme}` : i.group })),
-      back: fresh.filter((i) => i.mark === 'back').map((i) => i.name),
+      in: [...chosen, ...fresh].filter((i) => !was.has(front(i.name))).map((i) => ({ name: i.name, group: i.group === 'theme' && i.theme ? `theme:${i.theme}` : i.group })),
+      back: [...chosen, ...fresh].filter((i) => i.mark === 'back').map((i) => i.name),
       ...(landsIn.length || landsOut.length ? { lands: { in: landsIn, out: landsOut } } : {}),
     };
   }
   const found = await combosFound(ctx, items.map((i) => i.name));
   const run: Run = {
-    id: randomUUID(), at: now(), model, round, want: count.want, full: count.full, short: checked.short, reply: checked.reply,
+    id: randomUUID(), at: now(), model, round, want: count.want, full: count.full, short: Math.max(0, count.want - items.length), reply: checked.reply || buyReply,
     items, dropped: checked.dropped, combos: found ?? [], owned: owned?.length ?? null, combosFailed: combosFailed || found === null, ...(count.full ? { landsTarget } : {}),
-    ...(landPicks ? { landPicks, landsLimit: landLimit } : {}), ...(changes ? { changes } : {}),
+    ...(landPicks ? { landPicks, landsLimit: landLimit } : {}), ...(changes ? { changes } : {}), ...(buyInfo ? { buy: buyInfo } : {}),
   };
   update(list.id, (s) => {
     s.run = run;
@@ -523,7 +606,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     s.skippedBefore = [...s.skippedBefore, ...newSkips.filter((x) => !s.skippedBefore.some((y) => front(y.name) === front(x.name)))];
     if (!rerun) s.landPicks = { skip: [], basics: {}, added: [] };
     s.skipped = rerun ? [...new Set([...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)])] : [];
-    s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: checked.short, searches: used, reply: checked.reply, at: run.at }];
+    s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: run.short, searches: used, reply: run.reply, at: run.at }];
     s.done = null;
     s.pending = null;
   });
@@ -565,6 +648,30 @@ export function setChoices(listId: string, choices: unknown): void {
     next[name] = { choice: c.choice, text };
   }
   update(listId, (x) => { x.choices = next; });
+}
+
+/**
+ * "Add anyway" on a card that was over the total (review PR56, 12): it joins the list as one to buy, no paid
+ * round, after the same checks (Tune's, the budget at its shown price, the bracket over the picks on Add).
+ */
+export async function takeOver(list: List, profileId: string, name: string): Promise<void> {
+  const s = finishStore(list.id);
+  const over = s.run?.buy?.over ?? [];
+  const hit = over.find((o) => front(o.name) === front(name));
+  if (!s.run || !hit) throw new Error(`${name} isn't on the over-the-limit list`);
+  if (s.run.items.some((i) => front(i.name) === front(name))) return;
+  const ctx = await tuneContext(list, profileId);
+  const card = cardsNamed([name]).get(front(name));
+  if (!card) throw new Error(`The app couldn’t find ${name}`);
+  const adds = chosenAdds(s.run.items, s.choices);
+  const onAdd = cardsNamed(adds);
+  const room = gcRoomOf(ctx);
+  const left = room === null ? null : room - adds.filter((n) => onAdd.get(front(n))?.game_changer).length;
+  const why = whyNotAddable(ctx, card, null, { as: { owned: false, price: hit.price }, gcRoom: left, basicAgain: false });
+  if (why) throw new Error(why);
+  const theme = s.run.items.find((i) => i.group === 'theme' && i.theme)?.theme;
+  const item: StoredItem = { name: card.name, cardId: card.id, named: true, src: 'buy', price: hit.price, group: 'theme', ...(theme ? { theme } : {}), why: 'You added it past your total.', mark: 'yours' };
+  update(list.id, (x) => { if (!x.run) return; x.run.items.push(item); if (x.run.buy) x.run.buy.over = x.run.buy.over.filter((o) => front(o.name) !== front(name)); });
 }
 
 /** "+": take a card from a search's results without a paid round. It must be on offer, and not skipped or listed. */
@@ -695,7 +802,13 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   const held = heldCards(profileId, list.id);
   const pool = finishPool(ctx, s.copies, held);
   const names = chosenAdds(s.run.items, s.choices);
-  const cards = names.map((n) => pool.cards.get(n.toLowerCase()) ?? pool.cards.get(front(n))).filter((c): c is ScryfallCard => !!c);
+  // A card Claude named (to buy, or owned outside the copies setting, Part C) is checked by name, not against the pool.
+  const namedRows = s.run.items.filter((i) => names.includes(i.name) && (i.src === 'buy' || i.named));
+  const byName = cardsNamed(namedRows.map((i) => i.name));
+  const named = new Map<string, ScryfallCard>();
+  for (const i of namedRows) { const c = byName.get(front(i.name)); if (c && !whyNotAddable(ctx, c)) named.set(i.name, c); }
+  const cardOf = (n: string) => named.get(n) ?? pool.cards.get(n.toLowerCase()) ?? pool.cards.get(front(n));
+  const cards = names.map(cardOf).filter((c): c is ScryfallCard => !!c);
   if (!cards.length) throw new Error('Nothing to add: put at least one card on Add');
   const lp = landPlan(ctx);
   const lands = s.run.full ? landsFor(ctx, held, s, lp, cards.length, cards.map(manaCostOf)).chosen : [];
@@ -711,14 +824,15 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   const landCount = lands.reduce((n, l) => n + l.n, 0);
   // From what went in: a pick no longer on offer at apply time was left out, and is said so, not named as borrowed.
   const added = new Set(cards.map((c) => c.name));
-  const borrowed = s.run.items.filter((i) => i.src === 'other' && added.has(pool.cards.get(i.name.toLowerCase())?.name ?? pool.cards.get(front(i.name))?.name ?? '')).map((i) => `${i.name} (in ${i.deck})`);
-  const left = names.filter((n) => !pool.cards.has(n.toLowerCase()) && !pool.cards.has(front(n)));
+  const borrowed = s.run.items.filter((i) => i.src === 'other' && added.has(cardOf(i.name)?.name ?? '')).map((i) => `${i.name} (in ${i.deck})`);
+  const left = names.filter((n) => !cardOf(n));
+  const buy = s.run.items.filter((i) => i.src === 'buy' && added.has(cardOf(i.name)?.name ?? '')).map((i) => ({ name: i.name, price: i.price ?? null }));
   const done: Done = {
-    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo,
+    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo, buy,
     session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen },
   };
   update(list.id, (x) => { const had = new Set(x.skippedBefore.map((y) => front(y.name))); rememberSkips(x); done.remembered = x.skippedBefore.filter((y) => !had.has(front(y.name))).map((y) => y.name); x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
-  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left };
+  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left, buy };
 }
 
 /** Put every row the apply touched back exactly as it was, and bring the conversation back. */
@@ -754,7 +868,10 @@ export function undoFinish(list: List): { moved: number } {
  * picks $0.41, a later round $0.05) that grows with the cards asked for, so
  * 5 cards no longer show the price of a fill.
  */
-const GUESS = { first: { base: 0.06, perCard: 0.008 }, later: { base: 0.04, perCard: 0.004 } };
+// Corrected from the real runs (handoff 10, item 40): first lists of 62 cost $0.41, $0.44 and $0.48 (the label read
+// $0.38); later rounds $0.05, $0.12 and $0.16 (the label read $0.20). No round had been recorded on the Pi yet: the
+// real ones ran before the recorder shipped in PR #55.
+const GUESS = { first: { base: 0.06, perCard: 0.0062 }, later: { base: 0.05, perCard: 0.002 } };
 const ROUNDS_KEY = 'finish.rounds';
 const measured = (): MeasuredRound[] => { try { return JSON.parse(getSetting(ROUNDS_KEY) ?? '[]') as MeasuredRound[]; } catch { return []; } };
 
@@ -788,6 +905,9 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
   if (s.run) {
     const ids = [...new Set(s.run.items.map((i) => i.cardId))];
     for (const r of database().all(`SELECT id, data FROM cards WHERE id IN (${ids.map(() => '?').join(',') || "''"})`, ids) as Array<{ id: string; data: string }>) byId.set(r.id, JSON.parse(r.data) as ScryfallCard);
+    // A card to buy (Part C) may be only in the card data: read it by name.
+    const missing = s.run.items.filter((i) => !byId.has(i.cardId));
+    if (missing.length) { const got = cardsNamed(missing.map((i) => i.name)); for (const i of missing) { const c = got.get(front(i.name)); if (c) byId.set(i.cardId, c); } }
   }
   const items: FinishItem[] = (s.run?.items ?? []).map(({ cardId, ...i }) => {
     const c = byId.get(cardId);
@@ -831,6 +951,11 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
   return {
     size: ctx.size,
     copies: s.copies,
+    buy: s.buy,
+    spend: s.spend,
+    noCollection: !!pool && pool.counts.any === 0 && !ctx.plan.own,
+    ownOnly: ctx.plan.own,
+    emptyPool: !!pool && pool.lines.length === 0,
     want: s.want,
     counts: pool?.counts ?? null,
     combos: {
@@ -841,7 +966,7 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     howMany: { room: count.room, nonland: count.nonland, lands: count.lands || Math.min(count.room, landsToAdd(lp, landsTarget)), target: landsTarget, mine: s.lands !== null, have: fmt(lp.have), plan: lp.range },
     run: s.run ? {
       id: s.run.id, at: s.run.at, round: s.run.round, model: s.run.model, want: s.run.want, full: s.run.full, short: s.run.short, reply: s.run.reply,
-      items, more, lands, changes: s.run.changes ?? null, dropped: s.run.dropped,
+      items, more, lands, changes: s.run.changes ?? null, dropped: s.run.dropped, buy: s.run.buy ?? null,
     } : null,
     choices: s.choices,
     skipped: s.skipped,
@@ -850,7 +975,7 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     turns: s.turns,
     searches: s.searches.filter((x) => x.round === (running && s.pending ? s.pending : s.run?.round ?? 1)).map(({ q, n, round }) => ({ q, n, round })),
     job: job && (running || (job.status === 'failed' && (!s.run || job.startedAt > s.run.at))) ? { status: job.status as 'running' | 'failed', detail: job.detail || null, error: job.status === 'failed' ? job.error ?? 'Claude didn’t finish' : null } : null,
-    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed, left: s.done.left ?? [] } : null,
+    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed, left: s.done.left ?? [], buy: s.done.buy ?? [] } : null,
     cost: roundCosts(),
     noKey: !process.env.ANTHROPIC_API_KEY,
   };

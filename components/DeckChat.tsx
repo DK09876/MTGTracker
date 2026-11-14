@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CardName from './CardName';
+import { cardLookup, exactName, foldName } from '@/lib/card-lookup';
 import ChatText from './ChatText';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
@@ -65,6 +66,25 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(question);
   const end = useRef<HTMLDivElement>(null);
+  // Marked names the app couldn't find (item 39): looked up once per name per page view, on hover or tap, through
+  // the app's own card search by exact name; a found card is kept with its message.
+  const finder = useRef(cardLookup<ScryfallCard>(async (n) => (await api.search(exactName(n))).cards.find((c) => foldName(c.name) === foldName(n)) ?? null));
+  const [, setLooked] = useState(0);
+  // The chat open now: a lookup's answer for a chat that is no longer open is ignored (review PR56, 16).
+  const openChat = useRef<string | null>(null);
+  useEffect(() => { openChat.current = chat?.id ?? null; }, [chat?.id]);
+  const look = (m: number, name: string, retry = false) => {
+    // Not while the next answer is being written (review 15).
+    if (replying) return;
+    const was = finder.current.state(name).status;
+    const forChat = chat?.id ?? null;
+    const p = finder.current.look(name, retry);
+    if (finder.current.state(name).status !== was) setLooked((x) => x + 1);
+    void p.then((st) => {
+      setLooked((x) => x + 1);
+      if (st.status === 'found' && forChat) void api.keepFoundCard(listId, forChat, m, { id: st.card.id, name }).then((r) => { if (openChat.current === forChat) setChat(r.chat); }).catch(() => {});
+    });
+  };
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -124,7 +144,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
       ...adds.map((a, k) => ({ key: `${chat.id}:${m}:${a.j}`, add: card(a.c), ...(cuts[k] ? { cut: card(cuts[k].c) } : {}), why: [a.c.why, cuts[k]?.c.why].filter(Boolean).join(' Out: ') })),
       ...cuts.slice(adds.length).map((x) => ({ key: `${chat.id}:${m}:${x.j}`, cut: card(x.c), why: x.c.why })),
     ];
-    const intent = adds.length && cuts.length ? 'swaps' : adds.length ? 'find' : 'cuts';
+    const intent = adds.length ? 'upgrades' : 'cuts';
     try {
       await api.tuneAct(listId, { action: 'propose', intent, title: `From Chat · ${items.length}`, why: `Claude proposed these in “${chat.title}”.`, items });
       let next = chat;
@@ -173,9 +193,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const cardIn = (m: Chat['messages'][number]) => (n: string): ScryfallCard | undefined => {
     const own = byName(n);
     if (own) return own;
-    const f = n.split(' // ')[0].toLowerCase();
-    const c = m.cards?.find((x) => x.name.split(' // ')[0].toLowerCase() === f)
-      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => x.name.split(' // ')[0].toLowerCase() === f);
+    const f = foldName(n);
+    const c = m.cards?.find((x) => foldName(x.name) === f)
+      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => foldName(x.name) === f);
     return c ? partial(c) : undefined;
   };
   const openCard = (card: ScryfallCard) => {
@@ -233,8 +253,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} />
-              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the card data, so {m.unresolved === 1 ? 'it isn’t a link' : 'they aren’t links'}.</p>}
+              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} lookup={{ state: (n) => finder.current.state(n), look: (n, retry) => look(i, n, retry) }} />
+              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the app’s card data: point at {m.unresolved === 1 ? 'it' : 'one'} to look it up.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;
                 const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '', m)} out, {nm(c.name, m)} in</>
@@ -291,10 +311,10 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
               {(m.pages ?? (m.go ? [m.go] : [])).map((g) => (
                 <div key={g.page} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={g.page}>
                   <button onClick={() => go(g)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(g, planConfirmed, size)}</button>
-                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{g.why}</span>}
+                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim, Finish and Upgrades open once the plan is confirmed. ' : ''}{g.why}</span>}
                 </div>
               ))}
-              {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
+              {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'cuts' ? 'Cuts' : 'Upgrades'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>
           )

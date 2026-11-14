@@ -5,9 +5,11 @@
  */
 export const PROMPT_VERSIONS = {
   tuneIdeas: 'tune-ideas-1',
-  finishPicks: 'finish-5',
+  finishPicks: 'finish-6',
+  essentials: 'essentials-1',
+  upgrades: 'upgrades-3',
   cutReview: 'cut-review-1',
-  chat: 'chat-4',
+  chat: 'chat-7',
   planRead: 'plan-read-1',
   planPass: 'plan-pass-2',
   planHelp: 'plan-help-3',

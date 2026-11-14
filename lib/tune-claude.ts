@@ -20,8 +20,7 @@ import { tuneStore, updateTune } from './tune-store';
 
 const ASK: Record<Intent, string> = {
   finish: 'The owner is finishing this deck. Suggest the most important cards to add to get it to 100, following the plan.',
-  find: 'The owner is looking for cards to add. Suggest cards that fill what the deck is short of and fit the plan.',
-  swaps: 'The owner wants to improve the deck at its size. Suggest swaps: a card to add for a card to cut, each pair doing the deck more good.',
+  upgrades: 'The owner wants to improve the deck at its size. Suggest swaps: a card to add for a card to cut, each pair doing the deck more good.',
   cuts: 'The owner is cutting the deck down to 100. Suggest the cards to cut, and any card the rules would cut that should stay (keep).',
   fix: 'The owner says the deck has a problem in games. Suggest at most three swaps that address it.',
   lands: 'The owner is working on the mana. Suggest land swaps or changes to the land count that help the colours and the curve.',

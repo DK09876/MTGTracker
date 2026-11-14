@@ -635,6 +635,9 @@ export const deckChat = (listId: string, chatId: string) =>
   fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
 export const askDeck = (listId: string, text: string, chatId?: string) =>
   send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+/** A marked card name found by hovering it (handoff 10, item 39): kept with the message. */
+export const keepFoundCard = (listId: string, chatId: string, message: number, card: { id: string; name: string }) =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, card }).then(json<{ chat: DeckChat }>);
 export const markChange = (listId: string, chatId: string, message: number, change: number) =>
   send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
 /** Apply one of Claude's proposals in a chat, or take it back. The deck's remembered answers are dropped, since it changed. */
@@ -899,10 +902,11 @@ export const trimAct = (listId: string, act: TrimAction) => {
 /** Finish the deck from your cards (lib/finish.ts). */
 export type FinishView = import('./finish-shared').FinishView;
 export type FinishAction =
-  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null }
+  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null; buy?: import('./finish-shared').Buy; spend?: number | null }
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: FinishView['choices'] }
   | { action: 'take'; name: string; group: string }
+  | { action: 'takeOver'; name: string }
   | { action: 'lands'; skip?: string[]; basics?: Record<string, number>; add?: string; room?: number }
   | { action: 'unskip'; name: string }
   | { action: 'apply' }
@@ -913,6 +917,26 @@ export const finishCard = (listId: string, cardId: string, name?: string) => get
 export const finishAct = (listId: string, act: FinishAction) => {
   const paid = act.action === 'find';
   const work = send(`lists/${listId}/finish`, 'POST', act).then(json<FinishView>).finally(() => {
+    if (paid) jobsChanged();
+    if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
+  });
+  return paid ? spending(work) : work;
+};
+
+/** Upgrades for a finished deck (lib/upgrades.ts). */
+export type UpgradesView = import('./upgrades-shared').UpgradesView;
+export type UpgradesAction =
+  | { action: 'settings'; count?: number; sources?: import('./upgrades-shared').UpgradeSources }
+  | { action: 'find'; rerun?: boolean; message?: string }
+  | { action: 'choices'; choices: UpgradesView['choices'] }
+  | { action: 'unskip'; name: string }
+  | { action: 'apply' }
+  | { action: 'undo' }
+  | { action: 'reset' };
+export const upgrades = (listId: string) => get<UpgradesView>(`lists/${listId}/upgrades`);
+export const upgradesAct = (listId: string, act: UpgradesAction) => {
+  const paid = act.action === 'find';
+  const work = send(`lists/${listId}/upgrades`, 'POST', act).then(json<UpgradesView>).finally(() => {
     if (paid) jobsChanged();
     if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
   });
@@ -931,6 +955,7 @@ type TuneAction =
   | { action: 'keep'; cardId: string; keep: boolean; key?: string }
   | { action: 'reason'; key: string; chip?: import('./suggestion-shared').ReasonChip; text?: string }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
+  | { action: 'upgradesFree'; showFree: boolean }
   | { action: 'finishPicks'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
   | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };

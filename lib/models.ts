@@ -24,9 +24,9 @@ export type Provider = 'anthropic' | 'gemini' | 'mistral' | 'groq';
  * tagcards is putting tags on cards and checking them - many small guided
  * calls, so a cheaper model does.
  */
-export type Feature = 'rules' | 'tagging' | 'tagcards' | 'chat' | 'search' | 'finish';
+export type Feature = 'rules' | 'tagging' | 'tagcards' | 'chat' | 'search' | 'finish' | 'upgrades' | 'essentials';
 /** Finish (filling a deck from the owner's cards) has its own line so Settings and the budget show it by name; it runs on Opus whatever the page picked. */
-export const FEATURES: Feature[] = ['rules', 'tagging', 'tagcards', 'chat', 'search', 'finish'];
+export const FEATURES: Feature[] = ['rules', 'tagging', 'tagcards', 'chat', 'search', 'finish', 'upgrades', 'essentials'];
 
 /** Each feature in words, for Settings. */
 export const FEATURE_INFO: Record<Feature, { label: string; why: string }> = {
@@ -36,6 +36,8 @@ export const FEATURE_INFO: Record<Feature, { label: string; why: string }> = {
   chat: { label: 'Deck chat', why: 'Conversation, with look-ups' },
   search: { label: 'Search', why: 'Turns words into a Scryfall query' },
   finish: { label: 'Finish the deck', why: 'Searches your cards and picks what fills the deck' },
+  upgrades: { label: 'Upgrades', why: 'What would make a finished deck better, from your cards or to buy' },
+  essentials: { label: 'Cards that matter', why: 'Names the key cards for a commander before Finish fills the rest' },
 };
 
 /** How hard a Claude model thinks (its effort level). */
@@ -136,7 +138,7 @@ export const TIER_EFFORT: Record<Tier, Effort> = { haiku: 'low', sonnet: 'medium
 /** The pages with a model picker, and the steps each one's choice covers. */
 export type AiArea = 'search' | 'rules' | 'deck' | 'chat';
 export const AREAS: AiArea[] = ['search', 'rules', 'deck', 'chat'];
-export const AREA_OF: Record<Feature, AiArea> = { search: 'search', rules: 'rules', tagging: 'deck', tagcards: 'deck', chat: 'chat', finish: 'deck' };
+export const AREA_OF: Record<Feature, AiArea> = { search: 'search', rules: 'rules', tagging: 'deck', tagcards: 'deck', chat: 'chat', finish: 'deck', upgrades: 'deck', essentials: 'deck' };
 
 /** Where each page starts: Opus for rules, where a wrong answer costs a game; Haiku for search; Sonnet otherwise. */
 export const DEFAULT_TIER: Record<AiArea, Tier> = { search: 'haiku', rules: 'opus', deck: 'sonnet', chat: 'sonnet' };
@@ -154,6 +156,9 @@ export const TYPICAL_TOKENS: Record<Feature, { input: number; output: number }> 
   chat: { input: 9_000, output: 800 },
   // One Finish call (a round is several); from the real Opus run of 2026-11-13: $0.41 over 7 calls.
   finish: { input: 12_000, output: 600 },
+  // Guesses until there is a real run: one Upgrades call sends the deck with rules text (about 15K) and a search.
+  upgrades: { input: 18_000, output: 900 },
+  essentials: { input: 8_000, output: 1_500 },
 };
 export const FREE_DEFAULT_MODEL = 'openai/gpt-oss-120b';
 

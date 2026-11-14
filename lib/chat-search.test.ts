@@ -387,7 +387,7 @@ describe('review item 31: answer in words, and replaced proposals; item 30: mark
     const { list } = await setup();
     const db = await import('./db');
     const text = deckText({ list, cards: db.cardsInList(list.id), brief: '', roles: null, finishWhy: new Map([['Deck Spell 3', 'A Zombie that comes back by itself.']]) } as never);
-    expect(text).toContain('Deck Spell 3 - Instant (Finish: A Zombie that comes back by itself.)');
+    expect(text).toContain('Deck Spell 3 {1}{U} - Instant - Deck Spell 3 draws a card. (Finish: A Zombie that comes back by itself.)');
   });
 });
 
@@ -515,5 +515,18 @@ describe('rerun of the real runs: one answer when several tool calls carry one',
     expect(repeats(terse, fuller)).toBe(true);
     expect(repeats('Press Finish when the note is saved.', fuller)).toBe(false);
     expect(repeats('Swap [[Opt]] for [[Brainstorm]] and [[Ponder]]: 3 cheaper looks.', fuller)).toBe(false);
+  });
+});
+
+describe('handoff 10: Chat opens Upgrades', { timeout: 60_000 }, () => {
+  it('"what should I buy for this deck?" gives a short answer and the Upgrades button; a locked plan sends it to Plan', async () => {
+    const { list } = await setup();
+    const { answer, asked } = await ask(list, [[{ name: 'open_page', input: { page: 'upgrades', why: 'Upgrades lists what to buy and what each replaces.', answer: 'The engine is fine; the deck is short of ways to end the game.' } }], ''], 'what should I buy for this deck?');
+    expect(answer.text).toBe('The engine is fine; the deck is short of ways to end the game.');
+    expect(answer.pages).toEqual([{ page: 'upgrades', why: 'Upgrades lists what to buy and what each replaces.' }]);
+    expect(JSON.stringify(asked[0].system)).toMatch(/what should I buy/);
+    const { goLabel } = await import('./chat-pages');
+    expect(goLabel(answer.pages![0], true)).toBe('Open Upgrades');
+    expect(goLabel(answer.pages![0], false)).toBe('Confirm the plan first · Open Plan');
   });
 });

@@ -29,8 +29,16 @@ export const SEARCH_SHOWN = 40;
  */
 export const CHAT_SEARCH_LIMIT = 12;
 
-/** Where a pick's copy comes from. */
-export type Source = 'spare' | 'maybe' | 'other';
+/** Where a pick's copy comes from: a spare copy, this deck's section, another deck, or a card to buy (Part C). */
+export type Source = 'spare' | 'maybe' | 'other' | 'buy';
+
+/** Cards the owner would buy for this deck (handoff 10, Part C): none (collection only), the ones that matter, or any card. */
+export type Buy = 'none' | 'matter' | 'any';
+export const BUYS: Array<{ id: Buy; label: string; why: string }> = [
+  { id: 'none', label: 'None', why: 'Only cards you own.' },
+  { id: 'matter', label: 'The ones that matter', why: 'Claude names the cards that matter most for this commander and plan; the ones you don’t have are bought, up to your total, and the rest is filled from your cards around them.' },
+  { id: 'any', label: 'Any card', why: 'Claude names the whole list; the app marks each card owned or to buy.' },
+];
 
 /** One of the owner's cards on offer, as a search returns it. */
 export interface PoolLine {
@@ -101,7 +109,7 @@ export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): 
     if (mvMin !== null && c.cmc < mvMin) return false;
     return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
   });
-  const bySrc: Record<Source, number> = { spare: 0, maybe: 0, other: 0 };
+  const bySrc: Record<Source, number> = { spare: 0, maybe: 0, other: 0, buy: 0 };
   for (const h of hits) bySrc[h.src] += 1;
   return { total: hits.length, lines: hits.slice(0, shown), ignored, bySrc };
 }
@@ -164,7 +172,7 @@ export type FinishChoice = 'add' | 'ask' | 'skip';
 export interface FinishMark { name: string; choice: FinishChoice; text: string }
 
 export type FinishTurn =
-  | { kind: 'owner-start'; want: number; copies: Copies; at: string }
+  | { kind: 'owner-start'; want: number; copies: Copies; buy?: Buy; at: string }
   | { kind: 'claude-picks'; round: number; picks: string[]; short: number; searches: number; reply: string; at: string }
   | { kind: 'owner-reply'; marks: FinishMark[]; message: string; taken: string[]; at: string };
 
@@ -179,6 +187,8 @@ export interface FinishItem {
   deck?: string;
   /** The section of this deck it waits in, for src 'maybe'. */
   section?: string;
+  /** A card to buy: its price (one per card, lib/card-price.ts); null is no price. */
+  price?: number | null;
   /**
    * new: on this list and not the last; back: a card the owner asked Claude to rethink that it picked again, with
    * a new reason (the reason is what is new); yours: taken from a search's results by the owner.
@@ -192,6 +202,15 @@ export interface FinishSearch { q: string; n: number; round: number }
 export interface FinishView {
   size: number;
   copies: Copies;
+  /** Cards to buy (Part C) and the most to spend on them in all (null: no limit). */
+  buy: Buy;
+  spend: number | null;
+  /** None of the owner's cards can go in: Finish runs as "any card" (Part C, item 31). */
+  noCollection: boolean;
+  /** "Only cards I own" on the plan: buying is off (review PR56, 14). */
+  ownOnly?: boolean;
+  /** None of the owner's cards is on offer under these settings: "the ones that matter" runs as "any card" (review 11). */
+  emptyPool?: boolean;
   /** The number asked for; null is a fill to 100. */
   want: number | null;
   /** Cards on offer under each setting, and the funnel behind them. */
@@ -225,6 +244,8 @@ export interface FinishView {
     changes: FinishChanges | null;
     /** Picks Claude named that the app dropped (not on offer or not searched), for the record. */
     dropped: number;
+    /** Part C: how this list bought cards, the total, and picks to buy past it (listed, not dropped silently). */
+    buy: { kind: Buy; limit: number | null; over: Array<{ name: string; price: number | null }>; dropped: Array<{ name: string; why: string }> } | null;
   } | null;
   choices: Record<string, { choice: FinishChoice; text: string }>;
   skipped: string[];
@@ -238,7 +259,7 @@ export interface FinishView {
   searches: FinishSearch[];
   job: { status: 'running' | 'failed'; detail: string | null; error: string | null } | null;
   /** left: picks on Add that were no longer on offer when applied (the deck or the collection changed), so not added. */
-  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[] } | null;
+  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[]; buy?: Array<{ name: string; price: number | null }> } | null;
   /**
    * What a round costs. measured: the average of this app's real rounds (by round, not by call: a round is
    * several calls). Until there are enough, a guess that grows with the cards asked for (perCard).

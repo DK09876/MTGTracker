@@ -273,6 +273,12 @@ Doing it here, or opening a page:
     deck", "draft the rest"). Give how many. Never draft a whole deck here.
     If this conversation settled a theme, also propose it as a note, so the
     plan carries it into Finish.
+  - upgrades: what would make a finished deck better, from their cards or
+    to buy ("what should I buy", "what am I missing", "upgrade this deck").
+    Answer in at most three sentences, under 60 words: what the deck is
+    short of, naming at most two cards. No card-by-card list, no costs or
+    ownership notes, no proposed swaps: the Upgrades button does that, each
+    with the card it replaces.
   - tags: sorting the deck into groups, retagging it.
   - check: the mana, the curve, how the deck plays.
   - plan: what the deck is trying to do, its bracket or budget.
@@ -330,11 +336,11 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: 'open_page',
-    description: `A button under your answer that opens one of this deck's pages, for a job the page does better than Chat: trim (many cuts; cut: how many, or cut_to: the size to cut to), finish (fill from the owner's cards; add: how many), tags (sort into groups), check (mana, curve, how it plays), plan (what the deck is for, bracket, budget). why: one sentence. At most once per reply.`,
+    description: `A button under your answer that opens one of this deck's pages, for a job the page does better than Chat: trim (many cuts; cut: how many, or cut_to: the size to cut to), finish (fill from the owner's cards; add: how many), upgrades (what would make a finished deck better, from their cards or to buy, each with the card it replaces), tags (sort into groups), check (mana, curve, how it plays), plan (what the deck is for, bracket, budget). why: one sentence. At most once per reply.`,
     input_schema: {
       type: 'object',
       properties: {
-        page: { type: 'string', enum: ['trim', 'finish', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' },
+        page: { type: 'string', enum: ['trim', 'finish', 'upgrades', 'tags', 'check', 'plan'] }, why: { type: 'string' }, cut: { type: 'number' }, cut_to: { type: 'number' }, add: { type: 'number' },
         answer: { type: 'string', description: 'Your full answer in words, shown above the button. When you also call propose_changes, give the answer in one of the two calls only (leave this one empty), and don\'t write it again as text.' },
       },
       required: ['page', 'why', 'answer'],
@@ -401,7 +407,7 @@ export function pageButtons(changes: Change[], held: Array<{ kind: Change['kind'
 }
 
 /** The deck as Claude reads it: commander, brief, every card with its roles. */
-export function deckText(deck: ChatDeck): string {
+export function deckText(deck: ChatDeck, rules = true): string {
   const rolesOf = new Map<string, string[]>();
   for (const r of deck.roles ?? []) for (const c of r.cards) rolesOf.set(c, [...(rolesOf.get(c) ?? []), r.label]);
   const main = deck.cards.filter((c) => c.board === 'main');
@@ -422,7 +428,9 @@ export function deckText(deck: ChatDeck): string {
     ...main.map((x) => {
       const tags = [...(rolesOf.get(x.card.name) ?? []), ...(deck.tagsOf?.get(x.card.name) ?? []).map((t) => `#${t}`)];
       const why = deck.finishWhy?.get(x.card.name);
-      return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}${why ? ` (Finish: ${why})` : ''}`;
+      // The card's rules text (handoff 10, item 42, the owner's yes): Chat misjudged a recent card it only knew by name.
+      const text = rules ? (x.card.oracle_text ?? (x.card.card_faces ?? []).map((f) => f.oracle_text).filter(Boolean).join(' // ')).replace(/\n+/g, ' / ') : '';
+      return `${x.quantity} ${x.card.name}${rules && x.card.mana_cost ? ` ${x.card.mana_cost}` : ''} - ${x.card.type_line ?? ''}${text ? ` - ${text}` : ''}${tags.length ? ` [${tags.join(', ')}]` : ''}${why ? ` (Finish: ${why})` : ''}`;
     }),
     ...(deck.sections?.length ? ['', `Sections besides the main deck: ${deck.sections.map((x) => `${x.name} (${x.purpose === 'out' ? 'cards that came out' : x.purpose === 'in' ? 'cards to bring in' : x.purpose})`).join('; ')}`] : []),
     ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'In the sections:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}${deck.sections ? ` (${deck.sections.find((s) => s.id === x.board)?.name ?? x.board})` : ''}`)] : []),
@@ -690,7 +698,7 @@ export async function reply(
         takeAnswer(input);
         const page = pageGo(input);
         if (page) asked = page;
-        results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, tags, check or plan.', ...(page ? {} : { is_error: true }) });
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, upgrades, tags, check or plan.', ...(page ? {} : { is_error: true }) });
         continue;
       }
       if (use.name === 'search_my_cards') {

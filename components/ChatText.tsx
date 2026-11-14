@@ -10,17 +10,21 @@
 import { Fragment, useMemo } from 'react';
 
 import CardName from './CardName';
+import LookupName from './LookupName';
+import type { LookupState } from '@/lib/card-lookup';
 import SymbolText from './SymbolText';
 import { blocksOf, boldRuns, marksNames, splitMarked, splitNames } from '@/lib/chat-text';
 import type { ScryfallCard } from '@/lib/scryfall';
 
-export default function ChatText({ text, names, cardOf, onOpen }: {
+export default function ChatText({ text, names, cardOf, onOpen, lookup }: {
   text: string;
   /** The names to link. */
   names: string[];
   /** A card by name: the deck's full card, or one with its id and picture. */
   cardOf: (name: string) => ScryfallCard | undefined;
   onOpen: (card: ScryfallCard) => void;
+  /** A marked name the app couldn't find: looked up on hover or tap (item 39). */
+  lookup?: { state: (name: string) => LookupState<ScryfallCard>; look: (name: string, retry?: boolean) => void };
 }) {
   const blocks = useMemo(() => blocksOf(text), [text]);
   // Newer answers mark their card names [[like this]]: only those link. Older ones are matched against known names.
@@ -28,7 +32,14 @@ export default function ChatText({ text, names, cardOf, onOpen }: {
   const inline = (line: string, key: string) => boldRuns(line).map((run, k) => {
     const pieces = (marked ? splitMarked(run.text) : splitNames(run.text, names)).map((p, j) => {
       const card = p.name ? cardOf(p.name) : undefined;
-      return card ? <CardName key={j} name={p.text} card={card} onOpen={onOpen} /> : <SymbolText key={j} text={p.text} />;
+      if (card) return <CardName key={j} name={p.text} card={card} onOpen={onOpen} />;
+      // A name the answer marked that matched no card stays a link that looks the card up when pointed at.
+      if (marked && p.name && lookup) {
+        const st = lookup.state(p.name);
+        return st.status === 'found' ? <CardName key={j} name={p.text} card={st.card} onOpen={onOpen} />
+          : <LookupName key={j} name={p.text} state={st} onLook={(retry) => lookup.look(p.name!, retry)} onOpen={onOpen} />;
+      }
+      return <SymbolText key={j} text={p.text} />;
     });
     return run.bold ? <b key={`${key}-${k}`} className="font-semibold">{pieces}</b> : <Fragment key={`${key}-${k}`}>{pieces}</Fragment>;
   });
