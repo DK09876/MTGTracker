@@ -43,10 +43,12 @@ const few = (names: string[], n = 3) => names.slice(0, n).join(', ') + (names.le
 // --- the bracket ---------------------------------------------------------------
 
 /** The lowest bracket the list fits: from the bracket report when it could be asked, else from Game Changers alone. */
-export function detectBracket(cards: Cards, commanders: ScryfallCard[], report: Pick<BracketReport, 'cards' | 'combos'> | null): Detected<number> {
+export function detectBracket(cards: Cards, commanders: ScryfallCard[], report: Pick<BracketReport, 'cards' | 'combos'> | null, aside?: Set<string>): Detected<number> {
   const idea = 'The bracket is a promise to the table about how strong the deck plays; suggestions stay inside the one you pick.';
   if (report) {
-    const floor = bracketFloor(report);
+    const all = [...commanders, ...cards.map((c) => c.card)];
+    const byName = new Map(all.map((c) => [c.name.split(' // ')[0].trim().toLowerCase(), c]));
+    const floor = bracketFloor(report, { aside, textOf: (n) => { const c = byName.get(n.split(' // ')[0].trim().toLowerCase()); return c ? { text: oracleTextOf(c), planeswalker: /\bPlaneswalker\b/.test(c.type_line ?? '') } : null; } });
     const value = floor.floor === 1 ? 2 : floor.floor;
     return {
       value, strength: 'likely',
@@ -55,7 +57,7 @@ export function detectBracket(cards: Cards, commanders: ScryfallCard[], report: 
           `Game Changers: ${report.cards.filter((c) => c.gameChanger).length}`,
           `Two-card combos: ${report.combos.filter((c) => c.twoCard).length}`,
           `Extra turns: ${report.cards.filter((c) => c.extraTurn).length}`,
-          `Mass land destruction: ${report.cards.filter((c) => c.massLandDenial).length}`,
+          `Mass land destruction: ${report.cards.filter((c) => c.massLandDenial).length}${floor.aside?.length ? ` (${floor.aside.length} you set aside)` : ''}`,
         ],
         steps: [
           ...floor.reasons.map((r) => `${r.text}${r.cards.length ? ` (${few(r.cards)})` : ''} → ${r.floor} or higher.`),

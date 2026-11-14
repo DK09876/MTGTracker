@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 
 import { applyChange, ChatActionRefused, undoChange, type Undo } from '@/lib/chat-actions';
-import { deleteChat, getChat, saveChat } from '@/lib/deck-chat';
+import { deleteChat, getChat, saveChat, unreplace } from '@/lib/deck-chat';
 import { latestJob } from '@/lib/jobs';
 import { requireList } from '@/lib/profile-route';
 
@@ -48,14 +48,22 @@ export async function PATCH(request: Request, { params }: Ctx) {
     // accept it." Don't add the Tune lock here.
     if (body.do === 'apply') {
       if (change.applied) return NextResponse.json({ error: 'That is already applied' }, { status: 409 });
+      if (change.replaced) return NextResponse.json({ error: 'A later answer replaced that one: apply the newer proposal instead' }, { status: 409 });
       change.applied = { at: new Date().toISOString(), undo: await applyChange(owned.list, owned.profile, change) };
     } else if (body.do === 'undo') {
       if (!change.applied) return NextResponse.json({ error: 'That isn’t applied' }, { status: 409 });
       await undoChange(owned.list, owned.profile, change.applied.undo as Undo);
       change.applied = null;
+      unreplace(chat, body.message!, body.change!);
     } else change.done = true;
+    // Applied now: a reason it couldn't be, written when Claude answered, no longer holds.
+    if (change.applied) delete change.blocked;
   } catch (e) {
-    if (e instanceof ChatActionRefused) return NextResponse.json({ error: e.message }, { status: 400 });
+    if (e instanceof ChatActionRefused) {
+      // The deck may have changed since the answer: the row says today's reason (or loses a stale one).
+      if (body.do === 'apply' && (change.kind === 'add' || change.kind === 'swap')) { change.blocked = e.message; saveChat(chat); }
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     throw e;
   }
   saveChat(chat);

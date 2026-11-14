@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 
 import { database } from './db';
 import { recordError, type Level } from './errors';
+import { UPDATING_MESSAGE, updatingSince } from './updating';
 
 export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter' | 'printings' | 'cutreview' | 'tuneideas' | 'planpass' | 'planhelp' | 'tagsai' | 'trim' | 'trimapproach' | 'finish';
 export type JobStatus = 'running' | 'done' | 'failed' | 'interrupted';
@@ -88,10 +89,18 @@ export function getJob(id: string): Job | null {
   return row ? revive(row.job) : null;
 }
 
-/** The newest job of a kind on a deck. */
-export function latestJob(kind: JobKind, listId: string): Job | null {
-  const row = db().get('SELECT job FROM jobs WHERE kind = ? AND listId = ? ORDER BY startedAt DESC LIMIT 1', [kind, listId]) as { job: string } | null;
-  return row ? revive(row.job) : null;
+/**
+ * The newest job of a kind on a deck. A job refused because a deploy was under way shows for a minute (so the
+ * page can say why), then steps aside for the one before it, whose result the page shows again (review 28).
+ */
+export function latestJob(kind: JobKind, listId: string, now = Date.now()): Job | null {
+  const rows = db().all('SELECT job FROM jobs WHERE kind = ? AND listId = ? ORDER BY startedAt DESC LIMIT 5', [kind, listId]) as Array<{ job: string }>;
+  for (const r of rows) {
+    const job = revive(r.job);
+    if (job.error === UPDATING_MESSAGE && now - Date.parse(job.startedAt) > 60_000) continue;
+    return job;
+  }
+  return null;
 }
 
 /** A profile's running jobs and the ones that finished in the last few minutes, newest first. */
@@ -122,6 +131,13 @@ export function startJob(
     status: 'running', detail: '', done: null, total: null, result: null, error: null,
     startedAt: new Date().toISOString(), finishedAt: null,
   };
+  // A deploy is waiting for the running jobs to finish: nothing new starts. The job comes back failed with the
+  // reason, so every page shows it where it shows a job's error, and the work never runs.
+  if (updatingSince()) {
+    Object.assign(job, { status: 'failed', error: UPDATING_MESSAGE, finishedAt: job.startedAt });
+    save(job);
+    return job;
+  }
   running.add(job.id);
   save(job);
   const ctx: JobContext = {
@@ -151,4 +167,10 @@ export function startJob(
     }
   })();
   return job;
+}
+
+/** How many jobs are running in this process (the deploy script waits for none). Rows it lost track of are marked interrupted. */
+export function runningCount(): number {
+  const rows = db().all(`SELECT job FROM jobs WHERE status = 'running'`) as Array<{ job: string }>;
+  return rows.map((r) => revive(r.job)).filter((j) => j.status === 'running').length;
 }

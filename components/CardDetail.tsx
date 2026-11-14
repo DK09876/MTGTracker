@@ -9,7 +9,7 @@
  * both halves - showing only the front hides half the card's rules.
  */
 
-import Image from 'next/image';
+import CardPicture from './CardPicture';
 
 import ManaCost from './ManaCost';
 import type { ScryfallCard } from '@/lib/scryfall';
@@ -69,14 +69,7 @@ export default function CardDetail({ card }: { card: ScryfallCard }) {
     <div className="flex flex-col gap-5 sm:flex-row">
       {image && (
         <div className="mx-auto w-[244px] shrink-0 sm:mx-0">
-          <Image
-            src={image}
-            alt={card.name}
-            width={488}
-            height={680}
-            className="w-full rounded-[4.75%_/_3.5%] shadow-lg"
-            unoptimized
-          />
+          <CardPicture src={image} name={card.name} className="shadow-lg" />
         </div>
       )}
 

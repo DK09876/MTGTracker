@@ -22,6 +22,12 @@ export const SEARCH_LIMIT = 25;
 export const SEARCH_LIMIT_LATER = 8;
 /** Cards a search returns, at most; the true count is said too. */
 export const SEARCH_SHOWN = 40;
+/**
+ * Chat's searches over the owner's cards in one answer (handoff 9), counted and refused in code. 12 from the
+ * theme test (2026-11-13): with 20 allowed the runs used 12-15 and picked the same best theme as with 12; with 6
+ * one answer flipped.
+ */
+export const CHAT_SEARCH_LIMIT = 12;
 
 /** Where a pick's copy comes from. */
 export type Source = 'spare' | 'maybe' | 'other';
@@ -36,13 +42,21 @@ export interface PoolLine {
   src: Source;
   /** The deck it sits in, for a card only another deck holds. */
   deck?: string;
+  /** The section of this deck it waits in (the Maybeboard, a Sideboard, one of the owner's), for a card from there. */
+  section?: string;
+  /** The card's id and picture, for linking its name on the page (never sent to the model). */
+  id?: string;
+  image?: string | null;
 }
 
 export interface Query {
   words: string[];
   /** Words a card must not have (-word). */
   not: string[];
-  type: string | null;
+  /** Every t: filter; a card must match all of them (t:zombie t:creature is Zombie creatures). */
+  types: string[];
+  /** -t: filters: a card must match none of them. */
+  notTypes: string[];
   /** Mana value at most / at least. */
   mv: number | null;
   mvMin: number | null;
@@ -52,12 +66,15 @@ export interface Query {
 
 /** A search as Claude writes it: words that must all match, `-word`, `t:<type>`, `mv<=N`, `mv>=N`, `mv=N`. */
 export function parseQuery(q: string): Query {
-  const out: Query = { words: [], not: [], type: null, mv: null, mvMin: null, ignored: [] };
-  for (const w of q.toLowerCase().replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
+  const out: Query = { words: [], not: [], types: [], notTypes: [], mv: null, mvMin: null, ignored: [] };
+  // A quoted filter value is the value: t:"land" is t:land (review 19).
+  for (const w of q.toLowerCase().replace(/(-?[a-z]+):["“”]([^"“”]*)["“”]/g, (_, k: string, v: string) => `${k}:${v.trim().replace(/\s+/g, '-')}`).replace(/["“”()]/g, ' ').split(/\s+/).filter(Boolean)) {
     const mv = w.match(/^(?:mv|cmc|manavalue)(<=|>=|<|>|=|:)(\d+)$/);
     const text = w.match(/^(?:o|oracle|text|name|n):(.+)$/);
     const type = w.match(/^(?:t|type):(.+)$/);
-    if (type) out.type = type[1];
+    const notType = w.match(/^-(?:t|type):(.+)$/);
+    if (type) out.types.push(type[1]);
+    else if (notType) out.notTypes.push(notType[1]);
     else if (mv) {
       const n = Number(mv[2]);
       if (mv[1] === '<=') out.mv = n;
@@ -74,23 +91,26 @@ export function parseQuery(q: string): Query {
 }
 
 /** The owner's cards that match: every word in the name, type line or rules text; the type in the type line; the mana value in range. */
-export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[] } {
-  const { words, not, type, mv, mvMin, ignored } = parseQuery(q);
+export function searchLines(pool: PoolLine[], q: string, shown = SEARCH_SHOWN): { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> } {
+  const { words, not, types, notTypes, mv, mvMin, ignored } = parseQuery(q);
   const hits = pool.filter((c) => {
     const l = c.line.toLowerCase();
-    if (type && !c.typeLine.toLowerCase().includes(type)) return false;
+    if (!types.every((t) => c.typeLine.toLowerCase().includes(t))) return false;
+    if (notTypes.some((t) => c.typeLine.toLowerCase().includes(t))) return false;
     if (mv !== null && c.cmc > mv) return false;
     if (mvMin !== null && c.cmc < mvMin) return false;
     return words.every((w) => l.includes(w)) && !not.some((w) => l.includes(w));
   });
-  return { total: hits.length, lines: hits.slice(0, shown), ignored };
+  const bySrc: Record<Source, number> = { spare: 0, maybe: 0, other: 0 };
+  for (const h of hits) bySrc[h.src] += 1;
+  return { total: hits.length, lines: hits.slice(0, shown), ignored, bySrc };
 }
 
 /** What the search tool answers, in search.py's format; a filter it couldn't use is named, so a "0 match" is never a silent misread. */
 export function searchText(r: { total: number; lines: PoolLine[]; ignored?: string[] }): string {
   return [
     `${r.total} match${r.total > r.lines.length ? `, first ${r.lines.length} shown` : ''}`,
-    ...(r.ignored?.length ? [`Ignored, not understood: ${r.ignored.join(' ')}. The search takes plain words, -word, t:<type>, mv<=N, mv>=N and mv=N only.`] : []),
+    ...(r.ignored?.length ? [`Ignored, not understood: ${r.ignored.join(' ')}. The search takes plain words, -word, t:<type>, -t:<type>, mv<=N, mv>=N and mv=N only.`] : []),
     ...r.lines.map((c) => c.line),
   ].join('\n');
 }
@@ -157,8 +177,13 @@ export interface FinishItem {
   why: string;
   src: Source;
   deck?: string;
-  /** new: this round's pick after the first; yours: taken from a search's results by the owner. */
-  mark: 'new' | 'yours' | null;
+  /** The section of this deck it waits in, for src 'maybe'. */
+  section?: string;
+  /**
+   * new: on this list and not the last; back: a card the owner asked Claude to rethink that it picked again, with
+   * a new reason (the reason is what is new); yours: taken from a search's results by the owner.
+   */
+  mark: 'new' | 'back' | 'yours' | null;
   card: { id: string; image: string | null; manaCost: string; typeLine: string; text: string; cmc: number };
 }
 
@@ -186,19 +211,74 @@ export interface FinishView {
     /** Per group: the search that fed it, and its cards not already listed (for "+"). */
     more: Record<string, { q: string; n: number; cards: Array<{ name: string; manaCost: string }> }>;
     /** A fill to 100: the app's lands, with the owner's changes. total: what goes in; suggested: what the app chose; target: lands in the deck when done. */
-    lands: { duals: Array<{ name: string; on: boolean }>; basics: Array<{ name: string; n: number; suggested: number }>; total: number; suggested: number; target: number; why: string } | null;
+    /**
+     * duals: the nonbasic lands, ticked or not (Claude's picks with its reason, Part E; or an older run's
+     * colour-fixing lands). more: the owner's lands the land searches found, for "+". short: colours left
+     * short of their share once the nonbasic lands are in. limit: how many nonbasic lands Claude could pick.
+     */
+    lands: {
+      duals: Array<{ name: string; on: boolean; why?: string; deck?: string }>; basics: Array<{ name: string; n: number; suggested: number }>;
+      total: number; suggested: number; target: number; why: string;
+      more: string[]; short: Array<{ colour: string; have: number; want: number }>; limit: number | null; byClaude: boolean;
+    } | null;
+    /** What changed since the last list (a later round), worked out by the app from the two lists. */
+    changes: FinishChanges | null;
     /** Picks Claude named that the app dropped (not on offer or not searched), for the record. */
     dropped: number;
   } | null;
   choices: Record<string, { choice: FinishChoice; text: string }>;
   skipped: string[];
+  /** Cards skipped on this deck in earlier Finishes, with the owner's reason: never offered again here. */
+  skippedBefore: Array<{ name: string; why: string }>;
+  /** The cards Claude searches this round: how many, and the deck's colours in words. */
+  /** n: the spells on offer; lands: the owner's lands searched apart for a fill to 100 (0 when not asked). */
+  offer: { n: number; lands: number; colours: string } | null;
   turns: FinishTurn[];
   /** This round's searches, as they run and once done. */
   searches: FinishSearch[];
   job: { status: 'running' | 'failed'; detail: string | null; error: string | null } | null;
-  done: { at: string; added: number; lands: number; size: number; borrowed: string[] } | null;
-  cost: { first: { usd: number; measured: boolean }; later: { usd: number; measured: boolean } };
+  /** left: picks on Add that were no longer on offer when applied (the deck or the collection changed), so not added. */
+  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[] } | null;
+  /**
+   * What a round costs. measured: the average of this app's real rounds (by round, not by call: a round is
+   * several calls). Until there are enough, a guess that grows with the cards asked for (perCard).
+   */
+  cost: { first: RoundCost; later: RoundCost };
   noKey: boolean;
+}
+
+/** What a later list changed: cards that left (and which mark sent them), cards that came in, and Rethinks that came back. */
+export interface FinishChanges {
+  round: number;
+  out: Array<{ name: string; because: 'skipped' | 'rethink' | 'message' | 'gone' }>;
+  in: Array<{ name: string; group: string }>;
+  back: string[];
+  /** The lands Claude chose this round that differ from the last list's (kept as sets: order is no change). */
+  lands?: { in: string[]; out: string[] };
+}
+
+const COLOUR_WORD: Record<string, string> = { W: 'white', U: 'blue', B: 'black', R: 'red', G: 'green' };
+/** A deck's colours in words, in WUBRG order: "blue, black and red"; "colourless" for none. */
+export function colourWords(identity: Iterable<string>): string {
+  const w = [...'WUBRG'].filter((c) => [...identity].includes(c)).map((c) => COLOUR_WORD[c]);
+  return !w.length ? 'colourless' : w.length === 1 ? w[0] : `${w.slice(0, -1).join(', ')} and ${w.at(-1)}`;
+}
+
+/** A kept row's comment that reads like a doubt ("kind of expensive for what it does"): offer Rethink. A plain rule, in code. */
+export const soundsUnsure = (text: string) => /\b(not sure|unsure|maybe|kind of|kinda|sort of|meh|expensive|pricey|weak|not great|not sold|doubt|hmm+|iffy|idk|questionable|too slow|clunky)\b|\?\s*$/i.test(text.trim());
+
+export interface RoundCost { usd: number; measured: boolean; base?: number; perCard?: number }
+
+/** The price of a first list of `want` cards: the measured average, or the guess for that many. */
+export const roundPrice = (c: RoundCost, want: number) => (c.measured || c.perCard === undefined ? c : { usd: (c.base ?? 0) + c.perCard * want, measured: false });
+
+/** A finished round's cost, kept when the round ended with picks (round 2, item 5). */
+export interface MeasuredRound { kind: 'first' | 'later'; cost: number; at: string }
+
+/** The average cost of finished rounds of each kind, once there are `min` of them. */
+export function averageRounds(rounds: MeasuredRound[], min = 3): { first: number | null; later: number | null } {
+  const avg = (k: 'first' | 'later') => { const x = rounds.filter((r) => r.kind === k); return x.length >= min ? x.reduce((n, r) => n + r.cost, 0) / x.length : null; };
+  return { first: avg('first'), later: avg('later') };
 }
 
 /** The rows on Add, the owner's taken cards included. */

@@ -12,8 +12,9 @@
  *   find {rerun?, message?}    ask Claude in the background: the first list,
  *       or (rerun) the owner's marks and message, refilling the open slots
  *   choices {choices}          Add / Rethink / Skip and reasons, replaced whole
- *   lands {skip?, basics?}     a fill to 100: duals left out, and how many of
- *       each basic to take
+ *   lands {skip?, basics?, add?}  a fill to 100: nonbasic lands left out, how
+ *       many of each basic to take, and "+" for another land a search found
+ *   unskip {name}              take a card off the deck's skipped-before list
  *   take {name, group}         "+" from a search's results: no paid round
  *   apply                      add the cards on Add (and, on a full fill, the
  *       app's lands), after a snapshot
@@ -24,10 +25,11 @@
 import { NextResponse } from 'next/server';
 
 import { claudeCall, ModelError } from '@/lib/ai';
+import { localCards } from '@/lib/card-store';
 import { database } from '@/lib/db';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
-import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish } from '@/lib/finish';
-import { startJob } from '@/lib/jobs';
+import { applyFinish, finishView, resetFinish, runFinish, setChoices, setFinish, setLands, takeCard, undoFinish, unskip } from '@/lib/finish';
+import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { TRIM_MODELS } from '@/lib/trim-shared';
 
@@ -40,11 +42,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  // ?card=<id>: one card's full data, to open it from its name.
-  const cardId = new URL(request.url).searchParams.get('card');
+  // ?card=<id>[&name=<name>]: one card's full data, to open it from its name. A card the app hasn't stored (one
+  // Chat found by searching all cards) comes from the card data by its name.
+  const q = new URL(request.url).searchParams;
+  const cardId = q.get('card');
   if (cardId) {
     const r = database().get('SELECT data FROM cards WHERE id = ?', [cardId]) as { data: string } | null;
-    return r ? NextResponse.json(JSON.parse(r.data)) : NextResponse.json({ error: 'No such card' }, { status: 404 });
+    if (r) return NextResponse.json(JSON.parse(r.data));
+    const byName = q.get('name') ? localCards([q.get('name')!])[0] : undefined;
+    return byName ? NextResponse.json(byName) : NextResponse.json({ error: 'No such card' }, { status: 404 });
   }
   return NextResponse.json(await finishView(owned.list, owned.profile));
 }
@@ -57,6 +63,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as Record<string, unknown>;
+  // While Claude works on a round, the list it will replace can't be changed from another tab (round 2, item 6).
+  if ((b.action === 'take' || b.action === 'lands' || b.action === 'unskip') && latestJob('finish', id)?.status === 'running') {
+    return NextResponse.json({ error: 'Claude is working on this list: wait for the round to finish' }, { status: 409 });
+  }
   try {
     switch (b.action) {
       case 'settings':
@@ -66,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         if (!process.env.ANTHROPIC_API_KEY || profile === 'tour') return NextResponse.json({ error: NO_KEY }, { status: 503 });
         // Every AI step on the deck pages runs on Opus.
         const model = TRIM_MODELS.opus.id;
-        const call = claudeCall(model, { profile, feature: 'tagging', label: list.name });
+        const call = claudeCall(model, { profile, feature: 'finish', label: list.name });
         startJob({ kind: 'finish', label: 'Finishing the deck from your cards', subject: list.name, profileId: profile, listId: id, errorLevel: (e) => (e instanceof ModelError ? 'warn' : 'error') },
           ({ progress }) => runFinish(call, model, list, profile, { rerun: b.rerun === true, message: typeof b.message === 'string' ? b.message : '' }, progress));
         break;
@@ -75,7 +85,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         setChoices(id, b.choices);
         break;
       case 'lands':
-        setLands(id, { skip: b.skip, basics: b.basics });
+        await setLands(list, profile, { skip: b.skip, basics: b.basics, add: b.add });
+        break;
+      case 'unskip':
+        if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });
+        unskip(id, b.name);
         break;
       case 'take':
         if (typeof b.name !== 'string') return NextResponse.json({ error: 'Which card?' }, { status: 400 });

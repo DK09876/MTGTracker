@@ -6,18 +6,62 @@
 import { categories } from './categories';
 import { deckRoles, jobCards } from './deck-roles';
 import { sectionsOf } from './sections';
-import { tuneContext, whyNotAddable } from './tune';
+import { tuneContext, whyNotAddable, type Context } from './tune';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
-import { cardsInList, deckTags, type List } from './db';
+import { cardsInList, database, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
-import { newChat, recentChats, reply, saveChat, type DeckChat } from './deck-chat';
+import { newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
-import { searchCards, ScryfallError } from './scryfall';
+import { imageOf, searchCards, ScryfallError, type ScryfallCard } from './scryfall';
+import { finishStore } from './finish';
+import { localCards } from './card-store';
+import { finishPool, heldCards, type Pool } from './finish-pool';
+import { searchLines } from './finish-shared';
 
 export class ChatError extends Error {}
+
+/** Cards by name: the ones the app has stored (the owner's, the decks') first, then the full card data. By front name, lower case. */
+export function cardsNamed(names: string[]): Map<string, ScryfallCard> {
+  const key = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+  const out = new Map<string, ScryfallCard>();
+  for (const n of names) {
+    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? OR json_extract(data, '$.name') LIKE ? LIMIT 1`, [n, `${n} // %`]) as { data: string } | null;
+    if (r) out.set(key(n), JSON.parse(r.data) as ScryfallCard);
+  }
+  const rest = names.filter((n) => !out.has(key(n)));
+  if (rest.length) for (const c of localCards(rest)) if (!out.has(key(c.name))) out.set(key(c.name), c);
+  return out;
+}
+
+/**
+ * Chat's look-ups over the owner's cards (handoff 9): search_my_cards over every card they hold that may go in
+ * this deck (spare copies, this deck's sections, other decks; lands too), the pool worked out once per answer on
+ * the first search; and, for my_collection, why a named card can't go in.
+ */
+export function ownedTools(list: List, profile: string, tune: Context | null): Pick<ChatTools, 'mine' | 'fits'> {
+  let pool: Pool | null = null;
+  return {
+    mine: (q) => {
+      if (!list.commander) return { error: 'Set the commander first: the search follows its colours. Tell the owner that.' };
+      if (!tune) return { error: 'The search over the owner\'s cards isn\'t available right now. Say so, and answer without it.' };
+      pool ??= finishPool(tune, 'any', heldCards(profile, list.id), { chat: true });
+      return searchLines(pool.lines, q);
+    },
+    fits: (names) => {
+      // Without Tune's checks, at least the colours: an owned card outside the commander's still says so.
+      const known = cardsNamed(names);
+      if (!tune) {
+        if (!list.commander) return {};
+        const id = new Set(list.commander.color_identity ?? []);
+        return Object.fromEntries(names.map((n) => { const c = known.get(n.split(' // ')[0].toLowerCase()); return [n, c && !(c.color_identity ?? []).every((x) => id.has(x)) ? `${c.name} is outside this deck's colours` : null]; }));
+      }
+      return Object.fromEntries(names.map((n) => { const c = known.get(n.split(' // ')[0].toLowerCase()); return [n, c ? whyNotAddable(tune, c) : null]; }));
+    },
+  };
+}
 
 /** Add the owner's question to a chat (a new one when no id) and start Claude's reply. */
 export async function ask(list: List, profile: string, text: string, chat: DeckChat | null): Promise<{ chat: DeckChat; job: Job }> {
@@ -55,11 +99,18 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
     const sections = sectionsOf(list.id).map((x) => ({ id: x.id, name: x.name, purpose: x.purpose }));
     // Tune's checks for a card going into the main deck, so a proposal that Apply would refuse says why up front.
     const tune = await tuneContext(list, profile).catch(() => null);
-    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections }, {
+    const { mine, fits } = ownedTools(list, profile, tune);
+    // Claude's reason for each card Finish picked on this deck (the open list, or the one last applied).
+    const fs = finishStore(list.id);
+    const finishWhy = new Map((fs.run?.items ?? fs.done?.session.run?.items ?? []).map((i) => [i.name, i.why] as const));
+    const message = await reply(current, { list, cards, brief: tags.brief, roles, plan: planText, tagsOf, sections, finishWhy }, {
       search: async (q) => (await searchCards(`(${q}) id<=${identity} legal:commander`)).cards,
       held: (names) => heldByName(profile, list.id, names),
       gaps: async (role, owned, max) => (await gapCards(list, profile, role, { owned, max, show: 10 })).cards,
       check: tune ? (card, leaving) => whyNotAddable(tune, card, leaving) : undefined,
+      mine,
+      fits,
+      resolve: (names) => [...cardsNamed(names).values()].map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })),
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     current.messages.push(message);
     saveChat(current);

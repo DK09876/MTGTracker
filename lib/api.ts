@@ -60,6 +60,15 @@ import type { Budget } from './quota';
 import { sortKey, type Sort } from './sort';
 import type { ScryfallCard } from './scryfall';
 
+import { noteStatus, reached } from './reach';
+
+// Every request in this file goes through reached (lib/reach.ts): it notes whether the server answered, and
+// turns "can't reach it" during a deploy into words instead of "Failed to fetch".
+const fetch = (input: string, init?: RequestInit) => reached(input, init);
+
+/** How the app stands (handoff 9, Part B): its build, and whether a deploy is under way. Noted for the update banner. */
+export const appStatus = () => fetch(`${BASE}/api/status`, { cache: 'no-store' }).then(json<{ build: string; updating: string | null; running: number }>).then((s) => { noteStatus(s); return s; });
+
 /** Told when a request may have spent on a model, so the header's budget is read again. */
 export const AI_SPENT = 'mtg-ai-spent';
 
@@ -564,6 +573,8 @@ export interface DeckInsights {
 }
 
 export const deckInsights = (listId: string) => get<DeckInsights>(paths.insights(listId));
+/** Set a flagged card aside on the bracket box ("Doesn't count in this deck"), or put it back. */
+export const setBracketAside = (listId: string, name: string, aside: boolean) => send(`lists/${listId}/bracket`, 'POST', { name, aside }).then(json<{ ok: true }>);
 
 // --- deck tags -----------------------------------------------------------
 
@@ -892,12 +903,13 @@ export type FinishAction =
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: FinishView['choices'] }
   | { action: 'take'; name: string; group: string }
-  | { action: 'lands'; skip?: string[]; basics?: Record<string, number> }
+  | { action: 'lands'; skip?: string[]; basics?: Record<string, number>; add?: string; room?: number }
+  | { action: 'unskip'; name: string }
   | { action: 'apply' }
   | { action: 'undo' }
   | { action: 'reset' };
 export const finish = (listId: string) => get<FinishView>(`lists/${listId}/finish`);
-export const finishCard = (listId: string, cardId: string) => get<import('./scryfall').ScryfallCard>(`lists/${listId}/finish?card=${encodeURIComponent(cardId)}`);
+export const finishCard = (listId: string, cardId: string, name?: string) => get<import('./scryfall').ScryfallCard>(`lists/${listId}/finish?card=${encodeURIComponent(cardId)}${name ? `&name=${encodeURIComponent(name)}` : ''}`);
 export const finishAct = (listId: string, act: FinishAction) => {
   const paid = act.action === 'find';
   const work = send(`lists/${listId}/finish`, 'POST', act).then(json<FinishView>).finally(() => {

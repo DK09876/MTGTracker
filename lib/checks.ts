@@ -47,12 +47,13 @@ function backup(now: number): Check {
 }
 
 function refresh(now: number): Check {
-  const label = 'Nightly card refresh';
+  const label = 'Weekly card refresh';
   const last = getSetting('cards.refreshedAt');
   const failed = getSetting('cards.refreshError');
   if (!last && !failed) return { id: 'refresh', label, ok: true, detail: 'Not run yet' };
   if (failed) return { id: 'refresh', label, ok: false, detail: `Failed · ${failed}` };
-  const ok = now - Date.parse(last!) < 1.5 * DAY;
+  // Weekly, early on Sunday: late once more than eight days have passed.
+  const ok = now - Date.parse(last!) < 8 * DAY;
   return { id: 'refresh', label, ok, detail: `${ok ? 'OK' : 'Late'} · ${when(Date.parse(last!))}` };
 }
 

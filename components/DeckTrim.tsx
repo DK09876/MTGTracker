@@ -12,6 +12,8 @@
  * deck, so leaving the page loses nothing.
  */
 
+import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import ManaCost from './ManaCost';
@@ -67,6 +69,8 @@ const addLine = (box: string, line: string) => { const t = box.trim(); return !t
 const names = (xs: string[]) => xs.join('; ');
 
 export default function DeckTrim({ listId, version, sections, onChanged, onTab }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [view, setView] = useState<TrimView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -168,6 +172,12 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
 
   const items = useMemo(() => view?.run?.items ?? [], [view]);
   const cuts = useMemo(() => chosenCuts(items, choices), [items, choices]);
+  // Fold, filter and sort (D 13), the same control as Finish's, remembered for this deck in this browser.
+  const [lv, setLv] = useListView(`mtg-trim-list:${listId}`);
+  const callOf = (i: TrimItem) => { const c = choices[i.name]?.choice; return c ?? (i.tier === 'cut' ? 'cut' : 'keep'); };
+  const trimPasses = (i: TrimItem) => lv.filter === 'all' || (lv.filter === 'new' ? view?.run?.marks?.[i.name] === 'new' : callOf(i) === lv.filter);
+  const shown = useShown(items, (i) => i.name, trimPasses, `${lv.filter}:${lv.press ?? 0}:${view?.run?.at ?? ''}:${items.length}`);
+  useFilterFallback(view?.run?.at ?? '', lv.filter !== 'all' && !items.some(trimPasses), () => setLv({ filter: 'all' }));
   const marked = useMemo(() => newMarks(items, choices, view?.carried ?? {}).length, [items, choices, view?.carried]);
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading the deck…</p>;
@@ -261,7 +271,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           </div>
           <div className="flex flex-wrap items-center gap-x-4">
             <button type="button" className={LINK} disabled={busy} onClick={() => act({ action: 'approach', draft: true })}>Draft from the deck’s numbers · free</button>
-            <button type="button" className={LINK} disabled={busy || approachRunning || view.noKey} onClick={() => act({ action: 'approach', claude: true, text: box })}>
+            <button type="button" className={LINK} disabled={busy || approachRunning || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'approach', claude: true, text: box })}>
               {approachRunning ? 'Claude is adding to it…' : `✦ Have Claude add to it · ${money(view.costs.approach)}`}
             </button>
             <Tip label="About the two links">The draft is worked out by the app from the deck’s numbers and replaces the box. Claude keeps what you wrote, word for word, and adds its own lines below.</Tip>
@@ -274,7 +284,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             </p>
             <span className="flex flex-wrap items-center gap-3">
               {session && <button type="button" className={LINK} disabled={busy || cutsRunning} onClick={() => act({ action: 'reset' })}>Start a new session</button>}
-              <button className={TRIM_GO} disabled={busy || cutsRunning || view.noKey || over <= 0} onClick={() => act({ action: 'find', rerun: session })} data-tour="trim-find">
+              <button className={TRIM_GO} disabled={busy || cutsRunning || view.noKey || updating || over <= 0} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find', rerun: session })} data-tour="trim-find">
                 {cutsRunning ? 'Claude is ranking…' : `✦ Find ${over} cuts${session ? ' again' : ''} · ${cost}`}
               </button>
             </span>
@@ -324,19 +334,33 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
               <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={view.run.notes} /></p>
             ) : null}
           <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
-            disabled={busy || cutsRunning || view.noKey} onSend={send} />
+            disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
 
           <div className={`${CARD} flex flex-col gap-1`}>
-            {groups.map((g) => (
+            <ListControls filter={lv.filter} onFilter={(f) => setLv({ filter: f })} sort={lv.sort} onSort={(x) => setLv({ sort: x })} filters={[
+              { id: 'all', label: 'All', count: items.length },
+              { id: 'cut', label: 'Cut', count: items.filter((i) => callOf(i) === 'cut').length },
+              { id: 'keep', label: 'Keep', count: items.filter((i) => callOf(i) === 'keep').length },
+              { id: 'ask', label: 'Rethink', count: items.filter((i) => callOf(i) === 'ask').length },
+              ...(view.run.marks ? [{ id: 'new', label: 'New this round', count: items.filter((i) => view.run!.marks?.[i.name] === 'new').length }] : []),
+            ]} />
+            {groups.map((g) => {
+              const rows = sortRows(g.items.filter((i) => shown.has(i.name)), lv.sort, { choice: (i) => ['cut', 'ask', 'keep'].indexOf(callOf(i)), mv: (i) => mvOf(i.card.manaCost), name: (i) => i.name });
+              const folded = lv.folded.includes(g.tier);
+              if (!rows.length && lv.filter !== 'all') return null;
+              return (
               <div key={g.tier} className="flex flex-col" data-trim-group={g.tier}>
-                <div className="flex flex-wrap items-baseline gap-x-3 pb-1 pt-3"><h4 className="font-display text-lg font-semibold">{TIER_TITLE[g.tier](g.items.length)[0]}</h4><span className="text-sm text-[var(--muted)]">{TIER_TITLE[g.tier](g.items.length)[1]}</span></div>
-                {g.items.map((i) => (
+                <GroupHead title={TIER_TITLE[g.tier](g.items.length)[0]} count={g.items.length} extra={[TIER_TITLE[g.tier](g.items.length)[1], lv.filter !== 'all' ? `${rows.length} shown` : ''].filter(Boolean).join(' · ')}
+                  folded={folded} onToggle={() => setLv({ folded: folded ? lv.folded.filter((x) => x !== g.tier) : [...lv.folded, g.tier] })} />
+                {!folded && rows.map((i) => (
                   <Row key={i.name} item={i} cut={cuts.includes(i.name)} choice={choices[i.name]} marks={!!view.run!.marks} mark={view.run!.marks?.[i.name] ?? null}
                     showCard={card[i.name] ?? false} busy={busy}
                     onSet={(c) => set(i, c)} onCard={(v) => setCard((o) => ({ ...o, [i.name]: v }))} onReason={(text) => choose(i, { text })} onStar={() => star(i)} />
                 ))}
               </div>
-            ))}
+              );
+            })}
+            {lv.filter !== 'all' && items.every((i) => !shown.has(i.name)) && <p className="py-3 text-sm text-[var(--muted)]">Nothing here. <button type="button" className={LINK} onClick={() => setLv({ filter: 'all' })}>Show all</button></p>}
             <p className="pt-2 text-xs text-[var(--faint)]">Lands: {view.lands.have} in the deck, usual {view.lands.range[0]}–{view.lands.range[1]}. The app never lets a cut take the deck under {Math.ceil(view.lands.floor)}.</p>
           </div>
         </div>
@@ -407,6 +431,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
 }
 
 const fmt = (x: number) => (Math.round(x * 10) / 10).toString();
+/** A card's mana value from its cost, for sorting: {X} counts 0, a hybrid one. */
+const mvOf = (cost: string) => (cost.match(/\{[^}]+\}/g) ?? []).reduce((n, sym) => { const x = sym.slice(1, -1); return n + (/^\d+$/.test(x) ? Number(x) : x === 'X' ? 0 : 1); }, 0);
 
 /**
  * How many to cut: a number of cuts or a size to reach, the same box as

@@ -19,7 +19,8 @@ import type { RoleCount } from './roles';
 export const AI_RULES = `\
 Default ways to judge a Commander deck. Follow them unless this deck's plan
 or what the owner is optimizing for says otherwise; when you depart from
-one, say which and why.
+one, say which and why. The numbers are for this list only: never cite a
+rule by its number to the owner ("rule 1"); say what it means instead.
 1. Cantrips are not card draw: only cards that leave you with more cards count. Selection is its own thing.
 2. Note every job a card fills. Cards doing two or more jobs are the most valuable; single-job generic cards are the easiest to swap.
 3. Counts are ranges tied to the commander and the curve. Flag a count outside its range; don't call it an error.

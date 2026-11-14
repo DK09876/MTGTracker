@@ -3,7 +3,7 @@
 /**
  * The deck's Chat tab: ask Claude about the deck - what to add, what to
  * cut, whether the plan holds. Every chat is saved. Claude looks things up
- * (Scryfall, your collection) and puts each change it suggests on its own
+ * (all cards, your own cards) and puts each change it suggests on its own
  * row: a cut, an add, a swap, a move to a section, a card into or out of a
  * group, never cut, a note, a way to win, a key card. Nothing changes until
  * you press Apply on it, and Undo takes it back. Adds and cuts can also go
@@ -11,14 +11,17 @@
  * while Claude thinks.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CardName from './CardName';
+import ChatText from './ChatText';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Change, DeckChat as Chat } from '@/lib/deck-chat';
+import { goLabel, LOCKED_UNTIL_PLAN, type ChatGo } from '@/lib/chat-pages';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { ListedCard } from '@/lib/db';
 import { modelLabel } from '@/lib/quota';
@@ -33,7 +36,14 @@ interface Props {
   /** Open a card the way the card view does. */
   onCard?: (card: ScryfallCard) => void;
   commander?: ScryfallCard | null;
+  /** Open a page of this deck from an answer's button (Part C), with its starting value. */
+  onGo?: (go: ChatGo) => Promise<void> | void;
+  /** Tune (Trim, Finish) is locked until the plan is confirmed: its buttons open Plan then. */
+  planConfirmed?: boolean;
 }
+
+/** A proposal Apply can act on now: not done, not refused, and a card the app found. */
+const canApply = (c: Change) => !c.applied && !c.done && !c.blocked && !c.replaced && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId);
 
 const KIND_LABEL: Record<Change['kind'], [string, string]> = {
   add: ['add', 'text-emerald-400'], cut: ['cut', 'text-red-300'], swap: ['swap', 'text-amber-300'], move: ['move', 'text-sky-300'],
@@ -42,10 +52,12 @@ const KIND_LABEL: Record<Change['kind'], [string, string]> = {
 };
 
 const POLL_MS = 2_000;
-const PROMPTS = ['What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?', 'Which cards belong in a group together?'];
+const PROMPTS = ['Which theme do my cards support best?', 'What should I cut?', 'Suggest upgrades from my collection', 'Does the deck have enough ways to win?', 'Is the mana base right?', 'Which cards belong in a group together?'];
 const when = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export default function DeckChat({ listId, cards, question = '', onChanged, onCard, commander = null }: Props) {
+export default function DeckChat({ listId, cards, question = '', onChanged, onCard, commander = null, onGo, planConfirmed = true }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [chats, setChats] = useState<api.ChatSummary[] | null>(() => api.peek<{ chats: api.ChatSummary[] }>(api.paths.chats(listId))?.chats ?? null);
   const [open, setOpen] = useState<string | null>(null);
   const [chat, setChat] = useState<Chat | null>(null);
@@ -80,7 +92,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const send = async (question = text) => {
-    if (!question.trim() || replying || sendingRef.current) return;
+    if (!question.trim() || replying || sendingRef.current || updating) return;
     sendingRef.current = true;
     setSending(true);
     setError(null);
@@ -138,18 +150,47 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
       void loadList();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not do that');
+      // A refused add or swap now says today's reason on its row.
+      void api.deckChat(listId, chat.id).then((r) => setChat(r.chat)).catch(() => {});
     } finally {
       setDoing(null);
     }
   };
   const applyAll = async (m: number) => {
-    const open = (chat?.messages[m]?.changes ?? []).map((c, j) => ({ c, j })).filter(({ c }) => !c.applied && !c.done && !c.blocked && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId));
+    const open = (chat?.messages[m]?.changes ?? []).map((c, j) => ({ c, j })).filter(({ c }) => canApply(c));
     for (const { j } of open) await change(m, j, 'apply');
   };
+  const [going, setGoing] = useState(false);
+  const go = async (to: ChatGo) => {
+    if (!onGo || going) return;
+    setGoing(true);
+    try { await onGo(!planConfirmed && LOCKED_UNTIL_PLAN.includes(to.page) ? { page: 'plan', why: to.why } : to); } finally { setGoing(false); }
+  };
   const byName = (n: string) => { const f = n.split(' // ')[0].toLowerCase(); return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (commander && commander.name.split(' // ')[0].toLowerCase() === f ? commander : undefined); };
-  const nm = (n: string) => <CardName name={n} card={byName(n)} onOpen={onCard} />;
+  // Every card an answer mentions is a link (review item 29): the deck's own cards, and the cards its look-ups and
+  // proposals named, known by id and picture. One the deck doesn't hold is read in full when opened.
+  const partial = (c: { name: string; id: string; image: string | null }) => ({ id: c.id, name: c.name, ...(c.image ? { image_uris: { normal: c.image } } : {}) }) as unknown as ScryfallCard;
+  const cardIn = (m: Chat['messages'][number]) => (n: string): ScryfallCard | undefined => {
+    const own = byName(n);
+    if (own) return own;
+    const f = n.split(' // ')[0].toLowerCase();
+    const c = m.cards?.find((x) => x.name.split(' // ')[0].toLowerCase() === f)
+      ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => x.name.split(' // ')[0].toLowerCase() === f);
+    return c ? partial(c) : undefined;
+  };
+  const openCard = (card: ScryfallCard) => {
+    if (!onCard) return;
+    if (card.type_line) { onCard(card); return; }
+    void api.finishCard(listId, card.id, card.name).then(onCard).catch(() => {});
+  };
+  const namesIn = (m: Chat['messages'][number]) => [
+    ...cards.map((c) => c.card.name), ...(commander ? [commander.name] : []),
+    ...(m.cards ?? []).map((c) => c.name), ...(m.changes ?? []).flatMap((c) => [c.name, c.out?.name ?? '']).filter(Boolean),
+  ];
+  const nm = (n: string, m?: Chat['messages'][number]) => <CardName name={n} card={m ? cardIn(m)(n) : byName(n)} onOpen={openCard} />;
 
   const inDeck = new Set(cards.map((c) => c.card.id));
+  const size = cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (commander ? 1 : 0);
 
   return (
     <div className="mt-5 flex flex-wrap items-start gap-5">
@@ -189,19 +230,20 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             <div key={i} className="flex max-w-[95%] flex-col gap-2">
               {m.lookups && m.lookups.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {m.lookups.map((l) => <span key={l} className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l}</span>)}
+                  {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</p>
+              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} />
+              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the card data, so {m.unresolved === 1 ? 'it isn’t a link' : 'they aren’t links'}.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;
-                const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '')} out, {nm(c.name)} in</>
-                  : c.kind === 'move' ? <>{nm(c.name)} to {c.to}</>
-                  : c.kind === 'group' ? <>{nm(c.name)} into {c.to}</>
-                  : c.kind === 'ungroup' ? <>{nm(c.name)} out of {c.to}</>
+                const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '', m)} out, {nm(c.name, m)} in</>
+                  : c.kind === 'move' ? <>{nm(c.name, m)} to {c.to}</>
+                  : c.kind === 'group' ? <>{nm(c.name, m)} into {c.to}</>
+                  : c.kind === 'ungroup' ? <>{nm(c.name, m)} out of {c.to}</>
                   : c.kind === 'note' ? <span className="font-normal">“{c.name}”</span>
-                  : c.kind === 'win' ? <>{c.name}{c.cards?.length ? <span className="font-normal text-[var(--muted)]"> · {c.cards.map((x, k) => <span key={x}>{k ? ', ' : ''}{nm(x)}</span>)}</span> : null}</>
-                  : <>{nm(c.name)}{(c.kind === 'cut' || c.kind === 'add') && c.to ? <span className="font-normal text-[var(--muted)]"> to {c.to}</span> : null}</>;
+                  : c.kind === 'win' ? <>{c.name}{c.cards?.length ? <span className="font-normal text-[var(--muted)]"> · {c.cards.map((x, k) => <span key={x}>{k ? ', ' : ''}{nm(x, m)}</span>)}</span> : null}</>
+                  : <>{nm(c.name, m)}{(c.kind === 'cut' || c.kind === 'add') && c.to ? <span className="font-normal text-[var(--muted)]"> to {c.to}</span> : null}</>;
                 const unknown = (c.kind === 'add' || c.kind === 'swap') && !c.cardId;
                 return (
                   <div key={j} className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2" data-chat-change={c.kind}>
@@ -218,12 +260,16 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                         <button onClick={() => change(i, j, 'undo')} disabled={busy} className="rounded-full border border-[var(--border)] px-3 py-1 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50">Undo</button></span>
                     ) : c.done ? (
                       <span className="text-xs text-emerald-400">In Tune</span>
+                    ) : c.replaced ? (
+                      <span className="text-xs text-[var(--muted)]" data-replaced>Replaced by a later answer</span>
                     ) : unknown ? (
                       <span className="text-xs text-[var(--muted)]">Card not found</span>
                     ) : c.blocked ? (
+                      // The reason was true when Claude answered; pressing Apply checks again against the deck as it is now.
                       <span className="flex max-w-[18rem] items-center gap-2" data-blocked>
                         <span className="text-xs text-amber-300">{c.blocked}</span>
-                        <button disabled className="rounded-full border border-[var(--border)] px-3 py-1 text-sm opacity-40">Apply</button>
+                        <button onClick={() => change(i, j, 'apply')} disabled={busy} title="Checks again against the deck as it is now"
+                          className="rounded-full border border-[var(--border)] px-3 py-1 text-sm text-[var(--muted)] hover:bg-[var(--surface-hover)] disabled:opacity-50">{busy ? 'Checking…' : 'Apply'}</button>
                       </span>
                     ) : (
                       <span className="flex items-center gap-2">
@@ -237,11 +283,17 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   </div>
                 );
               })}
-              {(m.changes?.filter((c) => !c.done && !c.applied && !c.blocked).length ?? 0) > 1 && (
+              {(m.changes?.filter(canApply).length ?? 0) > 1 && (
                 <button onClick={() => applyAll(i)} disabled={!!doing} className="self-start rounded-full bg-[var(--accent)] px-3.5 py-1 text-sm font-semibold text-[#221c08] disabled:opacity-50">
-                  Apply all {m.changes!.filter((c) => !c.done && !c.applied && !c.blocked).length}
+                  Apply all {m.changes!.filter(canApply).length}
                 </button>
               )}
+              {(m.pages ?? (m.go ? [m.go] : [])).map((g) => (
+                <div key={g.page} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={g.page}>
+                  <button onClick={() => go(g)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(g, planConfirmed, size)}</button>
+                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{g.why}</span>}
+                </div>
+              ))}
               {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>
@@ -260,7 +312,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
         {!replying && (
           <div className="flex flex-wrap gap-2">
             {PROMPTS.map((p) => (
-              <button key={p} onClick={() => send(p)} disabled={sending} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
+              <button key={p} onClick={() => send(p)} disabled={sending || updating} className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-3 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]">{p}</button>
             ))}
           </div>
         )}
@@ -278,7 +330,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
           <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
-          <button type="submit" disabled={replying || sending || !text.trim()} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
+          <button type="submit" disabled={replying || sending || updating || !text.trim()} title={updating ? UPDATING_TITLE : undefined} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
       </section>
     </div>

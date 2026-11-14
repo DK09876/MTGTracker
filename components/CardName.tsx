@@ -8,7 +8,7 @@
  * plain text.
  */
 
-import Image from 'next/image';
+import CardPicture from './CardPicture';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -37,7 +37,7 @@ export default function CardName({ name, card, onOpen, className = '' }: { name:
       </button>
       {at && src && createPortal(
         <span className="pointer-events-none fixed z-[80] block drop-shadow-[0_12px_30px_rgba(0,0,0,0.6)]" style={{ left: at.x, top: at.y, width: WIDTH }} data-card-preview>
-          <Image src={src} alt="" width={488} height={680} className="h-auto w-full rounded-[4.75%/3.4%]" unoptimized />
+          <CardPicture src={src} name={name} retry={false} />
         </span>,
         document.body,
       )}

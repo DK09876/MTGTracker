@@ -42,7 +42,7 @@ describe('deck chat', () => {
       if (calls.length === 2) {
         return message([{ type: 'tool_use', id: 't2', name: 'propose_changes', input: { add: [{ name: 'Grapeshot', why: 'A storm kill.' }], cut: [{ name: 'Brainsurge', why: 'Weakest cantrip.' }] } }], 'tool_use');
       }
-      return message([{ type: 'text', text: 'Add Grapeshot, cut Brainsurge.' }], 'end_turn');
+      return message([{ type: 'text', text: 'Grapeshot is your finisher: every spell before it adds a copy. Brainsurge is the weakest cantrip here. That keeps the deck at 100.' }], 'end_turn');
     });
     const chat = newChat('l1', 'dk', 'What finisher should I add?');
     chat.messages.push({ role: 'user', text: 'What finisher should I add?', at: '' });
@@ -55,7 +55,7 @@ describe('deck chat', () => {
     expect(call).toHaveBeenCalledTimes(3);
     // The collection answer went back to Claude.
     expect(JSON.stringify(calls[1])).toContain('Grapeshot: yours, Box 4');
-    expect(answer.text).toBe('Add Grapeshot, cut Brainsurge.');
+    expect(answer.text).toBe('Grapeshot is your finisher: every spell before it adds a copy. Brainsurge is the weakest cantrip here. That keeps the deck at 100.');
     expect(answer.lookups).toEqual(['Looked at your collection']);
     expect(answer.changes?.map((c) => [c.kind, c.name, c.cardId, c.held])).toEqual([
       ['add', 'Grapeshot', null, 'yours, Box 4'],
@@ -68,11 +68,11 @@ describe('deck chat', () => {
     let n = 0;
     const call = vi.fn(async () => (++n === 1
       ? message([{ type: 'text', text: 'Leyline Axe is good here: double strike on Jiang means 21 commander damage comes fast.' }, { type: 'tool_use', id: 't1', name: 'propose_changes', input: { cut: [{ name: 'Opt', why: 'Weakest.' }] } }], 'tool_use')
-      : message([{ type: 'text', text: 'There is a button to cut Opt.' }], 'end_turn')));
+      : message([{ type: 'text', text: 'Opt is the weakest card here: it sees one card for a mana. Brainsurge does the same job better. There is a button to cut Opt.' }], 'end_turn')));
     const chat = newChat('l1', 'dk', 'Is Leyline Axe good enough?');
     chat.messages.push({ role: 'user', text: 'Is Leyline Axe good enough?', at: '' });
     const answer = await reply(chat, deck(), { search: async () => [], held: () => ({}), gaps: async () => [] }, call as never, 'claude-opus-5-5');
-    expect(answer.text).toBe('Leyline Axe is good here: double strike on Jiang means 21 commander damage comes fast.\n\nThere is a button to cut Opt.');
+    expect(answer.text).toBe('Leyline Axe is good here: double strike on Jiang means 21 commander damage comes fast.\n\nOpt is the weakest card here: it sees one card for a mana. Brainsurge does the same job better. There is a button to cut Opt.');
     expect(answer.changes?.map((c) => c.name)).toEqual(['Opt']);
   });
 

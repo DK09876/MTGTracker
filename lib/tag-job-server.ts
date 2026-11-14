@@ -6,8 +6,9 @@
 import { appModel } from './ai';
 import { deckTags, loadTagJob, saveTagJob, type List } from './db';
 import { recordError } from './errors';
+import { UPDATING_MESSAGE, updatingSince } from './updating';
 import { taggingDeck } from './tag-deck';
-import { isActive, isRunningHere, launch, newJob, stop, type JobParams, type TagJob } from './tag-jobs';
+import { isActive, isRunningHere, launch, newJob, runningHere, stop, type JobParams, type TagJob } from './tag-jobs';
 import { assignStep, auditStep, cardsToTag, proposeStep, StepError } from './tag-steps';
 
 /** The deck's latest job; one this process lost track of is marked interrupted. */
@@ -24,6 +25,7 @@ export function currentJob(listId: string): TagJob | null {
 
 /** Start a job on a deck, its model requests charged to the profile that owns it. */
 export function startJob(list: List, params: JobParams, profile: string): TagJob {
+  if (updatingSince()) throw new StepError(UPDATING_MESSAGE);
   if (isActive(currentJob(list.id))) throw new StepError('A tagging job is already running on this deck - stop it first');
   const model = appModel(profile, 'tagging', list.name);
   // Putting tags on cards is many small guided calls: its own, cheaper model.
@@ -58,3 +60,6 @@ export function startJob(list: List, params: JobParams, profile: string): TagJob
 }
 
 export const stopJob = stop;
+
+/** Tagging jobs running in this process, for the deploy script's wait. */
+export const taggingRunning = () => runningHere();

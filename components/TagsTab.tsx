@@ -9,6 +9,7 @@
  * lib/tags-tab.ts holds the rules.
  */
 
+import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { C, CardChip, CardPick, MARK, RemoveButton, useUndo } from './PlanTab';
@@ -42,6 +43,8 @@ const H2 = ({ n, children, extra }: { n?: number; children: React.ReactNode; ext
 );
 
 export default function TagsTab({ listId, version, onTab, cardOf, onCard }: Props) {
+  // A deploy is under way: nothing new starts until it is back (handoff 9).
+  const updating = useUpdating();
   const [v, setV] = useState<TagsView | null>(() => api.peek<TagsView>(api.categoriesPath(listId)) ?? null);
   const [error, setError] = useState<string | null>(null);
   // Saves run one after another and nothing is disabled meanwhile (see PlanTab): a double tap on the same thing is dropped.
@@ -113,7 +116,7 @@ export default function TagsTab({ listId, version, onTab, cardOf, onCard }: Prop
   const comboCount = s1.combos.length;
   const keyCount = s1.comboKeys.length;
   const combosLabel = [comboCount ? `${comboCount} ${comboCount === 1 ? 'combo' : 'combos'} found in the deck` : '', keyCount ? `${keyCount} key ${keyCount === 1 ? 'card' : 'cards'} several combos share` : ''].filter(Boolean).join(', and ');
-  const aiOff = !v.hasKey || !v.confirmed || running || pending > 0;
+  const aiOff = !v.hasKey || !v.confirmed || running || pending > 0 || updating;
   const aiNote = !v.hasKey ? 'Needs a Claude key on the server. Step 1 works without one.'
     : !v.confirmed ? 'AI reads your confirmed plan, so confirm the plan first.'
       : step1Open > 0 ? `Best after “More from your cards”: AI works with what is on the deck. ${step1Open} still to look at there.` : 'AI has your choices to work with.';
