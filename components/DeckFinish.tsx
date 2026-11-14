@@ -171,6 +171,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
           {d.size > 100 ? <button className={C.go} onClick={() => onTab('tune')}>Next: Trim {d.size - 100}</button> : <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>}
+          {d.size === 100 && <button className={C.btn} onClick={() => onTab('upgrades')} data-finish-upgrades>See what would make it better</button>}
           <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, onChanged)}>Undo</button>
           <button className={C.btn} disabled={busy} onClick={() => act({ action: 'reset' })}>Finish again</button>
         </div>

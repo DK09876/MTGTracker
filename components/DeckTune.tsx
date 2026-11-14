@@ -19,6 +19,7 @@ import AiModelPicker from './AiModelPicker';
 import CutRules from './CutRules';
 import DeckFinish from './DeckFinish';
 import DeckTrim from './DeckTrim';
+import DeckUpgrades from './DeckUpgrades';
 import ManaCost from './ManaCost';
 import PlanLine from './PlanLine';
 import Tip from './Tip';
@@ -215,7 +216,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         })}
       </div>
 
-      {!((current === 'cuts' || (current === 'finish' && !state.finish?.showRules)) && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
+      {!((current === 'cuts' || (current === 'finish' && !state.finish?.showRules) || (current === 'upgrades' && !state.groups.length)) && !state.changes.add.length && !state.changes.cut.length) && <Changes state={state} sections={sections} busy={busy} cutsTo={cutsTo ?? state.cutsTo.id} onCutsTo={setCutsTo}
         onUnstage={(k) => unstage([k])} onClear={() => act(() => api.tuneAct(listId, { action: 'clear' }))} onApply={apply} />}
 
       {note && (
@@ -240,11 +241,14 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
         {current === 'find' && state.pile && <PileQuestion pile={state.pile} busy={busy} onPick={(choice) => choice === 'cut' ? pick('cuts') : act(() => api.tuneAct(listId, { action: 'pile', choice }))} />}
 
-        {current === 'finish' && <DeckFinish listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : onTab(t))}
+        {current === 'upgrades' && <DeckUpgrades listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : onTab(t))}
+          onChanged={async () => { await onChanged(); await load(intent, symptom); }} />}
+
+        {current === 'finish' && <DeckFinish listId={listId} version={version} onCard={onCard} onTab={(t) => (t === 'tune' ? pick('cuts') : t === 'upgrades' ? pick('upgrades') : onTab(t))}
           onChanged={async () => { await onChanged(); await load(intent, symptom); }}
           showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
-        {current !== 'finish' && current !== 'cuts' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
+        {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
           onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
 
         {current === 'cuts' ? (
@@ -265,7 +269,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
             </div>
           </details>
         ) : (<>
-        {groups.length === 0 && current !== 'finish' && !(current === 'find' && state.pile && !state.pile.choice) && (
+        {groups.length === 0 && current !== 'finish' && current !== 'upgrades' && !(current === 'find' && state.pile && !state.pile.choice) && (
           <p className="rounded-2xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted)]">
             {current === 'swaps' && !state.pool ? 'Nothing waits in a section set to “Might go in”. Find cards can save some to your Maybeboard, or ask Claude for swaps.'
                 : 'Nothing to suggest here right now.'}

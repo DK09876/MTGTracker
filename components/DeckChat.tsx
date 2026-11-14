@@ -291,7 +291,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
               {(m.pages ?? (m.go ? [m.go] : [])).map((g) => (
                 <div key={g.page} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[#d6aa2e]/50 bg-[#d6aa2e]/[0.07] px-3 py-2" data-chat-go={g.page}>
                   <button onClick={() => go(g)} disabled={going || !onGo} className="min-h-9 rounded-xl bg-[#d6aa2e] px-3.5 text-sm font-bold text-[#15110a] hover:brightness-110 disabled:opacity-60">{goLabel(g, planConfirmed, size)}</button>
-                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim and Finish open once the plan is confirmed. ' : ''}{g.why}</span>}
+                  {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim, Finish and Upgrades open once the plan is confirmed. ' : ''}{g.why}</span>}
                 </div>
               ))}
               {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}

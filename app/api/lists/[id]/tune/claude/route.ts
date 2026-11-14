@@ -36,7 +36,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as { intent?: string; instructions?: string; problem?: string };
   const intent = INTENTS.find((i) => i.id === b.intent)?.id as Intent | undefined;
-  if (!intent || intent === 'finish') return NextResponse.json({ error: intent ? 'Finish the deck runs from its own tab' : 'Say what to tune' }, { status: 400 });
+  if (!intent || intent === 'finish' || intent === 'upgrades') return NextResponse.json({ error: intent ? `${intent === 'finish' ? 'Finish the deck' : 'Upgrades'} runs from its own tab` : 'Say what to tune' }, { status: 400 });
   const model = appModel(profile, 'tagging', list.name);
   if (!model) return NextResponse.json({ error: 'No model API key is set on the server' }, { status: 503 });
   const instructions = typeof b.instructions === 'string' ? b.instructions.slice(0, 2000) : '';

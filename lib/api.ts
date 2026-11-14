@@ -919,6 +919,26 @@ export const finishAct = (listId: string, act: FinishAction) => {
   return paid ? spending(work) : work;
 };
 
+/** Upgrades for a finished deck (lib/upgrades.ts). */
+export type UpgradesView = import('./upgrades-shared').UpgradesView;
+export type UpgradesAction =
+  | { action: 'settings'; count?: number; sources?: import('./upgrades-shared').UpgradeSources }
+  | { action: 'find'; rerun?: boolean; message?: string }
+  | { action: 'choices'; choices: UpgradesView['choices'] }
+  | { action: 'unskip'; name: string }
+  | { action: 'apply' }
+  | { action: 'undo' }
+  | { action: 'reset' };
+export const upgrades = (listId: string) => get<UpgradesView>(`lists/${listId}/upgrades`);
+export const upgradesAct = (listId: string, act: UpgradesAction) => {
+  const paid = act.action === 'find';
+  const work = send(`lists/${listId}/upgrades`, 'POST', act).then(json<UpgradesView>).finally(() => {
+    if (paid) jobsChanged();
+    if (act.action === 'apply' || act.action === 'undo') forgetDeck(listId);
+  });
+  return paid ? spending(work) : work;
+};
+
 export type TuneState = import('./tune').TuneState;
 type TuneAction =
   | { action: 'stage'; items: import('./tune-shared').Suggestion[] }

@@ -225,6 +225,35 @@ function deckCards(ctx: Context): DeckCard[] {
   });
 }
 
+/**
+ * What swapping `incoming` in for `out` does to the job counts (handoff 10, item 12), in true statements: a job
+ * the outgoing card does that would drop under its range (when the new card doesn't do it), a job both do that is
+ * under its range and stays there (a like-for-like trade that doesn't fix it), a card that does two jobs, and one
+ * of the deck's ways to win. Swaps' warnings, for any pair.
+ */
+export function swapEffects(ctx: Context, incoming: ScryfallCard, out: ScryfallCard | null): string[] {
+  const inJobs = cardJobs(incoming, ctx.rolesOf(incoming));
+  const warns: string[] = [];
+  const jobOf = (id: string) => ctx.jobs.find((j) => j.id === id);
+  const name = (id: string) => (JOB_LABELS[id as JobId] ?? id);
+  if (!out) {
+    for (const j of inJobs) { const s = jobOf(j); if (s?.range && s.count < s.range[0]) warns.push(`${name(j)} would go up to ${s.count + 1}, of ${s.range[0]}–${s.range[1]}`); }
+    return warns;
+  }
+  const d = deckCards(ctx).find((c) => c.card.name === out.name);
+  const outJobs = d?.jobs ?? cardJobs(out, ctx.rolesOf(out));
+  for (const j of outJobs) {
+    const s = jobOf(j);
+    if (!s?.range) continue;
+    if (!inJobs.includes(j) && s.count - 1 < s.range[0]) warns.push(`${name(j)} would drop to ${s.count - 1}, under ${s.range[0]}–${s.range[1]}`);
+    else if (inJobs.includes(j) && s.count < s.range[0]) warns.push(`${name(j)} stays at ${s.count}, under ${s.range[0]}–${s.range[1]}: this trade doesn’t fix it`);
+  }
+  for (const j of inJobs) { const s = jobOf(j); if (s?.range && !outJobs.includes(j) && s.count < s.range[0]) warns.push(`${name(j)} would go up to ${s.count + 1}, of ${s.range[0]}–${s.range[1]}`); }
+  if (outJobs.length >= 2) warns.push(`${out.name} does two jobs: ${outJobs.map(name).join(' and ')}`);
+  if (d?.route) warns.push(`${out.name} is one of the deck’s ways to win`);
+  return warns;
+}
+
 /** What the plan says a card plays to: its styles and themes. */
 function planOf(ctx: Context, card: ScryfallCard): string[] {
   const text = [card.type_line, card.oracle_text, ...(card.card_faces ?? []).map((f) => f.oracle_text)].filter(Boolean).join('\n');
@@ -250,7 +279,13 @@ function addReason(ctx: Context, c: ScryfallCard, inDeck: Set<string>): string |
   const owned = ctx.where.has(c.oracle_id ?? '') || ctx.pool.some((p) => p.card.name === c.name);
   if (ctx.plan.own && !owned) return `${c.name} isn't in your collection, and this deck is set to only cards you own`;
   const budget = ctx.plan.budget;
-  if (budget !== null && !ctx.where.has(c.oracle_id ?? '') && Number(c.prices?.usd ?? 0) > budget) return `${c.name} is over your $${budget} budget`;
+  // A missing price is unknown, not free (handoff 10, item 26): a card the owner doesn't have can't be checked
+  // against the budget without one. The owner's own cards are never over it.
+  if (budget !== null && !owned) {
+    const p = c.prices?.usd == null ? null : Number(c.prices.usd);
+    if (p === null || !Number.isFinite(p)) return `${c.name} has no price, so it can't be checked against your $${budget} budget`;
+    if (p > budget) return `${c.name} is over your $${budget} budget`;
+  }
   return null;
 }
 const inDeckOf = (ctx: Context) => {

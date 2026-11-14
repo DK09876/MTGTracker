@@ -11,7 +11,7 @@
 
 import { useCallback, useState } from 'react';
 
-export type ListSort = 'claude' | 'choice' | 'mv' | 'name';
+export type ListSort = 'claude' | 'choice' | 'mv' | 'name' | 'price';
 export const SORTS: Array<[ListSort, string]> = [['claude', 'Claude’s order'], ['choice', 'By choice'], ['mv', 'By mana value'], ['name', 'By name']];
 
 export interface ListView { filter: string; sort: ListSort; folded: string[]; /** Bumped on every filter press (not kept): pressing the same filter again re-applies it. */ press?: number }
@@ -60,15 +60,18 @@ export function useShown<T>(items: T[], name: (t: T) => string, test: (t: T) => 
 }
 
 /** Rows in a group in the chosen order; Claude's order keeps the list as it came. */
-export function sortRows<T>(rows: T[], sort: ListSort, of: { choice: (t: T) => number; mv: (t: T) => number; name: (t: T) => string }): T[] {
+export function sortRows<T>(rows: T[], sort: ListSort, of: { choice: (t: T) => number; mv: (t: T) => number; name: (t: T) => string; /** Upgrades: dearest first; a card with no price last. */ price?: (t: T) => number | null }): T[] {
   if (sort === 'claude') return rows;
-  const by = sort === 'choice' ? (a: T, b: T) => of.choice(a) - of.choice(b) : sort === 'mv' ? (a: T, b: T) => of.mv(a) - of.mv(b) : () => 0;
+  const p = (t: T) => of.price?.(t) ?? -1;
+  const by = sort === 'choice' ? (a: T, b: T) => of.choice(a) - of.choice(b) : sort === 'mv' ? (a: T, b: T) => of.mv(a) - of.mv(b) : sort === 'price' ? (a: T, b: T) => p(b) - p(a) : () => 0;
   return [...rows].sort((a, b) => by(a, b) || of.name(a).localeCompare(of.name(b)));
 }
 
-export default function ListControls({ filters, filter, onFilter, sort, onSort, label = 'Show' }: {
+export default function ListControls({ filters, filter, onFilter, sort, onSort, label = 'Show', sorts = SORTS }: {
   filters: Array<{ id: string; label: string; count: number }>;
   filter: string; onFilter: (id: string) => void; sort: ListSort; onSort: (s: ListSort) => void; label?: string;
+  /** The sorts offered (Upgrades: Claude's order, price, mana value, name). */
+  sorts?: Array<[ListSort, string]>;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-list-controls>
@@ -82,7 +85,7 @@ export default function ListControls({ filters, filter, onFilter, sort, onSort, 
       </div>
       <label className="ml-auto flex items-center gap-2 text-[13px] text-[var(--muted)]">Sort
         <select value={sort} onChange={(e) => onSort(e.target.value as ListSort)} className="min-h-9 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2 text-[13px] text-[var(--foreground)]" data-sort>
-          {SORTS.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+          {sorts.map(([id, l]) => <option key={id} value={id}>{l}</option>)}
         </select>
       </label>
     </div>
