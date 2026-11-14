@@ -1,5 +1,7 @@
 /**
  * One chat. GET: the chat, and whether Claude is still replying.
+ * PATCH {message, card: {id, name}}: a card name the answer marked that the app couldn't find, found by the owner's
+ * hover (handoff 10, item 39): stored with the message so the next view links it at once.
  * PATCH {message, change, do?}: one proposal. do 'apply' makes it happen
  * (lib/chat-actions.ts), 'undo' takes it back; with no do, it is marked as
  * sent to Tune.
@@ -10,7 +12,9 @@ import { NextResponse } from 'next/server';
 
 import { applyChange, ChatActionRefused, undoChange, type Undo } from '@/lib/chat-actions';
 import { deleteChat, getChat, saveChat, unreplace } from '@/lib/deck-chat';
+import { storeCard } from '@/lib/db';
 import { latestJob } from '@/lib/jobs';
+import { getCard, imageOf } from '@/lib/scryfall';
 import { requireList } from '@/lib/profile-route';
 
 export const runtime = 'nodejs';
@@ -39,7 +43,23 @@ export async function PATCH(request: Request, { params }: Ctx) {
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
   const chat = getChat(id, chatId);
-  const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo' };
+  const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo'; card?: { id?: unknown; name?: unknown } };
+  if (body.card) {
+    const m = chat?.messages[body.message ?? -1];
+    const name = typeof body.card.name === 'string' ? body.card.name.trim() : '';
+    const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+    // Only a name this answer marked, and the card as the card data has it (not the page's word).
+    if (!m || m.role !== 'assistant' || !name || !m.text.toLowerCase().includes(`[[${front(name)}`)) return NextResponse.json({ error: 'No such name in that answer' }, { status: 404 });
+    const card = typeof body.card.id === 'string' ? await getCard(body.card.id).catch(() => null) : null;
+    if (!card || front(card.name) !== front(name)) return NextResponse.json({ error: 'Couldn’t find this card' }, { status: 404 });
+    storeCard(card);
+    if (!(m.cards ?? []).some((c) => front(c.name) === front(card.name))) {
+      m.cards = [...(m.cards ?? []), { name: card.name, id: card.id, image: imageOf(card, 'normal') }];
+      if (m.unresolved) m.unresolved = Math.max(0, m.unresolved - 1) || undefined;
+    }
+    saveChat(chat!);
+    return NextResponse.json({ chat });
+  }
   const change = chat?.messages[body.message ?? -1]?.changes?.[body.change ?? -1];
   if (!chat || !change) return NextResponse.json({ error: 'No such change' }, { status: 404 });
   try {

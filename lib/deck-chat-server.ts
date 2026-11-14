@@ -15,9 +15,8 @@ import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
 import { newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
-import { imageOf, searchCards, ScryfallError, type ScryfallCard } from './scryfall';
+import { imageOf, searchCards, ScryfallError } from './scryfall';
 import { finishStore } from './finish';
-import { localCards } from './card-store';
 import { finishPool, heldCards, type Pool } from './finish-pool';
 import { searchLines } from './finish-shared';
 

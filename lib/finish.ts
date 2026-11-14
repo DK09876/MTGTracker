@@ -816,7 +816,10 @@ export function undoFinish(list: List): { moved: number } {
  * picks $0.41, a later round $0.05) that grows with the cards asked for, so
  * 5 cards no longer show the price of a fill.
  */
-const GUESS = { first: { base: 0.06, perCard: 0.008 }, later: { base: 0.04, perCard: 0.004 } };
+// Corrected from the real runs (handoff 10, item 40): first lists of 62 cost $0.41, $0.44 and $0.48 (the label read
+// $0.38); later rounds $0.05, $0.12 and $0.16 (the label read $0.20). No round had been recorded on the Pi yet: the
+// real ones ran before the recorder shipped in PR #55.
+const GUESS = { first: { base: 0.06, perCard: 0.0062 }, later: { base: 0.05, perCard: 0.002 } };
 const ROUNDS_KEY = 'finish.rounds';
 const measured = (): MeasuredRound[] => { try { return JSON.parse(getSetting(ROUNDS_KEY) ?? '[]') as MeasuredRound[]; } catch { return []; } };
 

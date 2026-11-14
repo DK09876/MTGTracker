@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import CardName from './CardName';
+import { cardLookup, exactName } from '@/lib/card-lookup';
 import ChatText from './ChatText';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
@@ -65,6 +66,19 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(question);
   const end = useRef<HTMLDivElement>(null);
+  // Marked names the app couldn't find (item 39): looked up once per name per page view, on hover or tap, through
+  // the app's own card search by exact name; a found card is kept with its message.
+  const finder = useRef(cardLookup<ScryfallCard>(async (n) => (await api.search(exactName(n))).cards.find((c) => c.name.split(' // ')[0].toLowerCase() === n.split(' // ')[0].trim().toLowerCase()) ?? null));
+  const [, setLooked] = useState(0);
+  const look = (m: number, name: string, retry = false) => {
+    const was = finder.current.state(name).status;
+    const p = finder.current.look(name, retry);
+    if (finder.current.state(name).status !== was) setLooked((x) => x + 1);
+    void p.then((st) => {
+      setLooked((x) => x + 1);
+      if (st.status === 'found' && chat) void api.keepFoundCard(listId, chat.id, m, { id: st.card.id, name }).then((r) => setChat(r.chat)).catch(() => {});
+    });
+  };
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -233,8 +247,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} />
-              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the card data, so {m.unresolved === 1 ? 'it isn’t a link' : 'they aren’t links'}.</p>}
+              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} lookup={{ state: (n) => finder.current.state(n), look: (n, retry) => look(i, n, retry) }} />
+              {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the app’s card data: point at {m.unresolved === 1 ? 'it' : 'one'} to look it up.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;
                 const what = c.kind === 'swap' ? <>{nm(c.out?.name ?? '', m)} out, {nm(c.name, m)} in</>

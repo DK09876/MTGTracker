@@ -404,7 +404,7 @@ export function pageButtons(changes: Change[], held: Array<{ kind: Change['kind'
 }
 
 /** The deck as Claude reads it: commander, brief, every card with its roles. */
-export function deckText(deck: ChatDeck): string {
+export function deckText(deck: ChatDeck, rules = true): string {
   const rolesOf = new Map<string, string[]>();
   for (const r of deck.roles ?? []) for (const c of r.cards) rolesOf.set(c, [...(rolesOf.get(c) ?? []), r.label]);
   const main = deck.cards.filter((c) => c.board === 'main');
@@ -425,7 +425,9 @@ export function deckText(deck: ChatDeck): string {
     ...main.map((x) => {
       const tags = [...(rolesOf.get(x.card.name) ?? []), ...(deck.tagsOf?.get(x.card.name) ?? []).map((t) => `#${t}`)];
       const why = deck.finishWhy?.get(x.card.name);
-      return `${x.quantity} ${x.card.name} - ${x.card.type_line ?? ''}${tags.length ? ` [${tags.join(', ')}]` : ''}${why ? ` (Finish: ${why})` : ''}`;
+      // The card's rules text (handoff 10, item 42, the owner's yes): Chat misjudged a recent card it only knew by name.
+      const text = rules ? (x.card.oracle_text ?? (x.card.card_faces ?? []).map((f) => f.oracle_text).filter(Boolean).join(' // ')).replace(/\n+/g, ' / ') : '';
+      return `${x.quantity} ${x.card.name}${rules && x.card.mana_cost ? ` ${x.card.mana_cost}` : ''} - ${x.card.type_line ?? ''}${text ? ` - ${text}` : ''}${tags.length ? ` [${tags.join(', ')}]` : ''}${why ? ` (Finish: ${why})` : ''}`;
     }),
     ...(deck.sections?.length ? ['', `Sections besides the main deck: ${deck.sections.map((x) => `${x.name} (${x.purpose === 'out' ? 'cards that came out' : x.purpose === 'in' ? 'cards to bring in' : x.purpose})`).join('; ')}`] : []),
     ...(deck.cards.some((x) => x.board !== 'main') ? ['', 'In the sections:', ...deck.cards.filter((x) => x.board !== 'main').map((x) => `${x.quantity} ${x.card.name}${deck.sections ? ` (${deck.sections.find((s) => s.id === x.board)?.name ?? x.board})` : ''}`)] : []),
