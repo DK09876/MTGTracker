@@ -9,7 +9,7 @@ import { sectionsOf } from './sections';
 import { tuneContext, whyNotAddable, type Context } from './tune';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
-import { cardsInList, database, deckTags, type List } from './db';
+import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
