@@ -410,7 +410,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
             <button className={C.go} disabled={busy || running || !adds.length} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Review and apply</button>
           </span>
         </div>
-        <span className="text-[13px] text-[var(--muted)]" data-finish-sub>{sub}</span>
+        <span className="line-clamp-3 min-h-[3.9em] text-[13px] leading-[1.3] text-[var(--muted)] sm:min-h-[2.6em]" title={sub} data-finish-sub>{sub}</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}

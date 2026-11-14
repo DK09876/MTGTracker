@@ -13,7 +13,7 @@ export type Intent = 'finish' | 'upgrades' | 'cuts' | 'fix' | 'lands';
 export const intentOf = (v: unknown): Intent | undefined => (v === 'find' || v === 'swaps' ? 'upgrades' : INTENTS.some((i) => i.id === v) ? v as Intent : undefined);
 
 export const INTENTS: Array<{ id: Intent; label: string; why: string }> = [
-  { id: 'finish', label: 'Finish the deck', why: 'Fill the deck from cards you own: Claude searches your collection for what fits the plan, you keep, rethink or skip each pick, and the app adds the lands. Or fill it free from the deck’s numbers.' },
+  { id: 'finish', label: 'Finish the deck', why: 'Fill the deck from cards you own, or with cards to buy: Claude searches your collection for what fits the plan (and names the cards worth buying, if you want), you keep, rethink or skip each pick, and the app adds the lands. Or fill it free from the deck’s numbers.' },
   { id: 'upgrades', label: 'Upgrades', why: 'What would make the deck better, from your cards or to buy, and what each card replaces. Claude searches your cards and names well-known ones you don’t have; the app checks every name, says where each copy is and prices it. The deck stays at 100.' },
   { id: 'cuts', label: 'Cuts', why: 'Where to find room when the deck is over 100, in the order to look: flagged cards, a heavy curve, your bracket, jobs over their range, cards off the plan.' },
   { id: 'fix', label: 'Fix a problem', why: 'Start from how the last games went. Each problem shows the numbers behind it and at most three swaps for it.' },

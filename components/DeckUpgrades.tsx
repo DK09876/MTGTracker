@@ -157,7 +157,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
     const d = view.done;
     const t = buyTotal(d.buy);
     return (
-      <section className={`${CARD} flex flex-col gap-3`} data-upgrades-done data-section="Upgrades">
+      <section className={`${CARD} flex flex-col gap-3`} data-upgrades-done>
         <h3 className="font-display text-2xl font-semibold">{d.swapped ? `Swapped in ${plural(d.swapped, 'card')}.` : ''}{d.maybe ? ` ${plural(d.maybe, 'card')} put in the Maybeboard.` : ''} The deck is at {d.size}.</h3>
         <p className="text-sm text-[var(--muted)]">{d.swapped ? `The cards they replaced are in ${d.cutsTo}, so you can bring one back. ` : ''}A snapshot from before is in History.</p>
         {d.buy.length > 0 && <BuyList rows={d.buy} copied={copied} onCopy={() => copy(d.buy)} />}
@@ -200,7 +200,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and the deck.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <button className={C.go} disabled={busy || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-upgrades-go>
-          ✦ Find {view.count} upgrades · Claude Opus · {cost}{view.cost.first.measured ? '' : ' estimated'}
+          ✦ Find {view.count} upgrades · Claude Opus · {cost}
         </button>
         {freeLink}
         <Tip label="What Claude reads"><span className="flex flex-col gap-1">{AI_READS.upgrades.map((r) => <span key={r}>• {r}</span>)}<span>At most {UPGRADE_SEARCHES} searches on the first list and {UPGRADE_SEARCHES_LATER} on each later one, counted by the app.</span></span></Tip>
@@ -247,7 +247,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
 
   if (!run) {
     return (
-      <section className="flex flex-col gap-4" data-section="Upgrades" data-upgrades>
+      <section className="flex flex-col gap-4" data-upgrades>
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}
         {setup}
@@ -274,7 +274,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
 
   if (review) {
     return (
-      <section className="flex flex-col gap-4" data-section="Upgrades" data-upgrades-review>
+      <section className="flex flex-col gap-4" data-upgrades-review>
         <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-upgrades-apply-bar>
           <span className="min-w-0 flex-[1_1_16rem] text-[13px] text-[var(--muted)]"><b className="tabular-nums text-[var(--foreground)]">{view.size} → {after}</b> · A snapshot is saved first. Undo puts every card back where it was.</span>
           <button className={C.btn} onClick={() => setReview(false)}>Back to the list</button>
@@ -305,7 +305,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
   }
 
   const sub = [
-    `Round ${run.round}. The deck stays at ${after}${after !== view.size ? ` (from ${view.size})` : ''}.`,
+    after === view.size ? `Round ${run.round}. The deck stays at ${after}.` : `Round ${run.round}. The deck goes from ${view.size} to ${after}: ${plural(after - view.size, 'card has', 'cards have')} no card to replace (Trim after, or choose one to take out yourself).`,
     asks.length ? `${asks.length} to rethink.` : '',
     skips.length ? `${skips.length} not for you.` : '',
   ].filter(Boolean).join(' ');
@@ -315,16 +315,16 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
   ];
 
   return (
-    <section className="flex flex-col gap-4" data-section="Upgrades" data-upgrades>
+    <section className="flex flex-col gap-4" data-upgrades>
       <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-col gap-1.5 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-upgrades-bar>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <b className="font-display text-lg tabular-nums" data-upgrades-count-line>{barLine}</b>
+          <b className="min-h-[2.5em] font-display text-lg leading-[1.25] tabular-nums sm:min-h-0" data-upgrades-count-line>{barLine}</b>
           <span className="ml-auto flex flex-wrap gap-2">
             <button className={C.btn} disabled={busy || running} onClick={() => act({ action: 'reset' })}>Start over</button>
             <button className={C.go} disabled={busy || running || !chosen.length} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Review and apply</button>
           </span>
         </div>
-        <span className="text-[13px] text-[var(--muted)]" data-upgrades-sub>{sub}</span>
+        <span className="line-clamp-2 min-h-[2.6em] text-[13px] leading-[1.3] text-[var(--muted)]" title={sub} data-upgrades-sub>{sub}</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}
@@ -379,7 +379,8 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
         {lv.filter !== 'all' && items.every((i) => !shown.has(i.name)) && <p className="py-3 text-sm text-[var(--muted)]">Nothing here. <button type="button" className={LINK} onClick={() => setLv({ filter: 'all' })}>Show all</button></p>}
       </div>
       {notForMe}
-      {freeLink && <p className="text-[13px] text-[var(--muted)]">Or browse the {freeLink}: no Claude, worked out by the app.</p>}
+      {freeLink && (showFree ? <p className="text-[13px] text-[var(--muted)]">The free list, worked out by the app with no Claude, is below. {freeLink}</p>
+        : <p className="text-[13px] text-[var(--muted)]">Or browse the {freeLink}: no Claude, worked out by the app.</p>)}
     </section>
   );
 }
@@ -445,7 +446,7 @@ function Row({ item, state, where, text, name, outName, onSet, onText, onWhere }
             {chip}{mark}
           </span>
           <span className={`flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] text-[var(--muted)] ${off}`} data-col="replaces">
-            {outName ? <>replaces {outName}{item.out?.why ? <span className="text-[var(--faint)]">: {item.out.why}</span> : null}</>
+            {outName ? <span className="min-w-0">replaces {outName}{item.out?.why ? <span className="text-[var(--faint)]">: {item.out.why}</span> : null}</span>
               : <span className="text-amber-300" title={item.outNote}>you choose what comes out{item.outNote ? ` · ${item.outNote}` : ''}</span>}
             {/* The row's menu: the second choice, same shape on every row, never a box that opens. */}
             <select value={where} onChange={(e) => onWhere(e.target.value as UpgradeWhere)} aria-label={`Where ${item.name} goes`} disabled={state !== 'in'}
