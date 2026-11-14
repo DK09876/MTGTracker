@@ -635,6 +635,9 @@ export const deckChat = (listId: string, chatId: string) =>
   fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
 export const askDeck = (listId: string, text: string, chatId?: string) =>
   send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+/** A marked card name found by hovering it (handoff 10, item 39): kept with the message. */
+export const keepFoundCard = (listId: string, chatId: string, message: number, card: { id: string; name: string }) =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, card }).then(json<{ chat: DeckChat }>);
 export const markChange = (listId: string, chatId: string, message: number, change: number) =>
   send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
 /** Apply one of Claude's proposals in a chat, or take it back. The deck's remembered answers are dropped, since it changed. */
@@ -899,7 +902,7 @@ export const trimAct = (listId: string, act: TrimAction) => {
 /** Finish the deck from your cards (lib/finish.ts). */
 export type FinishView = import('./finish-shared').FinishView;
 export type FinishAction =
-  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null }
+  | { action: 'settings'; copies?: import('./finish-shared').Copies; want?: number | null; lands?: number | null; buy?: import('./finish-shared').Buy; spend?: number | null }
   | { action: 'find'; rerun?: boolean; message?: string }
   | { action: 'choices'; choices: FinishView['choices'] }
   | { action: 'take'; name: string; group: string }

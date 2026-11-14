@@ -384,7 +384,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
   );
 }
 
-function BuyList({ rows, copied, onCopy }: { rows: Array<{ name: string; price: number | null }>; copied: boolean; onCopy: () => void }) {
+export function BuyList({ rows, copied, onCopy }: { rows: Array<{ name: string; price: number | null }>; copied: boolean; onCopy: () => void }) {
   const t = buyTotal(rows);
   return (
     <div className="flex flex-col gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--background)] p-3" data-upgrades-buylist>

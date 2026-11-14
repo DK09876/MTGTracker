@@ -6,7 +6,8 @@
  * GET: the view: the setting and the funnel, the latest picks with the
  * owner's choices, the searches of the round running now, the combos.
  * POST {action, ...}:
- *   settings {copies?, want?, lands?}  which cards may be used ("spare" | "any"),
+ *   settings {copies?, want?, lands?, buy?, spend?}  which cards may be used ("spare" | "any"),
+ *       cards to buy ("none" | "matter" | "any") and the most to spend on them in all (null: no limit),
  *       how many to add (null: fill to 100), and the lands in the deck when a
  *       fill to 100 is done (null: the plan's land number); kept per deck
  *   find {rerun?, message?}    ask Claude in the background: the first list,
@@ -70,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     switch (b.action) {
       case 'settings':
-        setFinish(id, { copies: b.copies, want: b.want, lands: b.lands });
+        setFinish(id, { copies: b.copies, want: b.want, lands: b.lands, buy: b.buy, spend: b.spend });
         break;
       case 'find': {
         if (!process.env.ANTHROPIC_API_KEY || profile === 'tour') return NextResponse.json({ error: NO_KEY }, { status: 503 });
