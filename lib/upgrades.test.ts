@@ -257,3 +257,31 @@ describe('apply and undo', { timeout: 180_000 }, () => {
     expect((await upgradesView(list, 'dk')).run!.items).toHaveLength(3);
   });
 });
+
+describe('the free list (Part B)', { timeout: 180_000 }, () => {
+  it('keeps the ranked order (not the name order), and a Maybeboard card over budget or past the bracket isn\'t offered', async () => {
+    // Ramp candidates: the cheaper, the better ranked; their names run the other way round.
+    const rocks = [card('Alpha Rock', { cmc: 5, type_line: 'Artifact' }), card('Mid Rock', { cmc: 3, type_line: 'Artifact' }), card('Zed Rock', { cmc: 1, type_line: 'Artifact' })];
+    const dear = card('Dear Waiting', { prices: { usd: '30.00' } });
+    const gc = card('Rhystic Waiting', { game_changer: true });
+    const cheap = card('Cheap Waiting', { prices: { usd: '0.50' } });
+    const { db, list } = await setup({ data: rocks });
+    const c = await import('./categories');
+    c.addCategory(list.id, { kind: 'job', name: 'Ramp', by: 'cards', jobId: 'ramp' });
+    const { ROLES_VERSION } = await import('./roles');
+    db.saveRoles(new Map(rocks.map((r) => [r.oracle_id!, ['ramp']] as [string, string[]])), ROLES_VERSION);
+    for (const x of [dear, gc, cheap]) db.addCardToList(list.id, x, 1, 'nonfoil', 'maybe');
+    db.saveRoles(new Map([dear, gc, cheap].map((r) => [r.oracle_id!, []] as [string, string[]])), ROLES_VERSION);
+    const plan = await import('./deck-plan');
+    plan.changePlan(list.id, { budget: 5, bracket: 2, confirm: true });
+    const { updateTune } = await import('./tune-store');
+    updateTune(list.id, (x) => { x.upgradesShowFree = true; });
+    const tune = await import('./tune');
+    const s = await tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent: 'upgrades' });
+    const ramp = s.groups.find((g) => g.key === 'free:ramp');
+    expect(ramp?.items.map((i) => i.add!.name)).toEqual(['Zed Rock', 'Mid Rock', 'Alpha Rock']);
+    expect(ramp?.why).toMatch(/not judged/);
+    const maybe = s.groups.filter((g) => g.key.startsWith('free:maybe')).map((g) => g.key);
+    expect(maybe.some((k) => /Dear Waiting|Rhystic Waiting/.test(k))).toBe(false);
+  });
+});

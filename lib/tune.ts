@@ -6,16 +6,17 @@
  * applyChanges. Server only.
  */
 
-import { allLocalCards, localCards } from './card-store';
+import { allLocalCards, cardsTagged, localCards, localCardsByOracle } from './card-store';
+import { cardPrices, priceText } from './card-price';
 import { deckIdentity } from './commanders';
 import { deckCutList } from './cut-list';
 import { lastReview } from './cut-review';
 import { addCardToList, cachedRoles, cardsInList, database, deckTags, setQuantity, updateListCard, type List, type ListedCard } from './db';
 import { drawKind, isImpulse, JOB_LABELS, jobsOf, landNumber, type Job, type JobId } from './deck-numbers';
 import { planFor, planStyles, type Plan } from './deck-plan';
-import { jobsOnDeck } from './categories';
+import { categories, jobsOnDeck } from './categories';
 import { planFlags } from './deck-context';
-import { commanderRoles as rolesOfCommander, deckRoles, deckRolesKnown, keeps } from './deck-roles';
+import { commanderRoles as rolesOfCommander, deckRoles, deckRolesKnown, jobCards, keeps } from './deck-roles';
 import type { Board } from './decklist';
 import { filterCards } from './filter';
 import { fitOf, fitProfile, quality, THEMES } from './fit';
@@ -462,76 +463,101 @@ function landPlanFor(ctx: Context, n: number): Suggestion[] {
   }).filter((x): x is Suggestion => !!x);
 }
 
-// --- Find cards ---------------------------------------------------------------------------
+// --- Upgrades' free list (the old Find cards and Swaps engines) ---------------------------
 
-async function findGroups(ctx: Context): Promise<{ groups: SuggestionGroup[]; pile: { main: number; pool: number; over: boolean; choice: 'fill' | 'best' | null } | null }> {
+const KEYWORD_NOTE = 'Matched by the commander’s themes; not judged.';
+
+/**
+ * Upgrades' free list (handoff 10, Part B), no Claude: (a) cards for jobs under their range, for the deck's own
+ * categories under the plan's size, and for built-in themes under theirs; (b) the one-card-from-a-combo group;
+ * (c) for each card waiting in the Maybeboard, the deck cards it could replace. At 100 each add is paired with a
+ * card to take out where one can be worked out (the next card on the cut list that does no job under its range),
+ * so the deck stays at 100; every pair carries what it does to the job counts. Also what a server with no key
+ * shows. Fixed on the way (FINDINGS.md): the ranked order is kept through the card-data re-read (it came back
+ * alphabetical), and a Maybeboard card goes through Tune's checks like everything else.
+ */
+export async function freeGroups(ctx: Context): Promise<SuggestionGroup[]> {
   const groups: SuggestionGroup[] = [];
-  const poolCount = count(ctx.pool);
-  const pile = (ctx.size < 100 && ctx.size + poolCount >= 110) || ctx.size > 110
-    ? { main: ctx.size, pool: poolCount, over: ctx.size > 110, choice: ctx.store.pile ?? null } : null;
-  if (pile && !pile.choice) return { groups, pile };
-  if (pile?.choice === 'fill') {
-    const lp = landPlan(ctx);
-    const landsShort = Math.max(0, Math.ceil(lp.range[0] - lp.have));
-    const room = Math.max(0, 100 - ctx.size);
-    if (landsShort) groups.push({ key: 'find:pile:lands', title: `Lands first · ${Math.min(landsShort, room)}`, why: `The deck has ${lp.have} lands and the plan wants ${lp.range[0]}–${lp.range[1]}.${landsShort >= room ? ` That alone is the ${room} cards to 100.` : ''}`, source: 'rules', items: landPlanFor(ctx, Math.min(landsShort, room)) });
-    const left = room - Math.min(landsShort, room);
-    if (left > 0) {
-      const picks = ctx.pool.filter((p) => !isLand(p.card)).map((p) => ({ p, s: rank(ctx, p.card).score + shortJobBonus(ctx, p.card) })).sort((a, b) => b.s - a.s).slice(0, left);
-      groups.push({ key: 'find:pile:fill', title: `From your Maybeboard · ${picks.length}`, why: 'The cards you set aside, best first: the jobs the deck is short of, then what fits the commander.', source: 'rules', items: picks.map(({ p }) => addItem(ctx, `find:pile:${p.card.name}`, p.card)) });
-    }
-    return { groups, pile };
-  }
-  if (pile?.choice === 'best') {
-    const lp = landPlan(ctx);
-    const landsShort = Math.max(0, Math.ceil(lp.range[0] - lp.have));
-    if (landsShort) groups.push({ key: 'find:pile:lands', title: `Lands · ${landsShort}`, why: `Whatever else changes, the plan wants ${lp.range[0]}–${lp.range[1]} lands.`, source: 'rules', items: landPlanFor(ctx, landsShort) });
-    groups.push(...poolSwaps(ctx, 'find:best', 12));
-    return { groups, pile };
-  }
-  // Jobs under their range.
+  const full = ctx.size >= 100;
+  const short = new Set(ctx.jobs.filter((j) => j.range && j.count < j.range[0]).map((j) => j.id as string));
+  const cut = full ? await deckCutList(ctx.list).catch(() => null) : null;
+  const outs = (cut?.candidates ?? []).map((c) => ({ c, card: ctx.main.find((m) => m.card.id === c.cardId)?.card }))
+    .filter((x): x is { c: (typeof x)['c']; card: ScryfallCard } => !!x.card && !isLand(x.card) && !ctx.protectedWhy.has(x.card.name) && !cardJobs(x.card, ctx.rolesOf(x.card)).some((j) => short.has(j)));
+  const usedOut = new Set<string>();
+  const taken = new Set<string>();
+  const pair = (card: ScryfallCard, key: string, why?: string): Suggestion => {
+    const item = addItem(ctx, key, card, why);
+    if (!full) { const w = swapEffects(ctx, card, null); return w.length ? { ...item, warn: w.join('. ') } : item; }
+    const out = outs.find((o) => !usedOut.has(o.card.name));
+    if (!out) return { ...item, warn: [...swapEffects(ctx, card, null), 'No card to take out was worked out: the deck goes over 100'].join('. ') };
+    usedOut.add(out.card.name);
+    const w = swapEffects(ctx, card, out.card);
+    return { ...item, cut: { ...ref(out.card, { from: 'main' }), quantity: 1 }, why: `${item.why}. Out: ${out.c.reasons[0] ?? 'the next card on the cut list'}`, ...(w.length ? { warn: w.join('. ') } : {}) };
+  };
+  /** The first n of these cards that may go in, in the order given (the ranked order, never the name order). */
+  const keepOrder = (names: string[], n: number) => {
+    const byName = new Map(localCards(names).map((c) => [front(c.name), c]));
+    const inOrder = names.map((x) => byName.get(front(x))).filter((c): c is ScryfallCard => !!c && !taken.has(c.name));
+    const ok = new Set(addable(ctx, inOrder, gcRoomOf(ctx)).map((c) => c.name));
+    const out = inOrder.filter((c) => ok.has(c.name)).slice(0, n);
+    for (const c of out) taken.add(c.name);
+    return out;
+  };
+  // (a) Jobs under their range.
   for (const id of JOBS) {
     const j = ctx.jobs.find((x) => x.id === id);
     if (!j?.range || j.count >= j.range[0]) continue;
     const found = await gapCards(ctx.list, ctx.profileId, id, { owned: ctx.plan.own, max: ctx.plan.budget, show: 24 }).catch(() => null);
-    if (!found) continue;
-    const ok = new Set(addable(ctx, localCards(found.cards.map((c) => c.name)), gcRoomOf(ctx)).map((c) => c.name));
-    const cards = localCards(found.cards.filter((c) => ok.has(c.name)).map((c) => c.name)).slice(0, 8);
-    if (cards.length) groups.push({ key: `find:${id}`, title: `${j.label} · ${j.count} of ${j.range[0]}–${j.range[1]}`, why: `In your colours, legal, within your bracket${ctx.plan.budget ? ` and $${ctx.plan.budget}` : ''}${ctx.plan.own ? ', from cards you own' : ''}. Ranked by fit with the commander, then how good each is at the job.`, source: 'rules', items: cards.map((c) => addItem(ctx, `find:${id}:${c.name}`, c)) });
+    const cards = keepOrder((found?.cards ?? []).map((c) => c.name), 8);
+    if (cards.length) groups.push({ key: `free:${id}`, title: `${j.label} · ${j.count} of ${j.range[0]}–${j.range[1]}`, why: `In your colours, legal, within your bracket${ctx.plan.budget ? ` and $${ctx.plan.budget}` : ''}${ctx.plan.own ? ', from cards you own' : ''}. Ranked by fit with the commander, then how good each is at the job. ${KEYWORD_NOTE}`, source: 'rules', items: cards.map((c) => pair(c, `free:${id}:${c.name}`)) });
   }
-  // Themes under their size.
-  for (const t of ctx.plan.snapshot.themes ?? []) {
-    if ((ctx.plan.stored.themes?.dropped ?? []).includes(t.id) || t.cards.length >= t.size) continue;
+  // The deck's own categories (from the card data's tags) under the plan's size for them.
+  const themes = ctx.plan.snapshot.themes ?? [];
+  const dropped = new Set(ctx.plan.stored.themes?.dropped ?? []);
+  const cats = await categories(ctx.list, jobCards).catch(() => []);
+  for (const c of cats) {
+    if (c.kind !== 'tag' || !c.slugs.length) continue;
+    const t = themes.find((x) => x.name.toLowerCase() === c.name.toLowerCase());
+    if (!t || dropped.has(t.id) || c.cards.length >= t.size) continue;
+    const pool = addable(ctx, localCardsByOracle([...new Set(c.slugs.flatMap((sl) => cardsTagged(sl)))]).filter((x) => !isLand(x) && !taken.has(x.name)), gcRoomOf(ctx))
+      .map((x) => ({ x, s: rank(ctx, x).score })).sort((a2, b2) => b2.s - a2.s).slice(0, 8).map((y) => y.x);
+    for (const x of pool) taken.add(x.name);
+    if (pool.length) groups.push({ key: `free:cat:${c.id}`, title: `${c.name} · ${c.cards.length} of ${t.size}`, why: `One of this deck’s own groups, under the plan’s size for it: cards the card data tags the same way. ${KEYWORD_NOTE}`, source: 'rules', items: pool.map((x) => pair(x, `free:cat:${c.id}:${x.name}`)) });
+  }
+  // Built-in themes under their size.
+  for (const t of themes) {
+    if (dropped.has(t.id) || t.cards.length >= t.size) continue;
     const def = THEMES.find((x) => x.name.toLowerCase() === t.id);
     if (!def) continue;
-    const cards = addable(ctx, allLocalCards().filter((c) => !isLand(c) && def.card.test(`${c.type_line}\n${c.oracle_text ?? ''}`)), gcRoomOf(ctx))
-      .map((c) => ({ c, s: rank(ctx, c).score })).sort((a, b) => b.s - a.s).slice(0, 8).map((x) => x.c);
-    if (cards.length) groups.push({ key: `find:theme:${t.id}`, title: `Theme: ${t.name} · ${t.cards.length} of ${t.size}`, why: 'Cards that do what this theme is about, best fit first.', source: 'rules', items: cards.map((c) => addItem(ctx, `find:theme:${t.id}:${c.name}`, c)) });
+    const cards = addable(ctx, allLocalCards().filter((c) => !isLand(c) && !taken.has(c.name) && def.card.test(`${c.type_line}\n${c.oracle_text ?? ''}`)), gcRoomOf(ctx))
+      .map((c) => ({ c, s: rank(ctx, c).score })).sort((a2, b2) => b2.s - a2.s).slice(0, 8).map((x) => x.c);
+    for (const c of cards) taken.add(c.name);
+    if (cards.length) groups.push({ key: `free:theme:${t.id}`, title: `Theme: ${t.name} · ${t.cards.length} of ${t.size}`, why: `Cards that do what this theme is about, best fit first. ${KEYWORD_NOTE}`, source: 'rules', items: cards.map((c) => pair(c, `free:theme:${t.id}:${c.name}`)) });
   }
-  // Combos one card away.
+  // (b) Combos one card away, in the lookup's order.
   try {
     const facts = await Promise.race([deckFacts(ctx.list, ctx.commanders.map((c) => c.name), ctx.main), new Promise<null>((r) => setTimeout(() => r(null), 6000))]);
     const almost = ((facts?.combos as { almost?: Array<{ id: string; cards: string[]; produces: string[]; missing: string[] }> } | null)?.almost ?? []).filter((c) => c.missing.length === 1);
-    const names = [...new Set(almost.map((c) => c.missing[0]))];
-    const cards = addable(ctx, localCards(names), gcRoomOf(ctx));
-    const items = cards.slice(0, 8).map((c) => {
-      const combo = almost.find((x) => x.missing[0] === c.name)!;
-      return addItem(ctx, `find:combo:${c.name}`, c, `Completes ${combo.cards.filter((n) => n !== c.name).join(' + ')}: ${combo.produces.slice(0, 2).join(', ').toLowerCase()}`);
+    const cards = keepOrder([...new Set(almost.map((c) => c.missing[0]))], 8);
+    const items = cards.map((c) => {
+      const combo = almost.find((x) => front(x.missing[0]) === front(c.name))!;
+      return pair(c, `free:combo:${c.name}`, `Completes ${combo.cards.filter((n) => n !== c.name).join(' + ')}: ${combo.produces.slice(0, 2).join(', ').toLowerCase()}`);
     });
-    if (items.length) groups.push({ key: 'find:combos', title: `One card from a combo · ${items.length}`, why: 'Combos the deck is one card away from, from Commander Spellbook.', source: 'rules', items });
+    if (items.length) groups.push({ key: 'free:combos', title: `One card from a combo · ${items.length}`, why: 'Combos the deck is one card away from, from Commander Spellbook.', source: 'rules', items });
   } catch { /* Spellbook is optional */ }
-  return { groups, pile };
+  // (c) The Maybeboard's cards, each with the deck cards it could replace.
+  groups.push(...poolSwaps(ctx, 'free:maybe', 12));
+  // One price per card (item 26): the printing the owner holds, else the cheapest the app knows.
+  const { heldCards } = await import('./finish-pool');
+  const held = heldCards(ctx.profileId, ctx.list.id);
+  const adds = groups.flatMap((g) => g.items.map((i) => i.add)).filter((a): a is NonNullable<Suggestion['add']> => !!a);
+  const known = new Map([...ctx.all.map((c) => c.card), ...localCards(adds.map((a) => a.name))].map((c) => [c.name, c]));
+  const prices = cardPrices([...new Set(adds.map((a) => a.name))].map((n) => known.get(n)).filter((c): c is ScryfallCard => !!c), held);
+  for (const a of adds) { const c = known.get(a.name); if (c) a.price = priceText(prices.get(c.oracle_id ?? c.id) ?? null); }
+  return groups;
 }
 
-/** A small push for cards that fill a job the deck is short of. */
-function shortJobBonus(ctx: Context, card: ScryfallCard): number {
-  return cardJobs(card, ctx.rolesOf(card)).reduce((n, j) => {
-    const s = ctx.jobs.find((x) => x.id === j);
-    return n + (s?.range && s.count < s.range[0] ? 0.5 : 0);
-  }, 0);
-}
-
-// --- Same job (the Swaps tab) -------------------------------------------------------
+// --- Same job (the free list's Maybeboard pairs) -------------------------------------------------------
 
 /**
  * For each card waiting in a "Might go in" section, the deck cards doing the
@@ -542,11 +568,16 @@ function shortJobBonus(ctx: Context, card: ScryfallCard): number {
 function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[] {
   const cards = deckCards(ctx);
   const jobs = ctx.jobs.map((j) => ({ id: j.id, label: j.label, count: j.count, range: j.range }));
-  const pool = ctx.pool.filter((p) => !isLand(p.card)).sort((a, b) => a.card.name.localeCompare(b.card.name)).slice(0, max);
+  const pool = ctx.pool.filter((p) => !isLand(p.card)).sort((a, b) => a.card.name.localeCompare(b.card.name));
   const groups: SuggestionGroup[] = [];
   for (const p of pool) {
+    if (groups.length >= max) break;
+    // The incoming card goes through Tune's checks like everything else: only cards I own, budget, bracket, rule (FINDINGS E).
+    if (whyNotAddable(ctx, p.card)) continue;
     const roles = ctx.rolesOf(p.card);
-    const options = sameJob({ card: p.card, roles, jobs: cardJobs(p.card, roles), plan: planOf(ctx, p.card) }, cards, jobs, 3);
+    const options = sameJob({ card: p.card, roles, jobs: cardJobs(p.card, roles), plan: planOf(ctx, p.card) }, cards, jobs, 3)
+      // A Game Changer for a Game Changer is fine; any other trade must leave the bracket's room.
+      .filter((o) => !whyNotAddable(ctx, p.card, o.out.card));
     if (!options.length) continue;
     const section = ctx.sections.find((s) => s.id === p.board)?.name ?? 'Maybeboard';
     groups.push({
@@ -555,7 +586,9 @@ function poolSwaps(ctx: Context, prefix: string, max: number): SuggestionGroup[]
         key: `${prefix}:${p.card.name}:${o.out.card.name}`,
         add: { ...ref(p.card, { from: p.board, where: `in your ${section}` }), quantity: 1 },
         cut: { ...ref(o.out.card, { from: 'main' }), quantity: 1 },
-        why: o.why, warn: o.warn, how: o.how,
+        why: o.why, how: o.how,
+        // Swaps' warnings, and a like-for-like inside a job under its range says it doesn't fix it (FINDINGS E5).
+        warn: [...new Set([...(o.warn ? o.warn.split('. ') : []), ...swapEffects(ctx, p.card, o.out.card).filter((w) => /stays at/.test(w))])].join('. ') || undefined,
       })),
     });
   }
@@ -773,12 +806,13 @@ export interface TuneState {
   staged: string[];
   log: TuneStore['log'];
   bracket: number | null;
-  pile?: { main: number; pool: number; over: boolean; choice: 'fill' | 'best' | null } | null;
   fix?: { symptom: Symptom; evidence: string[] };
   lands?: { have: number; range: [number, number]; want: number; how: { inputs: string[]; steps: string[] }; mine: boolean; colors: Array<{ color: string; name: string; share: number; sources: number; needed: number | null; neededFor: string | null }> };
   cuts?: { counts: Record<string, number>; type: { type: 'A' | 'B'; why: string }; curve: string | null; settings: unknown; overridden: Record<string, string> };
   /** Finish the deck: whether the free picks from the deck's numbers are shown (Claude's come from lib/finish.ts). */
   finish?: { showRules: boolean };
+  /** Upgrades: whether the free list from the deck's numbers is shown (Claude's comes from lib/upgrades.ts). */
+  upgrades?: { showFree: boolean };
 }
 
 export async function tuneState(list: List, profileId: string, opts: { intent?: Intent; symptom?: Symptom } = {}): Promise<TuneState> {
@@ -794,10 +828,9 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
   const landsShort = Math.ceil(lp.range[0] - lp.have);
   // A badge only for a hard failure: lands far under (lib/hard-checks.ts).
   if (ctx.size >= 90 && landsFarUnder(lp.have, lp.range)) badges.lands = `${landsShort} under`;
-  if (poolCount && ctx.size >= 95) badges.swaps = String(ctx.pool.filter((p) => !isLand(p.card)).length);
   const flags = deckFlags({ commander: list.commander, cards: ctx.main }).filter((f) => !f.commander).length;
   if (flags && !badges.cuts) badges.cuts = `${flags} flagged`;
-  if (ctx.size < 100) badges.find = `${100 - ctx.size} to add`;
+  if (ctx.size < 100) badges.finish = `${100 - ctx.size} to add`;
 
   let groups: SuggestionGroup[] = [];
   const out: Partial<TuneState> = {};
@@ -807,8 +840,12 @@ export async function tuneState(list: List, profileId: string, opts: { intent?: 
     groups = showRules ? finishGroups(ctx) : [];
     out.finish = { showRules };
   }
-  else if (intent === 'find') { const f = await findGroups(ctx); groups = f.groups; out.pile = f.pile; }
-  else if (intent === 'swaps') groups = poolSwaps(ctx, 'swaps', 12);
+  else if (intent === 'upgrades') {
+    // Claude's list is a conversation of its own (lib/upgrades.ts); the free list shows when asked, or with no key.
+    const showFree = !!ctx.store.upgradesShowFree;
+    groups = showFree ? await freeGroups(ctx) : [];
+    out.upgrades = { showFree };
+  }
   else if (intent === 'cuts') { const c = await cutGroups(ctx, lp.landCut); groups = [...c.groups]; if (lp.have > lp.range[1]) groups.splice(flags ? 1 : 0, 0, ...lp.groups.map((g) => ({ ...g, filter: 'other' as CutFilter }))); out.cuts = { counts: c.counts, type: c.type, curve: c.curve, settings: c.settings, overridden: c.overridden }; }
   else if (intent === 'fix') { const symptom = opts.symptom ?? 'gas'; const f = await fixGroups(ctx, symptom); groups = f.groups; out.fix = { symptom, evidence: f.evidence }; }
   else if (intent === 'lands') groups = lp.groups;

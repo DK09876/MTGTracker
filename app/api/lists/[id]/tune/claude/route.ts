@@ -14,7 +14,7 @@ import { latestJob, startJob } from '@/lib/jobs';
 import { requireList, requirePlan } from '@/lib/profile-route';
 import { tuneState } from '@/lib/tune';
 import { tuneIdeas } from '@/lib/tune-claude';
-import { INTENTS, SYMPTOMS, type Intent } from '@/lib/tune-shared';
+import { intentOf, INTENTS, SYMPTOMS } from '@/lib/tune-shared';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (locked) return locked;
   const { list, profile } = owned;
   const b = await request.json().catch(() => ({})) as { intent?: string; instructions?: string; problem?: string };
-  const intent = INTENTS.find((i) => i.id === b.intent)?.id as Intent | undefined;
+  const intent = intentOf(b.intent);
   if (!intent || intent === 'finish' || intent === 'upgrades') return NextResponse.json({ error: intent ? `${intent === 'finish' ? 'Finish the deck' : 'Upgrades'} runs from its own tab` : 'Say what to tune' }, { status: 400 });
   const model = appModel(profile, 'tagging', list.name);
   if (!model) return NextResponse.json({ error: 'No model API key is set on the server' }, { status: 503 });

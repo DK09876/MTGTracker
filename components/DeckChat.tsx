@@ -124,7 +124,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
       ...adds.map((a, k) => ({ key: `${chat.id}:${m}:${a.j}`, add: card(a.c), ...(cuts[k] ? { cut: card(cuts[k].c) } : {}), why: [a.c.why, cuts[k]?.c.why].filter(Boolean).join(' Out: ') })),
       ...cuts.slice(adds.length).map((x) => ({ key: `${chat.id}:${m}:${x.j}`, cut: card(x.c), why: x.c.why })),
     ];
-    const intent = adds.length && cuts.length ? 'swaps' : adds.length ? 'find' : 'cuts';
+    const intent = adds.length ? 'upgrades' : 'cuts';
     try {
       await api.tuneAct(listId, { action: 'propose', intent, title: `From Chat · ${items.length}`, why: `Claude proposed these in “${chat.title}”.`, items });
       let next = chat;
@@ -294,7 +294,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim, Finish and Upgrades open once the plan is confirmed. ' : ''}{g.why}</span>}
                 </div>
               ))}
-              {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'swaps' ? 'Swaps' : sent[`${i}`] === 'find' ? 'Find cards' : 'Cuts'}: nothing changes until you accept them there.</p>}
+              {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'cuts' ? 'Cuts' : 'Upgrades'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>
           )

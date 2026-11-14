@@ -12,7 +12,7 @@ import { logShown, type CardSide, type ShownBatch, type Task } from './suggestio
 import type { CardRef, Intent, SuggestionGroup } from './tune-shared';
 
 /** Which task in the deck flow each Tune intent is. */
-export const TASK_OF: Record<Intent, Task> = { cuts: 'trim', find: 'find', finish: 'build', upgrades: 'tune', swaps: 'tune', fix: 'tune', lands: 'tune' };
+export const TASK_OF: Record<Intent, Task> = { cuts: 'trim', finish: 'build', upgrades: 'tune', fix: 'tune', lands: 'tune' };
 
 /** A card as the log keeps it: its oracle id (from the stored printing, else the card copy) and name. */
 function side(ref: CardRef | undefined, oracleOf: Map<string, string>): CardSide | null {

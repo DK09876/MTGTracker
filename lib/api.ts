@@ -951,6 +951,7 @@ type TuneAction =
   | { action: 'keep'; cardId: string; keep: boolean; key?: string }
   | { action: 'reason'; key: string; chip?: import('./suggestion-shared').ReasonChip; text?: string }
   | { action: 'pile'; choice: 'fill' | 'best' | null }
+  | { action: 'upgradesFree'; showFree: boolean }
   | { action: 'finishPicks'; showRules?: boolean }
   | { action: 'verdict'; id: string; verdict: 'better' | 'same' | 'worse' }
   | { action: 'propose'; intent?: import('./tune-shared').Intent; title?: string; why?: string; items: import('./tune-shared').Suggestion[] };
