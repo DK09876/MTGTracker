@@ -436,7 +436,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
     rerun
       ? `This is list ${round}. Give up to ${need} more suggestion${need === 1 ? '' : 's'} for the slots that opened.${canSearch && sources !== 'buy' ? ` You have ${limit} searches.` : ''}`
       : `Give up to ${want} suggestions, the most important first, each with the card it replaces.${canSearch && sources !== 'buy' ? ` You have ${limit} searches.` : ''}`,
-    landsOk ? 'The owner asked about lands: land suggestions are welcome, each replacing a land.' : 'No lands.',
+    landsOk ? 'The owner asked about lands: land suggestions are welcome, each replacing a land.' : 'No lands this time (the app leaves lands out unless the owner asks). If the land count looks short, say so in the read.',
   ].join('\n').trim();
 
   const offer = { n: pool ? pool.lines.length : 0, colours: colourWords(ctx.identity), searched: canSearch && sources !== 'buy' };
