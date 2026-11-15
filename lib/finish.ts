@@ -329,6 +329,27 @@ export function buyModeFor(buy: Buy, ownOnly: boolean, pool: Pick<Pool, 'lines' 
   return buy;
 }
 
+/** How a named row was checked the first time: owned, or to buy at the price it shows (review PR56 round 2, 7). */
+const namedAs = (i: StoredItem) => ({ as: { owned: i.src !== 'buy', price: i.src === 'buy' ? i.price ?? null : null }, gcRoom: null, basicAgain: false });
+
+/** The Game Changers past the bracket's room among these cards going in, in order (none when there is no limit). */
+export function bracketOver(ctx: Context, cards: ScryfallCard[]): string[] {
+  let room = gcRoomOf(ctx);
+  if (room === null) return [];
+  const out: string[] = [];
+  for (const c of cards) if (c.game_changer) { if (room > 0) room -= 1; else out.push(c.name); }
+  return out;
+}
+
+/** The cards on Add now: searched ones from the pool, named ones by name. */
+function addCards(s: Pick<FinishStore, 'run' | 'choices'>, pool: Pick<Pool, 'cards'>): ScryfallCard[] {
+  if (!s.run) return [];
+  const names = chosenAdds(s.run.items, s.choices);
+  const rows = s.run.items.filter((i) => names.includes(i.name));
+  const byName = cardsNamed(rows.filter((i) => i.src === 'buy' || i.named).map((i) => i.name));
+  return rows.map((i) => (i.src === 'buy' || i.named ? byName.get(front(i.name)) : pool.cards.get(i.name.toLowerCase()) ?? pool.cards.get(front(i.name)))).filter((c): c is ScryfallCard => !!c);
+}
+
 /** A card Claude named (Part C) as a row: where the copy is comes from the app's check, never the model. */
 const namedItem = (p: Named, mark: StoredItem['mark'], themeNow: string): StoredItem => ({
   name: p.card.name, cardId: p.card.id, named: true, group: p.group, ...(p.group === 'theme' && (themeNow || p.theme) ? { theme: themeNow || p.theme } : {}), why: p.why, mark,
@@ -406,7 +427,9 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   // The pool may have changed since (the deck, the setting): what is no longer on offer opens its slot too. A card
   // named rather than searched (to buy, or owned outside the copies setting) stays while Tune's checks pass.
   const named = (i: StoredItem) => i.src === 'buy' || !!i.named;
-  const nameChecks = new Map([...cardsNamed(kept.filter(named).map((i) => i.name))].map(([k, c]) => [k, !whyNotAddable(ctx, c)]));
+  // Checked as the first pass checked them: owned or to buy, at the price the row shows (review PR56 round 2, 7).
+  const keptNamed = cardsNamed(kept.filter(named).map((i) => i.name));
+  const nameChecks = new Map(kept.filter(named).map((i) => { const c = keptNamed.get(front(i.name)); return [front(i.name), !!c && !whyNotAddable(ctx, c, null, namedAs(i))] as const; }));
   kept = kept.filter((i) => (named(i) ? nameChecks.get(front(i.name)) === true : pool.cards.has(i.name.toLowerCase()) || pool.cards.has(front(i.name))));
   skipped = new Set([...skipped].filter(Boolean));
   const need = Math.max(0, count.want - kept.length);
@@ -470,7 +493,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     });
     namedOut = anyWords ? checkOut({ out: named.out }, kept) : [];
     const checkedNames = checkNamed(ctx, held, named.raw, { need: buySlots + namedOut.length, taken: new Set(kept.map((i) => front(i.name))), leaveOut: leave, gcRoom: gcRoom === null ? null : gcRoom + kept.filter((i) => namedOut.includes(i.name) && keptCard(i)?.game_changer).length });
-    const spentKept = kept.reduce((n, i) => n + (i.src === 'buy' ? i.price ?? 0 : 0), 0);
+    // What the kept picks spend, without the ones Claude takes out (review PR56 round 2, 8).
+    const spentKept = kept.filter((i) => !namedOut.includes(i.name)).reduce((n, i) => n + (i.src === 'buy' ? i.price ?? 0 : 0), 0);
     const { taken, over } = withinTotal(checkedNames.picks, before.spend === null ? null : Math.max(0, before.spend - spentKept));
     const asked0 = new Set((reply?.marks ?? []).filter((m) => m.choice === 'ask').map((m) => front(m.name)));
     chosen = taken.map((p) => namedItem(p, rerun ? (asked0.has(front(p.card.name)) ? 'back' : 'new') : null, themeNow));
@@ -663,14 +687,22 @@ export async function takeOver(list: List, profileId: string, name: string): Pro
   const ctx = await tuneContext(list, profileId);
   const card = cardsNamed([name]).get(front(name));
   if (!card) throw new Error(`The app couldn’t find ${name}`);
+  const held = heldCards(profileId, list.id);
+  const pool = finishPool(ctx, s.copies, held);
   const adds = chosenAdds(s.run.items, s.choices);
-  const onAdd = cardsNamed(adds);
-  const room = gcRoomOf(ctx);
-  const left = room === null ? null : room - adds.filter((n) => onAdd.get(front(n))?.game_changer).length;
-  const why = whyNotAddable(ctx, card, null, { as: { owned: false, price: hit.price }, gcRoom: left, basicAgain: false });
+  const why = whyNotAddable(ctx, card, null, { as: { owned: false, price: hit.price }, gcRoom: null, basicAgain: false });
   if (why) throw new Error(why);
+  if (card.game_changer && bracketOver(ctx, [...addCards(s, pool), card]).includes(card.name)) throw new Error(`${card.name} would put the deck past bracket ${ctx.plan.bracket}: Skip a Game Changer on the list first`);
+  // On a fill to 100 one more pick takes the place of a land: said on the row, with the count (review PR56 round 2, 9).
+  let landNote = '';
+  if (s.run.full) {
+    const lp = landPlan(ctx);
+    const target = s.run.landsTarget ?? s.lands ?? lp.range[0];
+    const after = Math.round((lp.have + landsFor(ctx, held, s, lp, adds.length + 1, []).chosen.reduce((n, l) => n + l.n, 0)) * 10) / 10;
+    if (after < target) landNote = ` It takes the place of a land: the deck will hold ${after} lands of ${target}.`;
+  }
   const theme = s.run.items.find((i) => i.group === 'theme' && i.theme)?.theme;
-  const item: StoredItem = { name: card.name, cardId: card.id, named: true, src: 'buy', price: hit.price, group: 'theme', ...(theme ? { theme } : {}), why: 'You added it past your total.', mark: 'yours' };
+  const item: StoredItem = { name: card.name, cardId: card.id, named: true, src: 'buy', price: hit.price, group: 'theme', ...(theme ? { theme } : {}), why: `You added it past your total.${landNote}`, mark: 'yours' };
   update(list.id, (x) => { if (!x.run) return; x.run.items.push(item); if (x.run.buy) x.run.buy.over = x.run.buy.over.filter((o) => front(o.name) !== front(name)); });
 }
 
@@ -685,6 +717,11 @@ export async function takeCard(list: List, profileId: string, name: string, grou
   const pool = finishPool(ctx, s.copies, held);
   const card = pool.cards.get(name.toLowerCase()) ?? pool.cards.get(front(name));
   if (!card) throw new Error(`${name} can't go in this deck under these settings`);
+  // The bracket, over the deck and every pick on Add (review PR56 round 2, 6).
+  if (card.game_changer) {
+    const over = bracketOver(ctx, [...addCards(s, pool), card]);
+    if (over.includes(card.name)) throw new Error(`${card.name} would put the deck past bracket ${ctx.plan.bracket}: Skip a Game Changer on the list first`);
+  }
   const g = (FINISH_GROUPS as readonly string[]).includes(group) ? group as FinishGroup : 'theme';
   const theme = s.run.items.find((i) => i.group === g && i.theme)?.theme;
   const item = toItem(card, held.get(keyOf(card)), s.copies, { group: g, ...(theme ? { theme } : {}), why: 'You took it from the search results.', mark: 'yours' });
@@ -806,10 +843,18 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   const namedRows = s.run.items.filter((i) => names.includes(i.name) && (i.src === 'buy' || i.named));
   const byName = cardsNamed(namedRows.map((i) => i.name));
   const named = new Map<string, ScryfallCard>();
-  for (const i of namedRows) { const c = byName.get(front(i.name)); if (c && !whyNotAddable(ctx, c)) named.set(i.name, c); }
+  for (const i of namedRows) { const c = byName.get(front(i.name)); if (c && !whyNotAddable(ctx, c, null, namedAs(i))) named.set(i.name, c); }
   const cardOf = (n: string) => named.get(n) ?? pool.cards.get(n.toLowerCase()) ?? pool.cards.get(front(n));
   const cards = names.map(cardOf).filter((c): c is ScryfallCard => !!c);
   if (!cards.length) throw new Error('Nothing to add: put at least one card on Add');
+  // The bracket over the whole set going in, named and searched together (review PR56 round 2, 6). A searched
+  // Game Changer the pool now leaves out only because the bracket is full is named as that, not as "no longer
+  // on offer".
+  const missing = names.filter((n) => !cardOf(n));
+  const missingCards = cardsNamed(missing);
+  const bracketOnly = missing.map((n) => missingCards.get(front(n))).filter((c): c is ScryfallCard => !!c?.game_changer && gcRoomOf(ctx) !== null && !whyNotAddable(ctx, c, null, { gcRoom: null })).map((c) => c.name);
+  const past = [...bracketOver(ctx, cards), ...bracketOnly];
+  if (past.length) throw new Error(`These would put the deck past bracket ${ctx.plan.bracket}: ${past.join('; ')}. Skip ${past.length === 1 ? 'it' : 'them'}, or another Game Changer, first`);
   const lp = landPlan(ctx);
   const lands = s.run.full ? landsFor(ctx, held, s, lp, cards.length, cards.map(manaCostOf)).chosen : [];
   const undo: Done['undo'] = [];

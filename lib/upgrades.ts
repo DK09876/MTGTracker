@@ -42,7 +42,7 @@ import { localCards } from './card-store';
 import { addCardToList, aiCalls, cardsInList, database, getSetting, setQuantity, setSetting, updateListCard, type CardBefore, type List } from './db';
 import { cardsNamed } from './cards-named';
 import { finishStore } from './finish';
-import { finishPool, heldCards, isLand, type Held, type Pool } from './finish-pool';
+import { finishPool, heldCards, isLand, type Held } from './finish-pool';
 import { averageRounds, colourWords, parseQuery, searchLines, searchText, type Copies, type MeasuredRound } from './finish-shared';
 import { latestJob } from './jobs';
 import { planContext } from './plan-context';
@@ -51,6 +51,8 @@ import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from
 import { sectionsOf } from './sections';
 import { cutBoard } from './sections-shared';
 import { combosInDeck } from './spellbook';
+import { categories } from './categories';
+import { jobCards } from './deck-roles';
 import { deckCutList } from './cut-list';
 import { gcRoomOf, swapEffects, tuneContext, whyNotAddable, type Context } from './tune';
 import {
@@ -340,15 +342,21 @@ export const upgradesNot100 = (size: number) => (size < 100
   ? `Upgrades swaps cards in a deck at 100, and this one has ${size}. Finish the deck first.`
   : `Upgrades swaps cards in a deck at 100, and this one has ${size}. Trim it to 100 first.`);
 
-/** A search whose whole query is the exact name of a card that isn't on offer among the owner's cards. */
-export function notYours(q: string, pool: Pick<Pool, 'cards' | 'lands'>): boolean {
-  const p = parseQuery(q);
+/**
+ * A search that is only a card's name, for a card the owner doesn't hold (review round 2, 10): several words that
+ * together are an exact card name, or a quoted or !name query. Never a single plain word ("sacrifice",
+ * "reanimate" are card names too, and rules-text words), and never a card the owner holds in any way.
+ */
+export function notYours(q: string, held: Map<string, Held>): boolean {
+  const t = q.trim();
+  const quoted = /^!|^["“].*["”]$/.test(t);
+  const p = parseQuery(t.replace(/^!/, ''));
   if (p.types.length || p.notTypes.length || p.not.length || p.mv !== null || p.mvMin !== null || p.ignored.length) return false;
-  const name = q.replace(/^(?:name|n):/i, '').replace(/["“”]/g, '').trim();
-  if (name.length < 3) return false;
+  const name = t.replace(/^!/, '').replace(/^(?:name|n):/i, '').replace(/["“”]/g, '').trim();
+  if (name.length < 3 || (!quoted && name.split(/\s+/).length < 2)) return false;
   const card = cardsNamed([name]).get(front(name));
   if (!card || front(card.name) !== front(name)) return false;
-  return !pool.cards.has(front(card.name)) && !pool.lands.cards.has(front(card.name));
+  return !held.has(keyOf(card)) && ![...held.values()].some((h) => front(h.card.name) === front(card.name));
 }
 
 /** The conversation so far, in plain lines; nothing before the first list. */
@@ -383,13 +391,28 @@ async function almostCombos(ctx: Context): Promise<Array<{ cards: string[]; prod
   } catch { return []; }
 }
 
-/** The deck as Upgrades sends it: every main-deck card with its rules text, and Finish's reason on its picks. */
-export function deckLines(ctx: Context, finishWhy: Map<string, string>): string[] {
+/**
+ * The deck as Upgrades sends it: every main-deck card with its rules text, Finish's reason on its picks, and the
+ * plan's engine groups it belongs to (`engine`: the deck's own categories, by card name).
+ */
+export function deckLines(ctx: Context, finishWhy: Map<string, string>, engine: Map<string, string[]> = new Map()): string[] {
   return ctx.main.filter((c) => c.slot !== 'partner').map((c) => {
     const why = finishWhy.get(c.card.name);
     const never = ctx.protectedWhy.get(c.card.name);
-    return `- ${c.quantity > 1 ? `${c.quantity} ` : ''}${c.card.name} ${manaCostOf(c.card)} - ${typeLineOf(c.card)} - ${oracleTextOf(c.card).replace(/\n+/g, ' / ') || '(no text)'}${never ? ` [${never}]` : ''}${why ? ` (Finish picked it: ${why})` : ''}`;
+    const groups = engine.get(c.card.name) ?? [];
+    return `- ${c.quantity > 1 ? `${c.quantity} ` : ''}${c.card.name} ${manaCostOf(c.card)} - ${typeLineOf(c.card)} - ${oracleTextOf(c.card).replace(/\n+/g, ' / ') || '(no text)'}${never ? ` [${never}]` : ''}${groups.length ? ` [engine: ${groups.join(', ')}]` : ''}${why ? ` (Finish picked it: ${why})` : ''}`;
   });
+}
+
+/**
+ * The plan's engine groups (review round 2, 13): the deck's own categories (the owner's and the card data's tags),
+ * not the jobs every deck counts, nor ways to win or key cards, with the cards in each.
+ */
+export async function engineGroups(list: List): Promise<{ names: string[]; byCard: Map<string, string[]> }> {
+  const cats = (await categories(list, jobCards).catch(() => [])).filter((c) => (c.kind === 'own' || c.kind === 'tag') && c.cards.length);
+  const byCard = new Map<string, string[]>();
+  for (const c of cats) for (const x of c.cards) byCard.set(x.name, [...(byCard.get(x.name) ?? []), c.name]);
+  return { names: cats.map((c) => c.name), byCard };
 }
 
 /**
@@ -449,6 +472,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
   // card going out was the weak part). Never-cut cards and lands are left out.
   const cutList = await deckCutList(list).then((r) => r.candidates.filter((c) => !ctx.protectedWhy.has(c.name) && !ctx.main.some((m) => m.card.name === c.name && isLand(m.card))).slice(0, 20)
     .map((c) => `- ${c.name}${c.reasons[0] ? `: ${c.reasons[0]}` : ''}`)).catch(() => [] as string[]);
+  const engine = await engineGroups(list);
   const fs = finishStore(list.id);
   const finishWhy = new Map((fs.run?.items ?? fs.done?.session.run?.items ?? []).map((i) => [i.name, i.why] as const));
   const leaveOut = [...new Set([...before.notForMe.map((x) => x.name), ...(rerun ? [...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)] : [])])];
@@ -458,7 +482,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
     await planContext(list).catch(() => ''),
     '',
     `## The main deck (${ctx.size} with the commander), with rules text`,
-    ...deckLines(ctx, finishWhy),
+    ...deckLines(ctx, finishWhy, engine.byCard),
     ...(cutList.length ? ['', '## The app\'s cut list: its rules\' weakest cards first, with their main reason (a guide, not a judgement; never cut, the commander and lands left out)', ...cutList] : []),
     ...(combos.length ? ['', '## Combos the deck is one card away from (found by the app)', ...combos.map((c) => `- ${c.missing} completes ${c.cards.join(' + ')} => ${c.produces.join(', ')}`)] : []),
     ...(before.notForMe.length ? ['', '## Not for me on this deck, with the owner\'s reasons (never suggest these; apply the reasons to similar cards)', ...before.notForMe.map((x) => `- ${x.name}${x.why ? `: ${quote(x.why)}` : ''}`)] : []),
@@ -481,6 +505,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
     rerun
       ? `This is list ${round}. Give up to ${need} more suggestion${need === 1 ? '' : 's'} for the slots that opened.${canSearch && sources !== 'buy' ? ` You have ${limit} searches.` : ''}`
       : `Give up to ${want} suggestions, the most important first, each with the card it replaces.${canSearch && sources !== 'buy' ? ` You have ${limit} searches.` : ''}`,
+    ...(engine.names.length ? [`The plan is built on these groups: ${engine.names.join('; ')}. A card marked [engine: ...] comes out only for a clearly better card in that same group. Never take one out for a card in another job (ramp, draw, removal): find the room elsewhere.`] : []),
     landsOk ? 'The owner asked about lands: land suggestions are welcome, each replacing a land.' : 'No lands this time (the app leaves lands out unless the owner asks). If the land count looks short, say so in the read.',
   ].join('\n').trim();
 
@@ -515,7 +540,7 @@ export async function runUpgrades(call: Call, model: string, list: List, profile
       if (used >= limit) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'No searches left, give your answer now.' }); continue; }
       // A search that is only the name of a card the owner can't use here is refused and not counted (review 22):
       // the app checks every name given as one to buy.
-      if (notYours(q, pool)) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'That card isn\'t one of the owner\'s cards that can go in this deck. If you want it, name it as one to buy; the app checks it. That search wasn\'t counted.' }); continue; }
+      if (notYours(q, held)) { results.push({ type: 'tool_result', tool_use_id: use.id, content: 'That card isn\'t one of the owner\'s cards that can go in this deck. If you want it, name it as one to buy; the app checks it. That search wasn\'t counted.' }); continue; }
       used += 1;
       const landAsk = parseQuery(q).types.some((t) => t.startsWith('land'));
       const r = searchLines(landAsk ? pool.lands.lines : pool.lines, q);
@@ -634,15 +659,19 @@ export async function applyUpgrades(list: List, profileId: string): Promise<NonN
       if (room <= 0) { skipped.push({ name: i.name, why: `it would put the deck past bracket ${ctx.plan.bracket}` }); continue; }
       room -= 1;
     } else if (room !== null && o?.card.game_changer && !card.game_changer) room += 1;
-    // In: from the section it waits in, one copy (review 7); anything else a new row.
+    // In: from the section it waits in, one copy (review 7); anything else a new row. A printing sits on one board
+    // at a time, so a section holding several copies sends another printing in and keeps the rest; with no other
+    // printing to hand the row isn't applied and nothing is moved (review round 2, 11).
     const row = all.find((c) => front(c.card.name) === front(card.name) && c.board !== 'main');
-    if (row && row.quantity > 1) {
-      // A printing sits on one board at a time: another printing goes in, and the section keeps the rest.
-      const other = [...localCards([card.name]), card].find((c) => c && front(c.name) === front(card.name) && c.id !== row.card.id && !all.some((x) => x.card.id === c.id));
-      keep(row.card.id, { quantity: row.quantity, board: row.board });
-      if (other) { setQuantity(list.id, row.card.id, row.quantity - 1); keep(other.id, addCardToList(list.id, other, 1, 'nonfoil', 'main')); }
-      else { updateListCard(list.id, row.card.id, { board: 'main' }); setQuantity(list.id, row.card.id, 1); skipped.push({ name: i.name, why: `went in; the other ${row.quantity - 1} cop${row.quantity === 2 ? 'y' : 'ies'} in your ${boardLabel(sections, row.board)} left with it (Undo brings them back)` }); }
-    } else if (row) { keep(row.card.id, { quantity: row.quantity, board: row.board }); updateListCard(list.id, row.card.id, { board: 'main' }); }
+    const other = row && row.quantity > 1 ? [...localCards([card.name]), card].find((c) => c && front(c.name) === front(card.name) && c.id !== row.card.id && !all.some((x) => x.card.id === c.id)) : undefined;
+    if (row && row.quantity > 1 && !other) {
+      if (room !== null && card.game_changer && !o?.card.game_changer) room += 1;
+      else if (room !== null && o?.card.game_changer && !card.game_changer) room -= 1;
+      skipped.push({ name: i.name, why: `${row.quantity} copies wait in your ${boardLabel(sections, row.board)} as one printing: move one into the deck on the Cards tab` });
+      continue;
+    }
+    if (row && other) { keep(row.card.id, { quantity: row.quantity, board: row.board }); setQuantity(list.id, row.card.id, row.quantity - 1); keep(other.id, addCardToList(list.id, other, 1, 'nonfoil', 'main')); }
+    else if (row) { keep(row.card.id, { quantity: row.quantity, board: row.board }); updateListCard(list.id, row.card.id, { board: 'main' }); }
     else keep(card.id, addCardToList(list.id, card, 1, 'nonfoil', 'main'));
     // Out: to the cuts section (one copy of a card held in several just lowers the count).
     if (o) {
@@ -723,12 +752,14 @@ export async function upgradesView(list: List, profileId: string): Promise<Upgra
   const items: UpgradeItem[] = (s.run?.items ?? []).map(({ cardId, ...i }) => {
     const c = byId.get(cardId);
     const o = i.out ? ctx.main.find((m) => front(m.card.name) === front(i.out!.name))?.card : undefined;
-    return { ...i, out: i.out ? { ...i.out, image: o ? imageOf(o, 'normal') : null } : null, card: { id: cardId, image: c ? imageOf(c, 'normal') : null, manaCost: c ? manaCostOf(c) : '', typeLine: c ? typeLineOf(c) : '', text: c ? oracleTextOf(c) : '', cmc: c?.cmc ?? 0, land: c ? isLand(c) : false } };
+    return { ...i, gc: !!c?.game_changer, outGc: !!o?.game_changer, out: i.out ? { ...i.out, image: o ? imageOf(o, 'normal') : null } : null, card: { id: cardId, image: c ? imageOf(c, 'normal') : null, manaCost: c ? manaCostOf(c) : '', typeLine: c ? typeLineOf(c) : '', text: c ? oracleTextOf(c) : '', cmc: c?.cmc ?? 0, land: c ? isLand(c) : false } };
   });
   return {
     size: ctx.size,
     count: s.count,
     sources: ctx.plan.own ? 'mine' : s.sources,
+    gcRoom: gcRoomOf(ctx),
+    bracket: ctx.plan.bracket,
     ownOnly: ctx.plan.own,
     plan: { text: po.planText.trim() || null, confirmed: !!po.confirmedAt, budget: ctx.plan.budget },
     run: s.run ? { id: s.run.id, at: s.run.at, round: s.run.round, model: s.run.model, want: s.run.want, read: s.run.read, items, dropped: s.run.dropped, changes: s.run.changes ?? null } : null,

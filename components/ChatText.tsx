@@ -24,7 +24,7 @@ export default function ChatText({ text, names, cardOf, onOpen, lookup }: {
   cardOf: (name: string) => ScryfallCard | undefined;
   onOpen: (card: ScryfallCard) => void;
   /** A marked name the app couldn't find: looked up on hover or tap (item 39). */
-  lookup?: { state: (name: string) => LookupState<ScryfallCard>; look: (name: string, retry?: boolean) => void };
+  lookup?: { state: (name: string) => LookupState<ScryfallCard>; look: (name: string, retry?: boolean) => void; /** An answer is being written: no lookup until it is in. */ waiting?: boolean };
 }) {
   const blocks = useMemo(() => blocksOf(text), [text]);
   // Newer answers mark their card names [[like this]]: only those link. Older ones are matched against known names.
@@ -37,7 +37,7 @@ export default function ChatText({ text, names, cardOf, onOpen, lookup }: {
       if (marked && p.name && lookup) {
         const st = lookup.state(p.name);
         return st.status === 'found' ? <CardName key={j} name={p.text} card={st.card} onOpen={onOpen} />
-          : <LookupName key={j} name={p.text} state={st} onLook={(retry) => lookup.look(p.name!, retry)} onOpen={onOpen} />;
+          : <LookupName key={j} name={p.text} state={st} waiting={!!lookup.waiting} onLook={(retry) => lookup.look(p.name!, retry)} onOpen={onOpen} />;
       }
       return <SymbolText key={j} text={p.text} />;
     });

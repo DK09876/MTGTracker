@@ -28,7 +28,7 @@ import { roundPrice } from '@/lib/finish-shared';
 import { price } from '@/lib/price';
 import type { ScryfallCard } from '@/lib/scryfall';
 import {
-  buyListText, buyTotal, chosenIn, isBuy, ownLabel, UPGRADE_COUNTS, UPGRADE_SEARCHES, UPGRADE_SEARCHES_LATER, UPGRADE_SOURCES,
+  buyListText, buyTotal, chosenIn, isBuy, noBracketRoom, ownLabel, UPGRADE_COUNTS, UPGRADE_SEARCHES, UPGRADE_SEARCHES_LATER, UPGRADE_SOURCES,
   type UpgradeChoice, type UpgradeItem, type UpgradesView, type UpgradeWhere,
 } from '@/lib/upgrades-shared';
 
@@ -261,6 +261,8 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
 
   // --- the list ----------------------------------------------------------------------------
   const chosen = items.filter((i) => ins.includes(i.name));
+  // Rows on Swap in the bracket has no room for now (review round 2, 12): said on the row, left out at apply.
+  const noRoom = noBracketRoom(chosen.filter((i) => whereOf(i.name) === 'swap'), view.gcRoom);
   const swaps = chosen.filter((i) => whereOf(i.name) === 'swap');
   const maybes = chosen.filter((i) => whereOf(i.name) === 'maybe');
   const mine = swaps.filter((i) => !isBuy(i.own));
@@ -371,7 +373,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
             <div key={g.key} className="flex flex-col" data-upgrades-group={g.key}>
               <GroupHead title={g.title} count={g.rows.length} extra={lv.filter !== 'all' ? `${rows.length} shown` : ''} folded={folded} onToggle={() => setLv({ folded: folded ? lv.folded.filter((x) => x !== g.key) : [...lv.folded, g.key] })} />
               {!folded && rows.map((i) => (
-                <Row key={i.name} item={i} state={stateOf(i.name)} where={whereOf(i.name)} text={choices[i.name]?.text ?? ''}
+                <Row key={i.name} item={i} state={stateOf(i.name)} where={whereOf(i.name)} text={choices[i.name]?.text ?? ''} noRoom={noRoom.has(i.name) ? `No room under bracket ${view.bracket} now: Skip a Game Changer above, or this one won’t go in` : ''}
                   name={nameOf(i.name, i.card.id, i.card.image)} outName={i.out ? nameOf(i.out.name, i.out.id, i.out.image, '') : null}
                   onSet={(c) => choose(i, { choice: c })} onText={(t) => choose(i, { text: t })} onWhere={(w) => choose(i, { where: w })} />
               ))}
@@ -422,8 +424,8 @@ function Changes({ changes }: { changes: NonNullable<NonNullable<UpgradesView['r
  * me; the card, its cost, where the copy is and what it replaces (with the row's menu: into the deck, or the
  * Maybeboard instead); Claude's reason with what the swap does to the job counts; the owner's reason line.
  */
-function Row({ item, state, where, text, name, outName, onSet, onText, onWhere }: {
-  item: UpgradeItem; state: UpgradeChoice; where: UpgradeWhere; text: string; name: React.ReactNode; outName: React.ReactNode | null;
+function Row({ item, state, where, text, name, outName, onSet, onText, onWhere, noRoom }: {
+  item: UpgradeItem; state: UpgradeChoice; where: UpgradeWhere; text: string; name: React.ReactNode; outName: React.ReactNode | null; noRoom: string;
   onSet: (c: UpgradeChoice) => void; onText: (t: string) => void; onWhere: (w: UpgradeWhere) => void;
 }) {
   const buy = isBuy(item.own);
@@ -462,6 +464,7 @@ function Row({ item, state, where, text, name, outName, onSet, onText, onWhere }
           <span className={item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'}><span className="font-semibold text-[#c3a6e6]">✦</span> <b className="font-semibold text-[var(--foreground)]">{item.job}.</b> <SymbolText text={item.why} /></span>
           {item.wasBuy && <span className="text-[12px] text-emerald-300">Claude called it one to buy; you have it.</span>}
           {item.warn.map((w) => <span key={w} className="text-[12px] text-amber-300">{w}</span>)}
+          {noRoom && <span className="text-[12px] font-semibold text-[#f0714f]" data-upgrades-noroom>{noRoom}</span>}
         </span>
         <span className="relative col-span-2 min-w-0 @[44rem]:col-span-1">
           <input value={text} onChange={(e) => onText(e.target.value)} maxLength={300} data-col="reason" title={text.trim() || undefined}

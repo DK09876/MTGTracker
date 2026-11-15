@@ -51,6 +51,9 @@ export interface UpgradeItem {
   outNote?: string;
   /** What the swap does to the job counts, worked out by the app: true statements. */
   warn: string[];
+  /** A Game Changer coming in, and one going out: the page checks the bracket over the rows on Swap in (review round 2, 12). */
+  gc?: boolean;
+  outGc?: boolean;
   /** new: not on the last list; back: a Rethink that came back with a new reason. */
   mark: 'new' | 'back' | null;
   card: { id: string; image: string | null; manaCost: string; typeLine: string; text: string; cmc: number; land: boolean };
@@ -67,6 +70,9 @@ export interface UpgradesView {
   size: number;
   count: number;
   sources: UpgradeSources;
+  /** The bracket's room in the deck as it is (null: no limit), and the bracket. */
+  gcRoom?: number | null;
+  bracket?: number | null;
   /** "Only cards I own" on the plan: cards to buy are off, and the screen says so. */
   ownOnly: boolean;
   plan: { text: string | null; confirmed: boolean; budget: number | null };
@@ -103,6 +109,22 @@ export const isBuy = (o: UpgradeOwn): o is Extract<UpgradeOwn, { kind: 'buy' }> 
 /** The rows on Swap in (Swap in is the default when no choice is kept). */
 export const chosenIn = (items: Array<Pick<UpgradeItem, 'name'>>, choices: UpgradesView['choices']) =>
   items.filter((i) => (choices[i.name]?.choice ?? 'in') === 'in').map((i) => i.name);
+
+/**
+ * The rows on Swap in that the bracket has no room for, in list order: each Game Changer coming in for one that
+ * isn't needs room the deck and the rows above it haven't used; one going out frees room for later rows (as apply
+ * counts it). Shown on the row, so a row that relied on room from a row since unkept says so before apply.
+ */
+export function noBracketRoom(rows: Array<Pick<UpgradeItem, 'name' | 'gc' | 'outGc'>>, room: number | null | undefined): Set<string> {
+  const out = new Set<string>();
+  if (room === null || room === undefined) return out;
+  let left = room;
+  for (const r of rows) {
+    if (r.gc && !r.outGc) { if (left > 0) left -= 1; else out.add(r.name); }
+    else if (r.outGc && !r.gc) left += 1;
+  }
+  return out;
+}
 
 /** The buy list's total: cards with no price are left out of it and counted apart. */
 export function buyTotal(rows: Array<{ price: number | null }>): { total: number; priced: number; unpriced: number } {

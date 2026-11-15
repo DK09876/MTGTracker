@@ -406,3 +406,53 @@ describe('review PR56: the deck\'s limits hold in every path', { timeout: 180_00
     expect((await upgradesView(list, 'dk')).searches.map((x) => x.q)).toEqual(['Owned Draw']);
   });
 });
+
+
+describe('review PR56 round 2', { timeout: 180_000 }, () => {
+  it('10: a plain one-word search is never refused as a card name; a held card\'s name isn\'t either; a quoted name is', async () => {
+    const { list } = await setup({ boxed: [card('Owned Draw'), card('Held Two Words')], data: [card('Sacrifice'), card('Blood Artist')] });
+    const { notYours } = await import('./upgrades');
+    const { heldCards } = await import('./finish-pool');
+    const held = heldCards('dk', list.id);
+    expect(notYours('sacrifice', held)).toBe(false);
+    expect(notYours('Held Two Words', held)).toBe(false);
+    expect(notYours('Blood Artist', held)).toBe(true);
+    expect(notYours('"Sacrifice"', held)).toBe(true);
+    expect(notYours('!Sacrifice', held)).toBe(true);
+    expect(notYours('blood artist t:creature', held)).toBe(false);
+  });
+
+  it('11: several copies of one printing waiting in a section: nothing moves, and the row is listed as not applied', async () => {
+    const waiting = card('Only Printing');
+    const { db, list } = await setup({ data: [card('Up B')] });
+    db.addCardToList(list.id, waiting, 3, 'nonfoil', 'maybe');
+    const { runUpgrades, applyUpgrades } = await import('./upgrades');
+    await runUpgrades(stand([{ give: give([s('Only Printing', 'Deck Spell 1', 'mine'), s('Up B', 'Deck Spell 2')]) }]).call, 'claude-opus-5-5', list, 'dk');
+    const done = await applyUpgrades(db.getList(list.id, 'dk')!, 'dk');
+    expect(done.skipped).toEqual([{ name: 'Only Printing', why: '3 copies wait in your Maybeboard as one printing: move one into the deck on the Cards tab' }]);
+    expect(db.cardsInList(list.id).filter((c) => c.card.name === 'Only Printing').map((c) => `${c.board}:${c.quantity}`)).toEqual(['maybe:3']);
+    expect(db.cardsInList(list.id).find((c) => c.card.name === 'Deck Spell 1')?.board).toBe('main');
+    expect(done.size).toBe(100);
+  });
+
+  it('12: a row on Swap in that relied on room from a row since unkept is marked', async () => {
+    const { noBracketRoom } = await import('./upgrades-shared');
+    // No room in the deck: the first row frees one (a Game Changer out), so the second fits; unkeep the first and it doesn't.
+    const rows = [{ name: 'Frees', gc: false, outGc: true }, { name: 'Needs', gc: true, outGc: false }];
+    expect([...noBracketRoom(rows, 0)]).toEqual([]);
+    expect([...noBracketRoom(rows.slice(1), 0)]).toEqual(['Needs']);
+    expect([...noBracketRoom(rows.slice(1), null)]).toEqual([]);
+  });
+
+  it('13: the deck\'s engine groups go with the request, marked on their cards, with the rule said plainly', async () => {
+    const { list } = await setup({ data: [card('Up A')] });
+    const c = await import('./categories');
+    c.addCategory(list.id, { kind: 'own', name: 'Recursion', by: 'owner', cards: [{ key: 'o-Deck Spell 3', name: 'Deck Spell 3', by: 'owner' }] });
+    const { runUpgrades } = await import('./upgrades');
+    const st = stand([{ give: give([s('Up A', 'Deck Spell 1')]) }]);
+    await runUpgrades(st.call, 'claude-opus-5-5', list, 'dk');
+    const sys = (st.asked[0].system as Array<{ text: string }>)[1].text;
+    expect(sys).toMatch(/- Deck Spell 3 .* \[engine: Recursion\]/);
+    expect(JSON.stringify(st.asked[0].messages)).toMatch(/The plan is built on these groups: Recursion\. A card marked \[engine: \.\.\.\] comes out only for a clearly better card in that same group/);
+  });
+});

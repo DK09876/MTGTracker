@@ -17,9 +17,11 @@ import { imageOf, type ScryfallCard } from '@/lib/scryfall';
 
 const WIDTH = 220;
 
-export default function LookupName({ name, state, onLook, onOpen }: {
+export default function LookupName({ name, state, onLook, onOpen, waiting = false }: {
   name: string;
   state: LookupState<ScryfallCard>;
+  /** While an answer is being written: plain link text, no box and no lookup; the next hover after it looks up. */
+  waiting?: boolean;
   /** Look it up (retry: after a miss). */
   onLook: (retry?: boolean) => void;
   onOpen: (card: ScryfallCard) => void;
@@ -38,6 +40,9 @@ export default function LookupName({ name, state, onLook, onOpen }: {
     setAt({ x: x + 24 + WIDTH > window.innerWidth ? Math.max(8, x - WIDTH - 24) : x + 24, y: Math.min(window.innerHeight - h - 10, Math.max(10, y - h / 2)) });
   };
   const src = state.status === 'found' ? imageOf(state.card, 'normal') : null;
+  if (waiting && state.status !== 'found' && state.status !== 'loading') {
+    return <span className="underline decoration-dotted decoration-[var(--muted)] underline-offset-[3px]" title="Looks the card up once the answer is in" data-lookup-name={name} data-lookup="waiting">{name}</span>;
+  }
   return (
     <>
       <button type="button" data-lookup-name={name} data-lookup={state.status}

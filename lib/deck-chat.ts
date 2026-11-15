@@ -112,6 +112,32 @@ export function saveChat(chat: DeckChat): void {
   [chat.id, chat.listId, chat.profileId, chat.updatedAt, JSON.stringify(chat)]);
 }
 
+/**
+ * Every writer of a chat besides a new question reads the stored chat again immediately before saving and changes
+ * only its own part, with nothing awaited between the read and the save (review PR56 round 2, 1-2, 5): the reply job
+ * appends its answer to the chat as it is now, and Apply, Undo and "sent to Tune" set flags on one change. So an
+ * answer that lands while a change is applied, or a change applied while an answer is written, are both kept.
+ */
+export function appendReply(listId: string, chatId: string, message: ChatMessage): DeckChat | null {
+  const fresh = getChat(listId, chatId);
+  if (!fresh) return null;
+  // The earlier proposals this answer replaces, marked on the chat as stored now (applied and done ones never are).
+  markReplaced(fresh, message.changes ?? [], fresh.messages.length);
+  fresh.messages.push(message);
+  saveChat(fresh);
+  return fresh;
+}
+
+/** Change one proposal of one message on the chat as stored now; null when it isn't there. */
+export function updateChange(listId: string, chatId: string, message: number, change: number, edit: (c: Change, chat: DeckChat) => void): DeckChat | null {
+  const fresh = getChat(listId, chatId);
+  const c = fresh?.messages[message]?.changes?.[change];
+  if (!fresh || !c) return null;
+  edit(c, fresh);
+  saveChat(fresh);
+  return fresh;
+}
+
 export function getChat(listId: string, id: string): DeckChat | null {
   const row = db().get('SELECT chat FROM deck_chats WHERE id = ? AND listId = ?', [id, listId]) as { chat: string } | null;
   return row ? JSON.parse(row.chat) as DeckChat : null;

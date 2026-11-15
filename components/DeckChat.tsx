@@ -73,8 +73,13 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   // The chat open now: a lookup's answer for a chat that is no longer open is ignored (review PR56, 16).
   const openChat = useRef<string | null>(null);
   useEffect(() => { openChat.current = chat?.id ?? null; }, [chat?.id]);
+  // A found card the server wouldn't store yet (an answer was being written): stored once the answer is in.
+  const toStore = useRef<Array<{ chat: string; m: number; id: string; name: string }>>([]);
+  const store = (s: { chat: string; m: number; id: string; name: string }) => api.keepFoundCard(listId, s.chat, s.m, { id: s.id, name: s.name })
+    .then((r) => { if (openChat.current === s.chat) setChat(r.chat); })
+    .catch((e) => { if (e instanceof Error && /answering/i.test(e.message)) toStore.current.push(s); });
   const look = (m: number, name: string, retry = false) => {
-    // Not while the next answer is being written (review 15).
+    // Not while the next answer is being written (review 15): the name stays plain link text until then.
     if (replying) return;
     const was = finder.current.state(name).status;
     const forChat = chat?.id ?? null;
@@ -82,9 +87,15 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
     if (finder.current.state(name).status !== was) setLooked((x) => x + 1);
     void p.then((st) => {
       setLooked((x) => x + 1);
-      if (st.status === 'found' && forChat) void api.keepFoundCard(listId, forChat, m, { id: st.card.id, name }).then((r) => { if (openChat.current === forChat) setChat(r.chat); }).catch(() => {});
+      if (st.status === 'found' && forChat) void store({ chat: forChat, m, id: st.card.id, name });
     });
   };
+  useEffect(() => {
+    if (replying || !toStore.current.length) return;
+    const waiting = toStore.current.splice(0);
+    for (const s of waiting) void store(s);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replying]);
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -162,16 +173,19 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   // Apply one proposal, or take it back; the deck page reads the deck again.
   const change = async (m: number, j: number, act: 'apply' | 'undo') => {
     if (!chat) return;
+    const forChat = chat.id;
     setDoing(`${m}:${j}`);
     setError(null);
     try {
-      setChat((await api.chatChange(listId, chat.id, m, j, act)).chat);
+      // The answer for a chat that is no longer open isn't shown (review PR56 round 2, 4).
+      const r = await api.chatChange(listId, forChat, m, j, act);
+      if (openChat.current === forChat) setChat(r.chat);
       await onChanged?.();
       void loadList();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not do that');
+      if (openChat.current === forChat) setError(e instanceof Error ? e.message : 'Could not do that');
       // A refused add or swap now says today's reason on its row.
-      void api.deckChat(listId, chat.id).then((r) => setChat(r.chat)).catch(() => {});
+      void api.deckChat(listId, forChat).then((r) => { if (openChat.current === forChat) setChat(r.chat); }).catch(() => {});
     } finally {
       setDoing(null);
     }
@@ -253,7 +267,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} lookup={{ state: (n) => finder.current.state(n), look: (n, retry) => look(i, n, retry) }} />
+              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} lookup={{ state: (n) => finder.current.state(n), look: (n, retry) => look(i, n, retry), waiting: replying }} />
               {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the app’s card data: point at {m.unresolved === 1 ? 'it' : 'one'} to look it up.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;

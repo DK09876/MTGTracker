@@ -13,7 +13,7 @@ import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
-import { newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
+import { appendReply, newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
 import { imageOf, searchCards, ScryfallError } from './scryfall';
 import { finishStore } from './finish';
@@ -101,8 +101,8 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
       fits,
       resolve: (names) => [...cardsNamed(names).values()].map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })),
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
-    current.messages.push(message);
-    saveChat(current);
+    // Appended to the chat as stored now, not to the copy read before the reply (review PR56 round 2, 1 and 5).
+    appendReply(list.id, current.id, message);
     return { chatId: current.id };
   });
   return { chat: current, job };
