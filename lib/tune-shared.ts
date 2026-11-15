@@ -7,28 +7,28 @@
 
 import type { Board } from './decklist';
 
-export type Intent = 'finish' | 'find' | 'swaps' | 'cuts' | 'fix' | 'lands';
+export type Intent = 'finish' | 'upgrades' | 'cuts' | 'fix' | 'lands';
+
+/** Intents Tune had before handoff 10 (Find cards, Swaps): a remembered tab, an old link or Chat's older proposals open Upgrades. */
+export const intentOf = (v: unknown): Intent | undefined => (v === 'find' || v === 'swaps' ? 'upgrades' : INTENTS.some((i) => i.id === v) ? v as Intent : undefined);
 
 export const INTENTS: Array<{ id: Intent; label: string; why: string }> = [
-  { id: 'finish', label: 'Finish the deck', why: 'Fill the deck from cards you own: Claude searches your collection for what fits the plan, you keep, rethink or skip each pick, and the app adds the lands. Or fill it free from the deck’s numbers.' },
-  { id: 'find', label: 'Find cards', why: 'Cards for the jobs and themes the deck is short of, and combos one card away. Accept them into your changes, or save them to a section for later.' },
-  { id: 'swaps', label: 'Swaps', why: 'For each card waiting in your Maybeboard, the deck cards doing the same job at about the same cost, to help you choose. Not ranked. Ask Claude for swaps it would make. The deck stays at its size.' },
+  { id: 'finish', label: 'Finish the deck', why: 'Fill the deck from cards you own, or with cards to buy: Claude searches your collection for what fits the plan (and names the cards worth buying, if you want), you keep, rethink or skip each pick, and the app adds the lands. Or fill it free from the deck’s numbers.' },
+  { id: 'upgrades', label: 'Upgrades', why: 'What would make the deck better, from your cards or to buy, and what each card replaces. Claude searches your cards and names well-known ones you don’t have; the app checks every name, says where each copy is and prices it. The deck stays at 100.' },
   { id: 'cuts', label: 'Cuts', why: 'Where to find room when the deck is over 100, in the order to look: flagged cards, a heavy curve, your bracket, jobs over their range, cards off the plan.' },
   { id: 'fix', label: 'Fix a problem', why: 'Start from how the last games went. Each problem shows the numbers behind it and at most three swaps for it.' },
   { id: 'lands', label: 'Lands', why: 'The one land number, how your colours split, and basics to add or cut.' },
 ];
 
 /**
- * The step the deck's size points to (the deck flow plan): over 100, trim;
- * at 100, swaps from what waits to go in; under 100, fill it - from scratch
- * when it is far from 100. However far over, a deck over 100 is trimmed:
- * "the best 100 from everything" is still there under Find cards.
+ * The step the deck's size points to (handoff 10): over 100, trim; at 100,
+ * upgrades; under 100, finish it (Finish takes any number of cards).
  */
 export function suggestedIntent(size: number, pool: number): Intent {
   void pool;
   if (size > 100) return 'cuts';
-  if (size === 100) return 'swaps';
-  return size < 60 ? 'finish' : 'find';
+  if (size === 100) return 'upgrades';
+  return 'finish';
 }
 
 /** A card as a suggestion shows it. */

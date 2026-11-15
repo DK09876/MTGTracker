@@ -9,32 +9,21 @@ import { sectionsOf } from './sections';
 import { tuneContext, whyNotAddable, type Context } from './tune';
 import { appModel, claudeCall, modelFor, ModelError } from './ai';
 import { deckIdentity } from './commanders';
-import { cardsInList, database, deckTags, type List } from './db';
+import { cardsInList, deckTags, type List } from './db';
 import { gapCards, heldByName } from './gap-cards';
 import { planContext } from './plan-context';
 import { latestJob, startJob, type Job } from './jobs';
-import { newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
+import { appendReply, newChat, recentChats, reply, saveChat, type ChatTools, type DeckChat } from './deck-chat';
 import { providerOf } from './models';
-import { imageOf, searchCards, ScryfallError, type ScryfallCard } from './scryfall';
+import { imageOf, searchCards, ScryfallError } from './scryfall';
 import { finishStore } from './finish';
-import { localCards } from './card-store';
 import { finishPool, heldCards, type Pool } from './finish-pool';
 import { searchLines } from './finish-shared';
 
 export class ChatError extends Error {}
 
-/** Cards by name: the ones the app has stored (the owner's, the decks') first, then the full card data. By front name, lower case. */
-export function cardsNamed(names: string[]): Map<string, ScryfallCard> {
-  const key = (n: string) => n.split(' // ')[0].trim().toLowerCase();
-  const out = new Map<string, ScryfallCard>();
-  for (const n of names) {
-    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? OR json_extract(data, '$.name') LIKE ? LIMIT 1`, [n, `${n} // %`]) as { data: string } | null;
-    if (r) out.set(key(n), JSON.parse(r.data) as ScryfallCard);
-  }
-  const rest = names.filter((n) => !out.has(key(n)));
-  if (rest.length) for (const c of localCards(rest)) if (!out.has(key(c.name))) out.set(key(c.name), c);
-  return out;
-}
+export { cardsNamed } from './cards-named';
+import { cardsNamed } from './cards-named';
 
 /**
  * Chat's look-ups over the owner's cards (handoff 9): search_my_cards over every card they hold that may go in
@@ -112,8 +101,8 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
       fits,
       resolve: (names) => [...cardsNamed(names).values()].map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })),
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
-    current.messages.push(message);
-    saveChat(current);
+    // Appended to the chat as stored now, not to the copy read before the reply (review PR56 round 2, 1 and 5).
+    appendReply(list.id, current.id, message);
     return { chatId: current.id };
   });
   return { chat: current, job };

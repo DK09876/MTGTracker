@@ -12,7 +12,8 @@
  *   apply {cutsTo?}        move the cards; cuts to the section for cards that came out
  *   undo {undo}            put back exactly what an apply moved; staged changes stay
  *   keep {cardId, keep}    ★ keep a card (Claude's "keep this")
- *   pile {choice}          for a pile: 'fill' to 100, or the 'best' 100 from everything
+ *   upgradesFree {showFree}  Upgrades: show the free list from the deck's numbers
+ *   pile {choice}          (kept for old clients; nothing reads it since Find cards left)
  *   finishPicks {choice?, showRules?}  Finish the deck: picks from the rules or Claude, remembered per deck
  *   verdict {id, verdict}  how a fix went; "worse" stages undoing it
  *   propose {intent, title, why, items}  Claude's changes from Chat, waiting in Tune
@@ -31,7 +32,7 @@ import { getCard } from '@/lib/scryfall';
 import { hasBoard } from '@/lib/sections';
 import { recorded, takeSnapshot } from '@/lib/deck-history';
 import { applyChanges, ref, stage, tuneState, undoApply, unstage, type UndoMoves } from '@/lib/tune';
-import { INTENTS, SYMPTOMS, type Intent, type Suggestion, type Symptom } from '@/lib/tune-shared';
+import { intentOf, SYMPTOMS, type Suggestion, type Symptom } from '@/lib/tune-shared';
 import { PROMPT_VERSIONS } from '@/lib/prompt-versions';
 import { newKey, tuneStore, updateTune } from '@/lib/tune-store';
 import { clearOutcome, closeAll, logOutcome, logReason, quietly, REASON_CHIPS, type ReasonChip } from '@/lib/suggestion-log';
@@ -41,7 +42,6 @@ import { localCards } from '@/lib/card-store';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const intentOf = (v: unknown): Intent | undefined => (INTENTS.some((i) => i.id === v) ? v as Intent : undefined);
 const symptomOf = (v: unknown): Symptom | undefined => (SYMPTOMS.some((s) => s.id === v) ? v as Symptom : undefined);
 const keysOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string').slice(0, 300) : []);
 const itemsOf = (v: unknown): Suggestion[] => (Array.isArray(v) ? v.filter((i): i is Suggestion => !!i && typeof i === 'object' && typeof (i as Suggestion).key === 'string').slice(0, 120) : []);
@@ -152,6 +152,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         if (typeof b.showRules === 'boolean') s.finishShowRules = b.showRules;
       });
       return NextResponse.json({ ok: true });
+    case 'upgradesFree':
+      updateTune(id, (s) => { s.upgradesShowFree = b.showFree === true; });
+      return NextResponse.json({ ok: true });
     case 'pile':
       updateTune(id, (s) => { s.pile = b.choice === 'fill' || b.choice === 'best' ? b.choice : null; });
       return NextResponse.json({ ok: true });
@@ -175,7 +178,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return NextResponse.json({ ok: true, staged: done.staged });
     }
     case 'propose': {
-      const intent = intentOf(b.intent) ?? 'swaps';
+      const intent = intentOf(b.intent) ?? 'upgrades';
       // The cards as the suggestion shows them, from the deck or the card data: Chat only sends names and ids.
       const all = cardsInList(id);
       const full = (r: Suggestion['add']) => {

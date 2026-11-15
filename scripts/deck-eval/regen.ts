@@ -110,8 +110,10 @@ async function main() {
     for (const [id, listId] of Object.entries(SWAP_DECKS)) {
       const list = db.getList(listId, 'dk');
       if (!list) { write(join(OUT, 'code', `${id}.json`), { swaps: [], notes: 'deck not found in work.db' }); continue; }
-      const s = await tuneState(list, 'dk', { intent: 'swaps' });
-      const swaps = s.groups.filter((g) => g.source === 'rules').flatMap((g) => g.items).filter((i) => i.add && i.cut).map((i) => ({ out: i.cut!.name, in: i.add!.name, why: i.why }));
+      // Swaps left Tune in handoff 10; its lookup lives on in Upgrades' free list (its Maybeboard pairs).
+      (await import('../../lib/tune-store')).updateTune(listId, (x) => { x.upgradesShowFree = true; });
+      const s = await tuneState(list, 'dk', { intent: 'upgrades' });
+      const swaps = s.groups.filter((g) => g.source === 'rules' && g.key.startsWith('free:maybe')).flatMap((g) => g.items).filter((i) => i.add && i.cut).map((i) => ({ out: i.cut!.name, in: i.add!.name, why: i.why }));
       write(join(OUT, 'code', `${id}.json`), { swaps, notes: `Tune → Swaps, rules groups: ${swaps.length} same-job pairs` });
       n++;
     }

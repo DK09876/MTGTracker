@@ -11,9 +11,10 @@ describe('the suggested intent', () => {
   it('follows the deck\'s size and what waits to go in', () => {
     expect(suggestedIntent(2, 0)).toBe('finish');
     expect(suggestedIntent(59, 0)).toBe('finish');
-    expect(suggestedIntent(80, 0)).toBe('find');
-    expect(suggestedIntent(80, 60)).toBe('find');
-    expect(suggestedIntent(100, 9)).toBe('swaps');
+    expect(suggestedIntent(80, 0)).toBe('finish');
+    expect(suggestedIntent(80, 60)).toBe('finish');
+    expect(suggestedIntent(99, 0)).toBe('finish');
+    expect(suggestedIntent(100, 9)).toBe('upgrades');
     expect(suggestedIntent(108, 5)).toBe('cuts');
     expect(suggestedIntent(116, 24)).toBe('cuts');
     expect(suggestedIntent(128, 0)).toBe('cuts');

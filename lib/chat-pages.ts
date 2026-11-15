@@ -5,8 +5,8 @@
  * Chat tab (the button). Pure.
  */
 
-export type ChatPage = 'trim' | 'finish' | 'tags' | 'check' | 'plan';
-export const CHAT_PAGES: ChatPage[] = ['trim', 'finish', 'tags', 'check', 'plan'];
+export type ChatPage = 'trim' | 'finish' | 'upgrades' | 'tags' | 'check' | 'plan';
+export const CHAT_PAGES: ChatPage[] = ['trim', 'finish', 'upgrades', 'tags', 'check', 'plan'];
 
 /** A button under an answer that opens a page of this deck, with a starting value where the page takes one. */
 export interface ChatGo {
@@ -22,10 +22,10 @@ export interface ChatGo {
   fill?: boolean;
 }
 
-export const PAGE_LABEL: Record<ChatPage, string> = { trim: 'Trim', finish: 'Finish', tags: 'Tags', check: 'Check', plan: 'Plan' };
+export const PAGE_LABEL: Record<ChatPage, string> = { trim: 'Trim', finish: 'Finish', upgrades: 'Upgrades', tags: 'Tags', check: 'Check', plan: 'Plan' };
 
 /** Pages inside Tune, which stays locked until the plan is confirmed. */
-export const LOCKED_UNTIL_PLAN: ChatPage[] = ['trim', 'finish'];
+export const LOCKED_UNTIL_PLAN: ChatPage[] = ['trim', 'finish', 'upgrades'];
 
 /**
  * Changes of one kind proposed in Chat in one answer; past this the first ones stay and the page that does the

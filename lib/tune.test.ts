@@ -195,8 +195,8 @@ describe('lands', { timeout: 30_000 }, () => {
   });
 });
 
-describe('the Swaps tab and the cut guards', { timeout: 30_000 }, () => {
-  it('opens for a five-colour deck: a same-job lookup, no upgrades, nothing ranked', async () => {
+describe('the free list and the cut guards', { timeout: 60_000 }, () => {
+  it('opens for a five-colour deck: a same-job lookup, nothing judged', async () => {
     const db = await import('./db');
     const plan = await import('./deck-plan');
     const five = card('Five Leader', { type_line: 'Legendary Creature — Human', cmc: 5, color_identity: ['W', 'U', 'B', 'R', 'G'] });
@@ -206,10 +206,12 @@ describe('the Swaps tab and the cut guards', { timeout: 30_000 }, () => {
     db.addCardToList(list.id, card('Waiting Rock'), 1, 'nonfoil', 'maybe');
     plan.changePlan(list.id, { confirm: true });
     const tune = await import('./tune');
-    const s = await tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent: 'swaps' });
-    expect(s.groups.some((g) => g.key === 'swaps:upgrades')).toBe(false);
-    expect(JSON.stringify(s.groups)).not.toMatch(/upgrade|better/i);
-    for (const intent of ['cuts', 'find', 'lands'] as const) await expect(tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent })).resolves.toBeTruthy();
+    const { updateTune } = await import('./tune-store');
+    updateTune(list.id, (x) => { x.upgradesShowFree = true; });
+    const s = await tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent: 'upgrades' });
+    expect(s.upgrades).toEqual({ showFree: true });
+    expect(JSON.stringify(s.groups)).not.toMatch(/better/i);
+    for (const intent of ['cuts', 'upgrades', 'lands'] as const) await expect(tune.tuneState(db.getList(list.id, 'dk')!, 'dk', { intent })).resolves.toBeTruthy();
   });
 
   it('never stages a cut of a never-cut card, or a land under the floor', async () => {

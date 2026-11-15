@@ -32,6 +32,8 @@ export interface TuneStore {
   /** Finish the deck: where the picks come from, remembered per deck, and whether the rules' picks show beside Claude's. */
   finishPicks?: 'rules' | 'claude';
   finishShowRules?: boolean;
+  /** Upgrades: whether the free list from the deck's numbers shows. */
+  upgradesShowFree?: boolean;
   /** When Claude's last picks came back with no card the app could use. */
   finishEmpty?: boolean;
 }
@@ -46,12 +48,15 @@ export function tuneStore(listId: string): TuneStore {
     return {
       changes: { add: Array.isArray(s.changes?.add) ? s.changes!.add : [], cut: Array.isArray(s.changes?.cut) ? s.changes!.cut : [] },
       dismissed: Array.isArray(s.dismissed) ? s.dismissed : [],
-      proposals: s.proposals && typeof s.proposals === 'object' ? s.proposals : {},
+      // Proposals stored under Find cards and Swaps (before handoff 10) are dropped at first read; Chat's newer ones
+      // wait under Upgrades.
+      proposals: s.proposals && typeof s.proposals === 'object' ? Object.fromEntries(Object.entries(s.proposals).filter(([k]) => k !== 'find' && k !== 'swaps')) : {},
       cutReasons: s.cutReasons && typeof s.cutReasons === 'object' ? s.cutReasons : {},
       pile: s.pile ?? null,
       log: Array.isArray(s.log) ? s.log : [],
       finishPicks: s.finishPicks === 'claude' ? 'claude' : 'rules',
       finishShowRules: s.finishShowRules === true,
+      upgradesShowFree: s.upgradesShowFree === true,
       finishEmpty: s.finishEmpty === true,
     };
   } catch {

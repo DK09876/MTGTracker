@@ -18,7 +18,7 @@ import { database } from './db';
 import { recordError, type Level } from './errors';
 import { UPDATING_MESSAGE, updatingSince } from './updating';
 
-export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter' | 'printings' | 'cutreview' | 'tuneideas' | 'planpass' | 'planhelp' | 'tagsai' | 'trim' | 'trimapproach' | 'finish';
+export type JobKind = 'brief' | 'roles' | 'refresh' | 'chat' | 'starter' | 'printings' | 'cutreview' | 'tuneideas' | 'planpass' | 'planhelp' | 'tagsai' | 'trim' | 'trimapproach' | 'finish' | 'upgrades' | 'essentials';
 export type JobStatus = 'running' | 'done' | 'failed' | 'interrupted';
 
 export interface Job {

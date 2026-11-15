@@ -18,6 +18,7 @@ import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import CardName from './CardName';
+import { BuyList } from './DeckUpgrades';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
@@ -25,8 +26,9 @@ import SymbolText from './SymbolText';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
-import { chosenAdds, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, roundPrice, SEARCH_LIMIT, SEARCH_LIMIT_LATER, soundsUnsure, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
+import { BUYS, chosenAdds, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, roundPrice, SEARCH_LIMIT, SEARCH_LIMIT_LATER, soundsUnsure, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
 import { price } from '@/lib/price';
+import { buyListText, buyTotal } from '@/lib/upgrades-shared';
 import type { ScryfallCard } from '@/lib/scryfall';
 
 interface Props {
@@ -69,6 +71,8 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const [message, setMessage] = useState('');
   const [review, setReview] = useState(false);
   const [wantText, setWantText] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copy = (rows: Array<{ name: string; price: number | null }>) => { void navigator.clipboard?.writeText(buyListText(rows)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => {}); };
   const dirty = useRef(false);
   const runId = useRef<string | null>(null);
   // Fold, filter and sort (D 13), remembered for this deck in this browser.
@@ -137,7 +141,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const adds = useMemo(() => chosenAdds(items, choices), [items, choices]);
   const passes = (i: FinishItem) => {
     const c = choices[i.name]?.choice ?? 'add';
-    return lv.filter === 'all' ? true : lv.filter === 'changed' ? i.mark === 'new' || i.mark === 'back' : lv.filter === 'other' ? i.src === 'other' : c === lv.filter;
+    return lv.filter === 'all' ? true : lv.filter === 'changed' ? i.mark === 'new' || i.mark === 'back' : lv.filter === 'other' ? i.src === 'other' : lv.filter === 'buy' ? i.src === 'buy' : c === lv.filter;
   };
   const shown = useShown(items, (i) => i.name, passes, `${lv.filter}:${lv.press ?? 0}:${view?.run?.id ?? ''}:${items.length}`);
   useFilterFallback(view?.run?.id ?? '', lv.filter !== 'all' && !items.some(passes), () => setLv({ filter: 'all' }));
@@ -167,10 +171,12 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <h3 className="font-display text-2xl font-semibold">Added {plural(d.added + d.lands, 'card')}. The deck is at {d.size}.</h3>
         <p className="text-sm text-[var(--muted)]">{d.added} from your picks{d.lands ? ` and ${d.lands} lands chosen by the app` : ''}. A snapshot from before is in History.</p>
         {d.borrowed.length > 0 && <p className="text-sm text-amber-300">These stay in the decks they’re in, so you have no spare copy of them now: {d.borrowed.join('; ')}.</p>}
+        {(d.buy?.length ?? 0) > 0 && <BuyList rows={d.buy!} copied={copied} onCopy={() => copy(d.buy!)} />}
         {(d.left?.length ?? 0) > 0 && <p className="text-sm text-amber-300" data-finish-left>Left out, no longer on offer when you applied (the deck or your cards changed since the picks): {d.left!.join('; ')}.</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
           {d.size > 100 ? <button className={C.go} onClick={() => onTab('tune')}>Next: Trim {d.size - 100}</button> : <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>}
+          {d.size === 100 && <button className={C.btn} onClick={() => onTab('upgrades')} data-finish-upgrades>See what would make it better</button>}
           <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, onChanged)}>Undo</button>
           <button className={C.btn} disabled={busy} onClick={() => act({ action: 'reset' })}>Finish again</button>
         </div>
@@ -208,6 +214,34 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           })}
         </div>
         {counts && <p className="text-xs text-[var(--faint)]">{counts.held.toLocaleString()} different cards you own; {counts.fit.toLocaleString()} fit the commander’s colours and are Commander-legal. Cards already in the deck, cards you skipped here before, and anything past your budget, deck rule or bracket are left out. On a fill to 100 your nonbasic lands are searched apart, for Claude to choose the ones worth a slot. Claude only ever sees the cards on offer.</p>}
+      </div>
+      <div className="flex flex-col gap-2" data-finish-buy>
+        <h4 className={H3}>Cards you’d buy for this deck</h4>
+        <div role="radiogroup" aria-label="Cards you’d buy for this deck" className="grid gap-2 sm:grid-cols-3">
+          {BUYS.map((o) => {
+            const on = (view.ownOnly ? 'none' : view.noCollection && view.buy === 'none' ? 'any' : view.buy) === o.id;
+            return (
+              <button key={o.id} type="button" role="radio" aria-checked={on} disabled={busy || (view.noCollection && o.id === 'none') || (!!view.ownOnly && o.id !== 'none')} onClick={() => act({ action: 'settings', buy: o.id })} data-buy={o.id}
+                className={`flex flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-left disabled:opacity-40 ${on ? 'border-[#d6aa2e] bg-[#d6aa2e]/[0.06]' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
+                <b className="text-sm">{o.label}</b><span className="text-[13px] text-[var(--muted)]">{o.why}</span>
+              </button>
+            );
+          })}
+        </div>
+        {view.ownOnly && <p className="text-[13px] text-[var(--muted)]" data-finish-ownonly>Your plan says only cards you own, so buying is off. <button type="button" className="underline underline-offset-[3px] hover:text-[var(--foreground)]" onClick={() => onTab('plan')}>Change it on the Plan tab</button></p>}
+        {!view.ownOnly && !view.noCollection && view.emptyPool && view.buy === 'matter' && <p className="text-[13px] text-amber-300" data-finish-emptypool>None of your cards is on offer under these settings, so this runs as Any card: Claude names the whole list.</p>}
+        {view.noCollection && <p className="text-[13px] text-amber-300" data-finish-nocollection>None of your cards can go in this deck, so Finish names any card and marks the ones to buy.</p>}
+        {!view.ownOnly && (view.buy !== 'none' || view.noCollection) && (
+          <div className="flex flex-wrap items-center gap-2" data-finish-spend>
+            <label htmlFor="finish-spend" className="text-sm">Up to $</label>
+            <input id="finish-spend" type="number" min={0} step="any" inputMode="decimal" defaultValue={view.spend ?? ''} key={`${view.spend}`} placeholder="no limit"
+              onBlur={(e) => { const t = e.target.value.trim(); const n = t === '' ? null : Number(t); if ((n === null || (Number.isFinite(n) && n >= 0)) && n !== view.spend) save({ action: 'settings', spend: n }); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              className={`${C.input} w-24 text-center font-semibold tabular-nums`} />
+            <span className="text-sm">in all</span>
+            <span className="text-[13px] text-[var(--muted)]">Empty is no limit. Cards past it are listed with their prices, not left out silently.</span>
+          </div>
+        )}
       </div>
       <div className="flex flex-col gap-1">
         <h4 className={H3}>Combos · from your plan</h4>
@@ -309,12 +343,16 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const lands = run.full && run.lands ? run.lands.total : 0;
   const total = view.size + adds.length + lands;
   const borrowed = items.filter((i) => i.src === 'other' && adds.includes(i.name));
+  const buys = items.filter((i) => i.src === 'buy' && adds.includes(i.name));
+  const buyRows = buys.map((i) => ({ name: i.name, price: i.price ?? null }));
+  const bt = buyTotal(buyRows);
   const canSend = asks.length > 0 || skips.length > 0 || !!message.trim();
   const groups = [...new Set(items.map(groupKey))].sort((a, b) => groupOrder(a) - groupOrder(b));
   const complete = completeCombos(view.combos.found, [...view.combos.base, ...adds]);
   const sub = [
     `Round ${run.round}. ${plural(adds.length, 'pick')}${lands ? ` + ${lands} lands` : ''} takes the deck from ${view.size} to ${total}.`,
     borrowed.length ? `${borrowed.length} only in other decks.` : '',
+    buys.length ? `${buys.length} to buy, $${bt.total.toFixed(2)}${bt.unpriced ? ` + ${bt.unpriced} with no price` : ''}.` : '',
     asks.length ? `${asks.length} to rethink.` : '',
     skips.length ? `${skips.length} skipped.` : '',
     adds.length > run.want ? `${adds.length - run.want} more than you asked for, which is fine.` : adds.length < run.want ? `${run.want - adds.length} short: send to have Claude fill them, or apply as is.` : '',
@@ -343,12 +381,13 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           {borrowed.length > 0 && (
             <p className="text-sm text-amber-300" data-finish-borrowed>You don’t have a spare copy of {borrowed.length === 1 ? 'this card' : 'these'}: {borrowed.map((i) => `${i.name} (in ${i.deck})`).join('; ')}. {borrowed.length === 1 ? 'It stays' : 'They stay'} in that deck; applying only lists {borrowed.length === 1 ? 'it' : 'them'} here too.</p>
           )}
+          {buyRows.length > 0 && <BuyList rows={buyRows} copied={copied} onCopy={() => copy(buyRows)} />}
           {asks.length > 0 && <p className="text-sm text-amber-300">{plural(asks.length, 'card is', 'cards are')} still on Rethink and will be left out: {asks.map((i) => i.name).join('; ')}. Go back and send to have Claude look again.</p>}
           <div className="flex flex-col gap-2.5">
             {byGroup.map(({ g, names }) => (
               <div key={g} className="flex flex-col gap-1">
                 <h4 className={H3}>{groupTitle(g)} · {names.length}</h4>
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">{names.map((i) => <span key={i.name}>{nameOf(i)}{i.src === 'other' && <span className="ml-1 text-xs text-amber-300">in {i.deck}</span>}</span>)}</div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">{names.map((i) => <span key={i.name}>{nameOf(i)}{i.src === 'other' && <span className="ml-1 text-xs text-amber-300">in {i.deck}</span>}{i.src === 'buy' && <span className="ml-1 text-xs text-[#8cc0ee]">to buy</span>}</span>)}</div>
               </div>
             ))}
             {lands > 0 && run.lands && (
@@ -373,7 +412,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
             <button className={C.go} disabled={busy || running || !adds.length} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Review and apply</button>
           </span>
         </div>
-        <span className="text-[13px] text-[var(--muted)]" data-finish-sub>{sub}</span>
+        <span className="line-clamp-3 min-h-[3.9em] text-[13px] leading-[1.3] text-[var(--muted)] sm:min-h-[2.6em]" title={sub} data-finish-sub>{sub}</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}
@@ -383,6 +422,19 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       <div className={`${CARD} flex flex-col gap-2`} data-finish-say>
         {run.reply && <p className="text-[13px] text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <SymbolText text={run.reply} /></p>}
         {(run.short > 0 || run.dropped > 0) && <p className="text-[13px] text-amber-300">{run.short > 0 ? `${plural(run.short, 'pick')} short of what you asked for: Claude found no more it would put in. ` : ''}{run.dropped > 0 ? `${plural(run.dropped, 'name')} Claude gave ${run.dropped === 1 ? 'wasn’t' : 'weren’t'} among your cards on offer and ${run.dropped === 1 ? 'was' : 'were'} left out.` : ''}</p>}
+        {run.buy && run.buy.over.length > 0 && (
+          <div className="flex flex-col gap-1.5" data-finish-over>
+            <p className="text-[13px] text-amber-300">Over your ${(run.buy.limit ?? 0).toFixed((run.buy.limit ?? 0) % 1 ? 2 : 0)} in all, or with no price, so not taken. Add one anyway (no paid round), then Skip something if you like.</p>
+            <ul className="flex flex-wrap gap-1.5">
+              {run.buy.over.map((o) => (
+                <li key={o.name}><button type="button" disabled={busy || running} onClick={() => act({ action: 'takeOver', name: o.name })} aria-label={`Add ${o.name} anyway`} data-finish-over-add={o.name}
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--background)] px-2.5 text-[13px] hover:bg-[var(--surface-hover)] disabled:opacity-50">
+                  <span aria-hidden="true">+</span>{o.name}<span className="text-[var(--muted)]">{o.price === null ? 'no price' : `$${o.price.toFixed(2)}`}</span></button></li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {run.buy && run.buy.dropped.length > 0 && <p className="text-[13px] text-amber-300" title={run.buy.dropped.map((d) => `${d.name}: ${d.why}`).join('\n')}>{plural(run.buy.dropped.length, 'name')} Claude gave {run.buy.dropped.length === 1 ? 'wasn’t' : 'weren’t'} usable: {run.buy.dropped.slice(0, 4).map((d) => `${d.name} (${d.why})`).join('; ')}{run.buy.dropped.length > 4 ? '…' : ''}.</p>}
         <label htmlFor="finish-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say what to change <span className="text-[13px] font-normal text-[var(--muted)]">optional{run.round > 1 ? ' · the earlier rounds are part of the conversation' : ''}</span></label>
         <textarea id="finish-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend && !busy && !running && !updating) { e.preventDefault(); void act({ action: 'find', rerun: true, message }); } }}
@@ -419,6 +471,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           { id: 'skip', label: 'Skip', count: skips.length },
           ...(run.round > 1 ? [{ id: 'changed', label: 'Changed this round', count: items.filter((i) => i.mark === 'new' || i.mark === 'back').length }] : []),
           ...(items.some((i) => i.src === 'other') ? [{ id: 'other', label: 'From another deck', count: items.filter((i) => i.src === 'other').length }] : []),
+          ...(items.some((i) => i.src === 'buy') ? [{ id: 'buy', label: 'To buy', count: items.filter((i) => i.src === 'buy').length }] : []),
         ]} />
         {groups.map((g) => {
           const all = items.filter((i) => groupKey(i) === g);
@@ -456,6 +509,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       </div>
       {skippedBefore}
 
+      {run.full && run.lands && run.buy?.kind === 'any' && !run.lands.duals.length && <p className="text-[13px] text-[var(--muted)]" data-finish-lands-basics>None of your lands fit, so the lands are basics. Lands to buy are left to Upgrades once the deck is at 100.</p>}
       {run.full && run.lands && <Lands lands={run.lands} size={view.size + adds.length} busy={busy || running} onLands={(change) => act({ action: 'lands', ...change })} onSave={(change) => save({ action: 'lands', ...change })} />}
     </section>
   );
@@ -561,7 +615,8 @@ function Changes({ changes, items, onShow }: { changes: NonNullable<NonNullable<
 function Row({ item, state, text, name, onSet, onText }: {
   item: FinishItem; state: FinishChoice; text: string; name: React.ReactNode; onSet: (c: FinishChoice) => void; onText: (t: string) => void;
 }) {
-  const chip = item.src === 'other' ? <span className="max-w-full truncate rounded-full border border-amber-300/50 px-2 text-[11px] text-amber-300" title={`In ${item.deck}`}>in {item.deck}</span>
+  const chip = item.src === 'buy' ? <span className="max-w-full truncate rounded-full border border-[#8cc0ee]/50 px-2 text-[11px] text-[#8cc0ee]" data-own="buy">to buy · {item.price == null ? 'no price' : `$${item.price.toFixed(2)}`}</span>
+    : item.src === 'other' ? <span className="max-w-full truncate rounded-full border border-amber-300/50 px-2 text-[11px] text-amber-300" title={`In ${item.deck}`}>in {item.deck}</span>
     : item.src === 'maybe' ? <span className="max-w-full truncate rounded-full border border-[var(--border)] px-2 text-[11px] text-[var(--muted)]">in your {item.section ?? 'Maybeboard'}</span>
       : <span className="rounded-full border border-emerald-400/40 px-2 text-[11px] text-emerald-300">spare copy</span>;
   const mark = item.mark === 'new' ? <span className="rounded-full border border-[#c4a6f5]/50 px-2 text-[11px] text-[#c4a6f5]">new this round</span>
