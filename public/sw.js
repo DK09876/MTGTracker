@@ -6,7 +6,7 @@
  * from the server, so an update is never hidden behind an old copy.
  */
 
-const CACHE = 'mtg-offline-v1';
+const CACHE = 'mtg-offline-v2';
 const OFFLINE = new URL('offline.html', self.registration.scope).href;
 const ICON = new URL('icons/apple-touch-icon.png', self.registration.scope).href;
 
