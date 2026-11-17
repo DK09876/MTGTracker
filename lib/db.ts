@@ -70,6 +70,7 @@ function open(): Database {
     );
   `);
   db.run(`CREATE INDEX IF NOT EXISTS idx_list_cards_list ON list_cards (listId);`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_cards_name ON cards (name);`);
   db.run(`
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,

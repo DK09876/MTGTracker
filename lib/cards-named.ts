@@ -10,8 +10,10 @@ import type { ScryfallCard } from './scryfall';
 export function cardsNamed(names: string[]): Map<string, ScryfallCard> {
   const key = (n: string) => n.split(' // ')[0].trim().toLowerCase();
   const out = new Map<string, ScryfallCard>();
+  // By the indexed name column (it holds the card's full name), never json_extract: that read every stored card
+  // once per name and blocked the server for minutes on a Finish list with cards to buy.
   for (const n of names) {
-    const r = database().get(`SELECT data FROM cards WHERE json_extract(data, '$.name') = ? OR json_extract(data, '$.name') LIKE ? LIMIT 1`, [n, `${n} // %`]) as { data: string } | null;
+    const r = database().get(`SELECT data FROM cards WHERE name = ? OR (name >= ? AND name < ?) LIMIT 1`, [n, `${n} // `, `${n} //\uffff`]) as { data: string } | null;
     if (r) out.set(key(n), JSON.parse(r.data) as ScryfallCard);
   }
   const rest = names.filter((n) => !out.has(key(n)));
