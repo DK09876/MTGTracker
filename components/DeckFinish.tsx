@@ -30,6 +30,7 @@ import { BUYS, chosenAdds, chosenMaybes, completeCombos, COPIES, FINISH_GROUPS, 
 import { price } from '@/lib/price';
 import { buyListText, buyTotal } from '@/lib/upgrades-shared';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { mouseOnly } from '@/lib/mouse-only';
 
 interface Props {
   listId: string;
@@ -424,14 +425,15 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     <section className="flex flex-col gap-4" data-section="Finish" data-finish>
       {/* One sticky bar, the same element throughout: the count, the round, what the deck becomes. */}
       <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-col gap-1.5 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-finish-bar>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <b className="font-display text-xl tabular-nums" data-finish-count>{adds.length} of {run.want} to add</b>
-          <span className="ml-auto flex flex-wrap gap-2">
+        {/* On a phone the count and both buttons share one row ("Review"), so the bar stays short over the list. */}
+        <div className="flex items-center gap-x-3 gap-y-2 sm:flex-wrap sm:gap-x-4">
+          <b className="min-w-0 font-display text-lg tabular-nums sm:text-xl" data-finish-count>{adds.length} of {run.want} to add</b>
+          <span className="ml-auto flex shrink-0 gap-2">
             <button className={C.btn} disabled={busy || running} onClick={() => act({ action: 'reset' })}>Start over</button>
-            <button className={C.go} disabled={busy || running || (!adds.length && !maybes.length)} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Review and apply</button>
+            <button className={C.go} disabled={busy || running || (!adds.length && !maybes.length)} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><span className="sm:hidden">Review</span><span className="max-sm:hidden">Review and apply</span></button>
           </span>
         </div>
-        <span className="line-clamp-3 min-h-[3.9em] text-[13px] leading-[1.3] text-[var(--muted)] sm:min-h-[2.6em]" title={sub} data-finish-sub>{sub}</span>
+        <span className="min-h-[2.6em] text-[13px] leading-[1.3] text-[var(--muted)] sm:line-clamp-3" title={sub} data-finish-sub>{sub}</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}
@@ -561,7 +563,7 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           <div className="flex flex-wrap gap-1.5">
             {lands.duals.map((d) => (
               <span key={d.name} className="inline-flex items-stretch">
-                <button type="button" aria-pressed={d.on} disabled={busy} title={d.why} onMouseEnter={() => tell(d)} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
+                <button type="button" aria-pressed={d.on} disabled={busy} title={d.why} onPointerEnter={mouseOnly(() => tell(d))} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
                   className={`inline-flex min-h-10 items-center gap-1.5 border px-2.5 text-[13px] disabled:opacity-60 ${d.why ? 'rounded-l-lg' : 'rounded-lg'} ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
                   <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}{d.deck && <span className="text-[11px] text-amber-300">in {d.deck}</span>}
                 </button>

@@ -27,6 +27,7 @@ import type { Board } from '@/lib/decklist';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
 import { looksLikeSyntax } from '@/lib/syntax';
+import { mouseOnly } from '@/lib/mouse-only';
 
 interface Props {
   listId: string;
@@ -283,7 +284,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
                 className="absolute inset-x-0 top-full z-10 mt-1 max-h-80 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl">
                 {quick.cards.map((c, i) => (
                   <li key={c.id} id={`quick-${i}`} role="option" aria-selected={i === pick}
-                    onMouseEnter={() => setPick(i)}
+                    onPointerEnter={mouseOnly(() => setPick(i))}
                     // On mousedown, so the box keeps focus and the answer is the one on screen.
                     onMouseDown={(e) => { e.preventDefault(); void addTyped(e.shiftKey, i); }}
                     className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm ${i === pick ? 'bg-[var(--surface-hover)]' : ''}`}>

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import * as api from '@/lib/api';
 import { enterPick, moveHighlight } from '@/lib/picker-keys';
+import { mouseOnly } from '@/lib/mouse-only';
 
 interface Props {
   value: api.CommanderOption | null;
@@ -109,7 +110,7 @@ export default function CommanderPicker({ value, onChange, autoFocus }: Props) {
               role="option"
               aria-selected={i === active}
               tabIndex={-1}
-              onMouseEnter={() => setActive(i)}
+              onPointerEnter={mouseOnly(() => setActive(i))}
               onClick={() => onChange(option)}
               className={`flex w-full items-center gap-4 px-3 py-2 text-left hover:bg-[var(--surface-hover)] ${i === active ? 'bg-[var(--surface-hover)]' : ''}`}
             >

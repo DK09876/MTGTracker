@@ -30,6 +30,7 @@ import { identityStyle, MANA } from '@/lib/identity';
 import type { ImportSummary } from '@/lib/import-into';
 import { imageOf } from '@/lib/scryfall';
 import { useNavBottom } from '@/lib/use-nav-bottom';
+import { mouseOnly } from '@/lib/mouse-only';
 
 type OwnedSummary = Ownership['summary'];
 type Sort = 'recent' | 'name' | 'commander' | 'price' | 'created';
@@ -451,7 +452,7 @@ export default function DecksPage() {
             <div
               key={deck.id}
               className={`relative transition-opacity ${dragging === deck.id ? 'opacity-40' : ''}`}
-              onMouseEnter={() => setGlow(identity)}
+              onPointerEnter={mouseOnly(() => setGlow(identity))}
               onMouseLeave={() => setGlow(null)}
               // Dragged onto a folder in the rail, it goes in it.
               onDragStart={(e) => {

@@ -26,6 +26,7 @@ import type { KeepRule as KeepRuleType } from '@/lib/keep';
 import { atLeast } from '@/lib/odds';
 import type { Finish, ScryfallCard } from '@/lib/scryfall';
 import { ROLE_GROUPS, type RoleCount, type RoleGroup } from '@/lib/roles';
+import { mouseOnly } from '@/lib/mouse-only';
 
 // Series colour: the app's gold, stepped down into the band that reads on
 // the dark surface (validated: lightness band and 3:1 contrast on #1d1a16).
@@ -577,7 +578,7 @@ function Columns({ data, format, unit, name }: {
             return (
               <button
                 key={d.label}
-                onMouseEnter={() => setActive(i)}
+                onPointerEnter={mouseOnly(() => setActive(i))}
                 onFocus={() => setActive(i)}
                 onBlur={() => setActive(null)}
                 aria-label={`${name} ${d.label}: ${format(d.value)}${unit ? ` ${unit}${d.value === 1 ? '' : 's'}` : ''}`}

@@ -1,0 +1,11 @@
+{
+  "services": [
+    {
+      "name": "web",
+      "directory": ".",
+      "command": "npm run dev -- -H 0.0.0.0 -p $PORT",
+      "portVariable": "PORT",
+      "slot": 0
+    }
+  ]
+}

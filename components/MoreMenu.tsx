@@ -13,6 +13,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { bottomFloor } from '@/lib/bottom-floor';
+import { isMouse } from '@/lib/mouse-only';
 
 export interface MoreItem {
   label: string;
@@ -105,7 +106,7 @@ export default function MoreMenu({ items, label = 'More actions', triggerClassNa
       aria-expanded={item.submenu ? sub?.index === i : undefined}
       onClick={(e) => (inSub ? (close(), void item.onClick?.()) : pick(item, i, e.currentTarget))}
       // Hovering another item closes an open submenu; hovering this one opens its own.
-      onMouseEnter={inSub ? undefined : (e) => { if (item.submenu) openSub(i, e.currentTarget); else if (sub && sub.top !== -1) setSub(null); }}
+      onPointerEnter={inSub ? undefined : (e) => { if (!isMouse(e)) return; if (item.submenu) openSub(i, e.currentTarget); else if (sub && sub.top !== -1) setSub(null); }}
       className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-[var(--surface-hover)] ${sub?.index === i && !inSub ? 'bg-[var(--surface-hover)]' : ''} ${item.danger ? 'text-red-400' : ''} ${i > 0 && item.danger && !inSub ? 'mt-1 border-t border-[var(--border)] pt-2' : ''}`}
     >
       <span className="min-w-0 truncate">
