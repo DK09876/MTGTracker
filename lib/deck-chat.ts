@@ -28,6 +28,7 @@ import { database, type List, type ListedCard } from './db';
 import type { GapCard } from './gap-cards';
 import { ROLES, type RoleCount } from './roles';
 import { imageOf, type ScryfallCard } from './scryfall';
+import { TUNE_SECTIONS, type TuneSection } from './tune-snapshot';
 
 /** One proposal from Claude, applied with its own button. */
 export interface Change {
@@ -78,6 +79,8 @@ export interface ChatMessage {
   /** One page button, as answers stored before pages were a list had it. */
   go?: ChatGo;
   model?: string;
+  /** Claude wanted to read the Tune page and hadn't the owner's leave: the page asks them to allow it. */
+  askTune?: boolean;
 }
 
 export interface ChatCard { name: string; id: string; image: string | null }
@@ -90,6 +93,8 @@ export interface DeckChat {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  /** The owner let Claude read the deck's Tune page in this chat (the switch by the box, or Allow when asked). */
+  tuneAccess?: boolean;
 }
 
 // --- storage ---------------------------------------------------------------
@@ -183,6 +188,8 @@ export interface ChatTools {
   resolve?: (names: string[]) => ChatCard[];
   /** Why each named card can't go in this deck, or null; my_collection says so beside "owned". */
   fits?: (names: string[]) => Record<string, string | null>;
+  /** What is on the deck's Tune page now (lib/tune-snapshot.ts), read only with the owner's leave. */
+  tune?: (section: TuneSection) => string;
 }
 
 export interface MineResult { total: number; lines: PoolLine[]; ignored: string[]; bySrc: Record<Source, number> }
@@ -311,7 +318,17 @@ Doing it here, or opening a page:
 - Up to ${CHAT_CHANGE_LIMIT} changes of one kind in one answer. Past that, propose the best
   ${CHAT_CHANGE_LIMIT} and open the page for the rest.
 - The owner outranks this: "just do it here" or "don't send me to Trim"
-  means do it here (set in_chat on propose_changes) with no page button.`;
+  means do it here (set in_chat on propose_changes) with no page button.
+
+The Tune page:
+- read_tune shows what is on this deck's Tune page now: the open Finish,
+  Upgrades and Trim lists, each card with your reason and the owner's mark
+  and reason, and the changes staged in Tune. Use it when the owner asks
+  about what's there ("why did Finish pick this", "go through my Upgrades
+  list", "what have I staged"), then talk about the specifics.
+- It works only with the owner's leave. If it says you don't have it, don't
+  guess what's on the page: say in one line what you'd look at and why.
+  The app asks the owner, and they can let you read it.`;
 
 export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -361,6 +378,11 @@ export const CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: 'read_tune',
+    description: 'What is on this deck\'s Tune page now: the open Finish list (each pick with your reason, the owner\'s mark - Add, Rethink, Maybe or Skip - and their reason), the open Upgrades list, the open Trim list, and the changes staged in Tune. part: one of all, finish, upgrades, trim, staged. Works only when the owner let you read it.',
+    input_schema: { type: 'object', properties: { part: { type: 'string', enum: TUNE_SECTIONS } }, required: [] },
+  },
+  {
     name: 'open_page',
     description: `A button under your answer that opens one of this deck's pages, for a job the page does better than Chat: trim (many cuts; cut: how many, or cut_to: the size to cut to), finish (fill from the owner's cards; add: how many), upgrades (what would make a finished deck better, from their cards or to buy, each with the card it replaces), tags (sort into groups), check (mana, curve, how it plays), plan (what the deck is for, bracket, budget). why: one sentence. At most once per reply.`,
     input_schema: {
@@ -384,6 +406,12 @@ export function mineText(r: MineResult): string {
 export const usable = (c: Change) => !c.blocked && !((c.kind === 'add' || c.kind === 'swap') && !c.cardId);
 
 /** The owner said to do it here, in their own words (the model's in_chat is the other way). */
+/**
+ * The owner's message asks about what's on the Tune page: that is leave to read it for this answer. Plain words for
+ * the page and its lists, never a guess from a card name.
+ */
+export const saysTune = (text: string) => /\b(tune (page|tab)|(in|on|at|from|of) (my |the )?tune|(my|the) (finish|upgrades?|trim|cut|cuts) (list|picks|suggestions)|(my|the|your) (finish |upgrade )?(picks|suggestions)|finish picks|upgrades? (list|suggestions)|trim list|cuts? list|(what|anything) (have i|i've|i have) staged|staged (changes|cards))\b/i.test(text);
+
 export const saysHere = (text: string) => /\b(just do it here|do it here|do it in (the )?chat|here in (the )?chat|don'?t send me|no need to (go|send)|not in trim)\b/i.test(text);
 
 /**
@@ -631,6 +659,8 @@ export async function reply(
   let asked: ChatGo | null = null;
   let held: Array<{ kind: Change['kind']; n: number }> = [];
   let searches = 0;
+  // Claude asked to read the Tune page without the owner's leave: the answer carries a request for it.
+  let wantedTune = false;
   // The owner's newest message: cards they named themselves are never held back, and their words can say "do it here".
   const ownerText = [...chat.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
   const ownerSays = ownerText.toLowerCase();
@@ -654,7 +684,7 @@ export async function reply(
       unresolved = want.filter((n) => !got.has(front(n).toLowerCase())).length;
     }
     markReplaced(chat, changes, chat.messages.length);
-    return { role: 'assistant', text, at: new Date().toISOString(), lookups, changes, ...pagesNow(), ...cardsNow(), ...(unresolved ? { unresolved } : {}), ...(model ? { model } : {}) };
+    return { role: 'assistant', text, at: new Date().toISOString(), lookups, changes, ...pagesNow(), ...cardsNow(), ...(unresolved ? { unresolved } : {}), ...(model ? { model } : {}), ...(wantedTune ? { askTune: true } : {}) };
   };
   // Searching one at a time can use more rounds than an answer usually takes: an answer that searches gets more.
   const roundsFor = () => (searches > 0 ? MAX_ROUNDS + 8 : MAX_ROUNDS);
@@ -725,6 +755,19 @@ export async function reply(
         const page = pageGo(input);
         if (page) asked = page;
         results.push({ type: 'tool_result', tool_use_id: use.id, content: page ? `Shown to the owner as a button that opens ${PAGE_LABEL[page.page]}.` : 'No such page: trim, finish, upgrades, tags, check or plan.', ...(page ? {} : { is_error: true }) });
+        continue;
+      }
+      if (use.name === 'read_tune') {
+        // Only with the owner's leave: the switch or Allow in this chat, or their message asking about Tune.
+        const part = TUNE_SECTIONS.includes(input.part as TuneSection) ? input.part as TuneSection : 'all';
+        if (!tools.tune || !(chat.tuneAccess || saysTune(ownerText))) {
+          wantedTune = !!tools.tune;
+          results.push({ type: 'tool_result', tool_use_id: use.id, content: 'You don\'t have the owner\'s leave to read the Tune page in this chat. Don\'t guess what is on it: say in one line what you would look at there and why. The app asks the owner, and they can let you read it.' });
+          continue;
+        }
+        const l = 'Read your Tune page';
+        if (!lookups.includes(l)) lookups.push(l);
+        results.push({ type: 'tool_result', tool_use_id: use.id, content: tools.tune(part) });
         continue;
       }
       if (use.name === 'search_my_cards') {

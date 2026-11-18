@@ -1,5 +1,5 @@
 /**
- * A deck's chats. GET: every chat, newest first. POST {text, chatId?}: ask
+ * A deck's chats. GET: every chat, newest first. POST {text, chatId?, tuneAccess?}: ask
  * a question - in that chat, or a new one - and start Claude's reply in
  * the background. Answers the chat and the job.
  */
@@ -24,13 +24,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
-  const body = await request.json().catch(() => ({})) as { text?: string; chatId?: string };
+  const body = await request.json().catch(() => ({})) as { text?: string; chatId?: string; tuneAccess?: unknown };
   const text = (body.text ?? '').trim();
   if (!text) return NextResponse.json({ error: 'Ask something first' }, { status: 400 });
   const chat = body.chatId ? getChat(id, body.chatId) : null;
   if (body.chatId && !chat) return NextResponse.json({ error: 'No such chat' }, { status: 404 });
   try {
-    return NextResponse.json(await ask(owned.list, owned.profile, text.slice(0, 4000), chat));
+    return NextResponse.json(await ask(owned.list, owned.profile, text.slice(0, 4000), chat, typeof body.tuneAccess === 'boolean' ? { tuneAccess: body.tuneAccess } : {}));
   } catch (error) {
     if (error instanceof ChatError) return NextResponse.json({ error: error.message }, { status: 503 });
     throw error;

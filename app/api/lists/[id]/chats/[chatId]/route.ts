@@ -2,6 +2,7 @@
  * One chat. GET: the chat, and whether Claude is still replying.
  * PATCH {message, card: {id, name}}: a card name the answer marked that the app couldn't find, found by the owner's
  * hover (handoff 10, item 39): stored with the message so the next view links it at once.
+ * PATCH {tuneAccess}: whether Claude may read the deck's Tune page in this chat (answers any request for it).
  * PATCH {message, change, do?}: one proposal. do 'apply' makes it happen
  * (lib/chat-actions.ts), 'undo' takes it back; with no do, it is marked as
  * sent to Tune.
@@ -44,7 +45,17 @@ export async function PATCH(request: Request, { params }: Ctx) {
   const owned = requireList(request, id);
   if (owned instanceof NextResponse) return owned;
   const chat = getChat(id, chatId);
-  const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo'; card?: { id?: unknown; name?: unknown } };
+  const body = await request.json().catch(() => ({})) as { message?: number; change?: number; do?: 'apply' | 'undo'; card?: { id?: unknown; name?: unknown }; tuneAccess?: unknown };
+  if (typeof body.tuneAccess === 'boolean') {
+    // The owner's answer on letting Claude read the Tune page in this chat: the switch, or Allow / Not now when
+    // Claude asked. Either way the open request is answered. Written on the chat as stored now.
+    const fresh = getChat(id, chatId);
+    if (!fresh) return NextResponse.json({ error: 'No such chat' }, { status: 404 });
+    fresh.tuneAccess = body.tuneAccess;
+    for (const m of fresh.messages) delete m.askTune;
+    saveChat(fresh);
+    return NextResponse.json({ chat: fresh });
+  }
   if (body.card) {
     const at = body.message ?? -1;
     const m = chat?.messages[at];

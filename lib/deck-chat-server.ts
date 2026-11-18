@@ -24,6 +24,7 @@ export class ChatError extends Error {}
 
 export { cardsNamed } from './cards';
 import { cardsNamed } from './cards';
+import { tuneSnapshot } from './tune-snapshot';
 
 /**
  * Chat's look-ups over the owner's cards (handoff 9): search_my_cards over every card they hold that may go in
@@ -52,8 +53,11 @@ export function ownedTools(list: List, profile: string, tune: Context | null): P
   };
 }
 
-/** Add the owner's question to a chat (a new one when no id) and start Claude's reply. */
-export async function ask(list: List, profile: string, text: string, chat: DeckChat | null): Promise<{ chat: DeckChat; job: Job }> {
+/**
+ * Add the owner's question to a chat (a new one when no id) and start Claude's reply. `tuneAccess`, when given, is
+ * the owner's switch for letting Claude read the Tune page in this chat, sent with the question.
+ */
+export async function ask(list: List, profile: string, text: string, chat: DeckChat | null, opts: { tuneAccess?: boolean } = {}): Promise<{ chat: DeckChat; job: Job }> {
   const model = modelFor(profile, 'chat');
   if (providerOf(model) !== 'anthropic' || !appModel(profile, 'chat')) throw new ChatError('Deck chat needs Claude: no Anthropic key is set on the server');
   // The same question twice in a row (a double tap, or a phone resending) is one question.
@@ -68,6 +72,7 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
   }
   const current = chat ?? newChat(list.id, profile, text);
   current.messages.push({ role: 'user', text: text.trim(), at: new Date().toISOString() });
+  if (typeof opts.tuneAccess === 'boolean') current.tuneAccess = opts.tuneAccess;
   saveChat(current);
 
   const job = startJob({
@@ -100,6 +105,8 @@ export async function ask(list: List, profile: string, text: string, chat: DeckC
       mine,
       fits,
       resolve: (names) => [...cardsNamed(names).values()].map((c) => ({ name: c.name, id: c.id, image: imageOf(c, 'normal') })),
+      // The Tune page, read only with the owner's leave (checked in reply()).
+      tune: (part) => tuneSnapshot(list.id, part),
     }, claudeCall(model, { profile, feature: 'chat', label: list.name }), model);
     // Appended to the chat as stored now, not to the copy read before the reply (review PR56 round 2, 1 and 5).
     appendReply(list.id, current.id, message);

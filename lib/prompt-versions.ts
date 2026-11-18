@@ -10,7 +10,7 @@ export const PROMPT_VERSIONS = {
   essentials: 'essentials-2',
   upgrades: 'upgrades-5',
   cutReview: 'cut-review-2',
-  chat: 'chat-8',
+  chat: 'chat-9',
   planRead: 'plan-read-2',
   planPass: 'plan-pass-3',
   planHelp: 'plan-help-4',

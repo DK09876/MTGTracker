@@ -77,6 +77,11 @@ export function stubMessage(params: { system?: unknown; messages: Anthropic.Beta
     id: `stub-${Date.now()}`, type: 'message', role: 'assistant', model: 'stub', content, stop_reason: stop, stop_sequence: null,
     usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
   }) as unknown as Anthropic.Beta.BetaMessage;
+  // Chat: look at the Tune page first when it can (the app decides whether it may).
+  const tune = tools.find((t) => t.name === 'read_tune');
+  if (tune && !results.length && params.messages.at(-1)?.role === 'user') {
+    return message([{ type: 'tool_use', id: `stub-tune-${Date.now()}`, name: 'read_tune', input: { part: 'all' } }], 'tool_use');
+  }
   if (search && !results.length && params.messages.length === 1) {
     return message([{ type: 'tool_use', id: `stub-search-${Date.now()}`, name: search.name, input: { query: 'draw' } }], 'tool_use');
   }

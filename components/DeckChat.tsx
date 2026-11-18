@@ -96,13 +96,23 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   // One question at a time: a second tap while the first is on its way used to start a second chat and a second paid reply.
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
+  // Whether Claude may read the Tune page: the open chat's setting, or the switch for the next new chat.
+  const [shareTuneNew, setShareTuneNew] = useState(false);
+  const shareTune = chat ? !!chat.tuneAccess : shareTuneNew;
+  const setShareTune = async (on: boolean) => {
+    if (!chat) { setShareTuneNew(on); return; }
+    try { setChat((await api.chatTune(listId, chat.id, on)).chat); } catch (e) { setError(e instanceof Error ? e.message : 'Could not change that'); }
+  };
+  /** Allow, when Claude asked to read the Tune page: let it, then ask it to go ahead, as the owner would. */
+  const allowTune = async () => { await setShareTune(true); await send('Go ahead and read my Tune page.'); };
+
   const send = async (question = text) => {
     if (!question.trim() || replying || sendingRef.current || updating) return;
     sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
-      const r = await api.askDeck(listId, question, open ?? undefined);
+      const r = await api.askDeck(listId, question, open ?? undefined, open ? undefined : shareTuneNew);
       setText('');
       setChat(r.chat);
       setOpen(r.chat.id);
@@ -303,6 +313,16 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {g.why && <span className="min-w-0 flex-[1_1_12rem] text-xs text-[var(--muted)]">{!planConfirmed && LOCKED_UNTIL_PLAN.includes(g.page) ? 'Trim, Finish and Upgrades open once the plan is confirmed. ' : ''}{g.why}</span>}
                 </div>
               ))}
+              {m.askTune && !chat.tuneAccess && i === chat.messages.length - 1 && (
+                // Claude wanted to look at the Tune page: ask the owner, once, here under its answer.
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-[#c4a6f5]/50 bg-[#241d2e] px-3 py-2.5" data-chat-ask-tune>
+                  <p className="min-w-0 flex-[1_1_14rem] text-sm"><b>Claude wants to read your Tune page</b><span className="text-[var(--muted)]"> (Finish, Upgrades and Trim lists with your marks and reasons, and what you’ve staged) to answer this.</span></p>
+                  <span className="flex gap-2">
+                    <button type="button" onClick={() => void allowTune()} disabled={sending || replying || updating} className="min-h-9 rounded-xl bg-[#c4a6f5] px-3.5 text-sm font-bold text-[#1a1325] disabled:opacity-60" data-chat-allow-tune>Allow for this chat</button>
+                    <button type="button" onClick={() => void setShareTune(false)} className="min-h-9 rounded-xl border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)]">Not now</button>
+                  </span>
+                </div>
+              )}
               {sent[`${i}`] && <p className="text-xs text-[var(--muted)]">Waiting in Tune, under {sent[`${i}`] === 'cuts' ? 'Cuts' : 'Upgrades'}: nothing changes until you accept them there.</p>}
               {m.model && <p className="text-[11px] text-[var(--faint,var(--muted))]">{modelLabel(m.model).replace(/^Claude /, '')}</p>}
             </div>
@@ -325,6 +345,15 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             ))}
           </div>
         )}
+        {/* Whether Claude may read the Tune page in this chat: the owner's switch, always shown, always theirs. */}
+        <div className="flex flex-wrap items-center gap-2 text-xs" data-chat-tune-switch>
+          <button type="button" role="switch" aria-checked={shareTune} onClick={() => void setShareTune(!shareTune)}
+            className={`inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 ${shareTune ? 'border-[#c4a6f5]/60 bg-[#241d2e] text-[#e3d4fb]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+            <span aria-hidden className={`h-2 w-2 rounded-full ${shareTune ? 'bg-[#c4a6f5]' : 'bg-[var(--border)]'}`} />
+            {shareTune ? 'Chat can read your Tune page' : 'Let Chat read your Tune page'}
+          </button>
+          <span className="text-[var(--faint)]">{shareTune ? 'Your Finish, Upgrades and Trim lists and what you’ve staged. Tap to stop.' : 'Or just ask about it (“why did Finish pick this?”).'}</span>
+        </div>
         {/* The composer stays at the bottom of the screen as the thread grows, as on Rules. */}
         <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
           <label htmlFor={`ask-${listId}`} className="sr-only">Ask about this deck</label>
