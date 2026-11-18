@@ -633,8 +633,12 @@ export type ChatSummary = { id: string; title: string; updatedAt: string; added:
 export const deckChats = (listId: string) => get<{ chats: ChatSummary[] }>(paths.chats(listId));
 export const deckChat = (listId: string, chatId: string) =>
   fetch(url(`lists/${listId}/chats/${chatId}`)).then(json<{ chat: DeckChat; replying: boolean; error: string | null }>);
-export const askDeck = (listId: string, text: string, chatId?: string) =>
-  send(`lists/${listId}/chats`, 'POST', { text, chatId }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+/** Ask in a chat (or a new one). `tuneAccess`: the owner's switch for letting Claude read the Tune page, for a new chat. */
+export const askDeck = (listId: string, text: string, chatId?: string, tuneAccess?: boolean) =>
+  send(`lists/${listId}/chats`, 'POST', { text, chatId, ...(tuneAccess !== undefined ? { tuneAccess } : {}) }).then(json<{ chat: DeckChat; job: Job }>).finally(jobsChanged);
+/** Let Claude read the deck's Tune page in this chat, or stop it (answers a request for it). */
+export const chatTune = (listId: string, chatId: string, tuneAccess: boolean) =>
+  send(`lists/${listId}/chats/${chatId}`, 'PATCH', { tuneAccess }).then(json<{ chat: DeckChat }>);
 export const markChange = (listId: string, chatId: string, message: number, change: number) =>
   send(`lists/${listId}/chats/${chatId}`, 'PATCH', { message, change }).then(json<{ chat: DeckChat }>);
 /** Apply one of Claude's proposals in a chat, or take it back. The deck's remembered answers are dropped, since it changed. */
