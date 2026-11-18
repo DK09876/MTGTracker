@@ -403,6 +403,57 @@ describe('Claude picks the lands worth playing; the app counts (Part E)', { time
     expect(picks.map((l) => l.name)).not.toContain('Blue Land 1');
   });
 
+  it('Maybe: off the list on the next round, told to Claude as liked, into the Maybeboard on Apply, remembered for later Finishes, and undone exactly', async () => {
+    const { db, list } = await setup(owned);
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 3 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2', 'Owned 4', 'Owned 6']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    finish.setChoices(list.id, { 'Owned 4': { choice: 'maybe', text: 'love the art, too slow here' } });
+    // Claude names the Maybe card again: it is dropped, and the slot fills with another.
+    const { call, asked } = stand([{ search: ['draw'] }, { picks: pick(['Owned 4', 'Owned 8']) }]);
+    await finish.runFinish(call as never, 'claude-opus-5-5', list, 'dk', { rerun: true });
+    const t = text(asked[0]);
+    expect(t).toContain('put Owned 4 in the Maybeboard, liked it somewhat but not for the deck now (\\"love the art, too slow here\\")');
+    expect(t).toContain('## Put in the Maybeboard by the owner');
+    let s = finish.finishStore(list.id);
+    expect(s.run!.items.map((i) => i.name)).toEqual(['Owned 2', 'Owned 6', 'Owned 8']);
+    expect(s.run!.changes!.out).toEqual([{ name: 'Owned 4', because: 'maybe' }]);
+    expect(s.maybes).toEqual([{ name: 'Owned 4', why: 'love the art, too slow here' }]);
+    // A second card on Maybe this round, with no reason; Apply puts both in the Maybeboard, and only the rest in the deck.
+    finish.setChoices(list.id, { 'Owned 6': { choice: 'maybe', text: '' } });
+    const done = await finish.applyFinish(list, 'dk');
+    expect(done).toMatchObject({ added: 2, size: 18, maybe: ['Owned 4', 'Owned 6'] });
+    expect(db.cardsInList(list.id).filter((c) => c.board === 'maybe').map((c) => c.card.name).sort()).toEqual(['Owned 4', 'Owned 6']);
+    s = finish.finishStore(list.id);
+    expect(s.maybeBefore).toEqual([{ name: 'Owned 4', why: 'love the art, too slow here' }, { name: 'Owned 6', why: '' }]);
+    // A later Finish on this deck: not on offer, and the reasons go with the request as cards the owner liked.
+    finish.resetFinish(list.id);
+    const next = stand([{ search: ['draw'] }, { picks: pick(['Owned 4', 'Owned 10']) }]);
+    await finish.runFinish(next.call as never, 'claude-opus-5-5', list, 'dk');
+    expect(JSON.stringify(next.asked[0].system)).toContain('Put in the Maybeboard on this deck before');
+    expect(JSON.stringify(next.asked[0].system)).toContain('Owned 4: \\"love the art, too slow here\\"');
+    expect(finish.finishStore(list.id).run!.items.map((i) => i.name)).toEqual(['Owned 10']);
+    // "Offer it again" takes it off the Maybe list.
+    finish.unskip(list.id, 'Owned 6');
+    expect(finish.finishStore(list.id).maybeBefore.map((x) => x.name)).toEqual(['Owned 4']);
+  });
+
+  it('Maybe alone can be applied, and Undo takes the cards out of the Maybeboard and off the remembered list', async () => {
+    const { db, list } = await setup(owned);
+    const rows = () => db.cardsInList(list.id).map((c) => [c.card.name, c.board, c.quantity]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    const before = rows();
+    const finish = await import('./finish');
+    finish.setFinish(list.id, { want: 1 });
+    await finish.runFinish(stand([{ search: ['draw'] }, { picks: pick(['Owned 2']) }]).call as never, 'claude-opus-5-5', list, 'dk');
+    finish.setChoices(list.id, { 'Owned 2': { choice: 'maybe', text: 'fun, not now' } });
+    expect(await finish.applyFinish(list, 'dk')).toMatchObject({ added: 0, maybe: ['Owned 2'] });
+    expect(finish.finishStore(list.id).maybeBefore).toEqual([{ name: 'Owned 2', why: 'fun, not now' }]);
+    finish.undoFinish(list);
+    expect(rows()).toEqual(before);
+    expect(finish.finishStore(list.id).maybeBefore).toEqual([]);
+    expect(finish.finishStore(list.id).choices['Owned 2']).toEqual({ choice: 'maybe', text: 'fun, not now' });
+  });
+
   it('remembers what was skipped on this deck through Apply and Start over, with the reason, until taken off', async () => {
     const { list } = await setup(owned);
     const finish = await import('./finish');
