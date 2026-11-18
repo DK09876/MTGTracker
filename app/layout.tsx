@@ -52,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-[var(--background)]/85 pt-[env(safe-area-inset-top)] backdrop-blur-xl backdrop-saturate-150">
           <nav className="safe-x mx-auto flex h-14 max-w-[1680px] items-center gap-2 sm:gap-3 lg:gap-6">
             <Link href="/" className="font-display flex items-center gap-2 whitespace-nowrap text-lg font-extrabold">
-              {/* The app's icon (public/icons/icon.svg): a card at the heart of a teleportation circle, its five colours matching. */}
+              {/* The app's icon (public/icons/icon.svg): a Magic card at the heart of a teleportation circle, the five colours on its pentagon matching the orbs around it. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${base}/icons/icon-192.png`} alt="" aria-hidden width={28} height={28} className="h-7 w-7 rounded-[8px]" />
               {/* Only where there is room beside the six sections. */}
