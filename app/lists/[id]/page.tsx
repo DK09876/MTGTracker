@@ -12,7 +12,7 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
-import PlanTab from '@/components/PlanTab';
+import PlanTab, { PlanCards } from '@/components/PlanTab';
 import TagsTab from '@/components/TagsTab';
 import { TuneLocked } from '@/components/TuneLock';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
@@ -275,6 +275,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const entries: Entry[] = deck && list.commander
     ? [{ card: list.commander, quantity: 1, finish: list.commanderFinish, board: 'main', commander: true }, ...listed]
     : listed;
+  // A card in this deck (any board, or the commander) by name, for the names on the Plan and Tags tabs.
+  const deckCardOf = (name: string) => {
+    const f = name.split(' // ')[0].toLowerCase();
+    return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (list.commander && list.commander.name.split(' // ')[0].toLowerCase() === f ? list.commander : undefined);
+  };
   const partner = deck ? cards.find((c) => c.slot === 'partner')?.card ?? null : null;
   const companion = deck ? cards.find((c) => c.slot === 'companion')?.card ?? null : null;
   // Cuts and moved-out cards go to the section for cards that came out (the Sideboard unless changed).
@@ -641,18 +646,21 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </p>
       )}
       {deck && section === 'plan' ? (
-        <PlanTab
-          listId={id}
-          version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
-          onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-          onConfirmed={setPlanConfirmed}
-          onBracket={setBracket}
-        />
+        <PlanCards.Provider value={{ cardOf: deckCardOf, onCard: setSelected }}>
+          <PlanTab
+            listId={id}
+            version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
+            onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onConfirmed={setPlanConfirmed}
+            onBracket={setBracket}
+          />
+        </PlanCards.Provider>
       ) : null}
       {deck && section === 'tags' ? (
-        <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-          cardOf={(name) => { const f = name.split(' // ')[0].toLowerCase(); return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (list.commander && list.commander.name.split(' // ')[0].toLowerCase() === f ? list.commander : undefined); }}
-          onCard={setSelected} />
+        <PlanCards.Provider value={{ cardOf: deckCardOf, onCard: setSelected }}>
+          <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            cardOf={deckCardOf} onCard={setSelected} />
+        </PlanCards.Provider>
       ) : deck && section === 'tune' && !planConfirmed ? (
         <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
