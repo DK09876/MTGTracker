@@ -16,9 +16,9 @@ import Tip from './Tip';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
-import CardName from './CardName';
-import { cardLookup, exactName, foldName } from '@/lib/card-lookup';
-import ChatText from './ChatText';
+import { foldName } from '@/lib/card-lookup';
+import CardText, { CardLink, CardTextContext } from './CardText';
+import { openCard as openPopup } from './CardPopup';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import type { Change, DeckChat as Chat } from '@/lib/deck-chat';
@@ -26,6 +26,7 @@ import { goLabel, LOCKED_UNTIL_PLAN, type ChatGo } from '@/lib/chat-pages';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { ListedCard } from '@/lib/db';
 import { modelLabel } from '@/lib/quota';
+import { withoutMarks } from '@/lib/chat-text';
 
 interface Props {
   listId: string;
@@ -66,36 +67,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState(question);
   const end = useRef<HTMLDivElement>(null);
-  // Marked names the app couldn't find (item 39): looked up once per name per page view, on hover or tap, through
-  // the app's own card search by exact name; a found card is kept with its message.
-  const finder = useRef(cardLookup<ScryfallCard>(async (n) => (await api.search(exactName(n))).cards.find((c) => foldName(c.name) === foldName(n)) ?? null));
-  const [, setLooked] = useState(0);
-  // The chat open now: a lookup's answer for a chat that is no longer open is ignored (review PR56, 16).
+  // The chat open now: an answer for a chat that is no longer open is ignored (review PR56, 16).
   const openChat = useRef<string | null>(null);
   useEffect(() => { openChat.current = chat?.id ?? null; }, [chat?.id]);
-  // A found card the server wouldn't store yet (an answer was being written): stored once the answer is in.
-  const toStore = useRef<Array<{ chat: string; m: number; id: string; name: string }>>([]);
-  const store = (s: { chat: string; m: number; id: string; name: string }) => api.keepFoundCard(listId, s.chat, s.m, { id: s.id, name: s.name })
-    .then((r) => { if (openChat.current === s.chat) setChat(r.chat); })
-    .catch((e) => { if (e instanceof Error && /answering/i.test(e.message)) toStore.current.push(s); });
-  const look = (m: number, name: string, retry = false) => {
-    // Not while the next answer is being written (review 15): the name stays plain link text until then.
-    if (replying) return;
-    const was = finder.current.state(name).status;
-    const forChat = chat?.id ?? null;
-    const p = finder.current.look(name, retry);
-    if (finder.current.state(name).status !== was) setLooked((x) => x + 1);
-    void p.then((st) => {
-      setLooked((x) => x + 1);
-      if (st.status === 'found' && forChat) void store({ chat: forChat, m, id: st.card.id, name });
-    });
-  };
-  useEffect(() => {
-    if (replying || !toStore.current.length) return;
-    const waiting = toStore.current.splice(0);
-    for (const s of waiting) void store(s);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [replying]);
 
   const loadList = useCallback(() => api.deckChats(listId).then((r) => setChats(r.chats)).catch(() => setChats([])), [listId]);
   useEffect(() => { void loadList(); }, [loadList]);
@@ -212,16 +186,15 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
       ?? m.changes?.filter((x) => x.cardId && (x.kind === 'add' || x.kind === 'swap')).map((x) => ({ name: x.name, id: x.cardId!, image: x.image ?? null })).find((x) => foldName(x.name) === f);
     return c ? partial(c) : undefined;
   };
-  const openCard = (card: ScryfallCard) => {
-    if (!onCard) return;
-    if (card.type_line) { onCard(card); return; }
-    void api.finishCard(listId, card.id, card.name).then(onCard).catch(() => {});
-  };
+  // A stub card (id, name, picture) is read in full by CardLink before it opens.
+  const openCard = (card: ScryfallCard) => { if (onCard) onCard(card); else openPopup(card); };
   const namesIn = (m: Chat['messages'][number]) => [
     ...cards.map((c) => c.card.name), ...(commander ? [commander.name] : []),
     ...(m.cards ?? []).map((c) => c.name), ...(m.changes ?? []).flatMap((c) => [c.name, c.out?.name ?? '']).filter(Boolean),
   ];
-  const nm = (n: string, m?: Chat['messages'][number]) => <CardName name={n} card={m ? cardIn(m)(n) : byName(n)} onOpen={openCard} />;
+  const nm = (n: string, m?: Chat['messages'][number]) => (
+    <CardTextContext.Provider value={{ cardOf: m ? cardIn(m) : byName, onOpen: openCard }}><CardLink name={n} /></CardTextContext.Provider>
+  );
 
   const inDeck = new Set(cards.map((c) => c.card.id));
   const size = cards.filter((c) => c.board === 'main').reduce((n, c) => n + c.quantity, 0) + (commander ? 1 : 0);
@@ -239,7 +212,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
             onClick={() => setOpen(c.id)}
             className={`rounded-xl border px-3 py-2 text-left ${open === c.id ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)]'}`}
           >
-            <span className="block truncate text-sm font-medium">{c.title}</span>
+            <span className="block truncate text-sm font-medium">{withoutMarks(c.title)}</span>
             <span className="block text-xs text-[var(--muted)]">
               {when(c.updatedAt)}{c.added || c.cut ? ` · ${c.added ? `${c.added} added` : ''}${c.added && c.cut ? ', ' : ''}${c.cut ? `${c.cut} cut` : ''}` : ''}
             </span>
@@ -259,7 +232,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
         )}
         {chat?.messages.map((m, i) => (
           m.role === 'user' ? (
-            <p key={i} className="max-w-[85%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3.5 py-2 text-sm">{m.text}</p>
+            <p key={i} className="max-w-[85%] self-end whitespace-pre-wrap rounded-2xl rounded-br-md border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3.5 py-2 text-sm"><CardText text={m.text} /></p>
           ) : (
             <div key={i} className="flex max-w-[95%] flex-col gap-2">
               {m.lookups && m.lookups.length > 0 && (
@@ -267,7 +240,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                   {m.lookups.map((l) => <span key={l} className="max-w-full break-words rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">{l.replace(/^Searched Scryfall:/, 'Searched all cards:')}</span>)}
                 </div>
               )}
-              <ChatText text={m.text} names={namesIn(m)} cardOf={cardIn(m)} onOpen={openCard} lookup={{ state: (n) => finder.current.state(n), look: (n, retry) => look(i, n, retry), waiting: replying }} />
+              <CardTextContext.Provider value={{ cardOf: cardIn(m), names: namesIn(m), onOpen: openCard }}>
+                <div className="text-sm"><CardText text={m.text} blocks /></div>
+              </CardTextContext.Provider>
               {(m.unresolved ?? 0) > 0 && <p className="text-[11px] text-[var(--faint)]">{m.unresolved} name{m.unresolved === 1 ? '' : 's'} in this answer matched no card in the app’s card data: point at {m.unresolved === 1 ? 'it' : 'one'} to look it up.</p>}
               {m.changes?.map((c, j) => {
                 const busy = doing === `${i}:${j}`;
@@ -287,7 +262,7 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
                         {what}
                         {(c.kind === 'add' || c.kind === 'swap') && (c.held ? <span className="ml-2 text-xs text-emerald-400">{c.held}</span> : c.price && <span className="ml-2 text-xs text-[var(--muted)]">${c.price}</span>)}
                       </p>
-                      {c.why && <p className="text-xs text-[var(--muted)]">{c.why}</p>}
+                      {c.why && <p className="text-xs text-[var(--muted)]"><CardText text={c.why} /></p>}
                     </div>
                     {c.applied ? (
                       <span className="flex items-center gap-2"><span className="text-xs text-emerald-400">Applied</span>

@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { steady } from '@/lib/steady-tap';
+import { withoutMarks } from '@/lib/chat-text';
 
 export interface HistoryEntry {
   id: string;
@@ -211,9 +212,9 @@ function Row({ entry, on, onOpen, onSave, onUnsave, onRename, onDelete }: { entr
     <div className={`relative rounded-lg ${on ? 'bg-[var(--surface-hover)] shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-[var(--surface)]'}`}>
       <button data-tour-entry {...steady(() => onOpen(entry))} aria-current={on ? 'true' : undefined} className="flex w-full min-w-0 flex-col py-1.5 pl-2 pr-9 text-left">
         <span className="truncate text-sm">
-          {entry.saved && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{entry.title}
+          {entry.saved && <span aria-hidden className="mr-1 text-[var(--accent)]">★</span>}{withoutMarks(entry.title)}
         </span>
-        {entry.meta && <span className="truncate text-[11px] text-[var(--muted)]">{entry.meta}</span>}
+        {entry.meta && <span className="truncate text-[11px] text-[var(--muted)]">{withoutMarks(entry.meta)}</span>}
       </button>
       <button
         ref={trigger}

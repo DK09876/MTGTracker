@@ -22,8 +22,8 @@ import { searchLines } from './finish-shared';
 
 export class ChatError extends Error {}
 
-export { cardsNamed } from './cards-named';
-import { cardsNamed } from './cards-named';
+export { cardsNamed } from './cards';
+import { cardsNamed } from './cards';
 
 /**
  * Chat's look-ups over the owner's cards (handoff 9): search_my_cards over every card they hold that may go in

@@ -48,7 +48,7 @@ import { PROMPT_VERSIONS } from './prompt-versions';
 import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
 import { combosInDeck } from './spellbook';
 import { gcRoomOf, landPlan, tuneContext, whyNotAddable, type Context } from './tune';
-import { cardsNamed } from './cards-named';
+import { cardsNamed } from './cards';
 
 const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
 const fmt = (x: number) => String(Math.round(x * 10) / 10);

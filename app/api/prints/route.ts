@@ -2,7 +2,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { imageOf, printingsOf } from '@/lib/scryfall';
+import { printingsFor } from '@/lib/cards';
+import { imageOf } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,7 @@ export async function GET(request: Request) {
   const oracleId = new URL(request.url).searchParams.get('oracleId') ?? '';
   if (!/^[0-9a-f-]{36}$/.test(oracleId)) return NextResponse.json({ error: 'oracleId required' }, { status: 400 });
   try {
-    const cards = await printingsOf(oracleId);
+    const cards = await printingsFor(oracleId);
     return NextResponse.json({
       printings: cards.map((c) => ({
         id: c.id,

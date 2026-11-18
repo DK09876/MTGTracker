@@ -12,7 +12,10 @@ import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
-import PlanTab, { PlanCards } from '@/components/PlanTab';
+import PlanTab from '@/components/PlanTab';
+import { CardTextContext } from '@/components/CardText';
+import DeckExtras from '@/components/DeckExtras';
+import { openCard } from '@/components/CardPopup';
 import TagsTab from '@/components/TagsTab';
 import { TuneLocked } from '@/components/TuneLock';
 import DeckHistory, { countLine, DiffList } from '@/components/DeckHistory';
@@ -280,6 +283,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     const f = name.split(' // ')[0].toLowerCase();
     return cards.find((c) => c.card.name.split(' // ')[0].toLowerCase() === f)?.card ?? (list.commander && list.commander.name.split(' // ')[0].toLowerCase() === f ? list.commander : undefined);
   };
+  const cardText = { cardOf: deckCardOf, names: [...cards.map((c) => c.card.name), ...(list.commander ? [list.commander.name] : [])], onOpen: (c: ScryfallCard) => {
+    // A card in the deck opens this page's popup, with the deck's actions; any other, the app's, with its printings.
+    if (list.commander?.name === c.name || cards.some((x) => x.card.name === c.name)) setSelected(cards.find((x) => x.card.name === c.name)?.card ?? list.commander ?? c);
+    else openCard(c);
+  } };
   const partner = deck ? cards.find((c) => c.slot === 'partner')?.card ?? null : null;
   const companion = deck ? cards.find((c) => c.slot === 'companion')?.card ?? null : null;
   // Cuts and moved-out cards go to the section for cards that came out (the Sideboard unless changed).
@@ -359,6 +367,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const heroArt = list.commander ? list.commander.image_uris?.art_crop ?? list.commander.card_faces?.[0]?.image_uris?.art_crop ?? null : null;
 
   return (
+    // Every CardText on the deck's pages links the deck's card names (older answers have no [[marks]]) and opens
+    // this page's popup, with the deck's actions for the card.
+    <CardTextContext.Provider value={cardText}>
     <div style={deck && list.commander ? identityStyle([...new Set([...(list.commander.color_identity ?? []), ...(partner?.color_identity ?? [])])]) : undefined}>
       <Link href={deck ? '/decks' : '/lists'} className="relative z-10 text-sm text-[var(--muted)] hover:text-[var(--foreground)]">
         ← All {deck ? 'decks' : 'lists'}
@@ -646,7 +657,6 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         </p>
       )}
       {deck && section === 'plan' ? (
-        <PlanCards.Provider value={{ cardOf: deckCardOf, onCard: setSelected }}>
           <PlanTab
             listId={id}
             version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
@@ -654,13 +664,10 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onConfirmed={setPlanConfirmed}
             onBracket={setBracket}
           />
-        </PlanCards.Provider>
       ) : null}
       {deck && section === 'tags' ? (
-        <PlanCards.Provider value={{ cardOf: deckCardOf, onCard: setSelected }}>
           <TagsTab listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             cardOf={deckCardOf} onCard={setSelected} />
-        </PlanCards.Provider>
       ) : deck && section === 'tune' && !planConfirmed ? (
         <TuneLocked listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onConfirmed={() => setPlanConfirmed(true)} />
       ) : deck && section === 'tune' ? (
@@ -776,6 +783,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               onFilter={(text) => { setOwner('all'); setCopiesShown(true); setFilterTo({ text, n: Date.now() }); }} />
           </section>
         )}
+        {deck && <DeckExtras cards={[...(list.commander ? [list.commander] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card)]} />}
         </>
       )}
       </div>
@@ -862,6 +870,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
       )}
       {deckCopies.toastView}
     </div>
+    </CardTextContext.Provider>
   );
 }
 

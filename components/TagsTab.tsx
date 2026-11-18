@@ -12,10 +12,10 @@
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
+import CardText from './CardText';
 import { C, CardChip, CardPick, MARK, RemoveButton, useUndo } from './PlanTab';
 import CardName, { CardNames } from './CardName';
 import Tip from './Tip';
-import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
 import { price } from '@/lib/price';
 import type { Category } from '@/lib/categories-shared';
@@ -288,7 +288,7 @@ export default function TagsTab({ listId, version, onTab, cardOf, onCard }: Prop
               </span>}
             </div>
             {v.ai.focus.kind !== 'all' && <p className="text-[13px] text-[var(--muted)]">This run looked for: {FOCUS_LABELS[v.ai.focus.kind]}{v.ai.focus.kind === 'one' ? ` · ${v.ai.focus.category}` : v.ai.focus.kind === 'find' ? ` · “${v.ai.focus.text}”` : ''}</p>}
-            {v.ai.notes && <p className="text-[13px] text-[var(--muted)]"><SymbolText text={v.ai.notes} /></p>}
+            {v.ai.notes && <p className="text-[13px] text-[var(--muted)]"><CardText text={v.ai.notes} /></p>}
             {v.ai.rows.map((r) => <AiSug key={r.key} r={r} busy={busy} act={act} />)}
           </div>
         )}
@@ -328,7 +328,7 @@ function SugRow({ title, head, meta, why, busy, onAccept, onSkip, children }: { 
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t border-[var(--border)] pt-2" data-suggestion>
       <div className="min-w-0 flex-[1_1_18rem]">
         <b className="break-words">{head ?? title}</b> {meta && <span className="text-[13px] text-[var(--muted)]">{meta}</span>}
-        {why && <p className="text-sm text-[var(--muted)]"><SymbolText text={why} /></p>}
+        {why && <p className="text-sm text-[var(--muted)]"><CardText text={why} /></p>}
         {children}
       </div>
       <div className="flex gap-2">
@@ -360,7 +360,7 @@ function AiSug({ r, busy, act }: { r: AiRow; busy: boolean; act: (a: Record<stri
   const meta = r.kind === 'new' ? 'New category' : r.kind === 'merge' || r.kind === 'drop' ? 'Whole group' : r.kind === 'describe' ? 'Description' : undefined;
   return (
     <SugRow title={title} head={head} meta={meta} why={r.why} busy={busy} onAccept={() => act({ action: 'accept', keys: [r.key] })} onSkip={() => act({ action: 'skip', key: r.key })}>
-      {r.kind === 'describe' && r.text && <p className="text-sm">“<SymbolText text={r.text} />”</p>}
+      {r.kind === 'describe' && r.text && <p className="text-sm">“<CardText text={r.text} />”</p>}
       {r.kind === 'new' && r.cards && <p className="text-[13px] text-[var(--muted)]"><CardNames names={r.cards.slice(0, 8)} cardOf={cardOf} onOpen={onOpen} />{r.cards.length > 8 ? `, and ${r.cards.length - 8} more` : ''}</p>}
     </SugRow>
   );

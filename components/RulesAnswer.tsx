@@ -11,6 +11,9 @@
 
 import { useState } from 'react';
 
+import CardText from './CardText';
+import { withoutMarks } from '@/lib/chat-text';
+
 import type { Confidence, Source, Turn, Working } from '@/lib/rules/answer';
 import { modelInfo } from '@/lib/models';
 
@@ -62,7 +65,7 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
 
   const withMarks = (text: string) => text.split(/(\[[A-Z]\d+\])/g).map((part, i) => {
     const m = /^\[([A-Z]\d+)\]$/.exec(part);
-    if (!m || !byId.has(m[1])) return <span key={i}>{part}</span>;
+    if (!m || !byId.has(m[1])) return <CardText key={i} text={part} />;
     return (
       <a key={i} href={`#${anchor(m[1])}`} title={byId.get(m[1])!.label} className="mx-0.5 rounded bg-[var(--surface-hover)] px-1 align-super text-[10px] font-semibold text-[var(--accent)] no-underline">
         {numberOf(m[1])}
@@ -105,14 +108,14 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
         <div className="mt-3 rounded-lg bg-[var(--background)] px-3 py-2 text-xs">
           <p className="font-medium">Assumed</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[var(--muted)]">
-            {answer.assumptions.map((x, i) => <li key={i}>{x}</li>)}
+            {answer.assumptions.map((x, i) => <li key={i}><CardText text={x} /></li>)}
           </ul>
           <p className="mt-1 text-[var(--muted)]">If any of that is wrong, say so in a follow-up.</p>
         </div>
       )}
       {turn.clarifications && turn.clarifications.length > 0 && (
         <p className="mt-2 text-xs text-[var(--muted)]">
-          You said: {turn.clarifications.map((c) => `${c.question} ${c.answer}`).join(' · ')}
+          You said: <CardText text={turn.clarifications.map((c) => `${c.question} ${c.answer}`).join(' · ')} />
         </p>
       )}
 
@@ -164,7 +167,7 @@ export default function RulesAnswer({ turn, index, onAsk }: { turn: Turn; index:
         <div className="mt-4 flex flex-wrap gap-2">
           {answer.followUps.map((f) => (
             <button key={f} onClick={() => onAsk(f)} className="rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-left text-xs text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">
-              {f}
+              {withoutMarks(f)}
             </button>
           ))}
         </div>

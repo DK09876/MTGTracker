@@ -192,6 +192,11 @@ export async function interpret(
     commander = known;
     grounded = true;
     trace.push({ text: `Kept the commander, ${known.name}` });
+  } else if (plan.commander && !known && !resume) {
+    // A card named in the request is just a card: a search is for a commander's deck only when the owner chose one
+    // (the Commander field, or a deck's own search), never because the text names a legendary creature.
+    trace.push({ text: `Searched “${plan.commander}” as a card, not as your commander: choose a commander in the Commander field to search for its deck` });
+    plan = { ...plan, commander: null };
   } else if (plan.commander) {
     const found = await lookUpCommander(plan.commander, deps, trace);
     if (found && 'choices' in found) {
@@ -242,6 +247,17 @@ export async function runCombos(commanderName: string, deps: Deps): Promise<Inte
 // --- routes ----------------------------------------------------------------
 
 async function cardRoute(text: string, plan: Translation, deps: Deps, trace: Step[]): Promise<Interpreted> {
+  // What the owner typed, when it is a card's exact name, wins over the model's reading of it: the model may
+  // "correct" a real name into a different card (Forsaken Monument into another Monument).
+  const typed = text.replace(/\[\[+|\]\]+/g, '').trim();
+  if (typed.split(/\s+/).length <= NAME_WORDS && typed.toLowerCase() !== plan.cardName!.toLowerCase()) {
+    const own = ((await deps.cardsNamed([typed]).catch(() => [] as ScryfallCard[])) ?? [])
+      .find((c) => c.name.split(' // ')[0].toLowerCase() === typed.toLowerCase() || c.name.toLowerCase() === typed.toLowerCase());
+    if (own) {
+      trace.push({ text: `“${typed}” is a card's exact name, so this is that card` });
+      plan = { ...plan, cardName: own.name };
+    }
+  }
   const query = exactName(plan.cardName!);
   const interpretation: Interpretation = {
     via: 'ai', kind: 'card', query, explanation: plan.explanation || undefined,
@@ -260,7 +276,11 @@ async function comboRoute(
 ): Promise<Interpreted> {
   let target = commander;
   if (plan.cardName) {
-    target = await deps.findCardNamed(plan.cardName) ?? await findExactly(plan.cardName, deps);
+    // The exact name first; a loose match only when no card has it, and the trace says so.
+    const wanted = plan.cardName.toLowerCase();
+    target = ((await deps.cardsNamed([plan.cardName]).catch(() => [] as ScryfallCard[])) ?? [])
+      .find((c) => c.name.toLowerCase() === wanted || c.name.split(' // ')[0].toLowerCase() === wanted)
+      ?? await deps.findCardNamed(plan.cardName);
     trace.push({
       text: target
         ? `Looked up “${plan.cardName}” on Scryfall → ${target.name}`
@@ -559,7 +579,7 @@ async function nearestName(text: string, deps: Deps, trace: Step[]): Promise<Int
     cards: [named], totalCards: 1, hasMore: false, trace,
     interpretation: {
       via: 'name', kind: 'card', query: exactName(named.name),
-      note: 'Nothing matched that as a description, so this is the closest card name.',
+      note: `No card is named “${text}”. Did you mean ${named.name}? That's the closest name, shown here.`,
     },
   };
 }

@@ -1,3 +1,4 @@
+import CardPopup from '@/components/CardPopup';
 import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque, Figtree } from 'next/font/google';
 import 'mana-font/css/mana.css';
@@ -83,6 +84,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeApplier />
         <TourOverlay />
         <CommandPalette />
+        <CardPopup />
         <ServiceWorker />
       </body>
     </html>

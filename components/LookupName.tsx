@@ -8,7 +8,7 @@
  * retry if not. Nothing is looked up until the owner points at it.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import CardPicture from './CardPicture';
@@ -17,7 +17,7 @@ import { imageOf, type ScryfallCard } from '@/lib/scryfall';
 
 const WIDTH = 220;
 
-export default function LookupName({ name, state, onLook, onOpen, waiting = false }: {
+export default function LookupName({ name, state, onLook, onOpen, onTap, waiting = false }: {
   name: string;
   state: LookupState<ScryfallCard>;
   /** While an answer is being written: plain link text, no box and no lookup; the next hover after it looks up. */
@@ -25,10 +25,14 @@ export default function LookupName({ name, state, onLook, onOpen, waiting = fals
   /** Look it up (retry: after a miss). */
   onLook: (retry?: boolean) => void;
   onOpen: (card: ScryfallCard) => void;
+  /** A tap on a name not found yet: the caller opens the card once it is (this link is replaced by then). */
+  onTap?: () => void;
 }) {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
-  // A tap shows the box until the next tap elsewhere (a phone has no hover).
+  // A tap shows the box until the next tap elsewhere (a phone has no hover), and opens the card once it's found.
   const [pinned, setPinned] = useState(false);
+  // Where the last tap was: a tap that ends in "no such card" shows that there.
+  const tapAt = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     if (!pinned) return;
     const off = () => { setPinned(false); setAt(null); };
@@ -39,6 +43,12 @@ export default function LookupName({ name, state, onLook, onOpen, waiting = fals
     const h = WIDTH * 1.4;
     setAt({ x: x + 24 + WIDTH > window.innerWidth ? Math.max(8, x - WIDTH - 24) : x + 24, y: Math.min(window.innerHeight - h - 10, Math.max(10, y - h / 2)) });
   };
+  useEffect(() => {
+    if (state.status !== 'missing' || !tapAt.current) return;
+    const { x, y } = tapAt.current;
+    tapAt.current = null;
+    place(x, y); setPinned(true);
+  }, [state.status]);
   const src = state.status === 'found' ? imageOf(state.card, 'normal') : null;
   if (waiting && state.status !== 'found' && state.status !== 'loading') {
     return <span className="underline decoration-dotted decoration-[var(--muted)] underline-offset-[3px]" title="Looks the card up once the answer is in" data-lookup-name={name} data-lookup="waiting">{name}</span>;
@@ -50,11 +60,20 @@ export default function LookupName({ name, state, onLook, onOpen, waiting = fals
         onFocus={(e) => { if (!e.currentTarget.matches(':focus-visible')) return; const r = e.currentTarget.getBoundingClientRect(); place(r.right, r.top + r.height / 2); onLook(); }}
         onBlur={() => { if (!pinned) setAt(null); }}
         onClick={(e) => {
-          if (state.status === 'found') { setAt(null); onOpen(state.card); return; }
+          if (state.status === 'found') { setAt(null); setPinned(false); onOpen(state.card); return; }
           const r = e.currentTarget.getBoundingClientRect();
-          place(r.left, r.bottom + WIDTH * 0.7);
+          tapAt.current = { x: r.left, y: r.bottom + WIDTH * 0.7 };
+          // With a caller to open the card once found (CardLink), a tap just looks it up: the popup shows the
+          // picture, so no box floats over it. A miss shows "Couldn't find this card" with Try again (the effect).
+          if (onTap && state.status !== 'missing') {
+            setAt(null);
+            if (state.status === 'idle') onLook();
+            onTap();
+            return;
+          }
+          place(tapAt.current.x, tapAt.current.y);
           setPinned(true);
-          // A tap shows the box and looks up once; after a miss, only "Try again" asks again (review PR56, 17).
+          // After a miss, only "Try again" asks again (review PR56, 17).
           if (state.status === 'idle') onLook();
         }}
         className="inline text-left underline decoration-dotted decoration-[var(--muted)] underline-offset-[3px] hover:text-[var(--accent)]">

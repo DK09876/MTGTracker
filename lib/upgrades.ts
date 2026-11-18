@@ -40,7 +40,7 @@ import type { ClaudeParams } from './ai-claude';
 import { cardPrices } from './card-price';
 import { localCards } from './card-store';
 import { addCardToList, aiCalls, cardsInList, database, getSetting, setQuantity, setSetting, updateListCard, type CardBefore, type List } from './db';
-import { cardsNamed } from './cards-named';
+import { cardsNamed } from './cards';
 import { finishStore } from './finish';
 import { finishPool, heldCards, isLand, type Held } from './finish-pool';
 import { averageRounds, colourWords, parseQuery, searchLines, searchText, type Copies, type MeasuredRound } from './finish-shared';
