@@ -167,7 +167,13 @@ export function chunkPairs<T>(items: T[], size = 290): T[][] {
 
 // --- the conversation ------------------------------------------------------------------
 
-export type FinishChoice = 'add' | 'ask' | 'skip';
+/**
+ * add: into the deck. ask: Rethink, Claude weighs the reason. skip: left out for good. maybe: the owner liked it
+ * somewhat but not for the deck now: it goes to the Maybeboard on Apply, isn't offered again, and its reason tells
+ * later rounds and later Finishes what the owner likes.
+ */
+export type FinishChoice = 'add' | 'ask' | 'maybe' | 'skip';
+export const FINISH_CHOICES: readonly FinishChoice[] = ['add', 'ask', 'maybe', 'skip'];
 
 export interface FinishMark { name: string; choice: FinishChoice; text: string }
 
@@ -251,6 +257,10 @@ export interface FinishView {
   skipped: string[];
   /** Cards skipped on this deck in earlier Finishes, with the owner's reason: never offered again here. */
   skippedBefore: Array<{ name: string; why: string }>;
+  /** Cards put on Maybe in an earlier round of this conversation: off the list, into the Maybeboard on Apply. */
+  maybes: Array<{ name: string; why: string }>;
+  /** Cards an earlier Finish on this deck put in the Maybeboard, with the owner's reason: not offered again here. */
+  maybeBefore: Array<{ name: string; why: string }>;
   /** The cards Claude searches this round: how many, and the deck's colours in words. */
   /** n: the spells on offer; lands: the owner's lands searched apart for a fill to 100 (0 when not asked). */
   offer: { n: number; lands: number; colours: string } | null;
@@ -259,7 +269,7 @@ export interface FinishView {
   searches: FinishSearch[];
   job: { status: 'running' | 'failed'; detail: string | null; error: string | null } | null;
   /** left: picks on Add that were no longer on offer when applied (the deck or the collection changed), so not added. */
-  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[]; buy?: Array<{ name: string; price: number | null }> } | null;
+  done: { at: string; added: number; lands: number; size: number; borrowed: string[]; left?: string[]; buy?: Array<{ name: string; price: number | null }>; /** Put in the Maybeboard. */ maybe?: string[] } | null;
   /**
    * What a round costs. measured: the average of this app's real rounds (by round, not by call: a round is
    * several calls). Until there are enough, a guess that grows with the cards asked for (perCard).
@@ -271,7 +281,7 @@ export interface FinishView {
 /** What a later list changed: cards that left (and which mark sent them), cards that came in, and Rethinks that came back. */
 export interface FinishChanges {
   round: number;
-  out: Array<{ name: string; because: 'skipped' | 'rethink' | 'message' | 'gone' }>;
+  out: Array<{ name: string; because: 'skipped' | 'maybe' | 'rethink' | 'message' | 'gone' }>;
   in: Array<{ name: string; group: string }>;
   back: string[];
   /** The lands Claude chose this round that differ from the last list's (kept as sets: order is no change). */
@@ -300,6 +310,21 @@ export interface MeasuredRound { kind: 'first' | 'later'; cost: number; at: stri
 export function averageRounds(rounds: MeasuredRound[], min = 3): { first: number | null; later: number | null } {
   const avg = (k: 'first' | 'later') => { const x = rounds.filter((r) => r.kind === k); return x.length >= min ? x.reduce((n, r) => n + r.cost, 0) / x.length : null; };
   return { first: avg('first'), later: avg('later') };
+}
+
+/**
+ * What goes to the Maybeboard on Apply: the cards put on Maybe in earlier rounds, then the rows on Maybe now, once
+ * each by name, with the owner's reason (the latest one wins).
+ */
+export function chosenMaybes(earlier: Array<{ name: string; why: string }>, items: Array<Pick<FinishItem, 'name'>>, choices: Record<string, { choice: FinishChoice; text: string }>) {
+  const front = (n: string) => n.split(' // ')[0].trim().toLowerCase();
+  const out = new Map<string, { name: string; why: string }>();
+  for (const m of earlier) out.set(front(m.name), { name: m.name, why: m.why });
+  for (const i of items) {
+    const c = choices[i.name];
+    if (c?.choice === 'maybe') out.set(front(i.name), { name: i.name, why: (c.text ?? '').trim().slice(0, 300) || out.get(front(i.name))?.why || '' });
+  }
+  return [...out.values()];
 }
 
 /** The rows on Add, the owner's taken cards included. */

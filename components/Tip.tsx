@@ -10,6 +10,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isMouse } from '@/lib/mouse-only';
 
 interface Props {
   /** What the tip says; a few short lines at most. */
@@ -57,7 +58,7 @@ export default function Tip({ children, label = 'More about this', className = '
         aria-label={label}
         aria-describedby={open ? id : undefined}
         aria-expanded={open}
-        onMouseEnter={show}
+        onPointerEnter={(e) => { if (isMouse(e)) show(); }}
         onMouseLeave={() => { if (!pinned.current) setOpen(false); }}
         onFocus={show}
         onBlur={() => { pinned.current = false; setOpen(false); }}

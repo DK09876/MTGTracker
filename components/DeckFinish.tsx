@@ -26,10 +26,11 @@ import SymbolText from './SymbolText';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
-import { BUYS, chosenAdds, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, roundPrice, SEARCH_LIMIT, SEARCH_LIMIT_LATER, soundsUnsure, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
+import { BUYS, chosenAdds, chosenMaybes, completeCombos, COPIES, FINISH_GROUPS, FINISH_TITLE, roundPrice, SEARCH_LIMIT, SEARCH_LIMIT_LATER, soundsUnsure, type FinishChoice, type FinishItem, type FinishView } from '@/lib/finish-shared';
 import { price } from '@/lib/price';
 import { buyListText, buyTotal } from '@/lib/upgrades-shared';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { mouseOnly } from '@/lib/mouse-only';
 
 interface Props {
   listId: string;
@@ -52,9 +53,15 @@ const POLL_MS = 2_000;
 const SAVE_MS = 350;
 const QUICK = [5, 10, 25];
 
-const HINT: Record<FinishChoice, string> = { add: 'your reason, if you have one', ask: 'what should Claude weigh?', skip: 'you skipped it. why?' };
-const LABEL: Record<FinishChoice, string> = { add: 'Add', ask: 'Rethink', skip: 'Skip' };
-const LIT: Record<FinishChoice, string> = { add: 'bg-[#16301f] text-[#7fd6a0]', ask: 'bg-[#241d2e] text-[#c4a6f5]', skip: 'bg-[#3a211b] text-[#f0714f]' };
+const HINT: Record<FinishChoice, string> = { add: 'your reason, if you have one', ask: 'what should Claude weigh?', maybe: 'what do you like about it?', skip: 'you skipped it. why?' };
+const LABEL: Record<FinishChoice, string> = { add: 'Add', ask: 'Rethink', maybe: 'Maybe', skip: 'Skip' };
+const LIT: Record<FinishChoice, string> = { add: 'bg-[#16301f] text-[#7fd6a0]', ask: 'bg-[#241d2e] text-[#c4a6f5]', maybe: 'bg-[#2e2812] text-[#e8c558]', skip: 'bg-[#3a211b] text-[#f0714f]' };
+const TITLE: Record<FinishChoice, string | undefined> = {
+  add: undefined,
+  ask: 'Give your reason and Claude weighs it on the next round. It may come back with the same card and an argument.',
+  maybe: 'Goes to the Maybeboard when you apply, and isn’t offered again. Say what you like about it: Claude reads that on every later round and Finish.',
+  skip: 'Left out, and never offered again in this conversation.',
+};
 
 const groupKey = (i: Pick<FinishItem, 'group' | 'theme'>) => (i.group === 'theme' && i.theme ? `theme:${i.theme}` : i.group);
 const groupTitle = (k: string) => (k.startsWith('theme:') ? `Theme: ${k.slice(6)}` : FINISH_TITLE[k as keyof typeof FINISH_TITLE] ?? k);
@@ -170,6 +177,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       <section className={`${CARD} flex flex-col gap-3`} data-finish-done data-section="Finish">
         <h3 className="font-display text-2xl font-semibold">Added {plural(d.added + d.lands, 'card')}. The deck is at {d.size}.</h3>
         <p className="text-sm text-[var(--muted)]">{d.added} from your picks{d.lands ? ` and ${d.lands} lands chosen by the app` : ''}. A snapshot from before is in History.</p>
+        {(d.maybe?.length ?? 0) > 0 && <p className="text-sm" data-finish-done-maybe><b>Put in the Maybeboard:</b> {d.maybe!.join('; ')}. Finish won’t offer {d.maybe!.length === 1 ? 'it' : 'them'} again, and Claude reads your reasons as cards you liked.</p>}
         {d.borrowed.length > 0 && <p className="text-sm text-amber-300">These stay in the decks they’re in, so you have no spare copy of them now: {d.borrowed.join('; ')}.</p>}
         {(d.buy?.length ?? 0) > 0 && <BuyList rows={d.buy!} copied={copied} onCopy={() => copy(d.buy!)} />}
         {(d.left?.length ?? 0) > 0 && <p className="text-sm text-amber-300" data-finish-left>Left out, no longer on offer when you applied (the deck or your cards changed since the picks): {d.left!.join('; ')}.</p>}
@@ -288,18 +296,24 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   // --- the searches, as they run --------------------------------------------------------------
   // Every search is already limited to what may go in: say so, with the number and the deck's colours (D 10).
   const offerLine = view.offer && <p className="text-[13px] text-[var(--muted)]" data-finish-offer>Searching the {view.offer.n.toLocaleString()} cards you own that can go in this deck{view.offer.lands ? `, and ${view.offer.lands.toLocaleString()} of your lands for the lands` : ''} ({view.offer.colours}, Commander-legal).</p>;
-  // Cards skipped on this deck before (D 14): never offered again here, until taken off the list.
-  const skippedBefore = view.skippedBefore.length > 0 && (
+  // Cards skipped on this deck before (D 14), and cards an earlier Finish put in the Maybeboard: never offered again
+  // here, until taken off the list.
+  const remembered = view.skippedBefore.length + view.maybeBefore.length;
+  const rememberedRow = (x: { name: string; why: string }, tag: string) => (
+    <li key={`${tag}:${x.name}`} className="flex flex-wrap items-baseline gap-x-2">
+      <b>{x.name}</b><span className="text-[11px] text-[var(--muted)]">{tag}</span>{x.why && <span className="text-[#e2b93b]">“{x.why}”</span>}
+      <button type="button" disabled={busy || running} title={running ? 'After this round' : undefined} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
+    </li>
+  );
+  const skippedBefore = remembered > 0 && (
     <details className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]" data-finish-skipped-before>
-      <summary className="cursor-pointer px-4 py-2.5 text-[13px] text-[var(--muted)]">Skipped before on this deck · {plural(view.skippedBefore.length, 'card')} Claude won’t be offered again</summary>
+      <summary className="cursor-pointer px-4 py-2.5 text-[13px] text-[var(--muted)]">
+        {[view.skippedBefore.length ? `Skipped before · ${view.skippedBefore.length}` : '', view.maybeBefore.length ? `Put in the Maybeboard · ${view.maybeBefore.length}` : ''].filter(Boolean).join(' · ')} · {plural(remembered, 'card')} Claude won’t be offered again on this deck
+      </summary>
       <ul className="flex flex-col gap-1 border-t border-[var(--border)] px-4 py-3 text-[13px]">
-        {view.skippedBefore.map((x) => (
-          <li key={x.name} className="flex flex-wrap items-baseline gap-x-2">
-            <b>{x.name}</b>{x.why && <span className="text-[#e2b93b]">“{x.why}”</span>}
-            <button type="button" disabled={busy || running} title={running ? 'After this round' : undefined} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
-          </li>
-        ))}
-        <li className="text-xs text-[var(--faint)]">Your reasons go with every request on this deck, so Claude applies them to similar cards.</li>
+        {view.skippedBefore.map((x) => rememberedRow(x, 'skipped'))}
+        {view.maybeBefore.map((x) => rememberedRow(x, 'in the Maybeboard'))}
+        <li className="text-xs text-[var(--faint)]">Your reasons go with every request on this deck: Claude applies a skip’s reason to similar cards, and reads a Maybeboard reason as something you like.</li>
       </ul>
     </details>
   );
@@ -340,13 +354,16 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   // --- the picks --------------------------------------------------------------------------------
   const asks = items.filter((i) => stateOf(i.name) === 'ask');
   const skips = items.filter((i) => stateOf(i.name) === 'skip');
+  const maybeRows = items.filter((i) => stateOf(i.name) === 'maybe');
+  // What goes to the Maybeboard on Apply: this round's rows on Maybe and the ones sent on earlier rounds.
+  const maybes = chosenMaybes(view.maybes, items, choices);
   const lands = run.full && run.lands ? run.lands.total : 0;
   const total = view.size + adds.length + lands;
   const borrowed = items.filter((i) => i.src === 'other' && adds.includes(i.name));
   const buys = items.filter((i) => i.src === 'buy' && adds.includes(i.name));
   const buyRows = buys.map((i) => ({ name: i.name, price: i.price ?? null }));
   const bt = buyTotal(buyRows);
-  const canSend = asks.length > 0 || skips.length > 0 || !!message.trim();
+  const canSend = asks.length > 0 || skips.length > 0 || maybeRows.length > 0 || !!message.trim();
   const groups = [...new Set(items.map(groupKey))].sort((a, b) => groupOrder(a) - groupOrder(b));
   const complete = completeCombos(view.combos.found, [...view.combos.base, ...adds]);
   const sub = [
@@ -354,6 +371,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     borrowed.length ? `${borrowed.length} only in other decks.` : '',
     buys.length ? `${buys.length} to buy, $${bt.total.toFixed(2)}${bt.unpriced ? ` + ${bt.unpriced} with no price` : ''}.` : '',
     asks.length ? `${asks.length} to rethink.` : '',
+    maybes.length ? `${maybes.length} to the Maybeboard.` : '',
     skips.length ? `${skips.length} skipped.` : '',
     adds.length > run.want ? `${adds.length - run.want} more than you asked for, which is fine.` : adds.length < run.want ? `${run.want - adds.length} short: send to have Claude fill them, or apply as is.` : '',
   ].filter(Boolean).join(' ');
@@ -366,7 +384,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-finish-apply-bar>
           <span className="min-w-0 flex-[1_1_16rem] text-[13px] text-[var(--muted)]"><b className="text-[var(--foreground)] tabular-nums">{view.size} → {total}</b> · A snapshot is saved first. Undo puts every card back where it was, Maybeboard cards included.</span>
           <button className={C.btn} onClick={() => setReview(false)}>Back to the picks</button>
-          <button className={C.go} disabled={busy || !adds.length} onClick={() => act({ action: 'apply' }, onChanged)} data-finish-apply>Apply · add {plural(adds.length + lands, 'card')}</button>
+          <button className={C.go} disabled={busy || (!adds.length && !maybes.length)} onClick={() => act({ action: 'apply' }, onChanged)} data-finish-apply>Apply · add {plural(adds.length + lands, 'card')}{maybes.length ? `, ${maybes.length} to the Maybeboard` : ''}</button>
         </div>
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className={`${CARD} flex flex-col gap-3`}>
@@ -375,6 +393,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm tabular-nums">
             <dt className="text-right font-mono font-semibold">{adds.length}</dt><dd>cards picked for the deck</dd>
             {lands > 0 && <><dt className="text-right font-mono font-semibold">{lands}</dt><dd>lands chosen by the app</dd></>}
+            {maybes.length > 0 && <><dt className="text-right font-mono font-semibold">{maybes.length}</dt><dd>to the Maybeboard, not in the deck</dd></>}
             {skips.length > 0 && <><dt className="text-right font-mono font-semibold">{skips.length}</dt><dd>skipped, left out</dd></>}
             <dt className="text-right font-mono font-semibold">{view.size} → {total}</dt><dd>{total > 100 ? `deck size: ${total - 100} over, Trim next` : total < 100 ? `deck size: ${100 - total} still to go` : 'deck size: full'}</dd>
           </dl>
@@ -394,6 +413,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
               <div className="flex flex-col gap-1"><h4 className={H3}>Lands · {lands}</h4>
                 <p className="text-sm text-[var(--muted)]">{[...run.lands.duals.filter((d) => d.on).map((d) => d.name), ...run.lands.basics.filter((b) => b.n > 0).map((b) => `${b.n} ${b.name}`)].join(', ')}</p></div>
             )}
+            {maybes.length > 0 && <p className="text-sm" data-finish-review-maybe><b className="text-[#e8c558]">To the Maybeboard:</b> <span className="text-[var(--muted)]">{maybes.map((m) => (m.why ? `${m.name} (“${m.why}”)` : m.name)).join('; ')}</span></p>}
             {skips.length > 0 && <p className="text-sm text-[var(--muted)]"><b className="text-[var(--foreground)]">Skipped:</b> {skips.map((i) => i.name).join('; ')}</p>}
           </div>
         </div>
@@ -405,14 +425,15 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
     <section className="flex flex-col gap-4" data-section="Finish" data-finish>
       {/* One sticky bar, the same element throughout: the count, the round, what the deck becomes. */}
       <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-col gap-1.5 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-finish-bar>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <b className="font-display text-xl tabular-nums" data-finish-count>{adds.length} of {run.want} to add</b>
-          <span className="ml-auto flex flex-wrap gap-2">
+        {/* On a phone the count and both buttons share one row ("Review"), so the bar stays short over the list. */}
+        <div className="flex items-center gap-x-3 gap-y-2 sm:flex-wrap sm:gap-x-4">
+          <b className="min-w-0 font-display text-lg tabular-nums sm:text-xl" data-finish-count>{adds.length} of {run.want} to add</b>
+          <span className="ml-auto flex shrink-0 gap-2">
             <button className={C.btn} disabled={busy || running} onClick={() => act({ action: 'reset' })}>Start over</button>
-            <button className={C.go} disabled={busy || running || !adds.length} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Review and apply</button>
+            <button className={C.go} disabled={busy || running || (!adds.length && !maybes.length)} onClick={() => { setReview(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }}><span className="sm:hidden">Review</span><span className="max-sm:hidden">Review and apply</span></button>
           </span>
         </div>
-        <span className="line-clamp-3 min-h-[3.9em] text-[13px] leading-[1.3] text-[var(--muted)] sm:min-h-[2.6em]" title={sub} data-finish-sub>{sub}</span>
+        <span className="min-h-[2.6em] text-[13px] leading-[1.3] text-[var(--muted)] sm:line-clamp-3" title={sub} data-finish-sub>{sub}</span>
       </div>
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
       {view.job?.status === 'failed' && <p role="alert" className="text-sm text-red-400">Claude didn’t finish: {view.job.error}</p>}
@@ -438,11 +459,11 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         <label htmlFor="finish-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say what to change <span className="text-[13px] font-normal text-[var(--muted)]">optional{run.round > 1 ? ' · the earlier rounds are part of the conversation' : ''}</span></label>
         <textarea id="finish-say" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={1500}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && canSend && !busy && !running && !updating) { e.preventDefault(); void act({ action: 'find', rerun: true, message }); } }}
-          placeholder="For example: fewer counterspells, more one-mana cantrips. Or mark cards Rethink or Skip below and say why on their line."
+          placeholder="For example: fewer counterspells, more one-mana cantrips. Or mark cards Rethink, Maybe or Skip below and say why on their line."
           className={`${C.input} w-full resize-y py-2.5`} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">Add takes the card. Skip leaves it out for good. Rethink asks Claude again with your reason. Hover or focus a name to read the card.</p>
-          <button className={C.aiBtn} disabled={busy || running || !canSend || view.noKey || updating} onClick={() => act({ action: 'find', rerun: true, message })} title={updating ? UPDATING_TITLE : canSend ? undefined : 'Mark a card Rethink or Skip, or type something, first'} data-finish-send>✦ Send · {cost}</button>
+          <p className="min-w-0 flex-[1_1_14rem] text-[13px] text-[var(--muted)]">Add takes the card. Rethink asks Claude again with your reason. Maybe saves it to the Maybeboard: say what you like about it and Claude remembers. Skip leaves it out for good. Hover or focus a name to read the card.</p>
+          <button className={C.aiBtn} disabled={busy || running || !canSend || view.noKey || updating} onClick={() => act({ action: 'find', rerun: true, message })} title={updating ? UPDATING_TITLE : canSend ? undefined : 'Mark a card Rethink, Maybe or Skip, or type something, first'} data-finish-send>✦ Send · {cost}</button>
         </div>
       </div>
 
@@ -468,6 +489,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           { id: 'all', label: 'All', count: items.length },
           { id: 'add', label: 'Add', count: items.filter((i) => stateOf(i.name) === 'add').length },
           { id: 'ask', label: 'Rethink', count: asks.length },
+          { id: 'maybe', label: 'Maybe', count: maybeRows.length },
           { id: 'skip', label: 'Skip', count: skips.length },
           ...(run.round > 1 ? [{ id: 'changed', label: 'Changed this round', count: items.filter((i) => i.mark === 'new' || i.mark === 'back').length }] : []),
           ...(items.some((i) => i.src === 'other') ? [{ id: 'other', label: 'From another deck', count: items.filter((i) => i.src === 'other').length }] : []),
@@ -475,15 +497,16 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
         ]} />
         {groups.map((g) => {
           const all = items.filter((i) => groupKey(i) === g);
-          const rows = sortRows(all.filter((i) => shown.has(i.name)), lv.sort, { choice: (i) => ['add', 'ask', 'skip'].indexOf(stateOf(i.name)), mv: (i) => i.card.cmc, name: (i) => i.name });
+          const rows = sortRows(all.filter((i) => shown.has(i.name)), lv.sort, { choice: (i) => ['add', 'ask', 'maybe', 'skip'].indexOf(stateOf(i.name)), mv: (i) => i.card.cmc, name: (i) => i.name });
           const more = run.more[g];
           const folded = lv.folded.includes(g);
           const ga = all.filter((i) => stateOf(i.name) === 'ask').length;
           const gs = all.filter((i) => stateOf(i.name) === 'skip').length;
+          const gm = all.filter((i) => stateOf(i.name) === 'maybe').length;
           if (!rows.length && lv.filter !== 'all') return null;
           return (
             <div key={g} className="flex flex-col" data-finish-group={g}>
-              <GroupHead title={groupTitle(g)} count={all.length} extra={[ga ? `${ga} to rethink` : '', gs ? `${gs} skipped` : '', lv.filter !== 'all' ? `${rows.length} shown` : ''].filter(Boolean).join(' · ')}
+              <GroupHead title={groupTitle(g)} count={all.length} extra={[ga ? `${ga} to rethink` : '', gm ? `${gm} to the Maybeboard` : '', gs ? `${gs} skipped` : '', lv.filter !== 'all' ? `${rows.length} shown` : ''].filter(Boolean).join(' · ')}
                 folded={folded} onToggle={() => setLv({ folded: folded ? lv.folded.filter((x) => x !== g) : [...lv.folded, g] })} />
               {!folded && rows.map((i) => <Row key={i.name} item={i} state={stateOf(i.name)} text={choices[i.name]?.text ?? ''} name={nameOf(i)} onSet={(c) => choose(i, { choice: c })} onText={(t) => choose(i, { text: t })} />)}
               {!folded && more && lv.filter === 'all' && (
@@ -540,7 +563,7 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
           <div className="flex flex-wrap gap-1.5">
             {lands.duals.map((d) => (
               <span key={d.name} className="inline-flex items-stretch">
-                <button type="button" aria-pressed={d.on} disabled={busy} title={d.why} onMouseEnter={() => tell(d)} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
+                <button type="button" aria-pressed={d.on} disabled={busy} title={d.why} onPointerEnter={mouseOnly(() => tell(d))} onClick={() => onLands({ skip: d.on ? [...skip, d.name] : skip.filter((x) => x !== d.name) })} data-land={d.name}
                   className={`inline-flex min-h-10 items-center gap-1.5 border px-2.5 text-[13px] disabled:opacity-60 ${d.why ? 'rounded-l-lg' : 'rounded-lg'} ${d.on ? 'border-emerald-400/50 text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--faint)] line-through'}`}>
                   <span aria-hidden="true">{d.on ? '✓' : '+'}</span>{d.name}{d.deck && <span className="text-[11px] text-amber-300">in {d.deck}</span>}
                 </button>
@@ -586,7 +609,7 @@ function Lands({ lands, size, busy, onLands, onSave }: { lands: NonNullable<NonN
   );
 }
 
-const BECAUSE: Record<'skipped' | 'rethink' | 'message' | 'gone', string> = { skipped: 'you skipped it', rethink: 'you asked for a rethink', message: 'your message', gone: 'no longer on offer' };
+const BECAUSE: Record<'skipped' | 'maybe' | 'rethink' | 'message' | 'gone', string> = { skipped: 'you skipped it', maybe: 'to the Maybeboard', rethink: 'you asked for a rethink', message: 'your message', gone: 'no longer on offer' };
 
 /** What changed in a later round (D 15), from the two lists: out (and which mark sent it), in, and Rethinks that came back. */
 function Changes({ changes, items, onShow }: { changes: NonNullable<NonNullable<FinishView['run']>['changes']>; items: FinishItem[]; onShow: (name: string) => void }) {
@@ -608,7 +631,7 @@ function Changes({ changes, items, onShow }: { changes: NonNullable<NonNullable<
 
 /**
  * One pick: four columns on every row, so nothing moves when its state
- * changes. Add | Rethink | Skip; the name, its cost and where the copy comes
+ * changes. Add | Rethink | Maybe | Skip; the name, its cost and where the copy comes
  * from; Claude's reason; the owner's reason line, always there. On a narrow
  * row: the name on its own line, then the three buttons, then the reasons.
  */
@@ -630,10 +653,10 @@ function Row({ item, state, text, name, onSet, onText }: {
       {/* Narrow: four lines. Middle (a laptop): the buttons and the name, then Claude's reason beside yours. Wide: one line. */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 @[44rem]:grid-cols-[auto_minmax(0,1fr)_minmax(0,15rem)] @[66rem]:grid-cols-[auto_17rem_minmax(0,1fr)_15rem]">
         <span role="group" aria-label={item.name} className="inline-flex overflow-hidden rounded-[10px] border border-[var(--border)]" data-col="choice">
-          {(['add', 'ask', 'skip'] as const).map((v) => (
-            <button key={v} type="button" aria-pressed={state === v} onClick={() => onSet(v)} aria-label={`${LABEL[v]} ${item.name}`}
-              title={v === 'ask' ? 'Give your reason and Claude weighs it on the next round. It may come back with the same card and an argument.' : v === 'skip' ? 'Left out, and never offered again in this conversation.' : undefined}
-              className={`min-h-10 min-w-[3.6rem] px-3 text-sm font-bold ${state === v ? LIT[v] : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>{LABEL[v]}</button>
+          {(['add', 'ask', 'maybe', 'skip'] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={state === v} onClick={() => onSet(v)} aria-label={v === 'maybe' ? `Put ${item.name} in the Maybeboard` : `${LABEL[v]} ${item.name}`}
+              title={TITLE[v]} data-choice={v}
+              className={`min-h-10 min-w-[3.2rem] px-2.5 text-sm font-bold ${state === v ? LIT[v] : 'text-[var(--faint)] hover:text-[var(--foreground)]'}`}>{LABEL[v]}</button>
           ))}
         </span>
         <span className="order-first col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @[44rem]:order-none @[44rem]:col-span-2 @[66rem]:col-span-1" data-col="name">
@@ -642,11 +665,12 @@ function Row({ item, state, text, name, onSet, onText }: {
           {chip}{mark}
         </span>
         <span className={`col-span-2 min-w-0 text-[13px] @[44rem]:col-span-2 @[66rem]:col-span-1 ${item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'} ${off}`} data-col="why"><span className="font-semibold text-[#c3a6e6]">✦</span> <SymbolText text={item.why} /></span>
-        <span className="relative col-span-2 min-w-0 @[44rem]:col-span-1">
-        <input value={text} onChange={(e) => onText(e.target.value)} maxLength={300} data-col="reason" title={text.trim() || undefined}
-          onBlur={(e) => { e.currentTarget.scrollLeft = 0; }} placeholder={HINT[state]} aria-label={`Your reason for ${item.name}`}
-          className={`min-h-9 w-full min-w-0 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] ${unsure ? 'pr-32' : ''} ${state === 'add' ? 'placeholder:text-[var(--faint)]' : 'placeholder:text-[#e2b93b]'}`} />
-        {unsure && <button type="button" onClick={() => onSet('ask')} className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border border-[#c4a6f5]/50 bg-[var(--surface)] px-2 py-0.5 text-[11px] text-[#c4a6f5] hover:bg-[#241d2e]" data-unsure>Sounds unsure. Rethink?</button>}
+        {/* The reason line, and beside it (never over it) the offer to Rethink a comment that sounds unsure (D 16). */}
+        <span className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @[44rem]:col-span-1">
+          <input value={text} onChange={(e) => onText(e.target.value)} maxLength={300} data-col="reason" title={text.trim() || undefined}
+            onBlur={(e) => { e.currentTarget.scrollLeft = 0; }} placeholder={HINT[state]} aria-label={`Your reason for ${item.name}`}
+            className={`min-h-9 min-w-[8rem] flex-1 truncate border-0 border-b border-[var(--border)] bg-transparent px-0.5 text-[13px] text-[#e2b93b] outline-none focus:border-[#e2b93b] ${state === 'add' ? 'placeholder:text-[var(--faint)]' : 'placeholder:text-[#e2b93b]'}`} />
+          {unsure && <button type="button" onClick={() => onSet('ask')} className="shrink-0 whitespace-nowrap rounded-full border border-[#c4a6f5]/50 bg-[var(--surface)] px-2 py-0.5 text-[11px] text-[#c4a6f5] hover:bg-[#241d2e]" data-unsure>Sounds unsure. Rethink?</button>}
         </span>
       </div>
     </div>

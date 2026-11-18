@@ -12,14 +12,14 @@
  *       fill to 100 is done (null: the plan's land number); kept per deck
  *   find {rerun?, message?}    ask Claude in the background: the first list,
  *       or (rerun) the owner's marks and message, refilling the open slots
- *   choices {choices}          Add / Rethink / Skip and reasons, replaced whole
+ *   choices {choices}          Add / Rethink / Maybe / Skip and reasons, replaced whole
  *   lands {skip?, basics?, add?}  a fill to 100: nonbasic lands left out, how
  *       many of each basic to take, and "+" for another land a search found
- *   unskip {name}              take a card off the deck's skipped-before list
+ *   unskip {name}              take a card off the deck's skipped-before and Maybe lists
  *   take {name, group}         "+" from a search's results: no paid round
  *   takeOver {name}            "Add anyway" on a card to buy that was over the total: no paid round
  *   apply                      add the cards on Add (and, on a full fill, the
- *       app's lands), after a snapshot
+ *       app's lands) and put the cards on Maybe in the Maybeboard, after a snapshot
  *   undo                       put every row back as it was
  *   reset                      start over
  */

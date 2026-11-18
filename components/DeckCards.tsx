@@ -31,6 +31,7 @@ import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
 import { nextColor, tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
+import { mouseOnly } from '@/lib/mouse-only';
 
 export type Entry = Item & { board: Board; slot?: Slot | null };
 
@@ -650,7 +651,7 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
       )}
       <span className="w-6 text-right tabular-nums text-[var(--muted)]">{entry.quantity}</span>
-      <button onClick={(e) => onActivate(e.shiftKey)} onMouseEnter={(e) => { if (!selecting && src) place(e); }} onMouseMove={(e) => { if (preview) place(e); }} onMouseLeave={() => setPreview(null)}
+      <button onClick={(e) => onActivate(e.shiftKey)} onPointerEnter={mouseOnly((e) => { if (!selecting && src) place(e); })} onPointerMove={mouseOnly((e) => { if (preview) place(e); })} onMouseLeave={() => setPreview(null)}
         className="min-w-0 flex-1 truncate text-left hover:text-[var(--accent)]">
         {entry.card.name}
         {entry.finish !== 'nonfoil' && <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">{entry.finish}</span>}

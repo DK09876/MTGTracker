@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { imageOf, type ScryfallCard } from '@/lib/scryfall';
+import { mouseOnly } from '@/lib/mouse-only';
 
 const WIDTH = 220;
 
@@ -28,7 +29,7 @@ export default function CardName({ name, card, onOpen, className = '' }: { name:
   return (
     <>
       <button type="button" data-card-name={name} onClick={() => { setAt(null); onOpen?.(card); }}
-        onMouseEnter={(e) => { if (src) place(e); }} onMouseMove={(e) => { if (at) place(e); }} onMouseLeave={() => setAt(null)}
+        onPointerEnter={mouseOnly((e) => { if (src) place(e); })} onPointerMove={mouseOnly((e) => { if (at) place(e); })} onMouseLeave={() => setAt(null)}
         // Focus shows it too, beside the name, so the keyboard reads the card as the pointer does.
         onFocus={(e) => { if (!src || !e.currentTarget.matches(':focus-visible')) return; const r = e.currentTarget.getBoundingClientRect(); place({ clientX: r.right, clientY: r.top + r.height / 2 } as React.MouseEvent); }}
         onBlur={() => setAt(null)}

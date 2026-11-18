@@ -38,10 +38,11 @@ import { BASIC, dualCandidates, finishLands, finishPool, splitBasics, heldCards,
 import { localCards } from './card-store';
 import { checkNamed, ESSENTIALS_MAX, nameCards, withinTotal, type Named } from './essentials';
 import {
-  averageRounds, chosenAdds, colourWords, finishCount, FINISH_GROUPS, parseQuery, type MeasuredRound, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
+  averageRounds, chosenAdds, chosenMaybes, colourWords, FINISH_CHOICES, finishCount, FINISH_GROUPS, parseQuery, type MeasuredRound, SEARCH_LIMIT, SEARCH_LIMIT_LATER, searchLines, searchText,
   type Buy, type Copies, type FinishChanges, type FinishChoice, type FinishGroup, type FinishItem, type FinishMark, type FinishTurn, type FinishView, type OwnedCombo, type Source,
 } from './finish-shared';
 import { planContext } from './plan-context';
+import { sectionsOf } from './sections';
 import { owner as planOwner } from './plan-help';
 import { PROMPT_VERSIONS } from './prompt-versions';
 import { imageOf, manaCostOf, oracleTextOf, typeLineOf, type ScryfallCard } from './scryfall';
@@ -87,9 +88,12 @@ interface Done {
   buy?: Array<{ name: string; price: number | null }>;
   /** Cards this apply added to the skipped-before list: Undo takes them off again (review 16). */
   remembered?: string[];
+  /** Cards this apply put in the Maybeboard, and the ones it added to the deck's Maybe list (Undo takes them off). */
+  maybe?: string[];
+  rememberedMaybe?: string[];
   /** Each row the apply touched, and how it was before. */
   undo: Array<{ cardId: string; before: CardBefore }>;
-  session: Pick<FinishStore, 'run' | 'choices' | 'skipped' | 'turns' | 'searches' | 'seen'>;
+  session: Pick<FinishStore, 'run' | 'choices' | 'skipped' | 'turns' | 'searches' | 'seen'> & Partial<Pick<FinishStore, 'maybes'>>;
 }
 
 export interface FinishStore {
@@ -109,6 +113,13 @@ export interface FinishStore {
   skipped: string[];
   /** Skipped on this deck in an earlier Finish, with the owner's reason: never offered again on this deck (D 14). */
   skippedBefore: Array<{ name: string; why: string }>;
+  /** Put on Maybe in an earlier round of this conversation: off the list, into the Maybeboard on Apply, never picked again. */
+  maybes: Array<{ name: string; why: string }>;
+  /**
+   * Put in the Maybeboard by an earlier Finish on this deck, with the owner's reason: never offered again here, and
+   * sent with every request as cards the owner liked somewhat, so Claude reads what they like.
+   */
+  maybeBefore: Array<{ name: string; why: string }>;
   /** The cards Claude searches in the round running now or last run (D 10), the lands apart. */
   offer: { n: number; lands: number; colours: string } | null;
   /** Every name a search returned in this conversation: a pick must be one of them. */
@@ -120,7 +131,7 @@ export interface FinishStore {
   pending: number | null;
 }
 
-const EMPTY: FinishStore = { copies: 'spare', buy: 'none', spend: null, want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], skippedBefore: [], offer: null, seen: [], searches: [], turns: [], done: null, pending: null };
+const EMPTY: FinishStore = { copies: 'spare', buy: 'none', spend: null, want: null, lands: null, landPicks: { skip: [], basics: {} }, run: null, choices: {}, skipped: [], skippedBefore: [], maybes: [], maybeBefore: [], offer: null, seen: [], searches: [], turns: [], done: null, pending: null };
 
 let ready = false;
 function db() {
@@ -164,14 +175,36 @@ function rememberSkips(s: FinishStore): void {
   s.skippedBefore = s.skippedBefore.slice(-300);
 }
 
-/** Take a card off the deck's skipped-before list: it may be offered again. */
-export function unskip(listId: string, name: string): void {
-  update(listId, (s) => { s.skippedBefore = s.skippedBefore.filter((x) => front(x.name) !== front(name)); });
+/**
+ * What went to the Maybeboard on Apply joins the deck's Maybe list, with the reason (the latest one wins): a later
+ * Finish never offers it again, and tells Claude the owner liked it somewhat. Returns the names it added.
+ */
+function rememberMaybes(s: FinishStore, saved: Array<{ name: string; why: string }>): string[] {
+  const added: string[] = [];
+  for (const m of saved) {
+    const had = s.maybeBefore.find((y) => front(y.name) === front(m.name));
+    if (had) { if (m.why) had.why = m.why; continue; }
+    s.maybeBefore.push({ name: m.name, why: m.why });
+    added.push(m.name);
+  }
+  s.maybeBefore = s.maybeBefore.slice(-300);
+  return added;
 }
 
-/** Start over: the picks, the choices and the conversation go; the copies setting, the number and the skipped-before list stay. */
+/** Take a card off the deck's skipped-before and Maybe lists: it may be offered again. */
+export function unskip(listId: string, name: string): void {
+  update(listId, (s) => {
+    s.skippedBefore = s.skippedBefore.filter((x) => front(x.name) !== front(name));
+    s.maybeBefore = s.maybeBefore.filter((x) => front(x.name) !== front(name));
+  });
+}
+
+/**
+ * Start over: the picks, the choices and the conversation go; the copies setting, the number and the skipped-before
+ * list stay. Cards on Maybe go too: they reach the Maybeboard only on Apply.
+ */
 export function resetFinish(listId: string): void {
-  update(listId, (s) => { rememberSkips(s); s.run = null; s.choices = {}; s.skipped = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; s.landPicks = { skip: [], basics: {} }; });
+  update(listId, (s) => { rememberSkips(s); s.run = null; s.choices = {}; s.skipped = []; s.maybes = []; s.seen = []; s.searches = []; s.turns = []; s.done = null; s.landPicks = { skip: [], basics: {} }; });
 }
 
 /** The copies setting and the number, per deck. A new commander starts the conversation over. */
@@ -208,11 +241,13 @@ Give your picks with give_picks, sorted into groups: ramp, draw (real card draw,
 This is one conversation. On every list after the first:
 - Cards the owner kept stay; don't pick them again.
 - Never pick a card the owner skipped.
+- When the owner put a card in the Maybeboard, they liked it somewhat but don't want it in the deck now: never pick it again. Read their reason for what drew them to it, and let it guide similar picks.
 - When the owner asked you to rethink a card, weigh their reason: pick it again with a better argument, or pick something else, and say which in the reply.
 - Where the owner said something, follow it, and apply their reasons to similar cards. If what they said means a kept card should go, name it in "out" and pick its replacement too.
 - Reply in 2 to 4 sentences: what you changed and which of their words changed it.
 - Lands: give "lands" again only when the owner's words are about the lands ("more utility lands", "no lands that enter tapped"); then give the whole new set. Otherwise leave it out and the lands stay as they are. Never pick a land the owner took out.
-- Cards the owner skipped on this deck before are listed with their reasons: they are never on offer; apply those reasons to similar cards too.`;
+- Cards the owner skipped on this deck before are listed with their reasons: they are never on offer; apply those reasons to similar cards too.
+- Cards the owner put in the Maybeboard on this deck before are listed with their reasons: they are never on offer. The owner liked each one somewhat, so they show what appeals to them; their reasons say what they liked and why it wasn't for now.`;
 
 export const FINISH_TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -265,6 +300,7 @@ export function sessionLines(turns: FinishTurn[]): string[] {
       const parts = [
         ...t.marks.filter((m) => m.choice === 'ask').map((m) => `asked you to rethink ${m.name}${why(m) || ' (no reason given)'}`),
         ...t.marks.filter((m) => m.choice === 'skip').map((m) => `skipped ${m.name}${why(m)}`),
+        ...t.marks.filter((m) => m.choice === 'maybe').map((m) => `put ${m.name} in the Maybeboard, liked it somewhat but not for the deck now${why(m)}`),
         ...t.marks.filter((m) => m.choice === 'add' && m.text.trim()).map((m) => `kept ${m.name}${why(m)}`),
         ...(t.taken.length ? [`took from your searches themselves: ${t.taken.join(NAMES)}`] : []),
         ...(t.message.trim() ? [`said: ${quote(t.message)}`] : []),
@@ -384,7 +420,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   if (!list.commander) throw new ModelError('Set the commander first: the cards on offer follow its colours.');
   const held = heldCards(profileId, list.id);
   // Skipped on this deck before, and lands the owner took out this conversation: never on offer.
-  const leaveOut = new Set([...before.skippedBefore.map((x) => front(x.name)), ...(rerun ? before.landPicks.skip.map(front) : [])]);
+  // Put in the Maybeboard by an earlier Finish here: not offered again either (the reasons still go with the request).
+  const leaveOut = new Set([...before.skippedBefore.map((x) => front(x.name)), ...before.maybeBefore.map((x) => front(x.name)), ...(rerun ? before.landPicks.skip.map(front) : [])]);
   const pool = finishPool(ctx, before.copies, held, { leaveOut });
   // "Only cards I own" on the plan turns buying off (review PR56, 14). A profile whose cards can't go in at all gets
   // "any card" (Part C, item 31), and so does "the ones that matter" when the search has nothing to fill the rest
@@ -412,6 +449,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   let turns: FinishTurn[];
   let kept: StoredItem[] = [];
   let skipped = new Set(rerun ? before.skipped.map(front) : []);
+  // This conversation's cards on Maybe: off the list like a skip, but saved, and told to Claude as liked somewhat.
+  const maybes = rerun ? chosenMaybes(before.maybes, before.run!.items, before.choices) : [];
   let reply: Extract<FinishTurn, { kind: 'owner-reply' }> | null = null;
   if (!rerun) turns = [{ kind: 'owner-start', want: count.want, copies: before.copies, ...(buyMode !== 'none' ? { buy: buyMode } : {}), at }];
   else {
@@ -424,6 +463,8 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     kept = items.filter((i) => choiceOf(i.name) === 'add').map((i) => ({ ...i, mark: i.mark === 'yours' ? 'yours' : null }));
     for (const i of items) if (choiceOf(i.name) === 'skip') skipped.add(front(i.name));
   }
+  // Never picked again: the skips and the cards on Maybe.
+  const never = new Set([...skipped, ...maybes.map((m) => front(m.name))]);
   // The pool may have changed since (the deck, the setting): what is no longer on offer opens its slot too. A card
   // named rather than searched (to buy, or owned outside the copies setting) stays while Tune's checks pass.
   const named = (i: StoredItem) => i.src === 'buy' || !!i.named;
@@ -433,7 +474,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   kept = kept.filter((i) => (named(i) ? nameChecks.get(front(i.name)) === true : pool.cards.has(i.name.toLowerCase()) || pool.cards.has(front(i.name))));
   skipped = new Set([...skipped].filter(Boolean));
   const need = Math.max(0, count.want - kept.length);
-  if (rerun && !need && !reply?.message) throw new ModelError('Nothing to change: every pick is on Add. Mark a card Rethink or Skip, or say something.');
+  if (rerun && !need && !reply?.message) throw new ModelError('Nothing to change: every pick is on Add. Mark a card Rethink, Maybe or Skip, or say something.');
 
   // Combos: only when the plan says so.
   const mode = planFor(list.id, '', list.commander, ctx.main).goal.combos ?? null;
@@ -460,6 +501,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     ctx.main.length ? `Already in the deck (${ctx.main.reduce((n, c) => n + c.quantity, 0)}): ${ctx.main.map((c) => c.card.name).join(NAMES)}` : 'Nothing else is in the deck yet.',
     ...combosLines(mode, owned),
     ...(before.skippedBefore.length ? ['', `## Skipped on this deck before, with the owner's reasons (never on offer; apply the reasons to similar cards)`, ...before.skippedBefore.map((x) => `- ${x.name}${x.why ? `: ${quote(x.why)}` : ''}`)] : []),
+    ...(before.maybeBefore.length ? ['', `## Put in the Maybeboard on this deck before, with the owner's reasons (never on offer; the owner liked these somewhat, so they show what appeals to them)`, ...before.maybeBefore.map((x) => `- ${x.name}${x.why ? `: ${quote(x.why)}` : ''}`)] : []),
   ].join('\n');
   const landTask = !askLands ? '' : rerun && !legacyLands
     ? (prevLands.length ? ` The lands Claude chose stay unless the owner's words are about the lands: ${prevLands.map((l) => l.name).join(NAMES)}. If they are, give "lands" again, at most ${landLimit}.` : '')
@@ -486,10 +528,10 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   let namedOut: string[] = [];
   if (buySlots > 0 || anyWords) {
     progress(buyMode === 'any' ? `Claude is naming ${buySlots} cards` : 'Claude is naming the cards that matter');
-    const leave = new Set([...leaveOut, ...skipped]);
+    const leave = new Set([...leaveOut, ...never]);
     const named = await nameCards(call, model, ctx, list, {
       kind: buyMode === 'any' ? 'all' : 'matter', count: buySlots, skipped: before.skippedBefore,
-      chosen: kept.map((i) => i.name), allowOut: anyWords, extra: rerun ? [...sessionLines(turns), ...(skipped.size ? ['', `## Skipped by the owner: never name these\n${[...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)].join(NAMES)}`] : [])] : [],
+      chosen: kept.map((i) => i.name), allowOut: anyWords, extra: rerun ? [...sessionLines(turns), ...(skipped.size ? ['', `## Skipped by the owner: never name these\n${[...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)].join(NAMES)}`] : []), ...maybeLines(maybes)] : [],
     });
     namedOut = anyWords ? checkOut({ out: named.out }, kept) : [];
     const checkedNames = checkNamed(ctx, held, named.raw, { need: buySlots + namedOut.length, taken: new Set(kept.map((i) => front(i.name))), leaveOut: leave, gcRoom: gcRoom === null ? null : gcRoom + kept.filter((i) => namedOut.includes(i.name) && keptCard(i)?.game_changer).length });
@@ -512,6 +554,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
       kept.length ? `## Kept (they stay; don't pick them again)\n${kept.map((i) => i.name).join(NAMES)}` : '## Kept\nNothing.',
       ...(themeNow ? ['', `## The theme group is "${themeNow}": give theme picks under exactly that name.`] : []),
       ...(skipped.size ? ['', `## Skipped by the owner: never pick these\n${[...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)].filter((n, i, a) => a.indexOf(n) === i).join(NAMES)}`] : []),
+      ...maybeLines(maybes),
     ] : []),
     '',
     '## The task',
@@ -578,7 +621,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
   kept = kept.filter((i) => !outs.has(i.name));
   const need2 = Math.max(0, count.want - kept.length - chosen.length);
   const checked = checkPicks(answer, {
-    pool, seen, skipped, taken: new Set([...kept, ...chosen].map((i) => front(i.name))), need: need2,
+    pool, seen, skipped: never, taken: new Set([...kept, ...chosen].map((i) => front(i.name))), need: need2,
     // What the kept and named picks left, plus any a message took out (review 2).
     gcRoom: gcRoom === null ? null : gcRoom + [...outs].filter((n) => pool.cards.get(n.toLowerCase())?.game_changer).length,
   });
@@ -608,7 +651,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     const was = new Set(before.run!.items.map((i) => front(i.name)));
     const because = (n: string): FinishChanges['out'][number]['because'] => {
       const c = before.choices[n]?.choice ?? 'add';
-      return c === 'skip' ? 'skipped' : c === 'ask' ? 'rethink' : outs.has(n) ? 'message' : 'gone';
+      return c === 'skip' ? 'skipped' : c === 'maybe' ? 'maybe' : c === 'ask' ? 'rethink' : outs.has(n) ? 'message' : 'gone';
     };
     changes = {
       round,
@@ -630,6 +673,7 @@ export async function runFinish(call: Call, model: string, list: List, profileId
     s.skippedBefore = [...s.skippedBefore, ...newSkips.filter((x) => !s.skippedBefore.some((y) => front(y.name) === front(x.name)))];
     if (!rerun) s.landPicks = { skip: [], basics: {}, added: [] };
     s.skipped = rerun ? [...new Set([...before.skipped, ...(reply?.marks ?? []).filter((m) => m.choice === 'skip').map((m) => m.name)])] : [];
+    s.maybes = maybes;
     s.turns = [...turns, { kind: 'claude-picks', round, picks: items.map((i) => i.name), short: run.short, searches: used, reply: run.reply, at: run.at }];
     s.done = null;
     s.pending = null;
@@ -650,6 +694,11 @@ export function checkLands(given: unknown[], pool: Pick<Pool, 'lands'>, seen: Se
   return out;
 }
 
+/** This conversation's cards on Maybe, for a later round: never picked again, and what the owner liked about them. */
+const maybeLines = (maybes: Array<{ name: string; why: string }>): string[] => (maybes.length
+  ? ['', `## Put in the Maybeboard by the owner (liked somewhat, not for the deck now): never pick these; their reasons say what the owner likes`, ...maybes.map((m) => `- ${m.name}${m.why ? `: ${quote(m.why)}` : ''}`)]
+  : []);
+
 const checkOut = (answer: unknown, kept: StoredItem[]): string[] => {
   const out = ((answer as { out?: unknown })?.out ?? []) as unknown[];
   const names = new Set((Array.isArray(out) ? out : []).map((n) => front(String(n))));
@@ -666,10 +715,10 @@ export function setChoices(listId: string, choices: unknown): void {
   const next: FinishStore['choices'] = {};
   for (const [name, v] of Object.entries((choices ?? {}) as Record<string, unknown>).slice(0, 300)) {
     const c = v as { choice?: unknown; text?: unknown } | null;
-    if (!names.has(name) || !c || (c.choice !== 'add' && c.choice !== 'ask' && c.choice !== 'skip')) continue;
+    if (!names.has(name) || !c || !FINISH_CHOICES.includes(c.choice as FinishChoice)) continue;
     const text = typeof c.text === 'string' ? c.text.slice(0, 300) : '';
     if (c.choice === 'add' && !text.trim()) continue;
-    next[name] = { choice: c.choice, text };
+    next[name] = { choice: c.choice as FinishChoice, text };
   }
   update(listId, (x) => { x.choices = next; });
 }
@@ -731,6 +780,9 @@ export async function takeCard(list: List, profileId: string, name: string, grou
     x.run.items.push(item);
     x.skipped = x.skipped.filter((n) => front(n) !== front(card.name));
     x.skippedBefore = x.skippedBefore.filter((n) => front(n.name) !== front(card.name));
+    // Taken into the deck: it no longer waits to go to the Maybeboard.
+    x.maybes = x.maybes.filter((n) => front(n.name) !== front(card.name));
+    x.maybeBefore = x.maybeBefore.filter((n) => front(n.name) !== front(card.name));
     if (found) x.run.combos = found;
   });
 }
@@ -830,7 +882,8 @@ export async function setLands(list: List, profileId: string, input: { skip?: un
 /**
  * Apply: the picks on Add and, on a full fill, the app's lands go into the
  * main deck. A card waiting in a section moves in; a card in another deck is
- * only added here (the other deck keeps it). The caller takes the snapshot.
+ * only added here (the other deck keeps it). The cards on Maybe go to the
+ * Maybeboard and join the deck's Maybe list. The caller takes the snapshot.
  */
 export async function applyFinish(list: List, profileId: string): Promise<NonNullable<FinishView['done']>> {
   const s = finishStore(list.id);
@@ -846,7 +899,8 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   for (const i of namedRows) { const c = byName.get(front(i.name)); if (c && !whyNotAddable(ctx, c, null, namedAs(i))) named.set(i.name, c); }
   const cardOf = (n: string) => named.get(n) ?? pool.cards.get(n.toLowerCase()) ?? pool.cards.get(front(n));
   const cards = names.map(cardOf).filter((c): c is ScryfallCard => !!c);
-  if (!cards.length) throw new Error('Nothing to add: put at least one card on Add');
+  const maybes = chosenMaybes(s.maybes, s.run.items, s.choices);
+  if (!cards.length && !maybes.length) throw new Error('Nothing to add: put at least one card on Add or Maybe');
   // The bracket over the whole set going in, named and searched together (review PR56 round 2, 6). A searched
   // Game Changer the pool now leaves out only because the bracket is full is named as that, not as "no longer
   // on offer".
@@ -866,6 +920,17 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   };
   for (const c of cards) add(c, 1);
   for (const l of lands) add(l.card, l.n);
+  // The cards on Maybe: into the deck's Maybeboard (or the section it uses for cards to try), unless already in the deck.
+  const maybeTo = sectionsOf(list.id).find((x) => x.purpose === 'in')?.id ?? 'maybe';
+  const maybeCards = cardsNamed(maybes.map((m) => m.name));
+  const savedMaybe: string[] = [];
+  for (const m of maybes) {
+    const card = pool.cards.get(m.name.toLowerCase()) ?? pool.cards.get(front(m.name)) ?? maybeCards.get(front(m.name));
+    if (!card) continue;
+    savedMaybe.push(card.name);
+    if (cardsInList(list.id).some((c) => front(c.card.name) === front(card.name))) continue;
+    undo.push({ cardId: card.id, before: addCardToList(list.id, card, 1, 'nonfoil', maybeTo) });
+  }
   const landCount = lands.reduce((n, l) => n + l.n, 0);
   // From what went in: a pick no longer on offer at apply time was left out, and is said so, not named as borrowed.
   const added = new Set(cards.map((c) => c.name));
@@ -873,11 +938,17 @@ export async function applyFinish(list: List, profileId: string): Promise<NonNul
   const left = names.filter((n) => !cardOf(n));
   const buy = s.run.items.filter((i) => i.src === 'buy' && added.has(cardOf(i.name)?.name ?? '')).map((i) => ({ name: i.name, price: i.price ?? null }));
   const done: Done = {
-    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo, buy,
-    session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen },
+    at: now(), added: cards.length, lands: landCount, size: ctx.size + cards.length + landCount, borrowed, left, undo, buy, maybe: savedMaybe,
+    session: { run: s.run, choices: s.choices, skipped: s.skipped, turns: s.turns, searches: s.searches, seen: s.seen, maybes: s.maybes },
   };
-  update(list.id, (x) => { const had = new Set(x.skippedBefore.map((y) => front(y.name))); rememberSkips(x); done.remembered = x.skippedBefore.filter((y) => !had.has(front(y.name))).map((y) => y.name); x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.searches = []; x.seen = []; });
-  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left, buy };
+  update(list.id, (x) => {
+    const had = new Set(x.skippedBefore.map((y) => front(y.name)));
+    rememberSkips(x);
+    done.remembered = x.skippedBefore.filter((y) => !had.has(front(y.name))).map((y) => y.name);
+    done.rememberedMaybe = rememberMaybes(x, maybes.filter((m) => savedMaybe.some((n) => front(n) === front(m.name))));
+    x.done = done; x.run = null; x.choices = {}; x.turns = []; x.skipped = []; x.maybes = []; x.searches = []; x.seen = [];
+  });
+  return { at: done.at, added: done.added, lands: done.lands, size: done.size, borrowed, left, buy, maybe: savedMaybe };
 }
 
 /** Put every row the apply touched back exactly as it was, and bring the conversation back. */
@@ -897,7 +968,9 @@ export function undoFinish(list: List): { moved: number } {
   update(list.id, (x) => {
     const back = new Set((x.done!.remembered ?? []).map(front));
     x.skippedBefore = x.skippedBefore.filter((y) => !back.has(front(y.name)));
-    Object.assign(x, x.done!.session);
+    const backMaybe = new Set((x.done!.rememberedMaybe ?? []).map(front));
+    x.maybeBefore = x.maybeBefore.filter((y) => !backMaybe.has(front(y.name)));
+    Object.assign(x, { maybes: [] }, x.done!.session);
     x.done = null;
   });
   return { moved };
@@ -959,7 +1032,8 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     return { ...i, card: { id: cardId, image: c ? imageOf(c, 'normal') : null, manaCost: c ? manaCostOf(c) : '', typeLine: c ? typeLineOf(c) : '', text: c ? oracleTextOf(c) : '', cmc: c?.cmc ?? 0 } };
   });
   const listed = new Set(items.map((i) => front(i.name)));
-  const skipped = new Set(s.skipped.map(front));
+  // Skipped or on Maybe: not offered under "+" either.
+  const skipped = new Set([...s.skipped, ...s.maybes.map((m) => m.name)].map(front));
   // Under each group, the search that fed it (the one whose results hold most of its picks), and what else it found.
   const more: NonNullable<FinishView['run']>['more'] = {};
   if (s.run) {
@@ -1016,11 +1090,13 @@ export async function finishView(list: List, profileId: string): Promise<FinishV
     choices: s.choices,
     skipped: s.skipped,
     skippedBefore: s.skippedBefore,
+    maybes: s.maybes,
+    maybeBefore: s.maybeBefore,
     offer: s.offer,
     turns: s.turns,
     searches: s.searches.filter((x) => x.round === (running && s.pending ? s.pending : s.run?.round ?? 1)).map(({ q, n, round }) => ({ q, n, round })),
     job: job && (running || (job.status === 'failed' && (!s.run || job.startedAt > s.run.at))) ? { status: job.status as 'running' | 'failed', detail: job.detail || null, error: job.status === 'failed' ? job.error ?? 'Claude didn’t finish' : null } : null,
-    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed, left: s.done.left ?? [], buy: s.done.buy ?? [] } : null,
+    done: s.done ? { at: s.done.at, added: s.done.added, lands: s.done.lands, size: s.done.size, borrowed: s.done.borrowed, left: s.done.left ?? [], buy: s.done.buy ?? [], maybe: s.done.maybe ?? [] } : null,
     cost: roundCosts(),
     noKey: !process.env.ANTHROPIC_API_KEY,
   };

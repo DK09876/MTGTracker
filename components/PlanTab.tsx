@@ -14,8 +14,9 @@
  */
 
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 
+import CardName from './CardName';
 import GameChangerLine from './GameChangerLine';
 import Tip from './Tip';
 import SymbolText from './SymbolText';
@@ -23,6 +24,7 @@ import * as api from '@/lib/api';
 import { BRACKETS } from '@/lib/brackets';
 import { price } from '@/lib/price';
 import type { Category } from '@/lib/categories-shared';
+import type { ScryfallCard } from '@/lib/scryfall';
 import { BRACKET_CHIPS, COMMANDER_ROLES, NOT_SURE_TIP, type PlanAction, type PlanState } from '@/lib/plan-help-shared';
 
 // The page's colours: gold = yours and selected, violet ✦ = AI, blue = from the cards.
@@ -95,11 +97,29 @@ export function useUndo() {
 }
 
 /** A card in a list: its name, who added it, and × to take it out (only the × removes). */
+/**
+ * The deck's cards, for the names on the Plan and Tags tabs: given by the deck page, so a name there shows its card
+ * on hover and opens it on a click or tap, as card names do everywhere else.
+ */
+export const PlanCards = createContext<{ cardOf: (name: string) => ScryfallCard | undefined; onCard: (card: ScryfallCard) => void } | null>(null);
+
+/** A card name with its picture on hover and the card on a click or tap; plain text for a card the deck doesn't hold. */
+export function PlanCardName({ name, className = '' }: { name: string; className?: string }) {
+  const cards = useContext(PlanCards);
+  const card = cards?.cardOf(name);
+  return card ? <CardName name={name} card={card} onOpen={cards!.onCard} className={className} /> : <span className={className}>{name}</span>;
+}
+
+/** Card names in a line, comma-separated, each with its card on hover and tap. */
+export function PlanCardList({ names }: { names: string[] }) {
+  return <>{names.map((n, i) => <span key={`${n}-${i}`}>{i > 0 && ', '}<PlanCardName name={n} /></span>)}</>;
+}
+
 export function CardChip({ name, by, onRemove, label }: { name: string; by?: string; onRemove: () => void; label: string }) {
   const m = by ? MARK[by] : null;
   return (
     <span className={`${C.chip} cursor-default pr-0 hover:bg-[var(--background)]`}>
-      <span className="min-w-0 break-words">{name}</span>
+      <PlanCardName name={name} className="min-w-0 break-words" />
       {m && <span className={`text-[11px] font-bold ${m[1]}`}>{m[0]}</span>}
       <button type="button" onClick={onRemove} aria-label={label} className="-my-px flex min-h-11 w-9 shrink-0 items-center justify-center rounded-r-xl text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">×</button>
     </span>
@@ -450,7 +470,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
                     <div key={d.name} className={`${C.box} flex flex-col gap-1.5 ${on ? 'border-[#a98bd0]' : ''}`}>
                       <b>{d.name}</b>
                       <p className="text-sm text-[var(--muted)]"><SymbolText text={d.plan} /></p>
-                      <p className="text-[13px] text-[var(--muted)]">Already in the list: {d.cards.join(', ')}</p>
+                      <p className="text-[13px] text-[var(--muted)]">Already in the list: <PlanCardList names={d.cards} /></p>
                       <div><button type="button" className={C.btn} aria-pressed={on} onClick={() => act({ action: 'direction', name: d.name })}>{on ? 'Picked' : 'Use this direction'}</button></div>
                     </div>
                   );
@@ -489,7 +509,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
               <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · ways to win' : '✦ Suggested ways to win'}</span>{h.wins.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested ways to win" onClick={() => act({ action: 'skipAllWins' })}>Skip all</button></span>}</div>
               {h.wins.map((w) => (
                 <div key={w.name} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
-                  <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]"><SymbolText text={w.how} /></p><p className="text-[13px] text-[var(--muted)]">{w.cards.join(', ')}</p></div>
+                  <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]"><SymbolText text={w.how} /></p><p className="text-[13px] text-[var(--muted)]"><PlanCardList names={w.cards} /></p></div>
                   <div className="flex gap-2"><button type="button" className={C.btn} aria-label={`Accept ${w.name} as a way to win`} onClick={() => act({ action: 'acceptWin', name: w.name })}>Accept</button><button type="button" className={C.btn} aria-label={`Skip ${w.name}`} onClick={() => act({ action: 'skip', what: `win:${w.name.trim().toLowerCase()}` })}>Skip</button></div>
                 </div>
               ))}
@@ -510,7 +530,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
               <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · key cards' : '✦ Suggested key cards'}</span>{h.keys.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested key cards" onClick={() => act({ action: 'skipAllKeys' })}>Skip all</button></span>}</div>
               {h.keys.map((k) => (
                 <div key={k.key} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
-                  <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words">{k.name}</b>{k.why && <p className="text-sm text-[var(--muted)]"><SymbolText text={k.why} /></p>}</div>
+                  <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words"><PlanCardName name={k.name} /></b>{k.why && <p className="text-sm text-[var(--muted)]"><SymbolText text={k.why} /></p>}</div>
                   <div className="flex gap-2"><button type="button" className={C.btn} aria-label={`Accept ${k.name} as a key card`} onClick={() => act({ action: 'acceptKey', name: k.name })}>Accept</button><button type="button" className={C.btn} aria-label={`Skip ${k.name}`} onClick={() => act({ action: 'skip', what: `key:${k.key}` })}>Skip</button></div>
                 </div>
               ))}

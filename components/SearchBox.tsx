@@ -16,6 +16,7 @@ import { useEffect, useId, useState } from 'react';
 
 import * as api from '@/lib/api';
 import { looksLikeSyntax } from '@/lib/syntax';
+import { mouseOnly } from '@/lib/mouse-only';
 
 const DEBOUNCE_MS = 200;
 // Long card names run to five or six words; sentences run longer.
@@ -138,7 +139,7 @@ export default function SearchBox({ value, onChange, onSubmit, onPickName, recen
                 // mousedown, not click: click fires after the input's blur
                 // has already closed the list.
                 onMouseDown={(e) => { e.preventDefault(); pick(name, i); }}
-                onMouseEnter={() => setActive(i)}
+                onPointerEnter={mouseOnly(() => setActive(i))}
                 className={`cursor-pointer truncate px-4 py-2.5 text-sm ${i === active ? 'bg-[var(--surface-hover)]' : ''}`}
               >
                 {showingRecent && <span aria-hidden className={`mr-2 ${offered[i]?.saved ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}`}>{offered[i]?.saved ? '★' : '↺'}</span>}

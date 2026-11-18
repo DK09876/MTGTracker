@@ -93,7 +93,8 @@ body {
   mix-blend-mode: soft-light;
   background: radial-gradient(circle at var(--gx, 50%) var(--gy, 40%), rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0) 55%);
 }
-.tilt:hover .tilt-glare { opacity: 1; }
+/* Only where there is a real hover: on a phone a tap is not a hover (lib/mouse-only.ts). */
+@media (hover: hover) { .tilt:hover .tilt-glare { opacity: 1; } }
 /* Foil and etched printings shimmer; nothing else does. */
 .foil-sheen {
   position: absolute;
@@ -107,7 +108,7 @@ body {
 }
 @media (prefers-reduced-motion: no-preference) {
   .foil-sheen { animation: foil-drift 6s ease-in-out infinite alternate; }
-  .tilt:hover .foil-sheen { animation: none; }
+  @media (hover: hover) { .tilt:hover .foil-sheen { animation: none; } }
 }
 @keyframes foil-drift { from { background-position: 10% 0; } to { background-position: 90% 0; } }
 
@@ -211,8 +212,9 @@ body {
    the pointer stays on the next card as the one above closes, because the
    next card's name bar sits where the pointer already is. */
 .stack-card { transition: margin-top 160ms ease; }
-.stack-card:hover + .stack-card,
 .stack-card:has(:focus-visible) + .stack-card { margin-top: -1% !important; }
+/* A tap on a phone is not a hover: there the stack stays put and the tap opens the card. */
+@media (hover: hover) { .stack-card:hover + .stack-card { margin-top: -1% !important; } }
 @media (prefers-reduced-motion: reduce) { .stack-card { transition: none; } }
 
 /* The ⌘K palette arrives quickly and from just above; never on reduced motion. */

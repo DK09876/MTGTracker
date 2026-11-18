@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom';
 import * as api from '@/lib/api';
 import type { List } from '@/lib/db';
 import { IdentitySymbols } from './ManaCost';
+import { mouseOnly } from '@/lib/mouse-only';
 
 /** Search here, on the Search page itself: run this text (CustomEvent<string>). */
 export const PALETTE_SEARCH = 'mtg:palette-search';
@@ -196,7 +197,7 @@ export default function CommandPalette() {
                   data-index={i}
                   role="option"
                   aria-selected={i === active}
-                  onMouseMove={() => { if (i !== active) setActive(i); }}
+                  onPointerMove={mouseOnly(() => { if (i !== active) setActive(i); })}
                   onClick={item.run}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${i === active ? 'bg-[var(--surface-hover)] text-[var(--foreground)]' : 'text-[var(--foreground)]/85'}`}
                 >
