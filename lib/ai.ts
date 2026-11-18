@@ -28,6 +28,8 @@ import {
 } from './models';
 import { capFrom, DEFAULT_CAPS, monthStart, overBudget, summarize, type Caps, type SpendSummary } from './spend';
 import { budgetFrom, ladder, modelLabel, quotaDay, quotaViolation, type Budget } from './quota';
+import { AGENT_CONTEXT, ownerCardsBlock, plainNames } from './agent-context';
+import { stubJson, stubMessage, stubbed } from './ai-stub';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -310,8 +312,10 @@ export function claudeCall(id: string, charge: Charge, client: () => ClaudeClien
       throw new ModelError(over, 'quota');
     }
     const day = quotaDay(now());
+    const sent = await withContextParams(params);
+    if (stubbed()) return plainToolNames(stubMessage(sent, step));
     try {
-      const message = await client().beta.messages.stream({ ...params, model: id }).finalMessage();
+      const message = plainToolNames(await client().beta.messages.stream({ ...sent, model: id }).finalMessage());
       const usage = usageOf(message);
       const answeredBy = message.model;
       const cost = Math.max(costOf(id, usage), costOf(answeredBy ?? id, usage));
@@ -708,8 +712,10 @@ export async function testModel(profile: string | null, id: string): Promise<AiS
  * on the server.
  */
 export function modelById(id: string, fallbacks: string[] = [], charge: Charge = { profile: null, feature: 'search' }): JsonModel | null {
+  // Trying the app without spending: every call answered here, after the agent context is added (lib/ai-stub.ts).
+  if (stubbed()) return withAgentContext(async (request) => ({ data: stubJson(request), model: id }));
   if (!process.env[ENV_KEY[providerOf(id)]]) return null;
-  if (providerOf(id) === 'anthropic') return claudeModel(id, charge);
+  if (providerOf(id) === 'anthropic') return withAgentContext(claudeModel(id, charge));
   const ids = [id, ...fallbacks.filter((f) => f !== id)];
   const list = ids.map((m) => ({ id: m, label: modelLabel(m) }));
   const usage: Usage = {
@@ -719,9 +725,45 @@ export function modelById(id: string, fallbacks: string[] = [], charge: Charge =
     tokens: tokensRecorded,
   };
   const key = process.env.GEMINI_API_KEY ?? '';
-  return (request, options) => generate(key, usage, request, {
+  return withAgentContext((request, options) => generate(key, usage, request, {
     ...options,
     maxBusy: Math.max(ids.length, options?.maxBusy ?? 1),
     onOutcome: (m, ok, detail) => { recordModelHealth(m, ok, detail); options?.onOutcome?.(m, ok, detail); },
-  });
+  }));
 }
+
+/**
+ * Every JSON call, whatever the model (lib/agent-context.ts): the agent context first in the system prompt, the
+ * cards the owner named with [[ ]] added to their message, and [[ ]] taken off names in the answer.
+ */
+function withAgentContext(model: JsonModel): JsonModel {
+  return async (request, options) => {
+    const owner = await ownerCardsBlock([request.user]);
+    const answer = await model({ ...request, system: `${AGENT_CONTEXT}\n\n${request.system}`, user: `${request.user}${owner}` }, options);
+    return { ...answer, data: plainNames(answer.data) };
+  };
+}
+
+/**
+ * A tool-loop request with the agent context first in its system prompt (inside each feature's cached prefix) and
+ * the cards the owner named with [[ ]] added to the first message: the same on every step of a loop. The caller's
+ * own messages are never changed.
+ */
+async function withContextParams(params: ClaudeParams): Promise<ClaudeParams> {
+  const system = Array.isArray(params.system) ? params.system : params.system ? [{ type: 'text' as const, text: params.system }] : [];
+  const userText = params.messages.filter((m) => m.role === 'user').flatMap((m) => (typeof m.content === 'string' ? [m.content]
+    : m.content.flatMap((b) => (b.type === 'text' ? [b.text] : []))));
+  const owner = await ownerCardsBlock(userText);
+  const [first, ...rest] = params.messages;
+  const firstWith = !owner || !first ? first : {
+    ...first,
+    content: typeof first.content === 'string' ? `${first.content}${owner}` : [...(first.content as Anthropic.Beta.BetaContentBlockParam[]), { type: 'text' as const, text: owner.trim() }],
+  };
+  return { ...params, system: [{ type: 'text', text: AGENT_CONTEXT }, ...system], messages: first ? [firstWith!, ...rest] : params.messages } as ClaudeParams;
+}
+
+/** A tool-loop answer with [[ ]] taken off names in its tool calls (a pick's name), the text as written. */
+const plainToolNames = (message: Anthropic.Beta.BetaMessage): Anthropic.Beta.BetaMessage => ({
+  ...message,
+  content: message.content.map((b) => (b.type === 'tool_use' ? { ...b, input: plainNames(b.input) } : b)),
+});

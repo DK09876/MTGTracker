@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 
+import CardText from './CardText';
 import Tip from './Tip';
 import type { Flag } from '@/lib/health';
 
@@ -33,7 +34,7 @@ export default function FlaggedZone({ flags, cutName, onFix, bare = false }: Pro
         <li key={f.cardId + f.kind} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2 text-sm">
           <span className="min-w-0 flex-[1_1_14rem]">
             <span className="font-medium">{f.name}</span>
-            <span className="ml-2 text-[var(--muted)]">{f.why}</span>
+            <span className="ml-2 text-[var(--muted)]"><CardText text={f.why} /></span>
           </span>
           {f.commander
             ? <span className="text-xs text-[var(--muted)]">Change the commander from its ⋯ on Cards</span>

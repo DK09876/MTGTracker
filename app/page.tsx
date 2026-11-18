@@ -6,6 +6,7 @@ import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
+import CommanderField from '@/components/CommanderField';
 import FollowUp from '@/components/FollowUp';
 import { PALETTE_SEARCH } from '@/components/CommandPalette';
 import AiModelPicker from '@/components/AiModelPicker';
@@ -27,10 +28,9 @@ import { dismissKeyboard, steady } from '@/lib/steady-tap';
 import { exactName, looksLikeSyntax } from '@/lib/syntax';
 
 const EXAMPLES = [
-  'green ramp spells for omnath',
-  'enchantments that work well for fire lord azula',
-  'combo cards for vivi',
-  'cheap green ramp that isn\'t a land',
+  'green ramp that isn\'t a land under $2',
+  'enchantments that copy spells',
+  'what goes infinite with doubling season',
   'counterspells under $2',
 ];
 
@@ -90,6 +90,7 @@ interface KeptPage {
   searched: boolean;
   live: { thread: string[]; replay: Replay } | null;
   openSaved: string | null;
+  forCommander?: api.CommanderOption | null;
 }
 let keptPage: KeptPage | null = null;
 
@@ -104,6 +105,8 @@ export default function SearchPage() {
   // to ask which commander can carry on from it.
   const [asked, setAsked] = useState<{ text: string; previous?: Previous } | null>(back?.asked ?? null);
   const [searched, setSearched] = useState(back?.searched ?? false);
+  // The Commander field: a search is for a commander's deck only when one is chosen here, never from the text.
+  const [forCommander, setForCommander] = useState<api.CommanderOption | null>(back?.forCommander ?? null);
 
   const [lists, setLists] = useState<List[]>([]);
   const [selected, setSelected] = useState<ScryfallCard | null>(null);
@@ -117,7 +120,7 @@ export default function SearchPage() {
   const [live, setLive] = useState<{ thread: string[]; replay: Replay } | null>(back?.live ?? null);
   // The saved search this is, if it was opened from one or saved.
   const [openSaved, setOpenSaved] = useState<string | null>(back?.openSaved ?? null);
-  useEffect(() => { keptPage = { query, thread, asked, searched, live, openSaved }; }, [query, thread, asked, searched, live, openSaved]);
+  useEffect(() => { keptPage = { query, thread, asked, searched, live, openSaved, forCommander }; }, [query, thread, asked, searched, live, openSaved, forCommander]);
   const scrollY = useRef(0);
 
   useEffect(() => { api.fetchLists().then(setLists).catch(() => {}); }, []);
@@ -138,7 +141,7 @@ export default function SearchPage() {
     setSearched(true);
     setThread([term]);
     setAsked({ text: term });
-    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => api.ask(term), (r) => {
+    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => (forCommander ? api.askForDeck(term, forCommander.name) : api.ask(term)), (r) => {
       showAnswer(r);
       remember(term, replayOf(r));
     });
@@ -374,7 +377,7 @@ export default function SearchPage() {
     if (!answer) return;
     dismissKeyboard();
     const previous = previousOf(answer, thread);
-    run('thinking', () => api.followUp(text, previous), (r) => {
+    run('thinking', () => (forCommander ? api.askForDeck(text, forCommander.name, previous) : api.followUp(text, previous)), (r) => {
       setThread((t) => [...t, text]);
       setAsked({ text, previous });
       showAnswer(r);
@@ -457,6 +460,9 @@ export default function SearchPage() {
         }}
       />
       </StickyBar>
+
+      {/* The optional Commander field, under the box. */}
+      <div className="mt-2"><CommanderField value={forCommander} onChange={setForCommander} /></div>
 
       {/* Under the box, one row: saving (or ideas to try) on the left, the model on the right. */}
       <div className="mt-2 flex items-start gap-3 max-sm:flex-col-reverse max-sm:items-stretch">

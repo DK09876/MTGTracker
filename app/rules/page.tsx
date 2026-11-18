@@ -17,6 +17,8 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
+import CardText, { CardLinks, CardTextContext } from '@/components/CardText';
+import { withoutMarks } from '@/lib/chat-text';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
 import RulesAnswer from '@/components/RulesAnswer';
 import AiModelPicker from '@/components/AiModelPicker';
@@ -172,7 +174,7 @@ export default function RulesPage() {
           {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
             <div key={c.mention}>
               <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
-              <p className="text-sm text-[var(--muted)]">For: {choosing.question}</p>
+              <p className="text-sm text-[var(--muted)]">For: <CardText text={choosing.question} /></p>
               <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {c.options.map((o) => (
                   <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
@@ -199,20 +201,20 @@ export default function RulesPage() {
     <section id="clarify" className="mt-5 flex scroll-mt-20 flex-col gap-4 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Before I answer">
       <div>
         <h2 className="font-medium">Before I answer…</h2>
-        <p className="text-sm text-[var(--muted)]">The answer depends on {clarifying.items.length === 1 ? 'this' : 'these'}. For: {clarifying.question}</p>
+        <p className="text-sm text-[var(--muted)]">The answer depends on {clarifying.items.length === 1 ? 'this' : 'these'}. For: <CardText text={clarifying.question} /></p>
       </div>
       {clarifying.items.map((c) => {
         const value = clarifying.answers[c.question] ?? '';
         const set = (v: string) => setClarifying({ ...clarifying, answers: { ...clarifying.answers, [c.question]: v } });
         return (
           <div key={c.question} className="flex flex-col gap-2">
-            <p className="text-sm">{c.question}</p>
+            <p className="text-sm"><CardText text={c.question} /></p>
             {c.options.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {c.options.map((o) => (
                   <button key={o} {...steady(() => set(o))} aria-pressed={value === o}
                     className={`rounded-lg border px-3 py-1.5 text-left text-sm ${value === o ? 'border-[var(--accent)] bg-[var(--surface)]' : 'border-[var(--border)] hover:border-[var(--accent)]'}`}>
-                    {o}
+                    {withoutMarks(o)}
                   </button>
                 ))}
               </div>
@@ -331,11 +333,11 @@ export default function RulesPage() {
           <div className="flex flex-wrap items-center gap-2">
             {renaming === null ? (
               <>
-                <h2 className="min-w-0 flex-1 text-lg font-medium">{thread.title}</h2>
+                <h2 className="min-w-0 flex-1 text-lg font-medium">{withoutMarks(thread.title)}</h2>
                 <button onClick={() => star(thread)} className={button} aria-pressed={thread.starred}>
                   <span aria-hidden className={thread.starred ? 'text-[var(--accent)]' : ''}>{thread.starred ? '★' : '☆'}</span> {thread.starred ? 'Saved' : 'Save'}
                 </button>
-                <button onClick={() => setRenaming(thread.title)} className={button} aria-label="Rename">✎</button>
+                <button onClick={() => setRenaming(withoutMarks(thread.title))} className={button} aria-label="Rename">✎</button>
               </>
             ) : (
               <form className="flex w-full gap-2" onSubmit={(e) => { e.preventDefault(); if (renaming.trim()) rename(thread, renaming.trim()); }}>
@@ -348,11 +350,14 @@ export default function RulesPage() {
 
           {thread.turns.map((t, i) => (
             <section key={i} id={`turn-${i}`} data-tour={i === 0 ? 'rules-answer' : undefined} className="scroll-mt-20">
-              <p className="mb-2 ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-[var(--surface-hover)] px-4 py-2 text-sm">{t.question}</p>
-              {t.cards.length > 0 && (
-                <p className="mb-2 text-xs text-[var(--muted)]">About: {t.cards.join(', ')}</p>
-              )}
-              <RulesAnswer turn={t} index={i} onAsk={(q) => ask(q)} />
+              {/* The cards the question is about are linked wherever they're named in the answer, marked or not. */}
+              <CardTextContext.Provider value={{ names: t.cards }}>
+                <p className="mb-2 ml-auto w-fit max-w-[90%] rounded-2xl rounded-br-sm bg-[var(--surface-hover)] px-4 py-2 text-sm"><CardText text={t.question} /></p>
+                {t.cards.length > 0 && (
+                  <p className="mb-2 text-xs text-[var(--muted)]">About: <CardLinks names={t.cards} /></p>
+                )}
+                <RulesAnswer turn={t} index={i} onAsk={(q) => ask(q)} />
+              </CardTextContext.Provider>
             </section>
           ))}
 

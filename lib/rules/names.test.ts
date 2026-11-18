@@ -7,6 +7,7 @@ const names = [
   'Response // Resurgence', 'Stop Cold', 'Stop That', 'Does Machines', 'Clone', 'Hearthhull, the Worldseed',
   'Atraxa, Grand Unifier', "Atraxa, Praetors' Voice", 'Delver of Secrets // Insectile Aberration',
   "Can't Quite Recall", "Can't Stay Away", 'Soldier of Fortune', 'Soldier On',
+  'Forsaken Monument', 'Forsaken Crossroads', 'Monument to Endurance', 'Monument to Perfection',
 ];
 const idx = nameIndex(names);
 // The rules' own words, as vocabulary() gives them.
@@ -25,6 +26,11 @@ describe('findMentions', () => {
   it('finds full names, with or without the comma', () => {
     expect(find('how does blade of selves interact with kratos, stoic father').cards).toEqual(['Blade of Selves', 'Kratos, Stoic Father']);
     expect(find('does blasphemous act kill it').cards).toEqual(['Blasphemous Act']);
+  });
+
+  it('finds a name with a plural last word, and never a similar name instead', () => {
+    expect(find('what do forsaken monuments do')).toEqual({ cards: ['Forsaken Monument'], ambiguous: [] });
+    expect(find('does forsaken monument boost colorless creatures')).toEqual({ cards: ['Forsaken Monument'], ambiguous: [] });
   });
 
   it('asks which card when a word begins several names', () => {

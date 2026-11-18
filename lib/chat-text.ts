@@ -6,11 +6,25 @@
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// The pattern for a set of names, kept: a page shows many texts against the same names (a deck's 100 cards).
+const patterns = new Map<string, { usable: string[]; re: RegExp }>();
+function patternFor(names: string[]) {
+  const usable = [...new Set(names.map((n) => n.split(' // ')[0].trim()).filter((n) => n.length >= 3))].sort((a, b) => b.length - a.length);
+  const key = usable.join('\u0001');
+  let p = patterns.get(key);
+  if (!p) {
+    p = { usable, re: new RegExp(`(?<![\\p{L}\\p{N}'’])(${usable.map(escape).join('|')})(?![\\p{L}\\p{N}'’])`, 'giu') };
+    patterns.set(key, p);
+    if (patterns.size > 20) patterns.delete(patterns.keys().next().value!);
+  }
+  return p;
+}
+
 /** The text split into plain pieces and card names (longest name first, whole names only, any case). */
 export function splitNames(text: string, names: string[]): Array<{ text: string; name?: string }> {
-  const usable = [...new Set(names.map((n) => n.split(' // ')[0].trim()).filter((n) => n.length >= 3))].sort((a, b) => b.length - a.length);
-  if (!usable.length || !text) return text ? [{ text }] : [];
-  const re = new RegExp(`(?<![\\p{L}\\p{N}'’])(${usable.map(escape).join('|')})(?![\\p{L}\\p{N}'’])`, 'giu');
+  if (!text) return [];
+  const { usable, re } = patternFor(names);
+  if (!usable.length) return [{ text }];
   const out: Array<{ text: string; name?: string }> = [];
   let at = 0;
   for (const m of text.matchAll(re)) {
@@ -68,3 +82,6 @@ export function boldRuns(line: string): Array<{ text: string; bold: boolean }> {
     return { text: (bold ? p.slice(2, -2) : p).replace(/\*\*/g, ''), bold };
   });
 }
+
+/** Text with its [[marks]] taken off, the names kept: for where a link can't go (a button's label, a title). */
+export const withoutMarks = (text: string) => text.replace(/\[\[+([^[\]]{1,120})\]\]+/g, '$1').replace(/\[\[+|\]\]+/g, '');

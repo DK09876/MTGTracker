@@ -14,17 +14,15 @@
  */
 
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
-import CardName from './CardName';
+import CardText, { CardLink, CardLinks } from './CardText';
 import GameChangerLine from './GameChangerLine';
 import Tip from './Tip';
-import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
 import { BRACKETS } from '@/lib/brackets';
 import { price } from '@/lib/price';
 import type { Category } from '@/lib/categories-shared';
-import type { ScryfallCard } from '@/lib/scryfall';
 import { BRACKET_CHIPS, COMMANDER_ROLES, NOT_SURE_TIP, type PlanAction, type PlanState } from '@/lib/plan-help-shared';
 
 // The page's colours: gold = yours and selected, violet ✦ = AI, blue = from the cards.
@@ -97,29 +95,11 @@ export function useUndo() {
 }
 
 /** A card in a list: its name, who added it, and × to take it out (only the × removes). */
-/**
- * The deck's cards, for the names on the Plan and Tags tabs: given by the deck page, so a name there shows its card
- * on hover and opens it on a click or tap, as card names do everywhere else.
- */
-export const PlanCards = createContext<{ cardOf: (name: string) => ScryfallCard | undefined; onCard: (card: ScryfallCard) => void } | null>(null);
-
-/** A card name with its picture on hover and the card on a click or tap; plain text for a card the deck doesn't hold. */
-export function PlanCardName({ name, className = '' }: { name: string; className?: string }) {
-  const cards = useContext(PlanCards);
-  const card = cards?.cardOf(name);
-  return card ? <CardName name={name} card={card} onOpen={cards!.onCard} className={className} /> : <span className={className}>{name}</span>;
-}
-
-/** Card names in a line, comma-separated, each with its card on hover and tap. */
-export function PlanCardList({ names }: { names: string[] }) {
-  return <>{names.map((n, i) => <span key={`${n}-${i}`}>{i > 0 && ', '}<PlanCardName name={n} /></span>)}</>;
-}
-
 export function CardChip({ name, by, onRemove, label }: { name: string; by?: string; onRemove: () => void; label: string }) {
   const m = by ? MARK[by] : null;
   return (
     <span className={`${C.chip} cursor-default pr-0 hover:bg-[var(--background)]`}>
-      <PlanCardName name={name} className="min-w-0 break-words" />
+      <CardLink name={name} className="min-w-0 break-words" />
       {m && <span className={`text-[11px] font-bold ${m[1]}`}>{m[0]}</span>}
       <button type="button" onClick={onRemove} aria-label={label} className="-my-px flex min-h-11 w-9 shrink-0 items-center justify-center rounded-r-xl text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">×</button>
     </span>
@@ -326,7 +306,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
         </div>
         {h?.commander && (
           <Suggested title={newTitle} onAccept={() => act({ action: 'acceptCommander' })} onSkip={() => act({ action: 'skip', what: 'commander' })} note="Skipping leaves this on Not sure.">
-            <b>{h.commander.roles.map((id) => COMMANDER_ROLES.find((x) => x.id === id)?.label).join(', ')}</b>. <SymbolText text={h.commander.why} />
+            <b>{h.commander.roles.map((id) => COMMANDER_ROLES.find((x) => x.id === id)?.label).join(', ')}</b>. <CardText text={h.commander.why} />
           </Suggested>
         )}
         {!unsure && s.commander.by === 'ai' && <p className={`text-sm ${C.ai}`}>✦ AI suggestion, accepted by you. Pick another any time.</p>}
@@ -368,7 +348,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           {s.bracket.value !== null && <p className="text-[13px] text-[var(--muted)]">{BRACKETS[s.bracket.value]}</p>}
           {h?.bracket && (
             <Suggested title={newTitle} onAccept={() => act({ action: 'acceptBracket' })} onSkip={() => act({ action: 'skip', what: 'bracket' })} note="Skipping leaves this on Not sure.">
-              <b>Bracket {h.bracket.level}</b>. <SymbolText text={h.bracket.why} />
+              <b>Bracket {h.bracket.level}</b>. <CardText text={h.bracket.why} />
             </Suggested>
           )}
           {s.bracket.value !== null && s.bracket.by === 'ai' && <p className={`text-sm ${C.ai}`}>✦ AI suggestion, accepted by you. Pick another any time.</p>}
@@ -420,7 +400,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#141210] px-3 py-1.5">
             {editing?.id === n.id ? (
               <input aria-label="Edit the note" autoFocus value={editing.text} onChange={(e) => setEditing({ id: n.id, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { void act({ action: 'note', edit: editing }); setEditing(null); } if (e.key === 'Escape') setEditing(null); }} className={`${C.input} flex-[1_1_16rem]`} />
-            ) : <span className="min-w-0 flex-[1_1_16rem] break-words text-sm">{n.text}</span>}
+            ) : <span className="min-w-0 flex-[1_1_16rem] break-words text-sm"><CardText text={n.text} /></span>}
             <span className="flex gap-2">
               {editing?.id === n.id
                 ? <><button type="button" className={C.btn} disabled={!editing.text.trim()} onClick={() => { void act({ action: 'note', edit: editing }); setEditing(null); }}>Save</button><button type="button" className={C.btn} onClick={() => setEditing(null)}>Cancel</button></>
@@ -459,7 +439,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
               <span className={`font-bold ${C.ai}`}>{confirmed && left ? `✦ New since you confirmed · ${left} to look at` : '✦ AI suggestions are ready'}</span>
               <span className={`rounded-lg px-2.5 py-0.5 text-xs font-bold ${h.state === 'focused' ? 'bg-[#1d3324] text-[#9bdcae]' : 'bg-[#3a3010] text-[#f0cf6a]'}`}>{h.state === 'focused' ? 'One clear plan' : h.state === 'unfocused' ? 'Competing plans' : 'No clear plan'}</span>
             </div>
-            {h.summary && <p className="text-sm"><SymbolText text={h.summary} /></p>}
+            {h.summary && <p className="text-sm"><CardText text={h.summary} /></p>}
             <p className="text-[13px] text-[var(--muted)]">{left ? 'Each suggestion sits beside the field it is for. The list of steps shows what is still waiting.' : 'Nothing left to accept or answer.'}</p>
             {h.directions.length > 0 && (
               <div className="flex flex-col gap-2">
@@ -469,8 +449,8 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
                   return (
                     <div key={d.name} className={`${C.box} flex flex-col gap-1.5 ${on ? 'border-[#a98bd0]' : ''}`}>
                       <b>{d.name}</b>
-                      <p className="text-sm text-[var(--muted)]"><SymbolText text={d.plan} /></p>
-                      <p className="text-[13px] text-[var(--muted)]">Already in the list: <PlanCardList names={d.cards} /></p>
+                      <p className="text-sm text-[var(--muted)]"><CardText text={d.plan} /></p>
+                      <p className="text-[13px] text-[var(--muted)]">Already in the list: <CardLinks names={d.cards} /></p>
                       <div><button type="button" className={C.btn} aria-pressed={on} onClick={() => act({ action: 'direction', name: d.name })}>{on ? 'Picked' : 'Use this direction'}</button></div>
                     </div>
                   );
@@ -489,10 +469,10 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
           <textarea id="plantext" rows={4} value={planText} onFocus={() => { setTyping(true); }} onChange={(e) => setPlanText(e.target.value)} onBlur={savePlanText}
             placeholder="How does the deck win, and what is it built around? A few sentences is plenty. Leave it empty if you’re not sure." className={`${C.input} w-full resize-y py-2`} />
           {h?.fuller && (
-            <Suggested title="✦ Suggested · a fuller version, built on yours" onAccept={() => act({ action: 'acceptFuller' })} onSkip={() => act({ action: 'skip', what: 'fuller' })} note="Accepting replaces your text. Skipping keeps yours as it is."><SymbolText text={h.fuller} /></Suggested>
+            <Suggested title="✦ Suggested · a fuller version, built on yours" onAccept={() => act({ action: 'acceptFuller' })} onSkip={() => act({ action: 'skip', what: 'fuller' })} note="Accepting replaces your text. Skipping keeps yours as it is."><CardText text={h.fuller} /></Suggested>
           )}
           {h?.plan && (
-            <Suggested title={newTitle} onAccept={() => act({ action: 'acceptPlan' })} onSkip={() => act({ action: 'skip', what: 'plan' })} note="Accepting puts it in the box, where you can edit it."><SymbolText text={h.plan} /></Suggested>
+            <Suggested title={newTitle} onAccept={() => act({ action: 'acceptPlan' })} onSkip={() => act({ action: 'skip', what: 'plan' })} note="Accepting puts it in the box, where you can edit it."><CardText text={h.plan} /></Suggested>
           )}
         </div>
 
@@ -509,7 +489,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
               <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · ways to win' : '✦ Suggested ways to win'}</span>{h.wins.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllWins' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested ways to win" onClick={() => act({ action: 'skipAllWins' })}>Skip all</button></span>}</div>
               {h.wins.map((w) => (
                 <div key={w.name} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
-                  <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]"><SymbolText text={w.how} /></p><p className="text-[13px] text-[var(--muted)]"><PlanCardList names={w.cards} /></p></div>
+                  <div className="min-w-0 flex-[1_1_18rem]"><b className="break-words">{w.name}</b><p className="text-sm text-[var(--muted)]"><CardText text={w.how} /></p><p className="text-[13px] text-[var(--muted)]"><CardLinks names={w.cards} /></p></div>
                   <div className="flex gap-2"><button type="button" className={C.btn} aria-label={`Accept ${w.name} as a way to win`} onClick={() => act({ action: 'acceptWin', name: w.name })}>Accept</button><button type="button" className={C.btn} aria-label={`Skip ${w.name}`} onClick={() => act({ action: 'skip', what: `win:${w.name.trim().toLowerCase()}` })}>Skip</button></div>
                 </div>
               ))}
@@ -530,7 +510,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
               <div className="flex flex-wrap items-center justify-between gap-2"><span className={`font-bold ${C.ai}`}>{confirmed ? '✦ New since you confirmed · key cards' : '✦ Suggested key cards'}</span>{h.keys.length > 1 && <span className="flex gap-2"><button type="button" className={C.btn} onClick={() => act({ action: 'acceptAllKeys' })}>Accept all</button><button type="button" className={C.btn} aria-label="Skip all suggested key cards" onClick={() => act({ action: 'skipAllKeys' })}>Skip all</button></span>}</div>
               {h.keys.map((k) => (
                 <div key={k.key} className="flex flex-wrap items-start justify-between gap-2 border-t border-[var(--border)] pt-2">
-                  <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words"><PlanCardName name={k.name} /></b>{k.why && <p className="text-sm text-[var(--muted)]"><SymbolText text={k.why} /></p>}</div>
+                  <div className="min-w-0 flex-[1_1_16rem]"><b className="break-words"><CardLink name={k.name} /></b>{k.why && <p className="text-sm text-[var(--muted)]"><CardText text={k.why} /></p>}</div>
                   <div className="flex gap-2"><button type="button" className={C.btn} aria-label={`Accept ${k.name} as a key card`} onClick={() => act({ action: 'acceptKey', name: k.name })}>Accept</button><button type="button" className={C.btn} aria-label={`Skip ${k.name}`} onClick={() => act({ action: 'skip', what: `key:${k.key}` })}>Skip</button></div>
                 </div>
               ))}
@@ -544,7 +524,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             {h.questions.map((q) => (
               <div key={q.id} className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-2.5" data-suggestion={!q.skipped && !(answers[q.id] ?? '').trim() ? '' : undefined}>
                 {q.about && <span className={`text-[11px] font-bold ${C.yours}`}>About something you set</span>}
-                <label htmlFor={q.id} className={`text-sm ${q.skipped ? 'line-through text-[var(--muted)]' : ''}`}><SymbolText text={q.text} /></label>
+                <label htmlFor={q.id} className={`text-sm ${q.skipped ? 'line-through text-[var(--muted)]' : ''}`}><CardText text={q.text} /></label>
                 <div className="flex flex-wrap gap-2">
                   <input id={q.id} value={answers[q.id] ?? ''} disabled={q.skipped} placeholder={confirmed ? 'A line is plenty. It goes to your notes when you leave the box.' : 'A line is plenty'} onFocus={() => { setTyping(true); }}
                     onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
@@ -570,7 +550,7 @@ export default function PlanTab({ listId, version, onTab, onConfirmed, onBracket
             <ul className="mt-2 flex flex-col gap-1.5">
               {h.skipped.map((x) => (
                 <li key={x.what} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--border)] pt-1.5">
-                  <span className="line-clamp-2 min-w-0 flex-[1_1_14rem]"><span className="text-[var(--muted)]">{x.label}:</span> {x.text}</span>
+                  <span className="line-clamp-2 min-w-0 flex-[1_1_14rem]"><span className="text-[var(--muted)]">{x.label}:</span> <CardText text={x.text} /></span>
                   <button type="button" className={C.btn} aria-label={`Bring back ${x.label}: ${x.text.slice(0, 60)}`} onClick={() => act({ action: 'skip', what: x.what, on: false })}>Bring back</button>
                 </li>
               ))}
@@ -617,7 +597,7 @@ function WinRow({ w, names, cat, takeOut }: { w: Category; names: string[]; cat:
         <div className="flex min-w-0 flex-wrap items-center gap-2"><b className="min-w-0 break-words">{w.name}</b><span className={`text-[11px] font-bold ${m[1]}`}>{m[0]}</span></div>
         <RemoveButton label={`Remove ${w.name}`} what="Remove this way to win" onRemove={() => void cat({ action: 'remove', id: w.id })} />
       </div>
-      {w.how && <p className="text-sm text-[var(--muted)]"><SymbolText text={w.how} /></p>}
+      {w.how && <p className="text-sm text-[var(--muted)]"><CardText text={w.how} /></p>}
       {w.gone.length > 0 && <p className={`text-[13px] ${C.yours}`}>Look again: {w.gone.join(', ')} left the deck.</p>}
       <div className="flex flex-wrap items-center gap-2">
         {w.cards.map((c) => <CardChip key={c.key} name={c.name} by={c.by} label={`Remove ${c.name} from ${w.name}`} onRemove={() => takeOut(w.id, w.name, c)} />)}

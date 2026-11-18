@@ -11,6 +11,8 @@
  */
 
 import type { JsonModel } from './ai';
+import { AGENT_CONTEXT, ownerCardsBlock } from './agent-context';
+import { stubJson, stubbed } from './ai-stub';
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
@@ -134,7 +136,10 @@ export function userMessage(request: string, context: Context = {}, today = new 
   return lines.join('\n');
 }
 
-async function translate(key: string, model: string, user: string): Promise<Translation> {
+async function translate(key: string, model: string, given: string): Promise<Translation> {
+  // The cards the owner named with [[ ]], looked up exactly (lib/agent-context.ts), as every other call has them.
+  const user = `${given}${await ownerCardsBlock([given])}`;
+  if (stubbed()) return parseTranslation({ candidates: [{ content: { parts: [{ text: JSON.stringify(stubJson({ system: SYSTEM_PROMPT, user, schema: RESPONSE_SCHEMA, step: 'search' })) }] } }] });
   const started = Date.now();
   let response = await call(key, model, user);
   if (RETRY_STATUSES.has(response.status) && Date.now() - started < TIMEOUT_MS / 2) {
@@ -159,7 +164,8 @@ async function call(key: string, model: string, user: string): Promise<Response>
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        // The agent context first, as on every call (lib/agent-context.ts).
+        systemInstruction: { parts: [{ text: `${AGENT_CONTEXT}\n\n${SYSTEM_PROMPT}` }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
         generationConfig: {
           // Low but not zero: a retry after a failed query should be able
@@ -259,16 +265,17 @@ Return JSON with:
                or partial ("lightnig bolt", "sol ring").
     "combos" - the request asks for combos, infinite loops or "cards that go
                infinite with" something.
-    "cards"  - everything else: cards matching a description, optionally for
-               a commander's deck.
-- cardName: for "card", the card's correct full name. For "combos", the card
-  to find combos with when it is not the commander ("combos with Doubling
-  Season"). Otherwise null.
-- commander: the commander the request is building around, as named ("for
-  my Azula deck", "good with Atraxa", "combos for vivi"). A short or partial
-  name is fine - it is looked up for you. Two commanders leading one deck
-  together (partners, a Background): give both, joined by " and " - "Kratos
-  and Atreus" - never just the first. Otherwise null.
+    "cards"  - everything else: cards matching a description.
+- cardName: for "card", the name as the owner wrote it, with only an obvious
+  misspelling fixed ("lightnig bolt" -> Lightning Bolt). Never swap it for a
+  different card with a similar name: "forsaken monument" is Forsaken
+  Monument. For "combos", the card to find combos with ("combos with Doubling
+  Season", "combo cards for vivi"). Otherwise null. A name the owner wrote as
+  [[Card Name]] is exactly that card.
+- commander: always null. The owner chooses a commander in its own field, and
+  you are told when they have. A legendary creature named in the request is
+  just a card: "good with Atraxa" asks for cards that work with Atraxa, not
+  for Atraxa's deck.
 - explanation: one short sentence saying what the search looks for, in plain
   words, e.g. "Green ramp that isn't a land, under $2".
 - query:
@@ -278,7 +285,7 @@ Return JSON with:
     request narrows the combos: result:"infinite mana", cards<=2 (at most two
     pieces), price<50, coloridentity<=UR (only when no commander is given).
 
-When a commander is given, the server adds its colour identity, Commander
+When the owner has chosen a commander, the server adds its colour identity, Commander
 legality, and removes the commander itself. So never write id:, f:commander
 or the commander's name into the query. If the request says only "cards for
 X" with no other condition, the query may be empty.
@@ -327,16 +334,15 @@ Examples:
 "cheap green ramp that isn't a land" ->
   kind: cards; query: otag:ramp c:g -t:land usd<2
 "lightnig bolt" -> kind: card; cardName: Lightning Bolt
-"enchantments that work well for fire lord azula" ->
-  kind: cards; commander: Fire Lord Azula; query: t:enchantment
-  (once shown Azula's rules text: query: t:enchantment (o:copy or o:"whenever you cast"))
-"a repeatable sacrifice outlet like zuran's orb for hearthhull" ->
-  kind: cards; commander: Hearthhull; query: o:/sacrifice an? [^.:]*:/
-"a card under 5 cmc for azula that helps me draw cards" ->
-  kind: cards; commander: Azula; query: (otag:draw or otag:card-advantage) mv<5
-"kratos stoic father and atreus, counters synergy" -> kind: cards;
-  commander: Kratos, Stoic Father and Atreus; query: (o:"+1/+1 counter" or o:proliferate)
-"combo cards for vivi" -> kind: combos; commander: Vivi
+"enchantments that work well with fire lord azula" ->
+  kind: cards; query: t:enchantment (o:copy or o:"whenever you cast")
+  (Azula is a card here, not the commander: the query is about what she rewards)
+"enchantments", with the owner's commander Fire Lord Azula and its rules text shown ->
+  kind: cards; query: t:enchantment (o:copy or o:"whenever you cast")
+"a repeatable sacrifice outlet like zuran's orb" ->
+  kind: cards; query: o:/sacrifice an? [^.:]*:/
+"forsaken monument" -> kind: card; cardName: Forsaken Monument
+"combo cards for vivi" -> kind: combos; cardName: Vivi Ornitier
 "what goes infinite with doubling season" -> kind: combos; cardName: Doubling Season
 "two card infinite mana combos in izzet" ->
   kind: combos; query: coloridentity<=UR result:"infinite mana" cards<=2

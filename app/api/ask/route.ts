@@ -21,7 +21,8 @@ import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { geminiTranslator, modelTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
-import { cardsNamed, findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
+import { findCards } from '@/lib/cards';
+import { findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
 import { parseSortKey } from '@/lib/sort';
 import { searchCombos, SpellbookError } from '@/lib/spellbook';
 
@@ -46,7 +47,8 @@ function deps(request: Request, label = ''): Deps {
     search: (q, sort, page) => searchCards(q, page ?? 1, sort),
     findCardNamed,
     findCommanders,
-    cardsNamed,
+    // Exact names through the app's one way of getting a card: its own cards first (lib/cards.ts).
+    cardsNamed: async (names) => [...new Set((await findCards(names)).values())],
     searchCombos,
     translate: translator(profileOf(request), label),
   };

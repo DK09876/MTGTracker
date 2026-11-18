@@ -17,12 +17,12 @@
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import CardText, { CardLink, MoreCardNames } from './CardText';
 import CardName from './CardName';
 import { BuyList } from './DeckUpgrades';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
-import SymbolText from './SymbolText';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
@@ -152,7 +152,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   };
   const shown = useShown(items, (i) => i.name, passes, `${lv.filter}:${lv.press ?? 0}:${view?.run?.id ?? ''}:${items.length}`);
   useFilterFallback(view?.run?.id ?? '', lv.filter !== 'all' && !items.some(passes), () => setLv({ filter: 'all' }));
-  const open = (cardId: string) => { if (onCard) void api.finishCard(listId, cardId).then(onCard).catch(() => {}); };
+  const open = (cardId: string) => { if (onCard) void api.cardById(cardId).then(onCard).catch(() => {}); };
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading your cards…</p>;
 
@@ -281,7 +281,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
           </div>
         )}
       </div>
-      <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and your settings.'}</p>
+      <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <CardText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and your settings.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <button className={C.go} disabled={busy || view.noKey || updating} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-finish-go>
           ✦ {isFull ? 'Finish from my collection' : `Find ${plural(wanted, 'card')} in my collection`} · Claude Opus · {cost}
@@ -301,7 +301,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   const remembered = view.skippedBefore.length + view.maybeBefore.length;
   const rememberedRow = (x: { name: string; why: string }, tag: string) => (
     <li key={`${tag}:${x.name}`} className="flex flex-wrap items-baseline gap-x-2">
-      <b>{x.name}</b><span className="text-[11px] text-[var(--muted)]">{tag}</span>{x.why && <span className="text-[#e2b93b]">“{x.why}”</span>}
+      <b><CardLink name={x.name} /></b><span className="text-[11px] text-[var(--muted)]">{tag}</span>{x.why && <span className="text-[#e2b93b]">“<CardText text={x.why} />”</span>}
       <button type="button" disabled={busy || running} title={running ? 'After this round' : undefined} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
     </li>
   );
@@ -422,6 +422,8 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
   }
 
   return (
+    // The reasons link the picks they name, and the searches' other cards, as well as the deck's.
+    <MoreCardNames names={[...items.map((i) => i.name), ...Object.values(run.more).flatMap((m) => m.cards.map((c) => c.name)), ...(run.lands?.duals.map((d) => d.name) ?? [])]}>
     <section className="flex flex-col gap-4" data-section="Finish" data-finish>
       {/* One sticky bar, the same element throughout: the count, the round, what the deck becomes. */}
       <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-col gap-1.5 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-finish-bar>
@@ -441,7 +443,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
 
       {/* Say what to change: above the list, as Trim's reply box sits above its list. */}
       <div className={`${CARD} flex flex-col gap-2`} data-finish-say>
-        {run.reply && <p className="text-[13px] text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <SymbolText text={run.reply} /></p>}
+        {run.reply && <p className="text-[13px] text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <CardText text={run.reply} /></p>}
         {(run.short > 0 || run.dropped > 0) && <p className="text-[13px] text-amber-300">{run.short > 0 ? `${plural(run.short, 'pick')} short of what you asked for: Claude found no more it would put in. ` : ''}{run.dropped > 0 ? `${plural(run.dropped, 'name')} Claude gave ${run.dropped === 1 ? 'wasn’t' : 'weren’t'} among your cards on offer and ${run.dropped === 1 ? 'was' : 'were'} left out.` : ''}</p>}
         {run.buy && run.buy.over.length > 0 && (
           <div className="flex flex-col gap-1.5" data-finish-over>
@@ -535,6 +537,7 @@ export default function DeckFinish({ listId, version, onChanged, onTab, onCard, 
       {run.full && run.lands && run.buy?.kind === 'any' && !run.lands.duals.length && <p className="text-[13px] text-[var(--muted)]" data-finish-lands-basics>None of your lands fit, so the lands are basics. Lands to buy are left to Upgrades once the deck is at 100.</p>}
       {run.full && run.lands && <Lands lands={run.lands} size={view.size + adds.length} busy={busy || running} onLands={(change) => act({ action: 'lands', ...change })} onSave={(change) => save({ action: 'lands', ...change })} />}
     </section>
+    </MoreCardNames>
   );
 }
 
@@ -664,7 +667,7 @@ function Row({ item, state, text, name, onSet, onText }: {
           {item.card.manaCost && <ManaCost cost={item.card.manaCost} size={13} />}
           {chip}{mark}
         </span>
-        <span className={`col-span-2 min-w-0 text-[13px] @[44rem]:col-span-2 @[66rem]:col-span-1 ${item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'} ${off}`} data-col="why"><span className="font-semibold text-[#c3a6e6]">✦</span> <SymbolText text={item.why} /></span>
+        <span className={`col-span-2 min-w-0 text-[13px] @[44rem]:col-span-2 @[66rem]:col-span-1 ${item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'} ${off}`} data-col="why"><span className="font-semibold text-[#c3a6e6]">✦</span> <CardText text={item.why} /></span>
         {/* The reason line, and beside it (never over it) the offer to Rethink a comment that sounds unsure (D 16). */}
         <span className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 @[44rem]:col-span-1">
           <input value={text} onChange={(e) => onText(e.target.value)} maxLength={300} data-col="reason" title={text.trim() || undefined}

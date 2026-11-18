@@ -29,6 +29,7 @@ import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRule
 import { findMentions, type NameIndex } from './names';
 import { parseResearch, RESEARCH_SCHEMA, RESEARCH_SYSTEM, researchMessage, type Clarify, type Research } from './research';
 import type { WikiPage } from './sources';
+import { markedNames } from '../agent-context';
 
 export interface AskDeps {
   rules: () => Promise<{ index: RulesIndex; vocab: Set<string> }>;
@@ -298,7 +299,10 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   const question = input.question.trim();
   const earlier = input.earlier ?? [];
   const [{ vocab }, names] = await Promise.all([deps.rules(), deps.names()]);
-  const found = findMentions(question, names, vocab);
+  // A card written [[like this]] is exactly that card (lib/agent-context.ts); the rest of the question is read for names.
+  const marked = markedNames(question);
+  const found = findMentions(question.replace(/\[\[+[^[\]]*\]\]+/g, ' '), names, vocab);
+  found.cards.unshift(...marked.filter((m) => !found.cards.includes(m)));
 
   // A follow-up that says "Kratos" means the Kratos already in the
   // conversation; only a word the conversation cannot settle is asked about.

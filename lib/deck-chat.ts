@@ -229,8 +229,8 @@ Answering:
 - A card Finish picked shows Claude's reason in the deck list ("Finish:
   ..."). Read it before calling the card weak; if you still disagree, say
   why.
-- Write every card name as [[Card Name]], as printed, so the page can link
-  it. Otherwise plain text: no bold, no headings.
+- Card names as the agent context says ([[Card Name]]). Otherwise plain
+  text: no bold, no headings.
 
 How to help:
 - Start from what the deck is trying to do (its brief and how it wins).

@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+import CardText from './CardText';
 import KeepRule from './KeepRule';
 import { usePlanState } from './PlanTab';
 import Tip from './Tip';
@@ -229,7 +230,7 @@ function WinRead({ insights, wins }: { insights: api.DeckInsights | 'loading' | 
                 <span className="font-semibold">{r.label}</span>
                 <span className="text-xs font-semibold" style={{ color: STRENGTH[r.strength][1] }}>{STRENGTH[r.strength][0]}</span>
               </div>
-              <p className="text-sm text-[var(--muted)]">{r.how}</p>
+              <p className="text-sm text-[var(--muted)]"><CardText text={r.how} /></p>
               <p className="text-xs text-[var(--muted)]">{r.cards.slice(0, 6).join(' · ')}{r.cards.length > 6 ? ` · +${r.cards.length - 6} more` : ''}</p>
             </li>
           ))}
@@ -278,7 +279,7 @@ function Bracket({ insights, aim, onAside }: { insights: api.DeckInsights | 'loa
         <ul className="mt-2 flex flex-col gap-1 text-sm">
           {bracket.reasons.map((r) => (
             <li key={r.text}>
-              <span className="font-medium">{r.text}</span>
+              <span className="font-medium"><CardText text={r.text} /></span>
               {r.kind ? <Flagged cards={r.cards} why={bracket.why ?? {}} busy={busy} onAside={(n) => press(n, true)} /> : <span className="text-[var(--muted)]"> — {r.cards.join(', ')}</span>}
             </li>
           ))}
@@ -296,7 +297,7 @@ function Bracket({ insights, aim, onAside }: { insights: api.DeckInsights | 'loa
           {cautions.map((c) => (
             <li key={c.text} className="flex gap-2">
               <span aria-hidden className="font-bold" style={{ color: STATUS.warning }}>▲</span>
-              <span><span className="sr-only">Check: </span>{c.text}{c.kind ? <Flagged cards={c.cards} why={bracket.why ?? {}} busy={busy} onAside={(n) => press(n, true)} /> : <span className="text-[var(--muted)]"> — {c.cards.join(', ')}</span>}</span>
+              <span><span className="sr-only">Check: </span><CardText text={c.text} />{c.kind ? <Flagged cards={c.cards} why={bracket.why ?? {}} busy={busy} onAside={(n) => press(n, true)} /> : <span className="text-[var(--muted)]"> — {c.cards.join(', ')}</span>}</span>
             </li>
           ))}
         </ul>
@@ -493,7 +494,7 @@ function Warnings({ warnings }: { warnings: Warning[] }) {
               </span>
               <span className="sr-only">{level.label}:</span>
               <span className="font-medium">{w.title}</span>
-              {w.detail && <span className="text-[var(--muted)]">{w.detail}</span>}
+              {w.detail && <span className="text-[var(--muted)]"><CardText text={w.detail} /></span>}
             </p>
             {w.cards && w.cards.length > 0 && <p className="mt-1 pl-7 text-[var(--muted)]">{w.cards.join(', ')}</p>}
           </li>

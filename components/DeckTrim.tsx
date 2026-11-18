@@ -12,6 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
+import CardText from './CardText';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
 import Tip from './Tip';
-import SymbolText from './SymbolText';
 import * as api from '@/lib/api';
 import { price } from '@/lib/price';
 import type { DeckSection } from '@/lib/sections-shared';
@@ -328,10 +328,10 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
                 })()}
                 {ch.dropped.length > 0 && <p><b>No longer cuts, though you didn’t name them:</b> {names(ch.dropped)}.</p>}
                 <p><b>{ch.fresh ? `${ch.fresh} new cut${ch.fresh === 1 ? '' : 's'}` : 'No new cuts'}.</b> {ch.same + ch.yours} the same as before{ch.yours ? `, ${ch.yours} of them confirmed by you` : ''}.</p>
-                {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “<SymbolText text={view.run.reply} />”</p>}
+                {view.run.reply && <p className="text-[var(--muted)]"><span className={C.ai}>Claude:</span> “<CardText text={view.run.reply} />”</p>}
               </div>
             ) : view.run.notes ? (
-              <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={view.run.notes} /></p>
+              <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <CardText text={view.run.notes} /></p>
             ) : null}
           <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
             disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
@@ -482,7 +482,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
   return (
     <section className={`${CARD} flex flex-col gap-3`} data-trim-session aria-label="Say something back">
       <div className={`${C.box} flex flex-col gap-2`}>
-        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> <SymbolText text={ask} /></p>}
+        {ask && <p className={`${C.aiBox} text-[13px]`}><span className={`font-bold ${C.ai}`}>✦ Claude asks:</span> <CardText text={ask} /></p>}
         <label htmlFor="trim-say" className="flex flex-wrap items-baseline gap-x-2 font-bold">Say something back
           <span className="text-[13px] font-normal text-[var(--muted)]">Make your changes on the cuts below first, then send them with anything you want to say.</span>
         </label>
@@ -510,9 +510,9 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
                 {t.added && <div className="mt-1.5 flex flex-col gap-0.5" data-added><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ ADDED BY CLAUDE</span><p className="whitespace-pre-line text-[var(--muted)]">{t.added}</p></div>}</>
             ) : t.kind === 'claude-list' ? (
               <><span className={`text-[11px] font-bold tracking-wide ${C.ai}`}>✦ CLAUDE · LIST {t.round}</span>
-                <p>{t.cuts.length} cuts and {t.maybes.length} closer calls.{t.reply ? ' ' : ''}<SymbolText text={t.reply} /></p>
+                <p>{t.cuts.length} cuts and {t.maybes.length} closer calls.{t.reply ? ' ' : ''}<CardText text={t.reply} /></p>
                 {/* The latest question shows once, above the box. */}
-                {t.ask && k !== lastList && <p className={C.ai}>Asked: <SymbolText text={t.ask} /></p>}</>
+                {t.ask && k !== lastList && <p className={C.ai}>Asked: <CardText text={t.ask} /></p>}</>
             ) : (
               <><span className={`text-[11px] font-bold tracking-wide ${C.yours}`}>YOU</span>
                 {t.approach !== undefined && <p>Changed what matters to: “{t.approach || 'nothing'}”</p>}
@@ -577,7 +577,7 @@ function Row({ item, cut, choice, marks, mark, showCard, busy, onSet, onCard, on
         <span className="col-span-2 min-w-0 text-[13px] text-[var(--muted)] @[66rem]:col-span-1" data-col="why">
           {item.tier === 'yours'
             ? <><span className={`font-semibold ${C.yours}`}>You:</span> {item.mine || 'kept, no reason given'}</>
-            : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <SymbolText text={item.why} /></>}
+            : <><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <CardText text={item.why} /></>}
         </span>
         <input value={choice?.text ?? ''} onChange={(e) => onReason(e.target.value)} maxLength={300} data-col="reason"
           // One line high: the start shows with an ellipsis when not being typed in, the whole reason on hover.

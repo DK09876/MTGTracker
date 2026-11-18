@@ -16,17 +16,18 @@
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import CardText, { CardLink, MoreCardNames } from './CardText';
 import CardName from './CardName';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown, type ListSort } from './ListControls';
 import ManaCost from './ManaCost';
 import { C } from './PlanTab';
-import SymbolText from './SymbolText';
 import Tip from './Tip';
 import { AI_READS } from '@/lib/ai-reads';
 import * as api from '@/lib/api';
 import { roundPrice } from '@/lib/finish-shared';
 import { price } from '@/lib/price';
 import type { ScryfallCard } from '@/lib/scryfall';
+import { lookCard } from '@/lib/card-cache';
 import {
   buyListText, buyTotal, chosenIn, isBuy, noBracketRoom, ownLabel, UPGRADE_COUNTS, UPGRADE_SEARCHES, UPGRADE_SEARCHES_LATER, UPGRADE_SOURCES,
   type UpgradeChoice, type UpgradeItem, type UpgradesView, type UpgradeWhere,
@@ -124,7 +125,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
   };
   const shown = useShown(items, (i) => i.name, passes, `${lv.filter}:${lv.press ?? 0}:${view?.run?.id ?? ''}:${items.length}`);
   useFilterFallback(view?.run?.id ?? '', lv.filter !== 'all' && !items.some(passes), () => setLv({ filter: 'all' }));
-  const open = (cardId: string, name: string) => { if (onCard) void api.finishCard(listId, cardId, name).then(onCard).catch(() => {}); };
+  const open = (cardId: string, name: string) => { if (onCard) void api.cardById(cardId).catch(() => lookCard(name).then((s) => (s.status === 'found' ? s.card : Promise.reject(new Error('not found'))))).then(onCard).catch(() => {}); };
   if (error && !view) return <p className="mt-4 text-sm text-red-400">{error}</p>;
   if (!view) return <p className="mt-4 text-sm text-[var(--muted)]">Reading the deck…</p>;
 
@@ -198,7 +199,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
           {view.plan.budget !== null && !view.ownOnly ? ` Cards to buy stay within your $${view.plan.budget} a card.` : ''}
         </p>
       </div>
-      <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <SymbolText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and the deck.'}</p>
+      <p className="text-sm text-[var(--muted)]"><b className="text-[#e8c558]">Your plan:</b> {view.plan.text ? <CardText text={view.plan.text} /> : 'not written yet. Claude goes by the commander and the deck.'}</p>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <button className={C.go} disabled={busy || view.noKey || updating || view.size !== 100} title={updating ? UPDATING_TITLE : undefined} onClick={() => act({ action: 'find' })} data-upgrades-go>
           ✦ Find {view.count} upgrades · Claude Opus · {cost}
@@ -220,7 +221,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       <ul className="flex flex-col gap-1 border-t border-[var(--border)] px-4 py-3 text-[13px]">
         {view.notForMe.map((x) => (
           <li key={x.name} className="flex flex-wrap items-baseline gap-x-2">
-            <b>{x.name}</b>{x.why && <span className="text-[#e2b93b]">“{x.why}”</span>}
+            <b><CardLink name={x.name} /></b>{x.why && <span className="text-[#e2b93b]">“<CardText text={x.why} />”</span>}
             <button type="button" disabled={busy || running} onClick={() => act({ action: 'unskip', name: x.name })} className={LINK}>Offer it again</button>
           </li>
         ))}
@@ -319,6 +320,8 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
   ];
 
   return (
+    // The reasons link the suggestions and the cards they replace, as well as the deck's.
+    <MoreCardNames names={items.flatMap((i) => [i.name, i.out?.name ?? '']).filter(Boolean)}>
     <section className="flex flex-col gap-4" data-upgrades>
       <div className="sticky top-[calc(env(safe-area-inset-top)+4rem)] z-10 flex flex-col gap-1.5 rounded-2xl border border-[#ef6a4c] bg-[var(--surface)] p-3 shadow-lg sm:p-3.5" data-upgrades-bar>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -335,7 +338,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       {searches}
 
       <div className={`${CARD} flex flex-col gap-2`} data-upgrades-say>
-        {run.read && <p className="text-[13px] text-[var(--muted)]" data-upgrades-read><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <SymbolText text={run.read} /></p>}
+        {run.read && <p className="text-[13px] text-[var(--muted)]" data-upgrades-read><span className={`font-semibold ${C.ai}`}>✦ Claude{run.round > 1 ? `, list ${run.round}` : ''}:</span> <CardText text={run.read} /></p>}
         {run.dropped.length > 0 && (
           <p className="text-[13px] text-amber-300" data-upgrades-dropped title={run.dropped.map((d) => `${d.name}: ${d.why}`).join('\n')}>
             {plural(run.dropped.length, 'name')} {run.dropped.length === 1 ? 'wasn’t' : 'weren’t'} usable and {run.dropped.length === 1 ? 'was' : 'were'} left out: {run.dropped.slice(0, 4).map((d) => `${d.name} (${d.why})`).join('; ')}{run.dropped.length > 4 ? '…' : ''}.
@@ -386,6 +389,7 @@ export default function DeckUpgrades({ listId, version, onChanged, onTab, onCard
       {freeLink && (showFree ? <p className="text-[13px] text-[var(--muted)]">The free list, worked out by the app with no Claude, is below. {freeLink}</p>
         : <p className="text-[13px] text-[var(--muted)]">Or browse the {freeLink}: no Claude, worked out by the app.</p>)}
     </section>
+    </MoreCardNames>
   );
 }
 
@@ -450,7 +454,7 @@ function Row({ item, state, where, text, name, outName, onSet, onText, onWhere, 
             {chip}{mark}
           </span>
           <span className={`flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] text-[var(--muted)] ${off}`} data-col="replaces">
-            {outName ? <span className="min-w-0">replaces {outName}{item.out?.why ? <span className="text-[var(--faint)]">: {item.out.why}</span> : null}</span>
+            {outName ? <span className="min-w-0">replaces {outName}{item.out?.why ? <span className="text-[var(--faint)]">: <CardText text={item.out.why} /></span> : null}</span>
               : <span className="text-amber-300" title={item.outNote}>you choose what comes out{item.outNote ? ` · ${item.outNote}` : ''}</span>}
             {/* The row's menu: the second choice, same shape on every row, never a box that opens. */}
             <select value={where} onChange={(e) => onWhere(e.target.value as UpgradeWhere)} aria-label={`Where ${item.name} goes`} disabled={state !== 'in'}
@@ -461,7 +465,7 @@ function Row({ item, state, where, text, name, outName, onSet, onText, onWhere, 
           </span>
         </span>
         <span className={`col-span-2 flex min-w-0 flex-col gap-0.5 text-[13px] @[44rem]:col-span-2 @[66rem]:col-span-1 ${off}`} data-col="why">
-          <span className={item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'}><span className="font-semibold text-[#c3a6e6]">✦</span> <b className="font-semibold text-[var(--foreground)]">{item.job}.</b> <SymbolText text={item.why} /></span>
+          <span className={item.mark === 'back' ? 'rounded bg-[#e8c558]/[0.08] text-[var(--foreground)] ring-1 ring-[#e8c558]/30' : 'text-[var(--muted)]'}><span className="font-semibold text-[#c3a6e6]">✦</span> <b className="font-semibold text-[var(--foreground)]">{item.job}.</b> <CardText text={item.why} /></span>
           {item.wasBuy && <span className="text-[12px] text-emerald-300">Claude called it one to buy; you have it.</span>}
           {item.warn.map((w) => <span key={w} className="text-[12px] text-amber-300">{w}</span>)}
           {noRoom && <span className="text-[12px] font-semibold text-[#f0714f]" data-upgrades-noroom>{noRoom}</span>}

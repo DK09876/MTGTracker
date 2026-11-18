@@ -97,78 +97,70 @@ describe('one card by name', () => {
   // The model names the card; the exact-name syntax is built here, because
   // asked to write it the model wrote `-"Name"` - every card but that one.
   it('builds the exact-name search itself', async () => {
-    const d = deps({ translate: vi.fn(async () => plan({ kind: 'card', cardName: 'Lightning Bolt', query: '' })) });
+    // "lightnig bolt" is no card's exact name, so the model's reading stands.
+    const d = deps({ translate: vi.fn(async () => plan({ kind: 'card', cardName: 'Lightning Bolt', query: '' })), cardsNamed: vi.fn(async () => []) });
     const result = await interpret('lightnig bolt', d);
     expect(d.search).toHaveBeenCalledWith('!"Lightning Bolt"', DEFAULT_SORT, 1);
     expect(result.interpretation).toMatchObject({ kind: 'card', query: '!"Lightning Bolt"' });
   });
 
-  it('falls back to the nearest real name when the model misnames the card', async () => {
+  it('keeps the card the owner typed when it is a real name, whatever the model read it as', async () => {
+    const d = deps({
+      translate: vi.fn(async () => plan({ kind: 'card', cardName: 'Monument to Endurance', query: '' })),
+      cardsNamed: vi.fn(async (names: string[]) => names.filter((n) => n.toLowerCase() === 'forsaken monument').map(() => card('Forsaken Monument'))),
+    });
+    const result = await interpret('forsaken monument', d);
+    expect(d.search).toHaveBeenCalledWith('!"Forsaken Monument"', DEFAULT_SORT, 1);
+    expect(result.interpretation.query).toBe('!"Forsaken Monument"');
+  });
+
+  it('falls back to the nearest real name when the model misnames the card, and says it is a guess', async () => {
     const d = deps({
       translate: vi.fn(async () => plan({ kind: 'card', cardName: 'Emrakul the Timeless', query: '' })),
       search: vi.fn(async () => nothing),
       findCardNamed: vi.fn(async (q: string) => (q === 'Emrakul the Timeless' ? card('Emrakul, the Aeons Torn') : null)),
+      cardsNamed: vi.fn(async () => []),
     });
     const result = await interpret('emrakul', d);
     expect(result.cards.map((c) => c.name)).toEqual(['Emrakul, the Aeons Torn']);
     expect(result.interpretation.via).toBe('name');
+    expect(result.interpretation.note).toMatch(/Did you mean Emrakul, the Aeons Torn\?/);
   });
 });
 
 describe('cards for a commander', () => {
-  it('looks the commander up and shows the model its real rules text', async () => {
-    const translate = vi.fn()
-      .mockResolvedValueOnce(plan({ commander: 'azula', query: 't:enchantment' }))
-      .mockResolvedValueOnce(plan({ commander: 'azula', query: 't:enchantment (o:copy or o:"whenever you cast")' }));
+  // A legendary creature named in the request is just a card: a search is for a commander's deck only when the
+  // owner chose one (the Commander field on Search, or a deck's own search), never from the text.
+  it('takes a commander named only in the text as a card, and says how to search for its deck', async () => {
+    const d = deps({ translate: vi.fn(async () => plan({ commander: 'azula', query: 't:enchantment' })), findCommanders: vi.fn(async () => [azula]) });
+    const result = await interpret('enchantments that work well with azula', d);
+    expect(d.findCommanders).not.toHaveBeenCalled();
+    expect(d.search).toHaveBeenCalledWith('t:enchantment', DEFAULT_SORT, 1);
+    expect(result.interpretation.commander).toBeUndefined();
+    expect(result.choice).toBeUndefined();
+    expect(result.trace.some((s) => s.text.includes('not as your commander'))).toBe(true);
+  });
+
+  it('a chosen commander scopes the search, and the model reads its rules text up front', async () => {
+    const translate = vi.fn(async () => plan({ query: 't:enchantment (o:copy or o:"whenever you cast")' }));
     const d = deps({ translate, findCommanders: vi.fn(async () => [azula]) });
-
-    const result = await interpret('enchantments that work well for azula', d);
-
-    expect(d.findCommanders).toHaveBeenCalledWith('azula');
-    expect(translate.mock.calls[1][1].commander).toMatchObject({
-      name: 'Fire Lord Azula',
-      text: expect.stringContaining('copy that spell'),
-    });
+    const result = await interpret('enchantments', d, undefined, undefined, { commander: 'Fire Lord Azula' });
+    expect(translate).toHaveBeenCalledTimes(1);
+    expect((translate.mock.calls[0] as unknown as [string, { commander?: { text: string } }])[1].commander).toMatchObject({ name: 'Fire Lord Azula', text: expect.stringContaining('copy that spell') });
     expect(d.search).toHaveBeenCalledWith(
       '(t:enchantment (o:copy or o:"whenever you cast")) id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
-    expect(result.interpretation).toMatchObject({
-      query: 't:enchantment (o:copy or o:"whenever you cast")',
-      commander: { name: 'Fire Lord Azula', identity: 'UBR' },
-    });
+    expect(result.interpretation).toMatchObject({ commander: { name: 'Fire Lord Azula', identity: 'UBR' } });
   });
 
-  it('skips the rules-text pass when the first call used up the time', async () => {
-    let clock = 0;
-    const translate = vi.fn(async () => { clock += 20_000; return plan({ commander: 'azula', query: 't:instant' }); });
-    const d = deps({ translate, findCommanders: vi.fn(async () => [azula]), now: () => clock });
-    const result = await interpret('instants for azula', d);
-    expect(translate).toHaveBeenCalledTimes(1);
-    expect(d.search).toHaveBeenCalledWith('t:instant id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
-    expect(result.trace.some((s) => s.text.includes('too slow'))).toBe(true);
-  });
-
-  it('keeps the first answer when the grounded second pass fails', async () => {
-    const translate = vi.fn()
-      .mockResolvedValueOnce(plan({ commander: 'azula', query: 'otag:draw mv<5' }))
-      .mockRejectedValueOnce(new Error('timeout'));
-    const d = deps({ translate, findCommanders: vi.fn(async () => [azula]) });
-    await interpret('draw under 5 for azula', d);
-    expect(d.search).toHaveBeenCalledWith('otag:draw mv<5 id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
-  });
-
-  it('searches without a commander when none can be found', async () => {
-    const d = deps({ translate: vi.fn(async () => plan({ commander: 'Nobody Real', query: 't:elf' })) });
-    const result = await interpret('elves for nobody real', d);
+  it('searches without a commander when the chosen one can’t be found', async () => {
+    const d = deps({ translate: vi.fn(async () => plan({ query: 't:elf' })) });
+    await interpret('elves', d, undefined, undefined, { commander: 'Nobody Real' });
     expect(d.search).toHaveBeenCalledWith('t:elf', DEFAULT_SORT, 1);
-    expect(result.trace.some((s) => s.text.includes('Could not find a commander'))).toBe(true);
   });
 
-  it('allows "cards for X" with no other condition', async () => {
-    const d = deps({
-      translate: vi.fn(async () => plan({ commander: 'azula', query: '' })),
-      findCommanders: vi.fn(async () => [azula]),
-    });
-    await interpret('cards for azula', d);
+  it('allows a chosen commander with no other condition', async () => {
+    const d = deps({ translate: vi.fn(async () => plan({ query: '' })), findCommanders: vi.fn(async () => [azula]) });
+    await interpret('cards', d, undefined, undefined, { commander: 'Fire Lord Azula' });
     expect(d.search).toHaveBeenCalledWith('id<=ubr f:commander -!"Fire Lord Azula"', DEFAULT_SORT, 1);
   });
 
@@ -212,7 +204,7 @@ describe('a commander search', () => {
 
   it('asks Scryfall once, scoped to the commander, and nothing else', async () => {
     const search = vi.fn<Deps['search']>(async () => found('Rhystic Study', 'Some Random Card'));
-    const result = await interpret('enchantments for azula', forAzula({ search }));
+    const result = await interpret('enchantments', forAzula({ search }), undefined, undefined, { commander: 'Fire Lord Azula' });
     expect(search).toHaveBeenCalledTimes(1);
     expect(search.mock.calls[0][0]).toContain('t:enchantment');
     expect(search.mock.calls[0][0]).toContain('id<=ubr f:commander -!"Fire Lord Azula"');
@@ -290,9 +282,9 @@ describe('follow-ups', () => {
 describe('combos', () => {
   const vivi = card('Vivi Ornitier', { color_identity: ['U', 'R'] });
 
-  it('asks Spellbook for the commander\'s combos in its colours, then fetches the pieces', async () => {
+  it('asks Spellbook for the chosen commander\'s combos in its colours, then fetches the pieces', async () => {
     const d = deps({
-      translate: vi.fn(async () => plan({ kind: 'combos', commander: 'vivi', query: '' })),
+      translate: vi.fn(async () => plan({ kind: 'combos', query: '' })),
       findCommanders: vi.fn(async () => [vivi]),
       searchCombos: vi.fn(async () => [
         combo('1', ['Vivi Ornitier', 'Quicksilver Elemental']),
@@ -300,7 +292,7 @@ describe('combos', () => {
       ]),
     });
 
-    const result = await interpret('combo cards for vivi', d);
+    const result = await interpret('combo cards', d, undefined, undefined, { commander: 'Vivi Ornitier' });
 
     expect(d.searchCombos).toHaveBeenCalledWith('card:"Vivi Ornitier" coloridentity<=UR legal:commander');
     expect(d.cardsNamed).toHaveBeenCalledWith(['Vivi Ornitier', 'Quicksilver Elemental', 'Vivi Ornitier', 'Deadeye Navigator']);
@@ -309,14 +301,15 @@ describe('combos', () => {
     expect(d.translate).toHaveBeenCalledTimes(1);
   });
 
-  it('finds combos for a named card that is not the commander', async () => {
+  it('finds combos for a named card by its exact name, with no loose match', async () => {
     const d = deps({
       translate: vi.fn(async () => plan({ kind: 'combos', cardName: 'Doubling Season', query: '' })),
-      findCardNamed: vi.fn(async () => card('Doubling Season')),
+      findCardNamed: vi.fn(async () => card('Doubling Seasoning')),
       searchCombos: vi.fn(async () => [combo('3', ['Doubling Season', 'Ashnod\'s Altar'])]),
     });
     await interpret('what goes infinite with doubling season', d);
     expect(d.searchCombos).toHaveBeenCalledWith('card:"Doubling Season"');
+    expect(d.findCardNamed).not.toHaveBeenCalled();
   });
 
   it('runs a combo search that names no card', async () => {
@@ -333,11 +326,11 @@ describe('combos', () => {
       .mockRejectedValueOnce(new SpellbookError('Invalid search query', 400))
       .mockResolvedValueOnce([combo('1', ['Vivi Ornitier', 'Quicksilver Elemental'])]);
     const d = deps({
-      translate: vi.fn(async () => plan({ kind: 'combos', commander: 'vivi', query: 'bogus::' })),
+      translate: vi.fn(async () => plan({ kind: 'combos', query: 'bogus::' })),
       findCommanders: vi.fn(async () => [vivi]),
       searchCombos,
     });
-    const result = await interpret('weird vivi combos', d);
+    const result = await interpret('weird combos', d, undefined, undefined, { commander: 'Vivi Ornitier' });
     expect(searchCombos).toHaveBeenLastCalledWith('card:"Vivi Ornitier" coloridentity<=UR legal:commander');
     expect(result.combos).toHaveLength(1);
   });
@@ -352,10 +345,10 @@ describe('combos', () => {
 
   it('says so when Spellbook has none', async () => {
     const d = deps({
-      translate: vi.fn(async () => plan({ kind: 'combos', commander: 'vivi', query: '' })),
+      translate: vi.fn(async () => plan({ kind: 'combos', query: '' })),
       findCommanders: vi.fn(async () => [vivi]),
     });
-    const result = await interpret('combos for vivi', d);
+    const result = await interpret('combos', d, undefined, undefined, { commander: 'Vivi Ornitier' });
     expect(result.cards).toEqual([]);
     expect(result.interpretation.note).toBe('Commander Spellbook has no combos for Vivi Ornitier.');
     expect(d.cardsNamed).not.toHaveBeenCalled();
@@ -461,16 +454,15 @@ describe('which commander', () => {
     });
   });
 
-  it('stops to ask, and hands back the plan so the search can carry on', async () => {
+  it('never stops to ask which commander a name in the text meant: it searches it as a card', async () => {
     const translate = vi.fn(async () => plan({ commander: 'Omnath', query: 'otag:ramp c:g' }));
     const d = deps({ translate, findCommanders: vi.fn(async () => omnaths) });
 
     const result = await interpret('green ramp for omnath', d);
 
-    expect(d.search).not.toHaveBeenCalled();
-    expect(result.choice?.mention).toBe('Omnath');
-    expect(result.choice?.options.map((o) => o.name)).toHaveLength(3);
-    expect(result.plan).toMatchObject({ commander: 'Omnath', query: 'otag:ramp c:g' });
+    expect(result.choice).toBeUndefined();
+    expect(d.findCommanders).not.toHaveBeenCalled();
+    expect(d.search).toHaveBeenCalledWith('otag:ramp c:g', DEFAULT_SORT, 1);
   });
 
   it('carries on with the pick without re-planning, then reads the commander\'s text', async () => {

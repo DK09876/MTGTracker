@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScryfallCard } from './scryfall';
 import type { TuneState } from './tune';
+import { PROMPT_VERSIONS } from './prompt-versions';
 
 let dir: string;
 beforeEach(() => {
@@ -71,7 +72,7 @@ describe('logging through the Tune route', { timeout: 60_000 }, () => {
     expect(byMethod.ai).toMatchObject({ shown: 3, accepted: 1, refused: 1, ignored: 1, open: 0 });
     expect(byMethod.code.open).toBe(0);
     expect(log.rates().model.find((r) => r.value === 'claude-opus-5-5')).toBeTruthy();
-    expect(log.rates().promptVersion.find((r) => r.value === 'cut-review-1')).toBeTruthy();
+    expect(log.rates().promptVersion.find((r) => r.value === PROMPT_VERSIONS.cutReview)).toBeTruthy();
     expect(log.reasons()).toEqual([{ chip: 'part_of_plan', count: 1, typed: 0 }]);
   });
 

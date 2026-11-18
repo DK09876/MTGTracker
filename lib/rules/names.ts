@@ -84,7 +84,8 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
     for (let i = 0; i + n <= words.length; i++) {
       if (used.slice(i, i + n).some(Boolean)) continue;
       const phrase = words.slice(i, i + n).join(' ');
-      const name = index.full.get(phrase);
+      // "forsaken monuments" is Forsaken Monument: a plural last word still finds the name.
+      const name = index.full.get(phrase) ?? (n > 1 && phrase.endsWith('s') ? index.full.get(phrase.slice(0, -1)) : undefined);
       if (!name) continue;
       // One common word ("fog", "opt") is only a card if it was written like one.
       if (n === 1 && plain(phrase) && !capital(i)) continue;

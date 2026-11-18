@@ -15,7 +15,7 @@ import { ModelError } from './ai';
 import type { ClaudeParams } from './ai-claude';
 import { cardPrices } from './card-price';
 import type { List } from './db';
-import { cardsNamed } from './cards-named';
+import { cardsNamed } from './cards';
 import { isLand, type Held } from './finish-pool';
 import { FINISH_GROUPS, type FinishGroup } from './finish-shared';
 import { planContext } from './plan-context';

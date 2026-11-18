@@ -16,6 +16,7 @@ import { useState } from 'react';
 
 import Image from 'next/image';
 
+import CardText from './CardText';
 import ManaCost, { IdentitySymbols } from './ManaCost';
 import type { CommanderRef, Interpretation, Step } from '@/lib/interpret';
 
@@ -48,10 +49,10 @@ function Editor({ interpretation, trace, onRun }: Props) {
           {explanation && (
             <p>
               <span className="text-[var(--c1)]" aria-hidden>✦ </span>
-              {explanation}
+              <CardText text={explanation} />
             </p>
           )}
-          {note && <p className="text-[var(--muted)]">{note}</p>}
+          {note && <p className="text-[var(--muted)]"><CardText text={note} /></p>}
           {editable && (
             <form
               onSubmit={(e) => { e.preventDefault(); onRun(draft.trim()); }}
@@ -85,7 +86,7 @@ function Editor({ interpretation, trace, onRun }: Props) {
           <ol className="mt-2 flex list-decimal flex-col gap-2 pl-5 text-xs">
             {trace.map((step, i) => (
               <li key={i}>
-                <span>{step.text}</span>
+                <span><CardText text={step.text} /></span>
                 {step.count !== undefined && (
                   <span className="text-[var(--muted)]">
                     {' '}→ {step.count.toLocaleString()} {step.unit ?? 'card'}{step.count === 1 ? '' : 's'}

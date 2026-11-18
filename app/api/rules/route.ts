@@ -18,7 +18,8 @@ import {
 import { requireProfile } from '@/lib/profile-route';
 import { askRules } from '@/lib/rules/ask';
 import { cardNames, cardRulings, rulesIndex, wikiPage } from '@/lib/rules/sources';
-import { cardsNamed, imageOf, ScryfallError } from '@/lib/scryfall';
+import { findCards } from '@/lib/cards';
+import { imageOf, ScryfallError, type ScryfallCard } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
       .slice(0, 4)
       .map((c) => ({ question: String(c.question).slice(0, 300), answer: String(c.answer).trim().slice(0, 300) }));
     const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true, clarifications }, {
-      rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage, model,
+      rules: rulesIndex, names: cardNames, cards: async (n: string[]) => [...new Set((await findCards(n)).values())], rulings: cardRulings, wiki: wikiPage, model,
       helper: helperModel(who.profile, question), inputTokens: inputTokens(who.profile),
       privateWorking: providerOf(modelFor(who.profile, 'rules')) === 'anthropic',
     }, { maxBusy: 1 });
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
     if ('clarify' in result) return NextResponse.json({ clarify: result.clarify, budget: currentBudget(who.profile, 'rules') });
     if ('choice' in result) {
       // Pictures of the options, to pick by.
-      const cards = await cardsNamed(result.choice.flatMap((c) => c.options)).catch(() => []);
+      const cards = [...new Set((await findCards(result.choice.flatMap((c) => c.options)).catch(() => new Map())).values())] as ScryfallCard[];
       const picture = new Map(cards.map((c) => [c.name, imageOf(c, 'normal')]));
       return NextResponse.json({
         choice: result.choice.map((c) => ({ mention: c.mention, options: c.options.map((name) => ({ name, image: picture.get(name) ?? null })) })),
