@@ -6,13 +6,19 @@
  * A word that begins more than one card's name - "kratos" - is a question
  * back: which Kratos? A word that is ordinary English or rules language -
  * "creature", "board", "fog" in lower case - is not taken for a card.
+ *
+ * A misspelt name - "Innaiz, the gale force" - is offered as "did you mean",
+ * never taken: one letter off (two in a long word) from a word of a name.
  */
+
+/** A pick for a "did you mean" that says none of the cards: the question is answered without one. */
+export const NOT_A_CARD = '-';
 
 export interface Mentions {
   /** Cards named in full, by their exact names. */
   cards: string[];
   /** Words that could be several cards. */
-  ambiguous: Array<{ mention: string; options: string[] }>;
+  ambiguous: Array<{ mention: string; options: string[]; typo?: boolean }>;
 }
 
 // Words that are also card names, or begin many, but are far more often just
@@ -44,6 +50,25 @@ export interface NameIndex {
   /** First word of a name -> names that start with it. */
   first: Map<string, string[]>;
   longest: number;
+  /** Every word of every name. */
+  words: Set<string>;
+  /** A name word of 5+ letters, and it with any one letter taken out -> the words (a symmetric-delete index, for typos). */
+  near: Map<string, string[]>;
+}
+
+const deletions = (w: string) => Array.from(w, (_, i) => w.slice(0, i) + w.slice(i + 1));
+
+/** Edits between two words: a letter added, taken out, changed, or two side by side swapped. */
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
 }
 
 export function nameIndex(names: string[]): NameIndex {
@@ -54,13 +79,30 @@ export function nameIndex(names: string[]): NameIndex {
     const fronts = [name, ...(name.includes(' // ') ? [name.split(' // ')[0]] : [])];
     for (const n of fronts) {
       const key = normalise(n);
-      if (!full.has(key)) full.set(key, name);
+      // A question's "teferi's" is read as "teferi", and "thassas" is typed for "thassa's": both find the name.
+      for (const k of [key, key.replace(/'s\b/g, ''), key.replace(/'/g, '')]) if (!full.has(k)) full.set(k, name);
       longest = Math.max(longest, key.split(' ').length);
     }
     const w = normalise(name).split(' ')[0];
     if (w) first.set(w, [...(first.get(w) ?? []), name]);
   }
-  return { full, first, longest: Math.min(longest, 10) };
+  const words = new Set([...full.keys()].flatMap((k) => k.split(' ')));
+  const near = new Map<string, string[]>();
+  for (const w of words) {
+    if (w.length < 5 || /\d/.test(w)) continue;
+    for (const k of new Set([w, ...deletions(w)])) near.set(k, [...(near.get(k) ?? []), w]);
+  }
+  return { full, first, longest: Math.min(longest, 10), words, near };
+}
+
+/** Name words a typed word is likely a misspelling of: one edit off, or two in a word of 9+ letters with the same first letter. */
+function closeWords(w: string, index: NameIndex): string[] {
+  const out = new Set<string>();
+  for (const k of [w, ...deletions(w)]) for (const c of index.near.get(k) ?? []) out.add(c);
+  return [...out].filter((c) => {
+    const d = distance(w, c);
+    return d === 1 || (d === 2 && w.length >= 9 && c[0] === w[0]);
+  });
 }
 
 /**
@@ -76,8 +118,11 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
   const raw = question.replace(/[’']/g, "'").split(/[^A-Za-z0-9',]+/).filter(Boolean);
   const words = raw.map((w) => normalise(w).replace(/'s$/, ''));
   const used = new Array(words.length).fill(false);
-  const cards: string[] = [];
+  // Names found in full, with the words they took: a misspelt longer name over the same words replaces them.
+  const hits: Array<{ name: string; start: number; end: number }> = [];
   const ambiguous: Mentions['ambiguous'] = [];
+  const lookup = (phrase: string, n: number) =>
+    index.full.get(phrase) ?? (n > 1 && phrase.endsWith('s') ? index.full.get(phrase.slice(0, -1)) : undefined);
 
   // Full names, longest first. A comma in a name ("Kratos, Stoic Father") is optional.
   for (let n = Math.min(index.longest, words.length); n >= 1; n--) {
@@ -85,14 +130,59 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
       if (used.slice(i, i + n).some(Boolean)) continue;
       const phrase = words.slice(i, i + n).join(' ');
       // "forsaken monuments" is Forsaken Monument: a plural last word still finds the name.
-      const name = index.full.get(phrase) ?? (n > 1 && phrase.endsWith('s') ? index.full.get(phrase.slice(0, -1)) : undefined);
+      const name = lookup(phrase, n);
       if (!name) continue;
       // One common word ("fog", "opt") is only a card if it was written like one.
       if (n === 1 && plain(phrase) && !capital(i)) continue;
       if (n === 1 && phrase.length < 3) continue;
-      cards.push(name);
+      hits.push({ name, start: i, end: i + n - 1 });
       for (let k = i; k < i + n; k++) used[k] = true;
     }
+  }
+
+  // Then a misspelt name: "Innaiz, the gale force" -> did you mean Inniaz, the Gale Force (or Gale Force, which the
+  // exact pass found inside it)? A word already in some name, plain English, a game word, or one that is a name
+  // word's other form ("redirected") is never taken for a typo.
+  const typoUsed = new Array(words.length).fill(false);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (used[i] || w.length < 5 || /\d/.test(w) || index.words.has(w)) continue;
+    if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
+    if (/(s|es|ed|ing|er|ers)$/.test(w) && [w.replace(/(s|es|ed|ing|er|ers)$/, ''), w.replace(/(s|ed|er|ers)$/, '')].some((x) => index.words.has(x))) continue;
+    // Inside a full name any word may be the fix ("Teferi's Protecton"); on its own, not an ordinary one.
+    const fixes = closeWords(w, index);
+    if (!fixes.length || fixes.length > 3) continue;
+
+    // The longest full name over the words around it, the one word corrected.
+    let found: { names: string[]; start: number; end: number } | null = null;
+    for (let n = Math.min(index.longest, words.length); n >= 2 && !found; n--) {
+      const names = new Set<string>();
+      let start = -1;
+      for (let s = Math.max(0, i - n + 1); s <= i && s + n <= words.length; s++) {
+        if (typoUsed.slice(s, s + n).some(Boolean)) continue;
+        for (const f of fixes) {
+          const name = lookup(words.slice(s, s + n).map((x, k) => (s + k === i ? f : x)).join(' '), n);
+          if (name) { names.add(name); if (start < 0) start = s; }
+        }
+      }
+      if (names.size) found = { names: [...names], start, end: start + n - 1 };
+    }
+    // A word on its own is only a name if written like one ("Innaiz?"): lower case, "really" is not Rally the Ranks.
+    if (!found && capital(i)) {
+      const names = [...new Set(fixes.filter((f) => !COMMON.has(f) && !ordinary.has(f)).flatMap((f) => index.first.get(f) ?? []))];
+      if (names.length && names.length <= 12) found = { names: names.sort(), start: i, end: i };
+    }
+    if (!found) continue;
+    const { start, end } = found;
+    // An exact name inside the misspelt one is the other option.
+    const inside = hits.filter((h) => h.start >= start && h.end <= end);
+    for (const h of inside) hits.splice(hits.indexOf(h), 1);
+    ambiguous.push({
+      mention: raw.slice(start, end + 1).join(' ').replace(/[,']+$/, ''),
+      options: [...new Set([...found.names, ...inside.map((h) => h.name)])],
+      typo: true,
+    });
+    for (let k = start; k <= end; k++) { used[k] = true; typoUsed[k] = true; }
   }
 
   // Then a word that begins card names: one is that card, a few are a question.
@@ -105,9 +195,9 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
     if (ordinary.has(w) && /^(tokens?|creatures?|cards?|spells?|permanents?)$/.test(words[i + 1] ?? '')) continue;
     const options = index.first.get(w);
     if (!options?.length || options.length > 12) continue;
-    if (options.length === 1) cards.push(options[0]);
+    if (options.length === 1) hits.push({ name: options[0], start: i, end: i });
     else ambiguous.push({ mention: raw[i].replace(/[,']+$/, ''), options: [...options].sort() });
     used[i] = true;
   }
-  return { cards: [...new Set(cards)], ambiguous };
+  return { cards: [...new Set(hits.map((h) => h.name))], ambiguous };
 }

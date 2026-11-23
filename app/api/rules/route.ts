@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       const cards = [...new Set((await findCards(result.choice.flatMap((c) => c.options)).catch(() => new Map())).values())] as ScryfallCard[];
       const picture = new Map(cards.map((c) => [c.name, imageOf(c, 'normal')]));
       return NextResponse.json({
-        choice: result.choice.map((c) => ({ mention: c.mention, options: c.options.map((name) => ({ name, image: picture.get(name) ?? null })) })),
+        choice: result.choice.map((c) => ({ mention: c.mention, ...(c.typo ? { typo: true } : {}), options: c.options.map((name) => ({ name, image: picture.get(name) ?? null })) })),
       });
     }
     const id = threadId ?? startRulesThread(who.profile, result.turn);
