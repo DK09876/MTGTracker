@@ -52,11 +52,21 @@ export interface NameIndex {
   longest: number;
   /** Every word of every name. */
   words: Set<string>;
-  /** A name word of 5+ letters, and it with any one letter taken out -> the words (a symmetric-delete index, for typos). */
-  near: Map<string, string[]>;
+  /** Name words of 5+ letters by length, to check a typo against (a few ms a word, and nothing kept beside the words). */
+  byLength: Map<number, string[]>;
 }
 
-const deletions = (w: string) => Array.from(w, (_, i) => w.slice(0, i) + w.slice(i + 1));
+/** One edit apart: a letter added, taken out or changed, or two side by side swapped. Linear, for the scan over every name word. */
+function oneEdit(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) {
+    if (a.slice(i + 1) === b.slice(i + 1)) return true;
+    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2);
+  }
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
 
 /** Edits between two words: a letter added, taken out, changed, or two side by side swapped. */
 function distance(a: string, b: string): number {
@@ -87,22 +97,26 @@ export function nameIndex(names: string[]): NameIndex {
     if (w) first.set(w, [...(first.get(w) ?? []), name]);
   }
   const words = new Set([...full.keys()].flatMap((k) => k.split(' ')));
-  const near = new Map<string, string[]>();
+  const byLength = new Map<number, string[]>();
   for (const w of words) {
     if (w.length < 5 || /\d/.test(w)) continue;
-    for (const k of new Set([w, ...deletions(w)])) near.set(k, [...(near.get(k) ?? []), w]);
+    byLength.set(w.length, [...(byLength.get(w.length) ?? []), w]);
   }
-  return { full, first, longest: Math.min(longest, 10), words, near };
+  return { full, first, longest: Math.min(longest, 10), words, byLength };
 }
 
-/** Name words a typed word is likely a misspelling of: one edit off, or two in a word of 9+ letters with the same first letter. */
+/** Name words a typed word is likely a misspelling of: one edit off, or else two in a word of 9+ letters with the same first letter. */
 function closeWords(w: string, index: NameIndex): string[] {
-  const out = new Set<string>();
-  for (const k of [w, ...deletions(w)]) for (const c of index.near.get(k) ?? []) out.add(c);
-  return [...out].filter((c) => {
-    const d = distance(w, c);
-    return d === 1 || (d === 2 && w.length >= 9 && c[0] === w[0]);
-  });
+  const one: string[] = [];
+  const two: string[] = [];
+  for (let len = w.length - 2; len <= w.length + 2; len++) {
+    for (const c of index.byLength.get(len) ?? []) {
+      if (Math.abs(len - w.length) <= 1 && oneEdit(w, c)) one.push(c);
+      else if (w.length >= 9 && c[0] === w[0] && distance(w, c) === 2) two.push(c);
+    }
+  }
+  // Two letters off only when nothing is one off.
+  return one.length ? one : two;
 }
 
 /**
