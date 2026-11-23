@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { findMentions, nameIndex } from './names';
+import { findMentions, nameIndex, nearNames, withPick } from './card-names';
 
 const names = [
   'Blade of Selves', 'Kratos, God of War', 'Kratos, Stoic Father', 'Blasphemous Act', 'Opt', 'Fog', 'Counterspell',
@@ -86,5 +86,21 @@ describe('findMentions, misspelt names', () => {
     expect(typo('does it really work if it was redirected')).toEqual({ cards: [], ambiguous: [] });
     expect(typo('can my creatur block')).toEqual({ cards: [], ambiguous: [] });
     expect(typo('How many Soldier tokens do I get?').ambiguous).toEqual([]);
+  });
+});
+
+describe('nearNames and withPick', () => {
+  const idx = nameIndex(['Inniaz, the Gale Force', 'Gale Force', 'Sol Ring', 'Kratos, God of War', 'Kratos, Stoic Father']);
+
+  it('finds the closest name to one no card has, never a shorter name inside it', () => {
+    expect(nearNames('Innaiz, the Gale Force', idx)).toEqual(['Inniaz, the Gale Force']);
+    expect(nearNames('Sol Rign', idx)).toEqual(['Sol Ring']);
+    expect(nearNames('Zzyzx Qwop', idx)).toEqual([]);
+  });
+
+  it('puts the picked card in place of the words, marked', () => {
+    expect(withPick('Can you use a redirect spell on Innaiz, the gale force', 'Innaiz, the gale force', 'Inniaz, the Gale Force'))
+      .toBe('Can you use a redirect spell on [[Inniaz, the Gale Force]]');
+    expect(withPick('what about teferi’s protecton?', "teferi's protecton", "Teferi's Protection")).toBe("what about [[Teferi's Protection]]?");
   });
 });

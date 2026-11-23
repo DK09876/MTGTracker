@@ -14,9 +14,9 @@
  * stored with their sources, so opening one again costs no model request.
  */
 
-import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
+import CardChoice from '@/components/CardChoice';
 import CardText, { CardLinks, CardTextContext } from '@/components/CardText';
 import { withoutMarks } from '@/lib/chat-text';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -29,7 +29,7 @@ import { getProfile } from '@/lib/profile';
 import type { Budget } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
-import { NOT_A_CARD } from '@/lib/rules/names';
+import { NOT_A_CARD } from '@/lib/card-names';
 
 // Starting points, by the kind of rule they turn on.
 const EXAMPLES: Array<{ topic: string; question: string }> = [
@@ -170,26 +170,16 @@ export default function RulesPage() {
 
   // "Which card did you mean?" - shown where the question was asked: under the
   // question box, or above the follow-up box in a conversation.
-  const choicePanel = choosing && !busy && (
-        <section id="which-card" className="mt-5 flex scroll-mt-20 flex-col gap-5 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Which card?">
-          {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
-            <div key={c.mention}>
-              <h2 className="font-medium">{c.typo ? <>No card is named “{c.mention}”. Did you mean…</> : <>Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</>}</h2>
-              <p className="text-sm text-[var(--muted)]">For: <CardText text={choosing.question} /></p>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {c.options.map((o) => (
-                  <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
-                    {o.image && <Image src={o.image} alt="" width={244} height={340} className="w-full rounded-lg" unoptimized />}
-                    <span>{o.name}</span>
-                  </button>
-                ))}
-              </div>
-              {c.typo && <button {...steady(() => pick(c.mention, NOT_A_CARD))} className={`${button} mt-3`}>None of these</button>}
-            </div>
-          ))}
-          <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>
-        </section>
-        );
+  const openChoice = choosing?.choice.find((c) => !choosing.picks[c.mention]);
+  const choicePanel = choosing && openChoice && !busy && (
+    <CardChoice
+      choice={openChoice}
+      question={choosing.question}
+      onPick={(name) => pick(openChoice.mention, name)}
+      onNone={() => pick(openChoice.mention, NOT_A_CARD)}
+      onCancel={() => setChoosing(null)}
+    />
+  );
   // Bring it into view: it may appear far from where the Ask button was.
   useEffect(() => {
     if (choosing) setTimeout(() => document.getElementById('which-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);

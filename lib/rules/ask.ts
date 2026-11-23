@@ -1,7 +1,7 @@
 /**
  * Answering a rules question.
  *
- *   1. Find the cards: named in the question (lib/rules/names), plus the
+ *   1. Find the cards: named in the question (lib/card-names.ts), plus the
  *      conversation's cards for a follow-up. A word that could be several
  *      cards ("kratos") stops here to ask which; the answer carries on with
  *      the picks, no model spent.
@@ -26,7 +26,7 @@ import type { Ruling, ScryfallCard } from '../scryfall';
 import { anchorRules } from './anchors';
 import { ANSWER_SCHEMA, ANSWER_SCHEMA_PRIVATE, ANSWER_SYSTEM, ANSWER_SYSTEM_PRIVATE, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, compactWorking, parseAnswer, type Earlier, type Source, type Turn } from './answer';
 import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRules, tokens, type RulesIndex } from './cr';
-import { findMentions, NOT_A_CARD, type NameIndex } from './names';
+import { findMentions, NOT_A_CARD, type NameIndex } from '../card-names';
 import { parseResearch, RESEARCH_SCHEMA, RESEARCH_SYSTEM, researchMessage, type Clarify, type Research } from './research';
 import type { WikiPage } from './sources';
 import { markedNames } from '../agent-context';

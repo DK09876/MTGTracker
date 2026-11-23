@@ -1,7 +1,7 @@
 /**
- * Finding the cards a rules question is about, without a model: the question
- * is matched against the name of every card (Scryfall's catalog, fetched once
- * a day). Longest names first, so "Blade of Selves" is one card, not a blade.
+ * Reading the owner's words for cards (AGENTS.md, "Reading the owner's words"), without a model: what they typed
+ * - a rules question, a search - is matched against the name of every card (Scryfall's catalog, fetched once a
+ * day: cardNameIndex in lib/cards.ts). Longest names first, so "Blade of Selves" is one card, not a blade.
  *
  * A word that begins more than one card's name - "kratos" - is a question
  * back: which Kratos? A word that is ordinary English or rules language -
@@ -9,10 +9,21 @@
  *
  * A misspelt name - "Innaiz, the gale force" - is offered as "did you mean",
  * never taken: one letter off (two in a long word) from a word of a name.
+ * The page shows the choices with components/CardChoice.tsx before any AI call.
+ *
+ * Pure: safe in the browser. Server code gets the index and the rules' words with mentionsIn (lib/cards.ts).
  */
 
 /** A pick for a "did you mean" that says none of the cards: the question is answered without one. */
 export const NOT_A_CARD = '-';
+
+/** A choice to put to the owner, with the cards' pictures (components/CardChoice.tsx). */
+export interface NamedChoice {
+  mention: string;
+  /** The words looked like a misspelt name: "did you mean", with "None of these". */
+  typo?: boolean;
+  options: Array<{ name: string; image: string | null }>;
+}
 
 export interface Mentions {
   /** Cards named in full, by their exact names. */
@@ -52,7 +63,7 @@ export interface NameIndex {
   longest: number;
   /** Every word of every name. */
   words: Set<string>;
-  /** Name words of 5+ letters by length, to check a typo against (a few ms a word, and nothing kept beside the words). */
+  /** Name words of 4+ letters by length, to check a typo against (a few ms a word, and nothing kept beside the words). */
   byLength: Map<number, string[]>;
 }
 
@@ -99,7 +110,7 @@ export function nameIndex(names: string[]): NameIndex {
   const words = new Set([...full.keys()].flatMap((k) => k.split(' ')));
   const byLength = new Map<number, string[]>();
   for (const w of words) {
-    if (w.length < 5 || /\d/.test(w)) continue;
+    if (w.length < 4 || /\d/.test(w)) continue;
     byLength.set(w.length, [...(byLength.get(w.length) ?? []), w]);
   }
   return { full, first, longest: Math.min(longest, 10), words, byLength };
@@ -124,10 +135,11 @@ function closeWords(w: string, index: NameIndex): string[] {
  * Comprehensive Rules - which are only a card when written with a capital:
  * "copied by a clone" is a clone effect, "copied by Clone" is the card.
  */
-export function findMentions(question: string, index: NameIndex, ordinary: Set<string> = new Set()): Mentions {
+export function findMentions(question: string, index: NameIndex, ordinary: Set<string> = new Set(), { asName = false } = {}): Mentions {
   const plain = (w: string) => COMMON.has(w) || ordinary.has(w);
-  // A capital means a name, except at the start of the question.
-  const capital = (i: number) => i > 0 && /^[A-Z]/.test(raw[i]);
+  // A capital means a name, except at the start of the question. `asName`: the text is meant as a card's name.
+  const capital = (i: number) => asName || (i > 0 && /^[A-Z]/.test(raw[i]));
+  const shortest = asName ? 4 : 5;
   // Keep the words as typed, to know which were capitalised.
   const raw = question.replace(/[’']/g, "'").split(/[^A-Za-z0-9',]+/).filter(Boolean);
   const words = raw.map((w) => normalise(w).replace(/'s$/, ''));
@@ -160,7 +172,7 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
   const typoUsed = new Array(words.length).fill(false);
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    if (used[i] || w.length < 5 || /\d/.test(w) || index.words.has(w)) continue;
+    if (used[i] || w.length < shortest || /\d/.test(w) || index.words.has(w)) continue;
     if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
     if (/(s|es|ed|ing|er|ers)$/.test(w) && [w.replace(/(s|es|ed|ing|er|ers)$/, ''), w.replace(/(s|ed|er|ers)$/, '')].some((x) => index.words.has(x))) continue;
     // Inside a full name any word may be the fix ("Teferi's Protecton"); on its own, not an ordinary one.
@@ -214,4 +226,27 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
     used[i] = true;
   }
   return { cards: [...new Set(hits.map((h) => h.name))], ambiguous };
+}
+
+/**
+ * The card names closest to one the owner wrote that no card has ("[[Innaiz, the Gale Force]]"), most likely first;
+ * [] when none is close. To offer, never to take in its place.
+ */
+export function nearNames(name: string, index: NameIndex, max = 3): string[] {
+  const m = findMentions(name, index, new Set(), { asName: true });
+  // The whole name was meant as one card: not a shorter name found inside it ("Gale Force").
+  const words = (n: string) => normalise(n.split(' // ')[0]).split(' ').length;
+  const typed = words(name);
+  return [...new Set(m.ambiguous.filter((a) => a.typo).flatMap((a) => a.options))].filter((o) => words(o) === typed).slice(0, max);
+}
+
+/**
+ * The owner's text with a choice made: the words of `mention` replaced by the card, marked [[like this]] so it is
+ * that card from then on (lib/agent-context.ts) and not asked about again.
+ */
+export function withPick(text: string, mention: string, name: string): string {
+  const words = mention.split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]"));
+  if (!words.length) return text;
+  const at = new RegExp(words.join("[^A-Za-z0-9',’]+"), 'i');
+  return at.test(text) ? text.replace(at, `[[${name}]]`) : `${text} [[${name}]]`;
 }
