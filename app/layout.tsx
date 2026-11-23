@@ -16,6 +16,8 @@ import ServiceWorker from '@/components/ServiceWorker';
 import ThemeApplier from '@/components/ThemeApplier';
 import TourOverlay from '@/components/TourOverlay';
 import UpdateBanner from '@/components/UpdateBanner';
+import WhatsNew, { WhatsNewButton } from '@/components/WhatsNew';
+import { APP_VERSION } from '@/lib/releases';
 
 import './globals.css';
 
@@ -63,6 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <PaletteButton />
               <JobTray />
               <AiSpend />
+              <WhatsNewButton />
               <HelpButton />
               <SettingsLink />
               <ProfileSwitcher />
@@ -70,6 +73,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </nav>
           {/* Inside the sticky header, so it is seen wherever the page is scrolled and covers none of its controls. */}
           <UpdateBanner />
+          {/* After an update, what changed, until this profile has seen it (lib/releases.ts). */}
+          <WhatsNew />
         </header>
         <ErrorBanner />
         <main className="safe-x mx-auto w-full max-w-[1680px] flex-1 py-6"><ProfileGate>{children}</ProfileGate></main>
@@ -79,6 +84,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Scryfall
           </a>
           . Not affiliated with Wizards of the Coast.
+          {' · '}
+          <Link href="/releases" className="underline hover:text-[var(--foreground)]">v{APP_VERSION} · What’s new</Link>
         </footer>
         <TabBar />
         <ThemeApplier />

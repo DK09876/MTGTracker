@@ -8,6 +8,10 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     // A deploy's "updating" file past its end (the script died, the machine rebooted mid-deploy) goes at start.
     try { (await import('./lib/updating')).clearStaleUpdating(); } catch { /* nothing to clear */ }
+    // A build this server hasn't run before is a deploy: written down for the Releases page's history.
+    if (process.env.NODE_ENV === 'production') {
+      try { (await import('./lib/releases-server')).recordDeploy(); } catch (e) { console.error('[releases] could not record the deploy', e); }
+    }
     try { (await import('./lib/categories')).startCategories(); } catch (e) { console.error('[categories] start failed', e); }
   }
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.MTG_SCHEDULER !== 'off') {
