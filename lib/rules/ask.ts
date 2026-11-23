@@ -26,7 +26,7 @@ import type { Ruling, ScryfallCard } from '../scryfall';
 import { anchorRules } from './anchors';
 import { ANSWER_SCHEMA, ANSWER_SCHEMA_PRIVATE, ANSWER_SYSTEM, ANSWER_SYSTEM_PRIVATE, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, compactWorking, parseAnswer, type Earlier, type Source, type Turn } from './answer';
 import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRules, tokens, type RulesIndex } from './cr';
-import { findMentions, type NameIndex } from './names';
+import { findMentions, NOT_A_CARD, type NameIndex } from './names';
 import { parseResearch, RESEARCH_SCHEMA, RESEARCH_SYSTEM, researchMessage, type Clarify, type Research } from './research';
 import type { WikiPage } from './sources';
 import { markedNames } from '../agent-context';
@@ -63,7 +63,7 @@ export interface AskInput {
 }
 
 export type AskResult =
-  | { choice: Array<{ mention: string; options: string[] }> }
+  | { choice: Array<{ mention: string; options: string[]; typo?: boolean }> }
   | { clarify: Clarify[] }
   | { turn: Turn };
 
@@ -313,11 +313,13 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
     const known = a.options.filter((o) => previous.includes(o) || found.cards.includes(o));
     if (known.length === 1) picks[a.mention] = known[0];
   }
-  const unanswered = found.ambiguous.filter((a) => !picks[a.mention] || !a.options.includes(picks[a.mention]));
+  // A "did you mean" may be answered "none of these": the question goes on without a card for those words.
+  const answered = (a: (typeof found.ambiguous)[number]) => a.options.includes(picks[a.mention]) || (a.typo && picks[a.mention] === NOT_A_CARD);
+  const unanswered = found.ambiguous.filter((a) => !answered(a));
   if (unanswered.length) return { choice: unanswered };
 
   // The conversation's cards stay in play for a follow-up that does not name them.
-  const named = [...found.cards, ...found.ambiguous.map((a) => picks[a.mention])];
+  const named = [...found.cards, ...found.ambiguous.map((a) => picks[a.mention]).filter((p) => p !== NOT_A_CARD)];
   const wanted = [...new Set([...named, ...previous])].slice(0, 6);
   const cards = wanted.length ? await deps.cards(wanted) : [];
 

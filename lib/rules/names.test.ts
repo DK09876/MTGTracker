@@ -53,3 +53,38 @@ describe('findMentions', () => {
     expect(find('Does it trigger?').cards).toEqual([]);
   });
 });
+
+describe('findMentions, misspelt names', () => {
+  const typoIdx = nameIndex([...names, 'Inniaz, the Gale Force', 'Gale Force', 'Redirect', 'Rally the Ranks', 'Force of Will', 'Sheoldred, the Apocalypse', 'Counterspell', "Teferi's Protection", "Thassa's Oracle", 'Oracle', 'Protector of the Crown']);
+  const typo = (q: string) => findMentions(q, typoIdx, new Set([...ordinary, 'redirected', 'force']));
+
+  it('offers the misspelt name, and the exact name found inside it, never taking either', () => {
+    expect(typo('Can you use a redirect spell on Innaiz, the gale force')).toEqual({
+      cards: ['Redirect'],
+      ambiguous: [{ mention: 'Innaiz, the gale force', options: ['Inniaz, the Gale Force', 'Gale Force'], typo: true }],
+    });
+    expect(typo('can i redirect innaiz the gale force').ambiguous[0].options).toEqual(['Inniaz, the Gale Force', 'Gale Force']);
+  });
+
+  it('offers a misspelt word written as a name on its own', () => {
+    expect(typo('Can I target Innaiz?').ambiguous).toEqual([{ mention: 'Innaiz', options: ['Inniaz, the Gale Force'], typo: true }]);
+    expect(typo('Does Sheoldredd trigger on my draws?').ambiguous[0].options).toEqual(['Sheoldred, the Apocalypse']);
+  });
+
+  it('leaves exact names as they were', () => {
+    expect(typo('Can you redirect Inniaz, the gale force')).toEqual({ cards: ['Inniaz, the Gale Force', 'Redirect'], ambiguous: [] });
+    expect(typo('does gale force kill inniaz').cards).toEqual(['Gale Force', 'Inniaz, the Gale Force']);
+  });
+
+  it("finds a name with an apostrophe, written with or without it, and a typo in it", () => {
+    expect(typo("Can I flash in Teferi's Protection during combat?").cards).toEqual(["Teferi's Protection"]);
+    expect(typo('Does Thassas Oracle win with an empty library').cards).toEqual(["Thassa's Oracle"]);
+    expect(typo("Can I flash in Teferi's Protecton during combat?").ambiguous).toEqual([{ mention: "Teferi's Protecton", options: ["Teferi's Protection"], typo: true }]);
+  });
+
+  it('never takes ordinary words for a misspelt name', () => {
+    expect(typo('does it really work if it was redirected')).toEqual({ cards: [], ambiguous: [] });
+    expect(typo('can my creatur block')).toEqual({ cards: [], ambiguous: [] });
+    expect(typo('How many Soldier tokens do I get?').ambiguous).toEqual([]);
+  });
+});

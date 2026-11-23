@@ -29,6 +29,7 @@ import { getProfile } from '@/lib/profile';
 import type { Budget } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
+import { NOT_A_CARD } from '@/lib/rules/names';
 
 // Starting points, by the kind of rule they turn on.
 const EXAMPLES: Array<{ topic: string; question: string }> = [
@@ -173,7 +174,7 @@ export default function RulesPage() {
         <section id="which-card" className="mt-5 flex scroll-mt-20 flex-col gap-5 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Which card?">
           {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
             <div key={c.mention}>
-              <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
+              <h2 className="font-medium">{c.typo ? <>No card is named “{c.mention}”. Did you mean…</> : <>Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</>}</h2>
               <p className="text-sm text-[var(--muted)]">For: <CardText text={choosing.question} /></p>
               <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {c.options.map((o) => (
@@ -183,6 +184,7 @@ export default function RulesPage() {
                   </button>
                 ))}
               </div>
+              {c.typo && <button {...steady(() => pick(c.mention, NOT_A_CARD))} className={`${button} mt-3`}>None of these</button>}
             </div>
           ))}
           <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>

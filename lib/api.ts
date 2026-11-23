@@ -807,7 +807,8 @@ export const identifyScan = (read: { title: string; set?: string; number?: strin
 
 // --- rules ------------------------------------------------------------------------
 
-export interface RulesChoice { mention: string; options: Array<{ name: string; image: string | null }> }
+/** Cards a word in the question could be; `typo`: the words looked like a misspelt name ("did you mean"). */
+export interface RulesChoice { mention: string; typo?: boolean; options: Array<{ name: string; image: string | null }> }
 
 export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: RulesThreadSummary[]; budget: Budget }>);
 
