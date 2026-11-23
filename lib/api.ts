@@ -1027,3 +1027,22 @@ export const tagsTabAct = (listId: string, a: Record<string, unknown>) => {
     .then((v) => { memo.set(url(categoriesPath(listId)), v); return v; });
   return a.action === 'ai' ? spending(work.finally(jobsChanged)) : work;
 };
+
+// --- releases (lib/releases.ts) ----------------------------------------------------
+
+export interface ReleaseState {
+  version: string;
+  build: string;
+  /** The newest release this profile has seen; null when none yet. */
+  seen: string | null;
+  deploys: Array<{ build: string; version: string; at: string }>;
+}
+
+/** Told when the profile has seen the release notes, so the "What's new" line goes everywhere at once. */
+export const RELEASES_SEEN = 'mtg-releases-seen';
+
+export const releaseState = () => fetch(url('releases'), { cache: 'no-store' }).then(json<ReleaseState>);
+
+export const markReleasesSeen = (version: string) =>
+  send('releases', 'POST', { version }).then(json<{ seen: string }>)
+    .then((r) => { window.dispatchEvent(new CustomEvent(RELEASES_SEEN, { detail: r.seen })); return r; });

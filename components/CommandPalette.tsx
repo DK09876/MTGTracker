@@ -47,6 +47,7 @@ const PAGES: Array<[string, string, string]> = [
   ['/collection', 'Collection', 'owned boxes binders'],
   ['/collection/scan', 'Scan cards', 'camera collection'],
   ['/settings', 'Settings', 'ai model budget profile password'],
+  ['/releases', 'What’s new', 'releases updates version changelog deploys'],
 ];
 
 const art = (l: List) => l.commander?.image_uris?.art_crop ?? l.commander?.card_faces?.[0]?.image_uris?.art_crop ?? null;
