@@ -10,10 +10,15 @@
  * caller's choice to offer, never a silent answer here. Server only.
  */
 
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+
 import { localCards } from './card-store';
 import { foldName } from './card-lookup';
+import { findMentions, nameIndex, type Mentions, type NameIndex } from './card-names';
 import { database, storeCard } from './db';
-import { collection, getCard, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
+import { rulesIndex } from './rules/sources';
+import { cardNameCatalog, collection, getCard, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
 
 /** The key a name is matched by: its front face, folded (case, accents, curly quotes). */
 export const cardKey = (name: string) => foldName(name);
@@ -107,4 +112,41 @@ export function printingsFor(oracleId: string): Promise<ScryfallCard[]> {
   cards.catch(() => { if (printingsKept.get(oracleId)?.cards === cards) printingsKept.delete(oracleId); });
   if (printingsKept.size > 500) printingsKept.delete(printingsKept.keys().next().value!);
   return cards;
+}
+
+// --- Every card's name, for reading the owner's words (lib/card-names.ts) ---
+
+const NAMES_FILE = join(dirname(process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`), 'rules', 'card-names.json');
+const DAY = 24 * 3600_000;
+// Kept on globalThis: every route's bundle has its own copy of this module.
+const kept = globalThis as unknown as { __cardNames?: { index: NameIndex; at: number } };
+
+/** Every card name (Scryfall's catalog, fetched daily and kept on disk), indexed for findMentions. */
+export async function cardNameIndex(): Promise<NameIndex> {
+  if (kept.__cardNames && Date.now() - kept.__cardNames.at < DAY) return kept.__cardNames.index;
+  const read = () => { try { return JSON.parse(readFileSync(NAMES_FILE, 'utf8')) as string[]; } catch { return null; } };
+  let names: string[] | null = null;
+  try { if (Date.now() - statSync(NAMES_FILE).mtimeMs < DAY) names = read(); } catch { /* not kept yet */ }
+  if (!names) {
+    try {
+      names = await cardNameCatalog();
+      try { mkdirSync(dirname(NAMES_FILE), { recursive: true }); writeFileSync(NAMES_FILE, JSON.stringify(names)); } catch { /* in memory only */ }
+    } catch (error) {
+      // An old copy beats none.
+      names = read();
+      if (!names) throw error;
+    }
+  }
+  const index = nameIndex(names);
+  kept.__cardNames = { index, at: Date.now() };
+  return index;
+}
+
+/**
+ * The cards named in what the owner typed (lib/card-names.ts, findMentions), with the rules' own words as ordinary
+ * language. Text marked [[like this]] is left to the caller: it names exactly that card.
+ */
+export async function mentionsIn(text: string): Promise<Mentions> {
+  const [index, vocab] = await Promise.all([cardNameIndex(), rulesIndex().then((r) => r.vocab).catch(() => new Set<string>())]);
+  return findMentions(text.replace(/\[\[+[^[\]]*\]\]+/g, ' '), index, vocab);
 }

@@ -26,8 +26,8 @@ export interface RecentSearch {
 }
 
 /** How to run this answer again, or null for one that has nothing to replay (it stopped to ask). */
-export function replayOf(answer: Pick<Interpreted, 'interpretation' | 'choice'>): Replay | null {
-  if (answer.choice) return null;
+export function replayOf(answer: Pick<Interpreted, 'interpretation' | 'choice' | 'nameChoice'>): Replay | null {
+  if (answer.choice || answer.nameChoice?.length) return null;
   const { kind, query, commander, sort, explanation, note } = answer.interpretation;
   if (kind === 'combos') {
     return commander ? { kind: 'combos', commander: commander.name, explanation, note } : null;

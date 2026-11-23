@@ -17,8 +17,8 @@ import {
 } from '@/lib/db';
 import { requireProfile } from '@/lib/profile-route';
 import { askRules } from '@/lib/rules/ask';
-import { cardNames, cardRulings, rulesIndex, wikiPage } from '@/lib/rules/sources';
-import { findCards } from '@/lib/cards';
+import { cardRulings, rulesIndex, wikiPage } from '@/lib/rules/sources';
+import { cardNameIndex, findCards } from '@/lib/cards';
 import { imageOf, ScryfallError, type ScryfallCard } from '@/lib/scryfall';
 
 export const runtime = 'nodejs';
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       .slice(0, 4)
       .map((c) => ({ question: String(c.question).slice(0, 300), answer: String(c.answer).trim().slice(0, 300) }));
     const result = await askRules({ question, earlier, picks, secondCheck: b.secondCheck === true, clarifications }, {
-      rules: rulesIndex, names: cardNames, cards: async (n: string[]) => [...new Set((await findCards(n)).values())], rulings: cardRulings, wiki: wikiPage, model,
+      rules: rulesIndex, names: cardNameIndex, cards: async (n: string[]) => [...new Set((await findCards(n)).values())], rulings: cardRulings, wiki: wikiPage, model,
       helper: helperModel(who.profile, question), inputTokens: inputTokens(who.profile),
       privateWorking: providerOf(modelFor(who.profile, 'rules')) === 'anthropic',
     }, { maxBusy: 1 });

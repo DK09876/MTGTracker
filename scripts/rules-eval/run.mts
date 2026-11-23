@@ -6,7 +6,8 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { modelById } from '../../lib/ai';
 import { HELPER_MODEL, modelInfo, providerOf } from '../../lib/models';
 import { askRules } from '../../lib/rules/ask';
-import { cardNames, cardRulings, rulesIndex, wikiPage } from '../../lib/rules/sources';
+import { cardRulings, rulesIndex, wikiPage } from '../../lib/rules/sources';
+import { cardNameIndex } from '../../lib/cards';
 import { cardsNamed } from '../../lib/scryfall';
 
 type Case = { id: string; question: string; answer: string; clarifyWith?: string };
@@ -29,7 +30,7 @@ const rows: Record<string, unknown>[] = existsSync(out) ? JSON.parse(readFileSyn
 // Claude runs are charged to an "eval" profile, so the app's caps hold them too.
 const charge = { profile: 'eval', feature: 'rules' as const };
 const deps = {
-  rules: rulesIndex, names: cardNames, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage,
+  rules: rulesIndex, names: cardNameIndex, cards: cardsNamed, rulings: cardRulings, wiki: wikiPage,
   model: modelById(modelId, [], charge)!, helper: modelById(HELPER_MODEL[providerOf(modelId)], [], charge),
   inputTokens: modelInfo(modelId)?.inputTokens ?? 6000, privateWorking: providerOf(modelId) === 'anthropic',
 };

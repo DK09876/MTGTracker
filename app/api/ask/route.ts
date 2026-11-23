@@ -5,6 +5,7 @@
  *   POST {q, previous}             a follow-up, refining the search before it
  *   POST {q, previous?, resume}    carry on after the user picked a commander
  *   POST {q, forDeck: {commander}} search from inside a deck, for its commander
+ *   ?checked=1 / {checked: true}   the owner said "None of these" to a misspelt name: search as typed
  *   GET  ?query=&commander=&sort=  run a query as written, no model - for an
  *                                  edited query, a new sort, or a tab opened
  *                                  later; &page=2 for the next 175
@@ -21,8 +22,8 @@ import { listsHolding } from '@/lib/db';
 import { profileOf } from '@/lib/profile-route';
 import { geminiTranslator, modelTranslator, type Kind, type Previous, type Translation } from '@/lib/gemini';
 import { interpret, runCombos, runQuery, type Deps, type Interpreted, type Resume } from '@/lib/interpret';
-import { findCards } from '@/lib/cards';
-import { findCardNamed, findCommanders, searchCards, ScryfallError } from '@/lib/scryfall';
+import { findCards, mentionsIn } from '@/lib/cards';
+import { findCardNamed, findCommanders, imageOf, searchCards, ScryfallError } from '@/lib/scryfall';
 import { parseSortKey } from '@/lib/sort';
 import { searchCombos, SpellbookError } from '@/lib/spellbook';
 
@@ -51,6 +52,12 @@ function deps(request: Request, label = ''): Deps {
     cardsNamed: async (names) => [...new Set((await findCards(names)).values())],
     searchCombos,
     translate: translator(profileOf(request), label),
+    typos: async (q) => {
+      const typo = (await mentionsIn(q)).ambiguous.filter((a) => a.typo);
+      if (!typo.length) return [];
+      const cards = await findCards(typo.flatMap((a) => a.options)).catch(() => null);
+      return typo.map((a) => ({ mention: a.mention, typo: true, options: a.options.map((name) => ({ name, image: cards?.get(name) ? imageOf(cards.get(name)!, 'normal') : null })) }));
+    },
   };
 }
 
@@ -87,7 +94,7 @@ export async function GET(request: Request) {
     }));
   }
 
-  return respond(request, () => interpret(params.get('q') ?? '', deps(request, params.get('q') ?? '')));
+  return respond(request, () => interpret(params.get('q') ?? '', deps(request, params.get('q') ?? ''), undefined, undefined, undefined, { namesChecked: params.get('checked') === '1' }));
 }
 
 const KINDS = new Set<Kind>(['cards', 'card', 'combos']);
@@ -112,7 +119,7 @@ function resumeOf(raw: unknown): Resume | undefined {
 }
 
 export async function POST(request: Request) {
-  let body: { q?: unknown; previous?: Partial<Previous>; resume?: unknown; forDeck?: { commander?: unknown } };
+  let body: { q?: unknown; previous?: Partial<Previous>; resume?: unknown; forDeck?: { commander?: unknown }; checked?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -129,5 +136,6 @@ export async function POST(request: Request) {
   const deckCommander = text(body.forDeck?.commander);
   return respond(request, () => interpret(
     text(body.q) ?? '', deps(request, [previous?.request, text(body.q)].filter(Boolean).join(' › ')), previous, resumeOf(body.resume), deckCommander ? { commander: deckCommander } : undefined,
+    { namesChecked: body.checked === true },
   ));
 }

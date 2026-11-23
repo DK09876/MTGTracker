@@ -18,6 +18,7 @@ const url = (path: string) => {
 };
 
 import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
+import type { NamedChoice } from './card-names';
 import type { LinkReport } from './mythic';
 import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, RulesThreadSummary } from './db';
 import type { ImportSummary } from './import-into';
@@ -159,8 +160,8 @@ export const search = (q: string, page = 1) =>
 export type AskResponse = SearchResponse & Omit<Interpreted, keyof SearchResponse>;
 
 /** Search from anything typed - syntax, a name, or plain English. */
-export const ask = (q: string) =>
-  spending(fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>));
+export const ask = (q: string, { checked = false } = {}) =>
+  spending(fetch(url(`ask?q=${encodeURIComponent(q)}${checked ? '&checked=1' : ''}`)).then(json<AskResponse>));
 
 const post = (body: object) =>
   spending(fetch(url('ask'), {
@@ -173,8 +174,8 @@ const post = (body: object) =>
 export const followUp = (q: string, previous: Previous) => post({ q, previous });
 
 /** A search from inside a deck, always for that deck's commander. */
-export const askForDeck = (q: string, commander: string, previous?: Previous) =>
-  post({ q, previous, forDeck: { commander } });
+export const askForDeck = (q: string, commander: string, previous?: Previous, { checked = false } = {}) =>
+  post({ q, previous, forDeck: { commander }, ...(checked ? { checked } : {}) });
 
 /** Carry on a search that stopped to ask which commander was meant. */
 export const resume = (q: string, previous: Previous | undefined, plan: Translation, commander: string) =>
@@ -808,7 +809,7 @@ export const identifyScan = (read: { title: string; set?: string; number?: strin
 // --- rules ------------------------------------------------------------------------
 
 /** Cards a word in the question could be; `typo`: the words looked like a misspelt name ("did you mean"). */
-export interface RulesChoice { mention: string; typo?: boolean; options: Array<{ name: string; image: string | null }> }
+export type RulesChoice = NamedChoice;
 
 export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: RulesThreadSummary[]; budget: Budget }>);
 

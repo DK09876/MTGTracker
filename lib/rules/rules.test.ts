@@ -5,7 +5,7 @@ import { ANSWER_SCHEMA, ANSWER_SYSTEM, AUTO_CHECKS, parseAnswer, type Source } f
 import { anchorRules } from './anchors';
 import { askRules, type AskDeps } from './ask';
 import { keywordRules, parseRules, placeWeight, referencedRules, ruleWithContext, searchRules } from './cr';
-import { nameIndex } from './names';
+import { nameIndex } from '../card-names';
 
 // A slice of the real text: contents, body, glossary, credits.
 const CR = `Magic: The Gathering Comprehensive Rules

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
+import CardChoice from '@/components/CardChoice';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import CommanderField from '@/components/CommanderField';
@@ -17,6 +18,7 @@ import { SaveBar } from '@/components/SavedSearches';
 import SearchBox from '@/components/SearchBox';
 import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
+import { withPick } from '@/lib/card-names';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
 import { identityStyle } from '@/lib/identity';
@@ -132,7 +134,7 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const search = (text: string) => {
+  const search = (text: string, { checked = false } = {}) => {
     const term = text.trim();
     if (!term) return;
     // The keyboard closes now, before results come up to be tapped.
@@ -141,7 +143,7 @@ export default function SearchPage() {
     setSearched(true);
     setThread([term]);
     setAsked({ text: term });
-    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => (forCommander ? api.askForDeck(term, forCommander.name) : api.ask(term)), (r) => {
+    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => (forCommander ? api.askForDeck(term, forCommander.name, undefined, { checked }) : api.ask(term, { checked })), (r) => {
       showAnswer(r);
       remember(term, replayOf(r));
     });
@@ -385,6 +387,15 @@ export default function SearchPage() {
     });
   };
 
+  /** Answer "did you mean…?" for a misspelt card name: search again with the card marked, or as typed. */
+  const nameChoice = answer?.nameChoice?.[0];
+  const pickTypo = (name: string | null) => {
+    if (!asked || !nameChoice) return;
+    const text = name ? withPick(asked.text, nameChoice.mention, name) : asked.text;
+    setQuery(text);
+    search(text, { checked: !name });
+  };
+
   /** Answer "which commander?" and let the search carry on. */
   const pickCommander = (name: string) => {
     if (!answer?.plan || !asked) return;
@@ -467,7 +478,7 @@ export default function SearchPage() {
       {/* Under the box, one row: saving (or ideas to try) on the left, the model on the right. */}
       <div className="mt-2 flex items-start gap-3 max-sm:flex-col-reverse max-sm:items-stretch">
         <div className="min-w-0 flex-1">
-          {status === 'idle' && hasViews && !answer?.choice && session && (
+          {status === 'idle' && hasViews && !answer?.choice && !nameChoice && session && (
             <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />
           )}
           {!searched && (
@@ -488,13 +499,16 @@ export default function SearchPage() {
         <AiModelPicker area="search" align="right" className="shrink-0 max-sm:self-end" />
       </div>
 
-      {answer && status !== 'thinking' && (
+      {answer && status !== 'thinking' && !nameChoice && (
         <Interpreted interpretation={answer.interpretation} trace={answer.trace} onRun={s.runEdited} />
       )}
-      {answer && !answer.choice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
+      {answer && !answer.choice && !nameChoice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
 
       {status === 'idle' && answer?.choice && (
         <CommanderChoice mention={answer.choice.mention} options={answer.choice.options} onPick={pickCommander} />
+      )}
+      {status === 'idle' && nameChoice && (
+        <CardChoice id="which-card" choice={nameChoice} question={asked?.text} onPick={(n) => pickTypo(n)} onNone={() => pickTypo(null)} />
       )}
 
       {status === 'searching' && <p className="mt-8 text-center text-[var(--muted)]">Searching…</p>}
@@ -502,7 +516,7 @@ export default function SearchPage() {
       {status === 'error' && <p className="mt-8 text-center text-red-400">{s.error}</p>}
 
 
-      {status === 'idle' && hasViews && !answer?.choice && (
+      {status === 'idle' && hasViews && !answer?.choice && !nameChoice && (
         <Results
           views={views}
           commander={answer?.interpretation.kind !== 'card' ? answer?.interpretation.commander?.name : undefined}

@@ -42,6 +42,12 @@ name anywhere else.
 - In the browser: `/api/cards?name=…&name=…` or `?id=…`, through `lib/card-cache.ts` (`lookCard`, `useCardState`,
   `rememberCards`). It's one cache for the whole app, and names asked for together go in one request.
 
+## Reading the owner's words: `lib/card-names.ts`
+
+Card names in what the owner types (a question, a search, a chat message) are found with `findMentions`, never by
+matching text yourself. Exact names are taken; a word that could be several cards, or a misspelt name, comes back as a
+choice, and the page shows it with `<CardChoice>` before any AI call. A near match is never taken silently.
+
 ## AI calls and the agent context
 
 Every AI call passes one of three places:
