@@ -12,6 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
+import { useCardCheck } from './CardChoice';
 import CardText from './CardText';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
@@ -81,6 +82,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   // The box in step 1, and the message back in step 2.
   const [box, setBox] = useState('');
   const [message, setMessage] = useState('');
+  // Card names in what's said back are checked before Claude reads them (AGENTS.md, "Reading the owner's words").
+  const cardCheck = useCardCheck();
   const [keepNotes, setKeepNotes] = useState<string[]>([]);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
   const dirty = useRef(false);
@@ -213,7 +216,17 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   const outs = [...sections].sort((a, b) => Number(b.purpose === 'out') - Number(a.purpose === 'out'));
   const refused = items.filter((i) => i.tier === 'cut' && !cuts.includes(i.name));
   const cost = money(view.costs[view.model]);
-  const send = () => act({ action: 'find', rerun: true, message });
+  const send = async () => {
+    let said = message;
+    if (said.trim()) {
+      // The deck's cards on the list count as in play: "the bolt" there is that card.
+      const checked = await cardCheck.check(said, { known: items.map((i) => i.name) });
+      if (checked === null) return;
+      setMessage(checked);
+      said = checked;
+    }
+    await act({ action: 'find', rerun: true, message: said });
+  };
 
   // --- done: what happened, and the way back --------------------------------------------
   if (view.done) {
@@ -309,7 +322,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           {view.run.stale && (
             <p role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/60 bg-amber-300/[0.05] px-3.5 py-2 text-sm">
               <span className="min-w-0 flex-1">The deck changed since this list was made. Cards no longer in the deck are left out.</span>
-              <button className={C.btn} disabled={busy || cutsRunning} onClick={send}>✦ Make a new list</button>
+              <button className={C.btn} disabled={busy || cutsRunning} onClick={() => void send()}>✦ Make a new list</button>
             </p>
           )}
 
@@ -334,7 +347,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
               <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <CardText text={view.run.notes} /></p>
             ) : null}
           <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
-            disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
+            disabled={busy || cutsRunning || view.noKey || updating} onSend={() => void send()} />
+          {cardCheck.panel}
 
           <div className={`${CARD} flex flex-col gap-1`}>
             <ListControls filter={lv.filter} onFilter={(f) => setLv({ filter: f })} sort={lv.sort} onSort={(x) => setLv({ sort: x })} filters={[

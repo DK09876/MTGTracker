@@ -190,7 +190,7 @@ describe('askRules', () => {
   it('asks which card a word means before spending a model request', async () => {
     const model = vi.fn();
     const r = await askRules({ question: 'how does blade of selves interact with kratos' }, deps(model));
-    expect(r).toEqual({ choice: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'] }] });
+    expect(r).toEqual({ choice: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'], kind: 'several' }] });
     expect(model).not.toHaveBeenCalled();
   });
 

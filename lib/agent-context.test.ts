@@ -72,18 +72,4 @@ describe('every Claude tool-loop call', () => {
     const { readFileSync } = await import('fs');
     expect(readFileSync(join(dir, 'stub.log'), 'utf8')).toContain('Writing for MTG Tracker');
   });
-
-  it('gives the closest card for a misspelt [[name]], or the closest names to ask between', async () => {
-    const { mkdirSync, writeFileSync } = await import('fs');
-    mkdirSync(join(dir, 'rules'), { recursive: true });
-    writeFileSync(join(dir, 'rules', 'card-names.json'), JSON.stringify(['Inniaz, the Gale Force', 'Gale Force', 'Kratos, God of War', 'Kratos, Stoic Father', 'Forsaken Monument']));
-    delete (globalThis as { __cardNames?: unknown }).__cardNames;
-    const inniaz = { id: 'in', oracle_id: 'o-in', name: 'Inniaz, the Gale Force', type_line: 'Legendary Creature — Djinn', mana_cost: '{3}{U}{U}', oracle_text: 'Flying', cmc: 5 } as ScryfallCard;
-    (await import('./db')).storeCard(inniaz);
-    const { ownerCardsBlock } = await import('./agent-context');
-    const block = await ownerCardsBlock(['Can I redirect [[Innaiz, the Gale Force]]? And [[Forsaken Monumnet]], [[Zzyzx Qwop]]']);
-    expect(block).toContain('- Innaiz, the Gale Force: no card has this exact name. The closest is Inniaz, the Gale Force {3}{U}{U} - Legendary Creature — Djinn - Flying. Say which card you took it for.');
-    expect(block).toContain("- Zzyzx Qwop: no card has this exact name. Say so; don't guess a similar card.");
-    delete (globalThis as { __cardNames?: unknown }).__cardNames;
-  });
 });

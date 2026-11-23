@@ -11,6 +11,7 @@
  * Claude's ideas join the same groups, read against the plan.
  */
 
+import { useCardCheck } from './CardChoice';
 import { useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -72,6 +73,8 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
   const [showDismissed, setShowDismissed] = useState(false);
   const [rules, setRules] = useState(false);
   const [instructions, setInstructions] = useState('');
+  // Card names in the instructions are checked before Claude reads them (AGENTS.md, "Reading the owner's words").
+  const cardCheck = useCardCheck();
   const [job, setJob] = useState<Job | null>(null);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
   // How the deck wins, from the Plan tab only. The old tag brief is not the plan: falling back to it
@@ -185,7 +188,16 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
       },
     });
   });
-  const ask = () => act(async () => setJob((await api.startTuneIdeas(listId, current, instructions, current === 'fix' ? symptom : undefined)).job));
+  const ask = async () => {
+    let text = instructions;
+    if (text.trim()) {
+      const checked = await cardCheck.check(text);
+      if (checked === null) return;
+      setInstructions(checked);
+      text = checked;
+    }
+    await act(async () => setJob((await api.startTuneIdeas(listId, current, text, current === 'fix' ? symptom : undefined)).job));
+  };
 
   // Cuts on their own stop at 100; a cut paired with an add doesn't move the size.
   const cutRoom = Math.max(0, sizeAfter - 100);
@@ -250,7 +262,8 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
           showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
         {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
-          onAsk={ask} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
+          onAsk={() => void ask()} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
+        {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && cardCheck.panel}
 
         {current === 'cuts' ? (
           <details className="rounded-2xl border border-[var(--border)]" data-tour="cut-rules">

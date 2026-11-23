@@ -18,7 +18,7 @@ const url = (path: string) => {
 };
 
 import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
-import type { NamedChoice } from './card-names';
+import type { CardPick, CardReading, NamedChoice } from './card-names';
 import type { LinkReport } from './mythic';
 import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, RulesThreadSummary } from './db';
 import type { ImportSummary } from './import-into';
@@ -808,8 +808,16 @@ export const identifyScan = (read: { title: string; set?: string; number?: strin
 
 // --- rules ------------------------------------------------------------------------
 
-/** Cards a word in the question could be; `typo`: the words looked like a misspelt name ("did you mean"). */
+/** Cards a word in the question could be (lib/card-names.ts). */
 export type RulesChoice = NamedChoice;
+
+/** Read what the owner typed for cards before it's sent (lib/cards.ts readCards): marked text, and what to ask. */
+export const readCards = (text: string, { known = [], picks = [] }: { known?: string[]; picks?: CardPick[] } = {}) =>
+  send('cards/read', 'POST', { text, known, picks }).then(json<CardReading>);
+
+/** Forget the profile's pick for some words ("innaiz"), so they're asked about again. */
+export const forgetCardPick = (phrase: string) =>
+  fetch(url(`cards/read?phrase=${encodeURIComponent(phrase)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: RulesThreadSummary[]; budget: Budget }>);
 

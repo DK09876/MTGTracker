@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { findMentions, nameIndex, nearNames, withPick } from './card-names';
+import { findMentions, markText, nameIndex, NOT_A_CARD, phrasesForPick } from './card-names';
 
 const names = [
   'Blade of Selves', 'Kratos, God of War', 'Kratos, Stoic Father', 'Blasphemous Act', 'Opt', 'Fog', 'Counterspell',
@@ -12,7 +12,9 @@ const names = [
 const idx = nameIndex(names);
 // The rules' own words, as vocabulary() gives them.
 const ordinary = new Set(['soldier', 'stop', 'response', 'clone', 'damage', 'trample', 'creature', 'dies', 'copied']);
-const find = (q: string) => findMentions(q, idx, ordinary);
+// What a test checks: the cards and the questions (spans have their own tests).
+const brief = ({ cards, ambiguous }: ReturnType<typeof findMentions>) => ({ cards, ambiguous });
+const find = (q: string) => brief(findMentions(q, idx, ordinary));
 
 describe('findMentions', () => {
   it('reads a type before "tokens" as the type, not a card', () => {
@@ -36,7 +38,7 @@ describe('findMentions', () => {
   it('asks which card when a word begins several names', () => {
     expect(find('how does blade of selves interact with kratos')).toEqual({
       cards: ['Blade of Selves'],
-      ambiguous: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'] }],
+      ambiguous: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'], kind: 'several' }],
     });
   });
 
@@ -56,18 +58,18 @@ describe('findMentions', () => {
 
 describe('findMentions, misspelt names', () => {
   const typoIdx = nameIndex([...names, 'Inniaz, the Gale Force', 'Gale Force', 'Redirect', 'Rally the Ranks', 'Force of Will', 'Sheoldred, the Apocalypse', 'Counterspell', "Teferi's Protection", "Thassa's Oracle", 'Oracle', 'Protector of the Crown']);
-  const typo = (q: string) => findMentions(q, typoIdx, new Set([...ordinary, 'redirected', 'force']));
+  const typo = (q: string) => brief(findMentions(q, typoIdx, new Set([...ordinary, 'redirected', 'force'])));
 
   it('offers the misspelt name, and the exact name found inside it, never taking either', () => {
     expect(typo('Can you use a redirect spell on Innaiz, the gale force')).toEqual({
       cards: ['Redirect'],
-      ambiguous: [{ mention: 'Innaiz, the gale force', options: ['Inniaz, the Gale Force', 'Gale Force'], typo: true }],
+      ambiguous: [{ mention: 'Innaiz, the gale force', options: ['Inniaz, the Gale Force', 'Gale Force'], kind: 'typo' }],
     });
     expect(typo('can i redirect innaiz the gale force').ambiguous[0].options).toEqual(['Inniaz, the Gale Force', 'Gale Force']);
   });
 
   it('offers a misspelt word written as a name on its own', () => {
-    expect(typo('Can I target Innaiz?').ambiguous).toEqual([{ mention: 'Innaiz', options: ['Inniaz, the Gale Force'], typo: true }]);
+    expect(typo('Can I target Innaiz?').ambiguous).toEqual([{ mention: 'Innaiz', options: ['Inniaz, the Gale Force'], kind: 'typo' }]);
     expect(typo('Does Sheoldredd trigger on my draws?').ambiguous[0].options).toEqual(['Sheoldred, the Apocalypse']);
   });
 
@@ -79,7 +81,13 @@ describe('findMentions, misspelt names', () => {
   it("finds a name with an apostrophe, written with or without it, and a typo in it", () => {
     expect(typo("Can I flash in Teferi's Protection during combat?").cards).toEqual(["Teferi's Protection"]);
     expect(typo('Does Thassas Oracle win with an empty library').cards).toEqual(["Thassa's Oracle"]);
-    expect(typo("Can I flash in Teferi's Protecton during combat?").ambiguous).toEqual([{ mention: "Teferi's Protecton", options: ["Teferi's Protection"], typo: true }]);
+    expect(typo("Can I flash in Teferi's Protecton during combat?").ambiguous).toEqual([{ mention: "Teferi's Protecton", options: ["Teferi's Protection"], kind: 'typo' }]);
+  });
+
+  it('catches a four-letter typo inside a full name, never on its own', () => {
+    const idx2 = nameIndex(['Sol Ring', 'Rally the Ranks']);
+    expect(findMentions('is Sol Rnig worth keeping', idx2).ambiguous).toEqual([{ mention: 'Sol Rnig', options: ['Sol Ring'], kind: 'typo' }]);
+    expect(findMentions('is the Rnig good', idx2).ambiguous).toEqual([]);
   });
 
   it('never takes ordinary words for a misspelt name', () => {
@@ -89,18 +97,54 @@ describe('findMentions, misspelt names', () => {
   });
 });
 
-describe('nearNames and withPick', () => {
-  const idx = nameIndex(['Inniaz, the Gale Force', 'Gale Force', 'Sol Ring', 'Kratos, God of War', 'Kratos, Stoic Father']);
+describe('findMentions, only cards we are sure of', () => {
+  const sureIdx = nameIndex([
+    'Flicker', 'Lightning Bolt', 'Last Chance', 'Rhystic Study', 'Really Charming Prince', 'Really Epic Punch', 'Wrath of God',
+    'Wrath of the Skies', 'Inniaz, the Gale Force', 'Gale Force', 'Kratos, God of War', 'Kratos, Stoic Father', 'Blade of Selves',
+  ]);
+  const everyday = new Set(['flicker', 'lightning', 'bolt', 'last', 'chance', 'study', 'really', 'wrath', 'gale', 'force', 'blade']);
+  const read = (q: string, opts: Parameters<typeof findMentions>[3] = {}) => findMentions(q, sureIdx, ordinary, { everyday, ...opts });
 
-  it('finds the closest name to one no card has, never a shorter name inside it', () => {
-    expect(nearNames('Innaiz, the Gale Force', idx)).toEqual(['Inniaz, the Gale Force']);
-    expect(nearNames('Sol Rign', idx)).toEqual(['Sol Ring']);
-    expect(nearNames('Zzyzx Qwop', idx)).toEqual([]);
+  it('leaves an everyday word as a word unless written as a name', () => {
+    expect(brief(read('can I bounce my commander with a flicker effect'))).toEqual({ cards: [], ambiguous: [] });
+    expect(read('can I respond to Flicker').cards).toEqual(['Flicker']);
+    expect(brief(read('does it really work'))).toEqual({ cards: [], ambiguous: [] });
+    expect(brief(read('does a wrath kill everything'))).toEqual({ cards: [], ambiguous: [] });
+    expect(read('does a Wrath kill everything').ambiguous[0]).toMatchObject({ mention: 'Wrath', kind: 'several' });
   });
 
-  it('puts the picked card in place of the words, marked', () => {
-    expect(withPick('Can you use a redirect spell on Innaiz, the gale force', 'Innaiz, the gale force', 'Inniaz, the Gale Force'))
-      .toBe('Can you use a redirect spell on [[Inniaz, the Gale Force]]');
-    expect(withPick('what about teferi’s protecton?', "teferi's protecton", "Teferi's Protection")).toBe("what about [[Teferi's Protection]]?");
+  it('asks whether a two-word name in everyday words is the card, and takes one that is plainly a name', () => {
+    expect(read('is this my last chance').ambiguous).toEqual([{ mention: 'last chance', options: ['Last Chance'], kind: 'maybe' }]);
+    expect(read('can lightning bolt kill it').ambiguous).toEqual([{ mention: 'lightning bolt', options: ['Lightning Bolt'], kind: 'maybe' }]);
+    expect(read('can Lightning Bolt kill it').cards).toEqual(['Lightning Bolt']);
+    expect(read('does rhystic study trigger').cards).toEqual(['Rhystic Study']);
+    expect(read('how does blade of selves work').cards).toEqual(['Blade of Selves']);
+  });
+
+  it('takes a card in play without asking', () => {
+    expect(read('how does kratos attack', { known: ['Kratos, Stoic Father'] })).toMatchObject({ cards: ['Kratos, Stoic Father'], ambiguous: [] });
+    expect(read('can lightning bolt kill it', { known: ['Lightning Bolt'] }).cards).toEqual(['Lightning Bolt']);
+    const r = read('can I redirect Innaiz, the gale force', { known: ['Inniaz, the Gale Force'] });
+    expect(r.cards).toEqual(['Inniaz, the Gale Force']);
+    expect(r.spans).toEqual([{ mention: 'Innaiz, the gale force', name: 'Inniaz, the Gale Force', how: 'known' }]);
+  });
+
+  it('takes an earlier pick without asking, including just the misspelt word', () => {
+    const remembered = new Map(phrasesForPick('Innaiz, the gale force', 'Inniaz, the Gale Force', 'typo', sureIdx).map((p) => [p, 'Inniaz, the Gale Force']));
+    expect([...remembered.keys()]).toEqual(['innaiz the gale force', 'innaiz']);
+    const r = read('what about innaiz attacking', { remembered });
+    expect(r.cards).toEqual(['Inniaz, the Gale Force']);
+    expect(r.spans).toEqual([{ mention: 'innaiz', name: 'Inniaz, the Gale Force', how: 'remembered' }]);
+    expect(brief(read('is this my last chance', { remembered: new Map([['last chance', NOT_A_CARD]]) }))).toEqual({ cards: [], ambiguous: [] });
+  });
+});
+
+describe('markText', () => {
+  it('marks the cards where their words were, and leaves marks already there alone', () => {
+    expect(markText('Can you redirect innaiz, the gale force?', [{ mention: 'innaiz, the gale force', name: 'Inniaz, the Gale Force' }]))
+      .toBe('Can you redirect [[Inniaz, the Gale Force]]?');
+    expect(markText('what about teferi’s protection', [{ mention: "teferi's protection", name: "Teferi's Protection" }])).toBe("what about [[Teferi's Protection]]");
+    expect(markText('[[Sol Ring]] or sol ring', [{ mention: 'sol ring', name: 'Sol Ring' }])).toBe('[[Sol Ring]] or [[Sol Ring]]');
+    expect(markText('a Flickering flicker', [{ mention: 'flicker', name: 'Flicker' }])).toBe('a Flickering [[Flicker]]');
   });
 });

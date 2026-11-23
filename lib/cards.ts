@@ -15,10 +15,12 @@ import { dirname, join } from 'path';
 
 import { localCards } from './card-store';
 import { foldName } from './card-lookup';
-import { findMentions, nameIndex, type Mentions, type NameIndex } from './card-names';
+import { findMentions, markText, nameIndex, phraseKey, phrasesForPick, type CardPick, type CardReading, type NameIndex } from './card-names';
+import { cardPicks, rememberPick } from './card-picks';
+import { EVERYDAY_WORDS } from './everyday-words';
 import { database, storeCard } from './db';
 import { rulesIndex } from './rules/sources';
-import { cardNameCatalog, collection, getCard, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
+import { cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
 
 /** The key a name is matched by: its front face, folded (case, accents, curly quotes). */
 export const cardKey = (name: string) => foldName(name);
@@ -143,10 +145,34 @@ export async function cardNameIndex(): Promise<NameIndex> {
 }
 
 /**
- * The cards named in what the owner typed (lib/card-names.ts, findMentions), with the rules' own words as ordinary
- * language. Text marked [[like this]] is left to the caller: it names exactly that card.
+ * Read the owner's words for cards (AGENTS.md, "Reading the owner's words"): the cards we're sure of marked
+ * [[like this]] in the text, what to ask about, and how a loose word was read. `picks` are the owner's answers to
+ * earlier choices: remembered for the profile (lib/card-picks.ts), so the same words aren't asked again.
+ * `known`: cards in play where the text was written (the deck's, the conversation's).
  */
-export async function mentionsIn(text: string): Promise<Mentions> {
+export async function readCards(
+  text: string,
+  { profile = null, known = [], picks = [] }: { profile?: string | null; known?: string[]; picks?: CardPick[] } = {},
+): Promise<CardReading> {
   const [index, vocab] = await Promise.all([cardNameIndex(), rulesIndex().then((r) => r.vocab).catch(() => new Set<string>())]);
-  return findMentions(text.replace(/\[\[+[^[\]]*\]\]+/g, ' '), index, vocab);
+  const remembered = profile ? cardPicks(profile) : new Map<string, string>();
+  for (const p of picks) {
+    const phrases = phrasesForPick(p.mention, p.name, p.kind, index);
+    for (const phrase of phrases) remembered.set(phrase, p.name);
+    if (profile) rememberPick(profile, phrases, p.name);
+  }
+  const unmarked = text.replace(/\[\[+[^[\]]*\]\]+/g, ' ');
+  const m = findMentions(unmarked, index, vocab, { everyday: EVERYDAY_WORDS, known, remembered });
+  const pictures = m.ambiguous.length ? await findCards(m.ambiguous.flatMap((a) => a.options)).catch(() => null) : null;
+  return {
+    text: markText(text, m.spans),
+    cards: m.cards,
+    choices: m.ambiguous.map((a) => ({
+      mention: a.mention, kind: a.kind,
+      options: a.options.map((name) => { const c = pictures?.get(name); return { name, image: c ? imageOf(c, 'normal') : null }; }),
+    })),
+    // A word read loosely (a pick from before, a card in play) is said, with a way to forget a pick.
+    readAs: m.spans.filter((s) => s.how !== 'exact' && phraseKey(s.mention) !== phraseKey(s.name.split(' // ')[0]))
+      .map((s) => ({ mention: s.mention, name: s.name, remembered: s.how === 'remembered' })),
+  };
 }

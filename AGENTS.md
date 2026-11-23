@@ -48,6 +48,16 @@ Card names in what the owner types (a question, a search, a chat message) are fo
 matching text yourself. Exact names are taken; a word that could be several cards, or a misspelt name, comes back as a
 choice, and the page shows it with `<CardChoice>` before any AI call. A near match is never taken silently.
 
+- An AI call only gets a card we're sure the owner meant. A page that sends typed text to an AI checks it first with
+  `useCardCheck` (`components/CardChoice.tsx`): `const text = await cardCheck.check(typed, { known })`, then sends
+  `text`, or nothing when it's `null`. The server side is `readCards` in `lib/cards.ts` (`POST /api/cards/read`).
+- The sure cards come back marked `[[like this]]`, so the AI is given exactly those cards. `known` is the cards in
+  play on that page (the deck's, the conversation's): they win when the words could be them.
+- The owner's picks are remembered for their profile (`lib/card-picks.ts`), so the same words aren't asked twice; the
+  page says how it read them, with a way to forget. "None of these" sends nothing and asks them to check the spelling.
+- Everyday English in lower case stays words ("flicker effect"): the list is `lib/everyday-words.ts`, made by
+  `scripts/everyday-words.mts`. Run it again now and then, as new sets add names.
+
 ## AI calls and the agent context
 
 Every AI call passes one of three places:

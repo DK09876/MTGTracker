@@ -25,7 +25,6 @@
 
 import { colours, describeQuery, isUnfiltered } from './describe';
 import type { Context, Kind, Previous, Translation, Translator } from './gemini';
-import type { NamedChoice } from './card-names';
 import type { ScryfallCard, SearchResult } from './scryfall';
 import { imageOf, manaCostOf, oracleTextOf, ScryfallError, typeLineOf } from './scryfall';
 import { canPartner, mergePair, splitPair, type Commander } from './partners';
@@ -82,11 +81,6 @@ export interface Interpreted extends SearchResult {
    */
   choice?: { mention: string; options: CommanderRef[] };
   plan?: Translation;
-  /**
-   * The words look like a misspelt card name (lib/card-names.ts): the page asks which card with CardChoice, before
-   * the model is called, then searches again with the pick marked [[like this]], or as typed ("None of these").
-   */
-  nameChoice?: NamedChoice[];
 }
 
 /** A search paused to ask which commander was meant, resumed with the answer. */
@@ -101,8 +95,6 @@ export interface Deps {
   findCommanders: (mention: string) => Promise<ScryfallCard[]>;
   cardsNamed: (names: string[]) => Promise<ScryfallCard[]>;
   searchCombos: (query: string) => Promise<Combo[]>;
-  /** Misspelt card names in what was typed, as choices to put to the owner; none when it can't tell. */
-  typos?: (text: string) => Promise<NamedChoice[]>;
   /** Null when no model is configured; searches then run as typed. */
   translate: Translator | null;
   /** The clock, so the time budget can be tested. */
@@ -132,7 +124,6 @@ const NAME_WORDS = 5;
  */
 export async function interpret(
   input: string, deps: Deps, previous?: Previous, resume?: Resume, forDeck?: { commander: string },
-  { namesChecked = false }: { namesChecked?: boolean } = {},
 ): Promise<Interpreted> {
   const text = input.trim();
   const trace: Step[] = [];
@@ -153,16 +144,6 @@ export async function interpret(
     const used = sort ?? DEFAULT_SORT;
     const result = await searchStep(filters, deps, trace, used);
     return { ...result, trace, interpretation: { via: 'syntax', kind: 'cards', query: filters, sort: used } };
-  }
-
-  // A misspelt card name is asked about before the model reads it: the model would "correct" it silently, or
-  // search for the wrong card (AGENTS.md, "Reading the owner's words"). A follow-up refines; it is not checked.
-  if (!previous && !resume && !namesChecked && deps.typos) {
-    const nameChoice = await deps.typos(text).catch(() => [] as NamedChoice[]);
-    if (nameChoice.length) {
-      trace.push({ text: `“${nameChoice[0].mention}” is no card's name but close to one, so asked which card before the AI` });
-      return { ...EMPTY, trace, interpretation: { via: 'name', kind: 'card', query: '' }, nameChoice };
-    }
   }
 
   if (!deps.translate) {

@@ -1,35 +1,72 @@
 /**
  * Reading the owner's words for cards (AGENTS.md, "Reading the owner's words"), without a model: what they typed
- * - a rules question, a search - is matched against the name of every card (Scryfall's catalog, fetched once a
- * day: cardNameIndex in lib/cards.ts). Longest names first, so "Blade of Selves" is one card, not a blade.
+ * - a rules question, a search, a chat message - is matched against the name of every card (Scryfall's catalog,
+ * fetched once a day: cardNameIndex in lib/cards.ts). Longest names first, so "Blade of Selves" is one card.
  *
- * A word that begins more than one card's name - "kratos" - is a question
- * back: which Kratos? A word that is ordinary English or rules language -
- * "creature", "board", "fog" in lower case - is not taken for a card.
+ * Only a card we're sure of is taken; an AI call is never given a card the owner may not have meant:
+ *   - sure: a card already in play (`known`: the deck's, the conversation's), one the owner picked before
+ *     (`remembered`), a full name of three or more words, a two-word name with a word that isn't everyday English
+ *     ("rhystic study"), a name written with a capital ("Flicker"), or a word that begins only one name and isn't
+ *     everyday English ("hearthhull").
+ *   - asked (`choices`): a misspelt name ("Innaiz, the gale force": did you mean...?), a word that begins several
+ *     names ("kratos": which?), or a lower-case two-word name of everyday words ("lightning bolt", "last chance":
+ *     the card, or just the words?).
+ *   - left as words: everyday English and the game's own words in lower case ("flicker effect", "really", "wrath").
  *
- * A misspelt name - "Innaiz, the gale force" - is offered as "did you mean",
- * never taken: one letter off (two in a long word) from a word of a name.
- * The page shows the choices with components/CardChoice.tsx before any AI call.
- *
- * Pure: safe in the browser. Server code gets the index and the rules' words with mentionsIn (lib/cards.ts).
+ * The page asks with components/CardChoice.tsx (useCardCheck) before any AI call. Pure: safe in the browser; the
+ * server reads text with readCards (lib/cards.ts), which brings the index, the word lists and the owner's picks.
  */
 
-/** A pick for a "did you mean" that says none of the cards: the question is answered without one. */
+/** A pick for "the card, or just the words?" that says the words: they stay words, and it's remembered. */
 export const NOT_A_CARD = '-';
+
+/** typo: no card has the name, these are close. several: the words begin several names. maybe: a card's exact name in everyday words. */
+export type ChoiceKind = 'typo' | 'several' | 'maybe';
 
 /** A choice to put to the owner, with the cards' pictures (components/CardChoice.tsx). */
 export interface NamedChoice {
   mention: string;
-  /** The words looked like a misspelt name: "did you mean", with "None of these". */
-  typo?: boolean;
+  kind: ChoiceKind;
   options: Array<{ name: string; image: string | null }>;
 }
 
-export interface Mentions {
-  /** Cards named in full, by their exact names. */
+/** The owner's answer to a choice. */
+export interface CardPick { mention: string; name: string; kind: ChoiceKind }
+
+/** The owner's words, read (readCards in lib/cards.ts; POST /api/cards/read). */
+export interface CardReading {
+  /** The text with the cards we're sure of marked [[like this]]. */
+  text: string;
   cards: string[];
-  /** Words that could be several cards. */
-  ambiguous: Array<{ mention: string; options: string[]; typo?: boolean }>;
+  /** What to ask before the text goes anywhere, first one first. */
+  choices: NamedChoice[];
+  /** Words read loosely, to say so: "innaiz" as Inniaz, the Gale Force; `remembered` ones can be forgotten. */
+  readAs: Array<{ mention: string; name: string; remembered: boolean }>;
+}
+
+/** Where a sure card was found: the words as typed, and how it was settled. */
+export interface Span {
+  mention: string;
+  name: string;
+  how: 'exact' | 'remembered' | 'known';
+}
+
+export interface Mentions {
+  /** The cards we're sure of, by their exact names. */
+  cards: string[];
+  /** Each sure card's words, to mark [[like this]] (markText) and to say how a loose one was read. */
+  spans: Span[];
+  /** What to ask the owner. */
+  ambiguous: Array<{ mention: string; options: string[]; kind: ChoiceKind }>;
+}
+
+export interface ReadOptions {
+  /** Everyday English (lib/everyday-words.ts): only a card when written with a capital. */
+  everyday?: ReadonlySet<string>;
+  /** Cards already in play here (the deck, the conversation): these win when the words could be them. */
+  known?: string[];
+  /** The owner's earlier picks: the words, normalised (phraseKey) -> the card, or NOT_A_CARD. */
+  remembered?: ReadonlyMap<string, string>;
 }
 
 // Words that are also card names, or begin many, but are far more often just
@@ -52,6 +89,9 @@ const COMMON = new Set((
   // Contractions: "can't" began Can't Quite Recall and Can't Stay Away, and asked which (2026-09-30).
   + "can't cannot don't doesn't didn't won't isn't aren't wasn't weren't couldn't shouldn't wouldn't it's i'm i've that's what's there's"
 ).split(' '));
+
+/** The key a phrase is remembered by: lower case, no punctuation. */
+export const phraseKey = (s: string) => normalise(s);
 
 const normalise = (s: string) => s.toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -131,24 +171,55 @@ function closeWords(w: string, index: NameIndex): string[] {
 }
 
 /**
- * `ordinary`: words of the game's own language - every word of the
- * Comprehensive Rules - which are only a card when written with a capital:
- * "copied by a clone" is a clone effect, "copied by Clone" is the card.
+ * `ordinary`: words of the game's own language - every word of the Comprehensive Rules - which are only a card when
+ * written with a capital: "copied by a clone" is a clone effect, "copied by Clone" is the card.
  */
-export function findMentions(question: string, index: NameIndex, ordinary: Set<string> = new Set(), { asName = false } = {}): Mentions {
-  const plain = (w: string) => COMMON.has(w) || ordinary.has(w);
-  // A capital means a name, except at the start of the question. `asName`: the text is meant as a card's name.
-  const capital = (i: number) => asName || (i > 0 && /^[A-Z]/.test(raw[i]));
-  const shortest = asName ? 4 : 5;
+export function findMentions(question: string, index: NameIndex, ordinary: ReadonlySet<string> = new Set(), opts: ReadOptions = {}): Mentions {
+  const { everyday = new Set<string>(), known = [], remembered = new Map<string, string>() } = opts;
   // Keep the words as typed, to know which were capitalised.
   const raw = question.replace(/[’']/g, "'").split(/[^A-Za-z0-9',]+/).filter(Boolean);
   const words = raw.map((w) => normalise(w).replace(/'s$/, ''));
+  // A capital means a name, except at the start of the question.
+  const capital = (i: number) => i > 0 && /^[A-Z]/.test(raw[i]);
+  const game = (w: string) => COMMON.has(w) || ordinary.has(w);
+  // Everyday English, or a plain form of it ("bounces", "flickering").
+  const stems = (w: string) => [w, w.replace(/(s|es|ed|ing|er|ers|ly)$/, ''), w.replace(/(s|ed|er|ers|d)$/, '')];
+  const plainWord = (w: string) => game(w) || stems(w).some((x) => everyday.has(x));
+  const knownKey = new Map(known.map((k) => [normalise(k.split(' // ')[0]), k]));
+  const isKnown = (name: string) => knownKey.has(normalise(name.split(' // ')[0]));
   const used = new Array(words.length).fill(false);
-  // Names found in full, with the words they took: a misspelt longer name over the same words replaces them.
-  const hits: Array<{ name: string; start: number; end: number }> = [];
-  const ambiguous: Mentions['ambiguous'] = [];
+  const mention = (start: number, end: number) => raw.slice(start, end + 1).join(' ').replace(/[,']+$/, '');
+  // Cards found, with the words they took: a misspelt longer name over the same words replaces them.
+  const hits: Array<{ name: string; start: number; end: number; how: Span['how'] }> = [];
+  const asks: Array<Mentions['ambiguous'][number] & { start: number; end: number }> = [];
+  const take = (name: string, start: number, end: number, how: Span['how']) => {
+    hits.push({ name, start, end, how });
+    for (let k = start; k <= end; k++) used[k] = true;
+  };
+  // Several options, or a loose one: a card in play settles it; else it's a question.
+  const settle = (options: string[], start: number, end: number, kind: ChoiceKind) => {
+    const inPlay = options.filter(isKnown);
+    if (inPlay.length === 1) take(inPlay[0], start, end, kind === 'maybe' ? 'exact' : 'known');
+    else {
+      asks.push({ mention: mention(start, end), options, kind, start, end });
+      for (let k = start; k <= end; k++) used[k] = true;
+    }
+  };
   const lookup = (phrase: string, n: number) =>
     index.full.get(phrase) ?? (n > 1 && phrase.endsWith('s') ? index.full.get(phrase.slice(0, -1)) : undefined);
+
+  // The owner's earlier picks, longest first: "innaiz" is Inniaz, the Gale Force; "last chance" is just words.
+  if (remembered.size) {
+    for (let n = Math.min(index.longest, words.length); n >= 1; n--) {
+      for (let i = 0; i + n <= words.length; i++) {
+        if (used.slice(i, i + n).some(Boolean)) continue;
+        const picked = remembered.get(words.slice(i, i + n).join(' '));
+        if (!picked) continue;
+        if (picked === NOT_A_CARD) for (let k = i; k < i + n; k++) used[k] = true;
+        else take(picked, i, i + n - 1, 'remembered');
+      }
+    }
+  }
 
   // Full names, longest first. A comma in a name ("Kratos, Stoic Father") is optional.
   for (let n = Math.min(index.longest, words.length); n >= 1; n--) {
@@ -158,11 +229,16 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
       // "forsaken monuments" is Forsaken Monument: a plural last word still finds the name.
       const name = lookup(phrase, n);
       if (!name) continue;
-      // One common word ("fog", "opt") is only a card if it was written like one.
-      if (n === 1 && plain(phrase) && !capital(i)) continue;
-      if (n === 1 && phrase.length < 3) continue;
-      hits.push({ name, start: i, end: i + n - 1 });
-      for (let k = i; k < i + n; k++) used[k] = true;
+      const written = Array.from({ length: n }, (_, k) => capital(i + k)).some(Boolean);
+      if (n === 1) {
+        if (phrase.length < 3) continue;
+        // One everyday or game word ("flicker", "fog") is only a card if it was written like one, or is in play.
+        if (plainWord(phrase) && !written && !isKnown(name)) continue;
+        take(name, i, i, 'exact');
+      } else if (n === 2 && !written && !isKnown(name) && words.slice(i, i + 2).every(plainWord)) {
+        // "lightning bolt", "last chance": the card, or just the words?
+        settle([name], i, i + 1, 'maybe');
+      } else take(name, i, i + n - 1, 'exact');
     }
   }
 
@@ -172,8 +248,9 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
   const typoUsed = new Array(words.length).fill(false);
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    if (used[i] || w.length < shortest || /\d/.test(w) || index.words.has(w)) continue;
-    if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
+    // Four letters is enough inside a full name ("Sol Rnig"), where the other words must match too; on its own, five.
+    if (used[i] || w.length < 4 || /\d/.test(w) || index.words.has(w)) continue;
+    if (COMMON.has(w) || (ordinary.has(w) && !capital(i)) || (!capital(i) && stems(w).some((x) => everyday.has(x)))) continue;
     if (/(s|es|ed|ing|er|ers)$/.test(w) && [w.replace(/(s|es|ed|ing|er|ers)$/, ''), w.replace(/(s|ed|er|ers)$/, '')].some((x) => index.words.has(x))) continue;
     // Inside a full name any word may be the fix ("Teferi's Protecton"); on its own, not an ordinary one.
     const fixes = closeWords(w, index);
@@ -194,59 +271,73 @@ export function findMentions(question: string, index: NameIndex, ordinary: Set<s
       if (names.size) found = { names: [...names], start, end: start + n - 1 };
     }
     // A word on its own is only a name if written like one ("Innaiz?"): lower case, "really" is not Rally the Ranks.
-    if (!found && capital(i)) {
-      const names = [...new Set(fixes.filter((f) => !COMMON.has(f) && !ordinary.has(f)).flatMap((f) => index.first.get(f) ?? []))];
+    if (!found && capital(i) && w.length >= 5) {
+      const names = [...new Set(fixes.filter((f) => !game(f) && !everyday.has(f)).flatMap((f) => index.first.get(f) ?? []))];
       if (names.length && names.length <= 12) found = { names: names.sort(), start: i, end: i };
     }
     if (!found) continue;
     const { start, end } = found;
-    // An exact name inside the misspelt one is the other option.
+    // An exact name inside the misspelt one ("gale force") is the other option.
     const inside = hits.filter((h) => h.start >= start && h.end <= end);
     for (const h of inside) hits.splice(hits.indexOf(h), 1);
-    ambiguous.push({
-      mention: raw.slice(start, end + 1).join(' ').replace(/[,']+$/, ''),
-      options: [...new Set([...found.names, ...inside.map((h) => h.name)])],
-      typo: true,
-    });
-    for (let k = start; k <= end; k++) { used[k] = true; typoUsed[k] = true; }
+    const askedInside = asks.filter((a) => a.start >= start && a.end <= end);
+    for (const a of askedInside) asks.splice(asks.indexOf(a), 1);
+    for (let k = start; k <= end; k++) { used[k] = false; typoUsed[k] = true; }
+    settle([...new Set([...found.names, ...inside.map((h) => h.name), ...askedInside.flatMap((a) => a.options)])], start, end, 'typo');
   }
 
   // Then a word that begins card names: one is that card, a few are a question.
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
     if (used[i] || w.length < 4 || /^\d+$/.test(w)) continue;
-    // Plain English never begins a name here; the game's words only with a capital.
-    if (COMMON.has(w) || (ordinary.has(w) && !capital(i))) continue;
+    // Plain English and the game's words never begin a name here, unless written with a capital.
+    if (COMMON.has(w) || (!capital(i) && plainWord(w))) continue;
     // A type before "token" or "creature" is the type: "Soldier tokens" are not Soldier of Fortune (2026-09-30).
     if (ordinary.has(w) && /^(tokens?|creatures?|cards?|spells?|permanents?)$/.test(words[i + 1] ?? '')) continue;
     const options = index.first.get(w);
     if (!options?.length || options.length > 12) continue;
-    if (options.length === 1) hits.push({ name: options[0], start: i, end: i });
-    else ambiguous.push({ mention: raw[i].replace(/[,']+$/, ''), options: [...options].sort() });
-    used[i] = true;
+    if (options.length === 1) take(options[0], i, i, 'exact');
+    else settle([...options].sort(), i, i, 'several');
   }
-  return { cards: [...new Set(hits.map((h) => h.name))], ambiguous };
+
+  const sure = [...hits].sort((a, b) => a.start - b.start);
+  return {
+    cards: [...new Set(hits.map((h) => h.name))],
+    spans: sure.map((h) => ({ mention: mention(h.start, h.end), name: h.name, how: h.how })),
+    ambiguous: asks.sort((a, b) => a.start - b.start).map(({ mention: m, options, kind }) => ({ mention: m, options, kind })),
+  };
 }
 
 /**
- * The card names closest to one the owner wrote that no card has ("[[Innaiz, the Gale Force]]"), most likely first;
- * [] when none is close. To offer, never to take in its place.
+ * The phrases to remember for a pick: the words as typed, and for a misspelt name each misspelt word on its own
+ * ("innaiz"), so the owner needn't type the whole name again.
  */
-export function nearNames(name: string, index: NameIndex, max = 3): string[] {
-  const m = findMentions(name, index, new Set(), { asName: true });
-  // The whole name was meant as one card: not a shorter name found inside it ("Gale Force").
-  const words = (n: string) => normalise(n.split(' // ')[0]).split(' ').length;
-  const typed = words(name);
-  return [...new Set(m.ambiguous.filter((a) => a.typo).flatMap((a) => a.options))].filter((o) => words(o) === typed).slice(0, max);
+export function phrasesForPick(mention: string, name: string, kind: ChoiceKind, index: NameIndex): string[] {
+  const out = [phraseKey(mention)];
+  if (kind === 'typo' && name !== NOT_A_CARD) {
+    const nameWords = new Set(normalise(name).split(' '));
+    for (const w of phraseKey(mention).split(' ').map((x) => x.replace(/'s$/, ''))) {
+      if (w.length >= 4 && !index.words.has(w) && closeWords(w, index).some((c) => nameWords.has(c))) out.push(w);
+    }
+  }
+  return [...new Set(out)];
 }
 
+const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]");
+
 /**
- * The owner's text with a choice made: the words of `mention` replaced by the card, marked [[like this]] so it is
- * that card from then on (lib/agent-context.ts) and not asked about again.
+ * The owner's text with cards marked [[like this]] where their words were (spans from findMentions), so the card is
+ * exactly that one from then on (lib/agent-context.ts). Words already inside a mark are left alone.
  */
-export function withPick(text: string, mention: string, name: string): string {
-  const words = mention.split(/\s+/).filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]"));
-  if (!words.length) return text;
-  const at = new RegExp(words.join("[^A-Za-z0-9',’]+"), 'i');
-  return at.test(text) ? text.replace(at, `[[${name}]]`) : `${text} [[${name}]]`;
+export function markText(text: string, spans: Array<{ mention: string; name: string }>): string {
+  // Keep existing marks out of reach while the words are found.
+  const kept: string[] = [];
+  let out = text.replace(/\[\[+[^[\]]*\]\]+/g, (m) => `\u0000${kept.push(m) - 1}\u0000`);
+  for (const { mention, name } of spans) {
+    const words = mention.split(/\s+/).filter(Boolean).map(escape);
+    if (!words.length) continue;
+    const at = new RegExp(`(?<![A-Za-z0-9])${words.join("[^A-Za-z0-9',’]+")}(?![A-Za-z0-9])`, 'i');
+    out = out.replace(at, () => `\u0000${kept.push(`[[${name}]]`) - 1}\u0000`);
+  }
+  return out.replace(/\u0000(\d+)\u0000/g, (_, k) => kept[Number(k)]);
 }

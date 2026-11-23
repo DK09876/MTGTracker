@@ -481,24 +481,3 @@ describe('which commander', () => {
     expect(result.trace[0].text).toBe('You picked Omnath, Locus of Creation');
   });
 });
-
-describe('a misspelt card name', () => {
-  const choice = [{ mention: 'Innaiz', typo: true, options: [{ name: 'Inniaz, the Gale Force', image: null }] }];
-
-  it('is asked about before the model is called', async () => {
-    const d = deps({ typos: vi.fn(async () => choice) });
-    const result = await interpret('cards like Innaiz', d);
-    expect(result.nameChoice).toEqual(choice);
-    expect(d.translate).not.toHaveBeenCalled();
-    expect(d.search).not.toHaveBeenCalled();
-  });
-
-  it('is not asked again once the owner said none of these, nor for syntax or a follow-up', async () => {
-    const d = deps({ typos: vi.fn(async () => choice) });
-    expect((await interpret('cards like Innaiz', d, undefined, undefined, undefined, { namesChecked: true })).nameChoice).toBeUndefined();
-    await interpret('t:goblin c:r', d);
-    await interpret('only blue ones', d, { request: 'cards like Innaiz', kind: 'cards', query: 'c:u' });
-    expect(d.typos).not.toHaveBeenCalled();
-    expect(d.translate).toHaveBeenCalledTimes(2);
-  });
-});

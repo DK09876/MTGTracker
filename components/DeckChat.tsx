@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import { foldName } from '@/lib/card-lookup';
+import { useCardCheck } from './CardChoice';
 import CardText, { CardLink, CardTextContext } from './CardText';
 import { openCard as openPopup } from './CardPopup';
 import { AI_READS } from '@/lib/ai-reads';
@@ -106,12 +107,17 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   /** Allow, when Claude asked to read the Tune page: let it, then ask it to go ahead, as the owner would. */
   const allowTune = async () => { await setShareTune(true); await send('Go ahead and read my Tune page.'); };
 
-  const send = async (question = text) => {
-    if (!question.trim() || replying || sendingRef.current || updating) return;
+  const cardCheck = useCardCheck();
+  const send = async (typed = text) => {
+    if (!typed.trim() || replying || sendingRef.current || updating) return;
     sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
+      // Card names are checked before Claude reads them (AGENTS.md, "Reading the owner's words"); the deck's own
+      // cards count as in play, so "kratos" is the Kratos in this deck.
+      const question = await cardCheck.check(typed, { known: [...cards.map((c) => c.card.name), ...(commander ? [commander.name] : [])] });
+      if (question === null) return;
       const r = await api.askDeck(listId, question, open ?? undefined, open ? undefined : shareTuneNew);
       setText('');
       setChat(r.chat);
@@ -370,6 +376,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
           <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
           <button type="submit" disabled={replying || sending || updating || !text.trim()} title={updating ? UPDATING_TITLE : undefined} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
+        {/* Below the composer, which stays pinned to the screen and would cover it. */}
+        {cardCheck.panel}
       </section>
     </div>
   );

@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import CardChoice from '@/components/CardChoice';
+import CardChoice, { useCardCheck } from '@/components/CardChoice';
 import CardText, { CardLinks, CardTextContext } from '@/components/CardText';
 import { withoutMarks } from '@/lib/chat-text';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -97,10 +97,18 @@ export default function RulesPage() {
     return () => clearTimeout(timer);
   }, [refresh, open]);
 
+  const cards = useCardCheck();
   const ask = async (text: string, picks: Record<string, string> = {}, inThread = thread, clarifications: Array<{ question: string; answer: string }> = []) => {
-    const q = text.trim();
+    let q = text.trim();
     if (!q || busy) return;
     dismissKeyboard();
+    // A new question's card names are checked first (AGENTS.md, "Reading the owner's words"): sure ones marked, the
+    // rest asked; the conversation's cards count as in play.
+    if (!Object.keys(picks).length && !clarifications.length) {
+      const checked = await cards.check(q, { known: inThread?.turns.flatMap((t) => t.cards) ?? [] });
+      if (checked === null) return;
+      q = checked;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -176,7 +184,10 @@ export default function RulesPage() {
       choice={openChoice}
       question={choosing.question}
       onPick={(name) => pick(openChoice.mention, name)}
-      onNone={() => pick(openChoice.mention, NOT_A_CARD)}
+      onNone={openChoice.kind === 'maybe' ? () => pick(openChoice.mention, NOT_A_CARD) : () => {
+        setChoosing(null);
+        setError(`No card matched “${openChoice.mention}”. Check the spelling and the words, then try again.`);
+      }}
       onCancel={() => setChoosing(null)}
     />
   );
@@ -290,6 +301,7 @@ export default function RulesPage() {
       )}
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
+      {!thread && cards.panel}
       {!thread && choicePanel}
       {!thread && clarifyPanel}
 
@@ -353,6 +365,7 @@ export default function RulesPage() {
             </section>
           ))}
 
+          {cards.panel}
           {choicePanel}
           {clarifyPanel}
           <Composer

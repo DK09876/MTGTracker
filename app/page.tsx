@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
-import CardChoice from '@/components/CardChoice';
+import { useCardCheck } from '@/components/CardChoice';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import CommanderField from '@/components/CommanderField';
@@ -18,7 +18,6 @@ import { SaveBar } from '@/components/SavedSearches';
 import SearchBox from '@/components/SearchBox';
 import { useSearch } from '@/components/useSearch';
 import * as api from '@/lib/api';
-import { withPick } from '@/lib/card-names';
 import type { List } from '@/lib/db';
 import type { Previous } from '@/lib/gemini';
 import { identityStyle } from '@/lib/identity';
@@ -134,16 +133,26 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const search = (text: string, { checked = false } = {}) => {
-    const term = text.trim();
+  const cards = useCardCheck();
+
+  const search = async (text: string) => {
+    let term = text.trim();
     if (!term) return;
     // The keyboard closes now, before results come up to be tapped.
     dismissKeyboard();
+    // Card names are checked before the AI reads them (AGENTS.md, "Reading the owner's words"): Scryfall syntax is
+    // left as written. What was read is shown in the box: the cards marked [[like this]].
+    if (!looksLikeSyntax(term)) {
+      const checked = await cards.check(term, { known: forCommander ? [forCommander.name] : [] });
+      if (checked === null) return;
+      if (checked !== term) setQuery(checked);
+      term = checked;
+    }
     setOpenSaved(null);
     setSearched(true);
     setThread([term]);
     setAsked({ text: term });
-    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => (forCommander ? api.askForDeck(term, forCommander.name, undefined, { checked }) : api.ask(term, { checked })), (r) => {
+    run(looksLikeSyntax(term) ? 'searching' : 'thinking', () => (forCommander ? api.askForDeck(term, forCommander.name) : api.ask(term)), (r) => {
       showAnswer(r);
       remember(term, replayOf(r));
     });
@@ -375,9 +384,11 @@ export default function SearchPage() {
     },
   };
 
-  const followUp = (text: string) => {
+  const followUp = async (typed: string) => {
     if (!answer) return;
     dismissKeyboard();
+    const text = await cards.check(typed, { known: forCommander ? [forCommander.name] : [] });
+    if (text === null) return;
     const previous = previousOf(answer, thread);
     run('thinking', () => (forCommander ? api.askForDeck(text, forCommander.name, previous) : api.followUp(text, previous)), (r) => {
       setThread((t) => [...t, text]);
@@ -385,15 +396,6 @@ export default function SearchPage() {
       showAnswer(r);
       remember([...thread, text].join(THREAD), replayOf(r));
     });
-  };
-
-  /** Answer "did you mean…?" for a misspelt card name: search again with the card marked, or as typed. */
-  const nameChoice = answer?.nameChoice?.[0];
-  const pickTypo = (name: string | null) => {
-    if (!asked || !nameChoice) return;
-    const text = name ? withPick(asked.text, nameChoice.mention, name) : asked.text;
-    setQuery(text);
-    search(text, { checked: !name });
   };
 
   /** Answer "which commander?" and let the search carry on. */
@@ -478,7 +480,7 @@ export default function SearchPage() {
       {/* Under the box, one row: saving (or ideas to try) on the left, the model on the right. */}
       <div className="mt-2 flex items-start gap-3 max-sm:flex-col-reverse max-sm:items-stretch">
         <div className="min-w-0 flex-1">
-          {status === 'idle' && hasViews && !answer?.choice && !nameChoice && session && (
+          {status === 'idle' && hasViews && !answer?.choice && session && (
             <SaveBar session={session} saved={savedNow} onSave={saveAs} onSaveChanges={saveChanges} onNew={newSearch} />
           )}
           {!searched && (
@@ -499,16 +501,14 @@ export default function SearchPage() {
         <AiModelPicker area="search" align="right" className="shrink-0 max-sm:self-end" />
       </div>
 
-      {answer && status !== 'thinking' && !nameChoice && (
+      {answer && status !== 'thinking' && (
         <Interpreted interpretation={answer.interpretation} trace={answer.trace} onRun={s.runEdited} />
       )}
-      {answer && !answer.choice && !nameChoice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
+      {answer && !answer.choice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
+      {cards.panel}
 
       {status === 'idle' && answer?.choice && (
         <CommanderChoice mention={answer.choice.mention} options={answer.choice.options} onPick={pickCommander} />
-      )}
-      {status === 'idle' && nameChoice && (
-        <CardChoice id="which-card" choice={nameChoice} question={asked?.text} onPick={(n) => pickTypo(n)} onNone={() => pickTypo(null)} />
       )}
 
       {status === 'searching' && <p className="mt-8 text-center text-[var(--muted)]">Searching…</p>}
@@ -516,7 +516,7 @@ export default function SearchPage() {
       {status === 'error' && <p className="mt-8 text-center text-red-400">{s.error}</p>}
 
 
-      {status === 'idle' && hasViews && !answer?.choice && !nameChoice && (
+      {status === 'idle' && hasViews && !answer?.choice && (
         <Results
           views={views}
           commander={answer?.interpretation.kind !== 'card' ? answer?.interpretation.commander?.name : undefined}

@@ -11,9 +11,10 @@ import type { Release, UnreleasedItem } from './releases';
  * v…", with no banner.
  */
 export const UNRELEASED: UnreleasedItem[] = [
-  { kind: 'new', date: '2026-11-23', title: 'Rules and Search ask which card you meant', details: 'Misspell a card name, like “Innaiz, the gale force”, and Rules or Search shows the closest cards to pick from before answering, or None of these. Before, the answer could be about the wrong card.' },
+  { kind: 'new', date: '2026-11-23', title: 'The app asks which card you meant before Claude answers', details: 'In Rules, Search, Chat, Tune and Trim, a misspelt or unclear card name, like “Innaiz”, shows the closest cards to pick from first. Before, the answer could be about the wrong card. Claude is only given the cards you meant.' },
+  { kind: 'new', date: '2026-11-23', title: 'Pick a card once and the app remembers it', details: 'After you pick Inniaz for “innaiz”, the app reads it that way from then on, everywhere. A line under your message says how a word was read, with a way to forget it.' },
   { kind: 'fix', date: '2026-11-23', title: 'Rules finds card names with an apostrophe', details: 'Questions about cards like [[Teferi’s Protection]] or [[Thassa’s Oracle]] go straight to that card, written with or without the apostrophe, instead of asking which Teferi you meant.' },
-  { kind: 'fix', date: '2026-11-23', title: 'Chat gets the card you meant when a marked name has a typo', details: 'Mark a card name with double square brackets but misspell it, and Chat and the other AI helpers are given the closest card, and say which one they took it to be.' },
+  { kind: 'fix', date: '2026-11-23', title: 'Everyday words aren’t taken for cards', details: 'Words like “really”, “wrath” or “flicker” in a question stay words: no more “Which Really did you mean?”. Write a name with a capital to mean the card.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
