@@ -11,6 +11,7 @@ import type { Release, UnreleasedItem } from './releases';
  * v…", with no banner.
  */
 export const UNRELEASED: UnreleasedItem[] = [
+  { kind: 'fix', date: '2026-11-24', title: 'Trim lets you start another round after applying cuts', details: 'After applying cuts, Trim used to stay on its finished screen until you pressed Undo. Now Start another round takes you back to What matters with the deck as it is, the heading shows its real size, and Undo turns off once the deck has changed since the cuts.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
