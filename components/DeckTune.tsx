@@ -47,6 +47,8 @@ interface Props {
   onAsk: (question: string) => void;
   /** Open a card the way the card view does. */
   onCard?: (card: import('@/lib/scryfall').ScryfallCard) => void;
+  /** The deck's cards and commander: in play when the owner's words are read for cards (CardChoice). */
+  deckNames?: string[];
 }
 
 const BUTTON = 'rounded-full border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--surface-hover)] disabled:opacity-50';
@@ -58,7 +60,7 @@ const remembered = (listId: string): Intent | null => {
   try { return intentOf(sessionStorage.getItem(`mtg-tune:${listId}`)) ?? null; } catch { return null; }
 };
 
-export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk, onCard }: Props) {
+export default function DeckTune({ listId, version, sections, styleLabel, tagNames, onChanged, onTab, onAsk, onCard, deckNames = [] }: Props) {
   // A deploy is under way: nothing new starts until it is back (handoff 9).
   const updating = useUpdating();
   const [intent, setIntent] = useState<Intent | null>(() => remembered(listId));
@@ -191,7 +193,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
   const ask = async () => {
     let text = instructions;
     if (text.trim()) {
-      const checked = await cardCheck.check(text);
+      const checked = await cardCheck.check(text, { known: deckNames });
       if (checked === null) return;
       setInstructions(checked);
       text = checked;
@@ -248,7 +250,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
           </p>
         )}
 
-        {current === 'cuts' && <DeckTrim listId={listId} version={version} sections={sections} onChanged={async () => { await onChanged(); await load(intent, symptom); }} onTab={onTab} />}
+        {current === 'cuts' && <DeckTrim listId={listId} version={version} sections={sections} deckNames={deckNames} onChanged={async () => { await onChanged(); await load(intent, symptom); }} onTab={onTab} />}
         {current === 'fix' && <FixBar state={state} symptom={symptom} onSymptom={setSymptom} busy={busy}
           onVerdict={(id, verdict) => act(() => api.tuneAct(listId, { action: 'verdict', id, verdict }), verdict === 'worse' ? 'The fix is staged to be undone in Your changes.' : 'Noted.')} />}
         {current === 'lands' && state.lands && <LandsBar lands={state.lands} />}
@@ -262,7 +264,7 @@ export default function DeckTune({ listId, version, sections, styleLabel, tagNam
           showFree={!!state.finish?.showRules} onFree={(showRules) => act(() => api.tuneAct(listId, { action: 'finishPicks', showRules }))} />}
 
         {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && <AskClaude intent={current} busy={busy || updating} job={job} instructions={instructions} onInstructions={setInstructions}
-          onAsk={() => void ask()} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
+          deckNames={deckNames} onAsk={() => void ask()} onChat={() => onAsk(`Help me tune this deck: ${INTENTS.find((i) => i.id === current)!.label.toLowerCase()}.${instructions.trim() ? ` ${instructions.trim()}` : ''}`)} />}
         {current !== 'finish' && current !== 'cuts' && current !== 'upgrades' && cardCheck.panel}
 
         {current === 'cuts' ? (
@@ -467,8 +469,8 @@ function LandsBar({ lands }: { lands: NonNullable<api.TuneState['lands']> }) {
   );
 }
 
-function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onChat }: {
-  intent: Intent; busy: boolean; job: Job | null; instructions: string; onInstructions: (v: string) => void;
+function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onChat, deckNames }: {
+  intent: Intent; busy: boolean; job: Job | null; instructions: string; onInstructions: (v: string) => void; deckNames: string[];
   onAsk: () => void; onChat: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -489,7 +491,7 @@ function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onC
           placeholder={intent === 'cuts' ? 'e.g. Keep anything that attacks alone. I’d rather cut ramp than draw.' : 'e.g. Cards under $5. Lean into the graveyard.'}
           className="max-w-3xl resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
       )}
-      {open && <CardSuggestions text={instructions} onText={onInstructions} />}
+      {open && <CardSuggestions text={instructions} onText={onInstructions} known={deckNames} />}
     </div>
   );
 }

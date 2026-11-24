@@ -37,6 +37,8 @@ interface Props {
   /** After applying or undoing, the deck page reads the deck again. */
   onChanged: () => Promise<void> | void;
   onTab: (tab: string) => void;
+  /** The deck's cards and commander: in play when the owner's words are read for cards (CardChoice). */
+  deckNames?: string[];
 }
 
 type Step = 'approach' | 'cuts' | 'review';
@@ -69,7 +71,7 @@ const reasonWords = (c?: { chip?: string | null; text?: string }) => [c?.chip ? 
 const addLine = (box: string, line: string) => { const t = box.trim(); return !t ? line : /[.!?]$/.test(t) ? `${t} ${line}` : `${t}. ${line}`; };
 const names = (xs: string[]) => xs.join('; ');
 
-export default function DeckTrim({ listId, version, sections, onChanged, onTab }: Props) {
+export default function DeckTrim({ listId, version, sections, onChanged, onTab, deckNames = [] }: Props) {
   // A deploy is under way: nothing new starts until it is back (handoff 9).
   const updating = useUpdating();
   const [view, setView] = useState<TrimView | null>(null);
@@ -219,8 +221,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   const send = async () => {
     let said = message;
     if (said.trim()) {
-      // The deck's cards on the list count as in play: "the bolt" there is that card.
-      const checked = await cardCheck.check(said, { known: items.map((i) => i.name) });
+      // The deck's cards count as in play: a name of one of them is that card.
+      const checked = await cardCheck.check(said, { known: [...deckNames, ...items.map((i) => i.name)] });
       if (checked === null) return;
       setMessage(checked);
       said = checked;
@@ -346,7 +348,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             ) : view.run.notes ? (
               <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <CardText text={view.run.notes} /></p>
             ) : null}
-          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
+          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost} known={deckNames}
             disabled={busy || cutsRunning || view.noKey || updating} onSend={() => void send()} />
           {cardCheck.panel}
 
@@ -488,7 +490,8 @@ function Numbers({ rows }: { rows: TrimView['impact']['rows'] }) {
 }
 
 /** The cut session so far, the owner's turns in gold and Claude's in violet, then the box to say something back. */
-function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSend }: {
+function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSend, known }: {
+  known: string[];
   turns: TrimTurn[]; ask: string | null; message: string; setMessage: (m: string) => void; marked: number; cost: string; disabled: boolean; onSend: () => void;
 }) {
   const can = marked > 0 || !!message.trim();
@@ -505,7 +508,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
           aria-describedby="trim-say-keys"
           placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
           className={`${C.input} w-full resize-y py-2.5`} />
-        <CardSuggestions text={message} onText={setMessage} />
+        <CardSuggestions text={message} onText={setMessage} known={known} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] text-[var(--muted)]">Weigh more:</span>
           {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}
