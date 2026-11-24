@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useCardCheck } from './CardChoice';
 import CardModal from './CardModal';
 import Interpreted from './Interpreted';
 import Results, { type Views } from './Results';
@@ -50,6 +51,7 @@ const BOARD_LABEL: Record<string, string> = { main: 'In deck', maybe: 'On maybeb
 export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onClose, sections = [], tags = null, onTags }: Props) {
   // Where added cards go, and a tag to put on them; remembered while the panel is open.
   const [target, setTarget] = useState<Board>('main');
+  const cardCheck = useCardCheck();
   const [tagId, setTagId] = useState('');
   const [newTag, setNewTag] = useState<string | null>(null);
   // Names as you type: the answer is kept with the text it answers, so a slow one can't add the wrong card.
@@ -101,11 +103,19 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
     return () => clearTimeout(timer);
   }, [text, listId]);
 
-  const runSearch = () => {
+  const runSearch = async () => {
     dismissKeyboard();
-    const q = text.trim();
+    let q = text.trim();
     if (!q) return;
     setQuick(null);
+    // A described search's card names are checked before the AI reads them (AGENTS.md, "Reading the owner's
+    // words"); the deck's own cards count as in play. Scryfall syntax runs as written.
+    if (!looksLikeSyntax(q)) {
+      const checked = await cardCheck.check(q, { known: [...inDeck.keys(), ...(commander ? [commander] : [])] });
+      if (checked === null) return;
+      if (checked !== q) setText(checked);
+      q = checked;
+    }
     s.run(looksLikeSyntax(q) ? 'searching' : 'thinking',
       () => (commander ? api.askForDeck(q, commander) : api.ask(q)), s.showAnswer);
   };
@@ -307,6 +317,7 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
+          {cardCheck.panel}
           {!commander && !s.answer && !busy && (
             <p className="text-sm text-[var(--muted)]">Pick a commander for the deck to see cards it can play — or search for anything above.</p>
           )}
