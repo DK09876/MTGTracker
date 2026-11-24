@@ -103,6 +103,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab, 
     if (fresh || !dirty.current) { setChoices(v.choices); if (fresh) setCard({}); }
     // A new list answered what was sent: the message box starts empty again, and "What changed" comes into view.
     if (fresh && v.run && runId.current !== null) { setStep('cuts'); setMessage(''); if (v.run.round > 1) scrollChanged.current = true; }
+    // The list went (a new round, from here or from Chat): back to step 1, not an empty step 2 or 3.
+    if (fresh && !v.run) setStep(null);
     runId.current = v.run?.id ?? null;
     // The box follows the saved text when it changes on the server (a draft, or Claude adding to it).
     const at = v.approach?.at ?? null;
@@ -233,15 +235,19 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab, 
   // --- done: what happened, and the way back --------------------------------------------
   if (view.done) {
     const d = view.done;
+    // The deck as it is now, not as the apply left it: cards may have come in or gone since.
+    const size = view.size;
+    const left = Math.max(0, size - 100);
     return (
       <section className={`${CARD} flex flex-col gap-3`} data-tour="trim-done" data-section="Trim">
-        <h3 className="font-display text-2xl font-semibold">{d.size === 100 ? 'The deck is at 100 cards' : `The deck is at ${d.size} cards${d.size > 100 ? `, ${d.size - 100} over` : ''}`}</h3>
+        <h3 className="font-display text-2xl font-semibold">{size === 100 ? 'The deck is at 100 cards' : `The deck is at ${size} cards${left ? `, ${left} over` : ''}`}</h3>
         <p className="text-sm text-[var(--muted)]">{d.cut} card{d.cut === 1 ? '' : 's'} moved to {d.to}, each with its reason. A snapshot from before is in History.{d.notes ? ` ${d.notes} line${d.notes === 1 ? '' : 's'} from the session went to your notes.` : ''}</p>
+        {view.changedSinceDone && <p className="text-sm text-[var(--muted)]">The deck changed since these cuts, so Undo is off: it could put back the wrong cards.</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
-          <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>
-          <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, async () => { setStep('cuts'); await onChanged(); })}>Undo</button>
-          {d.size > 100 && <button className={C.btn} disabled={busy} onClick={() => act({ action: 'reset' })}>Trim the rest</button>}
+          <button className={C.go} disabled={busy} onClick={() => act({ action: 'reset' }, () => setStep('approach'))}>Start another round{left ? ` · ${left} to cut` : ''}</button>
+          <button className={C.btn} onClick={() => onTab('check')}>Check mana and curve</button>
+          {!view.changedSinceDone && <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, async () => { setStep('cuts'); await onChanged(); })}>Undo</button>}
         </div>
       </section>
     );

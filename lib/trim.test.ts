@@ -178,6 +178,65 @@ describe('trim', { timeout: 60_000 }, () => {
     expect(v.run!.items.filter((i) => i.tier === 'cut')).toHaveLength(8);
   });
 
+  it('starts another round right after an apply that reached exactly 100', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    expect((await trim.applyTrim(list, 'dk')).size).toBe(100);
+    const now = () => db.getList(list.id, 'dk')!;
+    let v = await trim.trimView(now(), 'dk');
+    expect(v.done).not.toBeNull();
+    expect(v.changedSinceDone).toBe(false);
+    // Two cards come in later (two more Islands): the finished screen reads the deck as it is now.
+    db.addCardToList(list.id, island, 2);
+    v = await trim.trimView(now(), 'dk');
+    expect(v.size).toBe(102);
+    expect(v.over).toBe(2);
+    expect(v.changedSinceDone).toBe(true);
+    trim.resetTrim(list.id);
+    v = await trim.trimView(now(), 'dk');
+    expect(v.done).toBeNull();
+    expect(v.run).toBeNull();
+    expect(v.over).toBe(2);
+    // The next round runs on the deck as it is.
+    await trim.runTrim(fakeModel(() => ({ ranked: [{ name: 'Spell 20', why: 'x', with: [] }, { name: 'Spell 21', why: 'x', with: [] }], keep: [], notes: '' })).model, now(), 'dk', { model: 'opus' });
+    v = await trim.trimView(now(), 'dk');
+    expect(v.run!.items.filter((i) => i.tier === 'cut').map((i) => i.name)).toEqual(['Spell 20', 'Spell 21']);
+  });
+
+  it('refuses Undo once the deck changed since the cuts, and allows it on older applies', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    await trim.applyTrim(list, 'dk');
+    db.addCardToList(list.id, island);
+    const main = () => db.cardsInList(list.id).filter((c) => c.board === 'main');
+    expect(() => trim.undoTrim(db.getList(list.id, 'dk')!)).toThrow(/deck changed/);
+    expect(main().some((c) => c.card.name === 'Spell 1')).toBe(false);
+    expect((await trim.trimView(db.getList(list.id, 'dk')!, 'dk')).done).not.toBeNull();
+    // An apply saved before the fingerprint was kept: Undo works as it did.
+    const row = db.database().get('SELECT state FROM deck_trim WHERE listId = ?', [list.id]) as { state: string };
+    const state = JSON.parse(row.state);
+    delete state.done.deckHash;
+    db.database().run('UPDATE deck_trim SET state = ? WHERE listId = ?', [JSON.stringify(state), list.id]);
+    expect((await trim.trimView(db.getList(list.id, 'dk')!, 'dk')).changedSinceDone).toBe(false);
+    trim.undoTrim(db.getList(list.id, 'dk')!);
+    expect(main().some((c) => c.card.name === 'Spell 1')).toBe(true);
+  });
+
+  it('setting a target after an apply starts the next round', async () => {
+    const { db, list } = await deck();
+    const trim = await import('./trim');
+    await trim.runTrim(fakeModel(() => ANSWER).model, list, 'dk', { model: 'opus' });
+    await trim.applyTrim(list, 'dk');
+    trim.setTarget(list.id, { kind: 'cut', n: 5 });
+    const v = await trim.trimView(db.getList(list.id, 'dk')!, 'dk');
+    expect(v.done).toBeNull();
+    expect(v.run).toBeNull();
+    expect(v.target).toEqual({ kind: 'cut', n: 5 });
+    expect(v.over).toBe(5);
+  });
+
   it('drafts an approach from the deck’s numbers without a model', async () => {
     const { list } = await deck();
     const trim = await import('./trim');

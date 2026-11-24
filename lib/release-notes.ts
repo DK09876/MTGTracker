@@ -16,6 +16,7 @@ export const UNRELEASED: UnreleasedItem[] = [
   { kind: 'new', date: '2026-11-23', title: 'Pick a card once and the app remembers it', details: 'After you pick Inniaz for “innaiz”, the app reads it that way from then on, everywhere. A line under your message says how a word was read, with a way to forget it.' },
   { kind: 'fix', date: '2026-11-23', title: 'Rules finds card names with an apostrophe', details: 'Questions about cards like [[Teferi’s Protection]] or [[Thassa’s Oracle]] go straight to that card, written with or without the apostrophe, instead of asking which Teferi you meant.' },
   { kind: 'fix', date: '2026-11-23', title: 'Everyday words aren’t taken for cards', details: 'Words like “really”, “wrath” or “flicker” in a question stay words: no more “Which Really did you mean?”. Write a name with a capital to mean the card.' },
+  { kind: 'fix', date: '2026-11-24', title: 'Trim lets you start another round after applying cuts', details: 'After applying cuts, Trim used to stay on its finished screen until you pressed Undo. Now Start another round takes you back to What matters with the deck as it is, the heading shows its real size, and Undo turns off once the deck has changed since the cuts.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
