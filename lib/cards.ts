@@ -152,7 +152,7 @@ export async function cardNameIndex(): Promise<NameIndex> {
  */
 export async function readCards(
   text: string,
-  { profile = null, known = [], picks = [] }: { profile?: string | null; known?: string[]; picks?: CardPick[] } = {},
+  { profile = null, known = [], picks = [], pictures = true }: { profile?: string | null; known?: string[]; picks?: CardPick[]; pictures?: boolean } = {},
 ): Promise<CardReading> {
   const [index, vocab] = await Promise.all([cardNameIndex(), rulesIndex().then((r) => r.vocab).catch(() => new Set<string>())]);
   const remembered = profile ? cardPicks(profile) : new Map<string, string>();
@@ -163,16 +163,17 @@ export async function readCards(
   }
   const unmarked = text.replace(/\[\[+[^[\]]*\]\]+/g, ' ');
   const m = findMentions(unmarked, index, vocab, { everyday: EVERYDAY_WORDS, known, remembered });
-  const pictures = m.ambiguous.length ? await findCards(m.ambiguous.flatMap((a) => a.options)).catch(() => null) : null;
+  const shown = pictures && m.ambiguous.length ? await findCards(m.ambiguous.flatMap((a) => a.options)).catch(() => null) : null;
   return {
     text: markText(text, m.spans),
     cards: m.cards,
     choices: m.ambiguous.map((a) => ({
       mention: a.mention, kind: a.kind,
-      options: a.options.map((name) => { const c = pictures?.get(name); return { name, image: c ? imageOf(c, 'normal') : null }; }),
+      options: a.options.map((name) => { const c = shown?.get(name); return { name, image: c ? imageOf(c, 'normal') : null }; }),
     })),
     // A word read loosely (a pick from before, a card in play) is said, with a way to forget a pick.
     readAs: m.spans.filter((s) => s.how !== 'exact' && phraseKey(s.mention) !== phraseKey(s.name.split(' // ')[0]))
       .map((s) => ({ mention: s.mention, name: s.name, remembered: s.how === 'remembered' })),
+    suggestions: m.suggestions,
   };
 }

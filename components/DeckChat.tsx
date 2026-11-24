@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import { foldName } from '@/lib/card-lookup';
-import { useCardCheck } from './CardChoice';
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import CardText, { CardLink, CardTextContext } from './CardText';
 import { openCard as openPopup } from './CardPopup';
 import { AI_READS } from '@/lib/ai-reads';
@@ -361,7 +361,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
           <span className="text-[var(--faint)]">{shareTune ? 'Your Finish, Upgrades and Trim lists and what you’ve staged. Tap to stop.' : 'Or just ask about it (“why did Finish pick this?”).'}</span>
         </div>
         {/* The composer stays at the bottom of the screen as the thread grows, as on Rules. */}
-        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
+        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
+          {/* Cards the words may be, offered as you type, inside the pinned box so they're always in view. */}
+          <CardSuggestions text={text} onText={setText} known={[...cards.map((c) => c.card.name), ...(commander ? [commander.name] : [])]} className="basis-full empty:hidden" />
           <label htmlFor={`ask-${listId}`} className="sr-only">Ask about this deck</label>
           <textarea
             id={`ask-${listId}`}

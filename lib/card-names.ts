@@ -8,20 +8,22 @@
  *     (`remembered`), a full name of three or more words, a two-word name with a word that isn't everyday English
  *     ("rhystic study"), a name written with a capital ("Flicker"), or a word that begins only one name and isn't
  *     everyday English ("hearthhull").
- *   - asked (`choices`): a misspelt name ("Innaiz, the gale force": did you mean...?), a word that begins several
- *     names ("kratos": which?), or a lower-case two-word name of everyday words ("lightning bolt", "last chance":
- *     the card, or just the words?).
+ *   - asked (`choices`), before anything is sent: a misspelt name ("Innaiz, the gale force": did you mean...?) or
+ *     a word that begins several names ("kratos": which?). The owner clearly meant a card; sending would be wrong.
+ *   - suggested (`suggestions`), never asked: a card's exact name in lower-case everyday words ("lightning bolt",
+ *     "last chance", "humility"). It may be the card or just English, so the page offers it quietly as they type
+ *     (components/CardChoice.tsx, CardSuggestions); left alone, the words go as words.
  *   - left as words: everyday English and the game's own words in lower case ("flicker effect", "really", "wrath").
  *
  * The page asks with components/CardChoice.tsx (useCardCheck) before any AI call. Pure: safe in the browser; the
  * server reads text with readCards (lib/cards.ts), which brings the index, the word lists and the owner's picks.
  */
 
-/** A pick for "the card, or just the words?" that says the words: they stay words, and it's remembered. */
+/** A pick that says "not a card": a suggestion the owner closed. Those words stay words, and it's remembered. */
 export const NOT_A_CARD = '-';
 
-/** typo: no card has the name, these are close. several: the words begin several names. maybe: a card's exact name in everyday words. */
-export type ChoiceKind = 'typo' | 'several' | 'maybe';
+/** typo: no card has the name, these are close. several: the words begin several names. */
+export type ChoiceKind = 'typo' | 'several';
 
 /** A choice to put to the owner, with the cards' pictures (components/CardChoice.tsx). */
 export interface NamedChoice {
@@ -30,8 +32,11 @@ export interface NamedChoice {
   options: Array<{ name: string; image: string | null }>;
 }
 
-/** The owner's answer to a choice. */
-export interface CardPick { mention: string; name: string; kind: ChoiceKind }
+/** The owner's answer to a choice, or a suggestion closed (`suggest`, name NOT_A_CARD). */
+export interface CardPick { mention: string; name: string; kind: ChoiceKind | 'suggest' }
+
+/** A card the words may be, offered quietly (never asked): "lightning bolt" -> Lightning Bolt. */
+export interface Suggestion { mention: string; name: string }
 
 /** The owner's words, read (readCards in lib/cards.ts; POST /api/cards/read). */
 export interface CardReading {
@@ -42,6 +47,8 @@ export interface CardReading {
   choices: NamedChoice[];
   /** Words read loosely, to say so: "innaiz" as Inniaz, the Gale Force; `remembered` ones can be forgotten. */
   readAs: Array<{ mention: string; name: string; remembered: boolean }>;
+  /** Cards the words may be, to offer as the owner types; nothing is sent for them unless they're tapped. */
+  suggestions: Suggestion[];
 }
 
 /** Where a sure card was found: the words as typed, and how it was settled. */
@@ -58,6 +65,8 @@ export interface Mentions {
   spans: Span[];
   /** What to ask the owner. */
   ambiguous: Array<{ mention: string; options: string[]; kind: ChoiceKind }>;
+  /** What to offer, never ask. */
+  suggestions: Suggestion[];
 }
 
 export interface ReadOptions {
@@ -197,9 +206,16 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
     for (let k = start; k <= end; k++) used[k] = true;
   };
   // Several options, or a loose one: a card in play settles it; else it's a question.
+  const offers: Array<Suggestion & { start: number; end: number }> = [];
+  // A card's name in everyday words: in play, it's the card; else offered, and the words stay words.
+  const offer = (name: string, start: number, end: number) => {
+    if (isKnown(name)) { take(name, start, end, 'exact'); return; }
+    offers.push({ mention: mention(start, end), name, start, end });
+    for (let k = start; k <= end; k++) used[k] = true;
+  };
   const settle = (options: string[], start: number, end: number, kind: ChoiceKind) => {
     const inPlay = options.filter(isKnown);
-    if (inPlay.length === 1) take(inPlay[0], start, end, kind === 'maybe' ? 'exact' : 'known');
+    if (inPlay.length === 1) take(inPlay[0], start, end, 'known');
     else {
       asks.push({ mention: mention(start, end), options, kind, start, end });
       for (let k = start; k <= end; k++) used[k] = true;
@@ -215,6 +231,8 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
         if (used.slice(i, i + n).some(Boolean)) continue;
         const picked = remembered.get(words.slice(i, i + n).join(' '));
         if (!picked) continue;
+        // "Not a card" was said of the words in lower case: written with a capital, they're the card again.
+        if (picked === NOT_A_CARD && Array.from({ length: n }, (_, k) => capital(i + k)).some(Boolean)) continue;
         if (picked === NOT_A_CARD) for (let k = i; k < i + n; k++) used[k] = true;
         else take(picked, i, i + n - 1, 'remembered');
       }
@@ -233,11 +251,15 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
       if (n === 1) {
         if (phrase.length < 3) continue;
         // One everyday or game word ("flicker", "fog") is only a card if it was written like one, or is in play.
-        if (plainWord(phrase) && !written && !isKnown(name)) continue;
+        // An everyday one ("humility") is offered; the game's own words ("fog", "clone") aren't, they're too common.
+        if (plainWord(phrase) && !written && !isKnown(name)) {
+          if (!game(phrase)) offer(name, i, i);
+          continue;
+        }
         take(name, i, i, 'exact');
-      } else if (n === 2 && !written && !isKnown(name) && words.slice(i, i + 2).every(plainWord)) {
-        // "lightning bolt", "last chance": the card, or just the words?
-        settle([name], i, i + 1, 'maybe');
+      } else if (n === 2 && !written && words.slice(i, i + 2).every(plainWord)) {
+        // "lightning bolt", "last chance": maybe the card, maybe the words. Offered, never asked.
+        offer(name, i, i + 1);
       } else take(name, i, i + n - 1, 'exact');
     }
   }
@@ -280,10 +302,10 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
     // An exact name inside the misspelt one ("gale force") is the other option.
     const inside = hits.filter((h) => h.start >= start && h.end <= end);
     for (const h of inside) hits.splice(hits.indexOf(h), 1);
-    const askedInside = asks.filter((a) => a.start >= start && a.end <= end);
-    for (const a of askedInside) asks.splice(asks.indexOf(a), 1);
+    const offeredInside = offers.filter((a) => a.start >= start && a.end <= end);
+    for (const a of offeredInside) offers.splice(offers.indexOf(a), 1);
     for (let k = start; k <= end; k++) { used[k] = false; typoUsed[k] = true; }
-    settle([...new Set([...found.names, ...inside.map((h) => h.name), ...askedInside.flatMap((a) => a.options)])], start, end, 'typo');
+    settle([...new Set([...found.names, ...inside.map((h) => h.name), ...offeredInside.map((a) => a.name)])], start, end, 'typo');
   }
 
   // Then a word that begins card names: one is that card, a few are a question.
@@ -305,6 +327,7 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
     cards: [...new Set(hits.map((h) => h.name))],
     spans: sure.map((h) => ({ mention: mention(h.start, h.end), name: h.name, how: h.how })),
     ambiguous: asks.sort((a, b) => a.start - b.start).map(({ mention: m, options, kind }) => ({ mention: m, options, kind })),
+    suggestions: offers.sort((a, b) => a.start - b.start).map(({ mention: m, name }) => ({ mention: m, name })),
   };
 }
 
@@ -312,7 +335,7 @@ export function findMentions(question: string, index: NameIndex, ordinary: Reado
  * The phrases to remember for a pick: the words as typed, and for a misspelt name each misspelt word on its own
  * ("innaiz"), so the owner needn't type the whole name again.
  */
-export function phrasesForPick(mention: string, name: string, kind: ChoiceKind, index: NameIndex): string[] {
+export function phrasesForPick(mention: string, name: string, kind: CardPick['kind'], index: NameIndex): string[] {
   const out = [phraseKey(mention)];
   if (kind === 'typo' && name !== NOT_A_CARD) {
     const nameWords = new Set(normalise(name).split(' '));

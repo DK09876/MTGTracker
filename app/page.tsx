@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
-import { useCardCheck } from '@/components/CardChoice';
+import { CardSuggestions, useCardCheck } from '@/components/CardChoice';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import CommanderField from '@/components/CommanderField';
@@ -473,6 +473,8 @@ export default function SearchPage() {
         }}
       />
       </StickyBar>
+      {/* Cards the words may be, offered as you type; Scryfall syntax is left alone. */}
+      <CardSuggestions text={looksLikeSyntax(query) ? '' : query} onText={setQuery} known={forCommander ? [forCommander.name] : []} className="mt-2" />
 
       {/* The optional Commander field, under the box. */}
       <div className="mt-2"><CommanderField value={forCommander} onChange={setForCommander} /></div>

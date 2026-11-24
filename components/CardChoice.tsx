@@ -10,33 +10,37 @@
  *
  * `check` reads the text on the server (lib/cards.ts readCards): the cards it's sure of come back marked
  * [[like this]]. Anything it isn't sure of is asked here, with the cards' pictures, before anything is sent: a
- * misspelt name ("Did you mean…"), a word that begins several names ("Which Kratos?"), or a card's name in everyday
- * words ("lightning bolt": the card, or just the words?). The owner's picks are remembered for their profile, so the
- * same words aren't asked again; the page says how it read them, with a way to forget. "None of these" sends
- * nothing: the owner is asked to check the spelling and try again.
+ * misspelt name ("Did you mean…") or a word that begins several names ("Which Kratos?"). The owner's picks are
+ * remembered for their profile, so the same words aren't asked again; the page says how it read them, with a way to
+ * forget. "None of these" sends nothing: the owner is asked to check the spelling and try again.
+ *
+ * A card's name in everyday words ("lightning bolt", "last chance", "humility") is never asked: CardSuggestions,
+ * above the box, offers it quietly as the owner types. A tap marks it in the box; ✕ says it isn't a card, and is
+ * remembered; left alone, the words go as words.
+ *
+ *   <CardSuggestions text={typed} onText={setTyped} known={deckNames} />
  */
 
 import Image from 'next/image';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import CardText, { CardLink } from '@/components/CardText';
 import * as api from '@/lib/api';
-import { NOT_A_CARD, type CardPick, type CardReading, type NamedChoice } from '@/lib/card-names';
+import { markText, NOT_A_CARD, type CardPick, type CardReading, type NamedChoice, type Suggestion } from '@/lib/card-names';
 import { steady } from '@/lib/steady-tap';
 
 const button = 'min-h-10 rounded-full border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50';
 
 const heading = (c: NamedChoice) =>
   c.kind === 'typo' ? <>No card is named “{c.mention}”. Did you mean…</>
-    : c.kind === 'maybe' ? <>“{c.mention}”: the card, or just the words?</>
-      : <>Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</>;
+    : <>Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</>;
 
 interface Props {
   choice: NamedChoice;
   /** What the owner wrote, shown under the heading. */
   question?: string;
   onPick: (name: string) => void;
-  /** "None of these" (or "Just the words" for a card's name in everyday words). */
+  /** "None of these": nothing is sent. */
   onNone?: () => void;
   onCancel?: () => void;
   busy?: boolean;
@@ -57,7 +61,7 @@ export default function CardChoice({ choice: c, question, onPick, onNone, onCanc
             </button>
           ))}
         </div>
-        {onNone && <button disabled={busy} {...steady(onNone)} className={`${button} mt-3`}>{c.kind === 'maybe' ? 'Just the words' : 'None of these'}</button>}
+        {onNone && <button disabled={busy} {...steady(onNone)} className={`${button} mt-3`}>None of these</button>}
       </div>
       {onCancel && <button onClick={onCancel} className={`${button} self-start`}>Cancel</button>}
     </section>
@@ -127,7 +131,6 @@ export function useCardCheck(): {
   const none = () => {
     if (!asking) return;
     const c = asking.reading.choices[0];
-    if (c.kind === 'maybe') { void pick(NOT_A_CARD); return; }
     setNotice(`No card matched “${c.mention}”. Check the spelling and the words, then try again.`);
     setAsking(null);
     asking.resolve(null);
@@ -167,4 +170,54 @@ export function useCardCheck(): {
   ) : null;
 
   return { check, panel, asking: !!asking };
+}
+
+/**
+ * Cards the owner's words may be, offered as they type (see the top of this file): a chip each, above the box. A tap
+ * marks the card in the text; ✕ says those words aren't a card, remembered for the profile. Nothing blocks the send.
+ */
+export function CardSuggestions({ text, onText, known = [], className = '' }: {
+  text: string;
+  onText: (text: string) => void;
+  /** Cards in play here: a name of theirs is the card already, never offered. */
+  known?: string[];
+  className?: string;
+}) {
+  // Kept with the text they were read from: once the text changes, they're stale and not shown.
+  const [found, setFound] = useState<{ text: string; list: Suggestion[] }>({ text: '', list: [] });
+  const [closed, setClosed] = useState<string[]>([]);
+  const seq = useRef(0);
+  const knownKey = known.join('\n');
+
+  useEffect(() => {
+    const mine = ++seq.current;
+    // Two words before there's anything to offer; a pause in the typing before asking.
+    if (text.trim().split(/\s+/).length < 2 && !/\s$/.test(text)) return;
+    const timer = setTimeout(() => {
+      api.readCards(text, { known: knownKey ? knownKey.split('\n') : [], typing: true })
+        .then((r) => { if (seq.current === mine) setFound({ text, list: r.suggestions }); })
+        .catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [text, knownKey]);
+
+  const list = found.text === text ? found.list.filter((s) => !closed.includes(s.mention.toLowerCase())) : [];
+  if (!list.length) return null;
+  const close = (s: Suggestion) => {
+    setClosed((c) => [...c, s.mention.toLowerCase()]);
+    void api.readCards(text, { picks: [{ mention: s.mention, name: NOT_A_CARD, kind: 'suggest' }], typing: true }).catch(() => {});
+  };
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${className}`} aria-live="polite">
+      {list.map((s) => (
+        <span key={`${s.mention}|${s.name}`} className="inline-flex items-center rounded-full border border-[var(--accent)]/45 bg-[color-mix(in_srgb,var(--accent)_12%,var(--background))] text-[13px] shadow-sm">
+          <button type="button" {...steady(() => onText(markText(text, [s])))} className="flex min-h-9 items-center gap-1.5 py-1 pl-2.5 pr-2 text-left" title={`Use the card ${s.name}`}>
+            <span className="text-[var(--accent)]" aria-hidden>✦</span>
+            <span>Card: <b className="font-semibold">{s.name}</b>?</span>
+          </button>
+          <button type="button" {...steady(() => close(s))} aria-label={`“${s.mention}” isn’t the card ${s.name}`} className="grid min-h-9 min-w-9 place-items-center border-l border-[var(--border)] pr-1 text-[var(--muted)] hover:text-[var(--foreground)]">✕</button>
+        </span>
+      ))}
+    </div>
+  );
 }

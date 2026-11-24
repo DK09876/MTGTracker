@@ -11,7 +11,7 @@
  * Claude's ideas join the same groups, read against the plan.
  */
 
-import { useCardCheck } from './CardChoice';
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import { useUpdating } from '@/lib/use-reach';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -489,6 +489,7 @@ function AskClaude({ intent, busy, job, instructions, onInstructions, onAsk, onC
           placeholder={intent === 'cuts' ? 'e.g. Keep anything that attacks alone. I’d rather cut ramp than draw.' : 'e.g. Cards under $5. Lean into the graveyard.'}
           className="max-w-3xl resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
       )}
+      {open && <CardSuggestions text={instructions} onText={onInstructions} />}
     </div>
   );
 }

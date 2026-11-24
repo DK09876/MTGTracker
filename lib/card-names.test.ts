@@ -14,6 +14,7 @@ const idx = nameIndex(names);
 const ordinary = new Set(['soldier', 'stop', 'response', 'clone', 'damage', 'trample', 'creature', 'dies', 'copied']);
 // What a test checks: the cards and the questions (spans have their own tests).
 const brief = ({ cards, ambiguous }: ReturnType<typeof findMentions>) => ({ cards, ambiguous });
+const quiet = (m: ReturnType<typeof findMentions>) => ({ cards: m.cards, ambiguous: m.ambiguous, suggestions: m.suggestions });
 const find = (q: string) => brief(findMentions(q, idx, ordinary));
 
 describe('findMentions', () => {
@@ -105,17 +106,17 @@ describe('findMentions, only cards we are sure of', () => {
   const everyday = new Set(['flicker', 'lightning', 'bolt', 'last', 'chance', 'study', 'really', 'wrath', 'gale', 'force', 'blade']);
   const read = (q: string, opts: Parameters<typeof findMentions>[3] = {}) => findMentions(q, sureIdx, ordinary, { everyday, ...opts });
 
-  it('leaves an everyday word as a word unless written as a name', () => {
-    expect(brief(read('can I bounce my commander with a flicker effect'))).toEqual({ cards: [], ambiguous: [] });
+  it('leaves an everyday word as a word unless written as a name, offering the card quietly', () => {
+    expect(quiet(read('can I bounce my commander with a flicker effect'))).toEqual({ cards: [], ambiguous: [], suggestions: [{ mention: 'flicker', name: 'Flicker' }] });
     expect(read('can I respond to Flicker').cards).toEqual(['Flicker']);
     expect(brief(read('does it really work'))).toEqual({ cards: [], ambiguous: [] });
     expect(brief(read('does a wrath kill everything'))).toEqual({ cards: [], ambiguous: [] });
     expect(read('does a Wrath kill everything').ambiguous[0]).toMatchObject({ mention: 'Wrath', kind: 'several' });
   });
 
-  it('asks whether a two-word name in everyday words is the card, and takes one that is plainly a name', () => {
-    expect(read('is this my last chance').ambiguous).toEqual([{ mention: 'last chance', options: ['Last Chance'], kind: 'maybe' }]);
-    expect(read('can lightning bolt kill it').ambiguous).toEqual([{ mention: 'lightning bolt', options: ['Lightning Bolt'], kind: 'maybe' }]);
+  it('offers a two-word name in everyday words, never asking, and takes one that is plainly a name', () => {
+    expect(quiet(read('is this my last chance'))).toEqual({ cards: [], ambiguous: [], suggestions: [{ mention: 'last chance', name: 'Last Chance' }] });
+    expect(read('can lightning bolt kill it').suggestions).toEqual([{ mention: 'lightning bolt', name: 'Lightning Bolt' }]);
     expect(read('can Lightning Bolt kill it').cards).toEqual(['Lightning Bolt']);
     expect(read('does rhystic study trigger').cards).toEqual(['Rhystic Study']);
     expect(read('how does blade of selves work').cards).toEqual(['Blade of Selves']);
@@ -123,7 +124,7 @@ describe('findMentions, only cards we are sure of', () => {
 
   it('takes a card in play without asking', () => {
     expect(read('how does kratos attack', { known: ['Kratos, Stoic Father'] })).toMatchObject({ cards: ['Kratos, Stoic Father'], ambiguous: [] });
-    expect(read('can lightning bolt kill it', { known: ['Lightning Bolt'] }).cards).toEqual(['Lightning Bolt']);
+    expect(read('can lightning bolt kill it', { known: ['Lightning Bolt'] })).toMatchObject({ cards: ['Lightning Bolt'], suggestions: [] });
     const r = read('can I redirect Innaiz, the gale force', { known: ['Inniaz, the Gale Force'] });
     expect(r.cards).toEqual(['Inniaz, the Gale Force']);
     expect(r.spans).toEqual([{ mention: 'Innaiz, the gale force', name: 'Inniaz, the Gale Force', how: 'known' }]);
@@ -135,7 +136,10 @@ describe('findMentions, only cards we are sure of', () => {
     const r = read('what about innaiz attacking', { remembered });
     expect(r.cards).toEqual(['Inniaz, the Gale Force']);
     expect(r.spans).toEqual([{ mention: 'innaiz', name: 'Inniaz, the Gale Force', how: 'remembered' }]);
-    expect(brief(read('is this my last chance', { remembered: new Map([['last chance', NOT_A_CARD]]) }))).toEqual({ cards: [], ambiguous: [] });
+    const closed = new Map([['last chance', NOT_A_CARD]]);
+    expect(quiet(read('is this my last chance', { remembered: closed }))).toEqual({ cards: [], ambiguous: [], suggestions: [] });
+    // Closed in lower case; written with capitals, it's the card again.
+    expect(read('can I copy Last Chance', { remembered: closed }).cards).toEqual(['Last Chance']);
   });
 });
 

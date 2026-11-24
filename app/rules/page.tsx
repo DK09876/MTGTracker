@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import CardChoice, { useCardCheck } from '@/components/CardChoice';
+import CardChoice, { CardSuggestions, useCardCheck } from '@/components/CardChoice';
 import CardText, { CardLinks, CardTextContext } from '@/components/CardText';
 import { withoutMarks } from '@/lib/chat-text';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -29,7 +29,6 @@ import { getProfile } from '@/lib/profile';
 import type { Budget } from '@/lib/quota';
 import { dollars } from '@/lib/spend';
 import { dismissKeyboard, steady } from '@/lib/steady-tap';
-import { NOT_A_CARD } from '@/lib/card-names';
 
 // Starting points, by the kind of rule they turn on.
 const EXAMPLES: Array<{ topic: string; question: string }> = [
@@ -184,7 +183,7 @@ export default function RulesPage() {
       choice={openChoice}
       question={choosing.question}
       onPick={(name) => pick(openChoice.mention, name)}
-      onNone={openChoice.kind === 'maybe' ? () => pick(openChoice.mention, NOT_A_CARD) : () => {
+      onNone={() => {
         setChoosing(null);
         setError(`No card matched “${openChoice.mention}”. Check the spelling and the words, then try again.`);
       }}
@@ -371,6 +370,7 @@ export default function RulesPage() {
           <Composer
             value={followUp}
             onChange={setFollowUp}
+            known={thread?.turns.flatMap((t) => t.cards)}
             onSend={() => ask(followUp)}
             busy={busy}
             placeholder="Follow up - the cards above stay in the conversation"
@@ -388,7 +388,9 @@ export default function RulesPage() {
  * The question box, docked at the bottom of the screen as a chat's is:
  * Enter sends, Shift+Enter starts a new line.
  */
-function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
+function Composer({ value, onChange, onSend, busy, placeholder, label, hint, known }: {
+  /** The conversation's cards: never offered, they're the card already. */
+  known?: string[];
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
@@ -403,6 +405,7 @@ function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
       className="sticky bottom-[calc(var(--nav-h)+0.75rem)] z-10 mt-5 flex flex-col gap-1.5 bg-gradient-to-t from-[var(--background)] from-60% to-transparent pt-4 sm:bottom-4"
       onSubmit={(e) => { e.preventDefault(); onSend(); }}
     >
+      <CardSuggestions text={value} onText={onChange} known={known} />
       <div className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-2 pl-4 pr-2 shadow-lg focus-within:border-[var(--accent)]">
         <textarea
           value={value}

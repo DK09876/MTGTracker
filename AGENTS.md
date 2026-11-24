@@ -57,6 +57,8 @@ choice, and the page shows it with `<CardChoice>` before any AI call. A near mat
   page says how it read them, with a way to forget. "None of these" sends nothing and asks them to check the spelling.
 - Everyday English in lower case stays words ("flicker effect"): the list is `lib/everyday-words.ts`, made by
   `scripts/everyday-words.mts`. Run it again now and then, as new sets add names.
+- A card's name in everyday words ("lightning bolt", "last chance") is never asked about: `<CardSuggestions text
+  onText known />` beside the box offers it as the owner types. A tap marks it; ✕ is remembered; ignored, it's words.
 
 ## AI calls and the agent context
 

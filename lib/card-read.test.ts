@@ -59,11 +59,12 @@ describe('readCards', () => {
     expect((await readCards('does Innaiz have flying', { profile: 'p' })).choices).toHaveLength(1);
   });
 
-  it('remembers "just the words" too', async () => {
+  it('offers a card in everyday words without asking, and remembers a closed offer', async () => {
     const { readCards } = await import('./cards');
-    expect((await readCards('is this my last chance', { profile: 'p' })).choices[0]).toMatchObject({ kind: 'maybe', mention: 'last chance' });
-    await readCards('is this my last chance', { profile: 'p', picks: [{ mention: 'last chance', name: '-', kind: 'maybe' }] });
-    expect(await readCards('my last chance to win', { profile: 'p' })).toMatchObject({ text: 'my last chance to win', cards: [], choices: [] });
+    expect(await readCards('is this my last chance', { profile: 'p' }))
+      .toMatchObject({ text: 'is this my last chance', cards: [], choices: [], suggestions: [{ mention: 'last chance', name: 'Last Chance' }] });
+    await readCards('is this my last chance', { profile: 'p', picks: [{ mention: 'last chance', name: '-', kind: 'suggest' }] });
+    expect(await readCards('my last chance to win', { profile: 'p' })).toMatchObject({ text: 'my last chance to win', cards: [], choices: [], suggestions: [] });
   });
 
   it('takes the card in play when the words could be several', async () => {

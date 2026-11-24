@@ -812,8 +812,8 @@ export const identifyScan = (read: { title: string; set?: string; number?: strin
 export type RulesChoice = NamedChoice;
 
 /** Read what the owner typed for cards before it's sent (lib/cards.ts readCards): marked text, and what to ask. */
-export const readCards = (text: string, { known = [], picks = [] }: { known?: string[]; picks?: CardPick[] } = {}) =>
-  send('cards/read', 'POST', { text, known, picks }).then(json<CardReading>);
+export const readCards = (text: string, { known = [], picks = [], typing = false }: { known?: string[]; picks?: CardPick[]; typing?: boolean } = {}) =>
+  send('cards/read', 'POST', { text, known, picks, ...(typing ? { typing } : {}) }).then(json<CardReading>);
 
 /** Forget the profile's pick for some words ("innaiz"), so they're asked about again. */
 export const forgetCardPick = (phrase: string) =>

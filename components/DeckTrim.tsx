@@ -12,7 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
-import { useCardCheck } from './CardChoice';
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import CardText from './CardText';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
@@ -505,6 +505,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
           aria-describedby="trim-say-keys"
           placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
           className={`${C.input} w-full resize-y py-2.5`} />
+        <CardSuggestions text={message} onText={setMessage} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] text-[var(--muted)]">Weigh more:</span>
           {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}

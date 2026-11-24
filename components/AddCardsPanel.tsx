@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { useCardCheck } from './CardChoice';
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import CardModal from './CardModal';
 import Interpreted from './Interpreted';
 import Results, { type Views } from './Results';
@@ -310,6 +310,10 @@ export default function AddCardsPanel({ listId, commander, inDeck, onAdded, onCl
           <p className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-[var(--muted)]">
             {note ? <span role="status" className={note.ok ? 'text-emerald-400' : 'text-red-300'}>{note.text}</span> : <span>Enter adds · Shift+Enter to the Maybeboard · ↑↓ pick · Cmd/Ctrl+Enter searches</span>}
           </p>
+          {/* For a described search ("cards like lightning bolt"); a name on its own is added from the list above. */}
+          {!quick?.cards.length && !looksLikeSyntax(text) && (
+            <CardSuggestions text={text} onText={setText} known={[...inDeck.keys(), ...(commander ? [commander] : [])]} className="mt-2" />
+          )}
           <label className="mt-2 flex items-center gap-2 text-xs text-[var(--muted)]">
             <input type="checkbox" checked={hideInDeck} onChange={(e) => setHideInDeck(e.target.checked)} />
             Hide cards already in the deck{hideInDeck && hidden > 0 ? ` (${hidden} hidden)` : ''}
