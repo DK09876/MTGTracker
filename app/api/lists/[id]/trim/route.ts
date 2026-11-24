@@ -94,7 +94,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       break;
     }
     case 'undo':
-      await recorded(id, { profile }, 'undo', 'Undid the trim', () => undoTrim(list));
+      try {
+        await recorded(id, { profile }, 'undo', 'Undid the trim', () => undoTrim(list));
+      } catch (e) {
+        return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not undo the cuts' }, { status: 409 });
+      }
       break;
     case 'reset':
       resetTrim(id);

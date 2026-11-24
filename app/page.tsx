@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import StickyBar from '@/components/StickyBar';
 import AddToListDialog from '@/components/AddToListDialog';
+import { CardSuggestions, useCardCheck } from '@/components/CardChoice';
 import CardModal from '@/components/CardModal';
 import CommanderChoice from '@/components/CommanderChoice';
 import CommanderField from '@/components/CommanderField';
@@ -132,11 +133,21 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const search = (text: string) => {
-    const term = text.trim();
+  const cards = useCardCheck();
+
+  const search = async (text: string) => {
+    let term = text.trim();
     if (!term) return;
     // The keyboard closes now, before results come up to be tapped.
     dismissKeyboard();
+    // Card names are checked before the AI reads them (AGENTS.md, "Reading the owner's words"): Scryfall syntax is
+    // left as written. What was read is shown in the box: the cards marked [[like this]].
+    if (!looksLikeSyntax(term)) {
+      const checked = await cards.check(term, { known: forCommander ? [forCommander.name] : [] });
+      if (checked === null) return;
+      if (checked !== term) setQuery(checked);
+      term = checked;
+    }
     setOpenSaved(null);
     setSearched(true);
     setThread([term]);
@@ -373,9 +384,11 @@ export default function SearchPage() {
     },
   };
 
-  const followUp = (text: string) => {
+  const followUp = async (typed: string) => {
     if (!answer) return;
     dismissKeyboard();
+    const text = await cards.check(typed, { known: forCommander ? [forCommander.name] : [] });
+    if (text === null) return;
     const previous = previousOf(answer, thread);
     run('thinking', () => (forCommander ? api.askForDeck(text, forCommander.name, previous) : api.followUp(text, previous)), (r) => {
       setThread((t) => [...t, text]);
@@ -460,6 +473,8 @@ export default function SearchPage() {
         }}
       />
       </StickyBar>
+      {/* Cards the words may be, offered as you type; Scryfall syntax is left alone. */}
+      <CardSuggestions text={looksLikeSyntax(query) ? '' : query} onText={setQuery} known={forCommander ? [forCommander.name] : []} className="mt-2" />
 
       {/* The optional Commander field, under the box. */}
       <div className="mt-2"><CommanderField value={forCommander} onChange={setForCommander} /></div>
@@ -492,6 +507,7 @@ export default function SearchPage() {
         <Interpreted interpretation={answer.interpretation} trace={answer.trace} onRun={s.runEdited} />
       )}
       {answer && !answer.choice && <FollowUp thread={thread} busy={busy} onSubmit={followUp} />}
+      {cards.panel}
 
       {status === 'idle' && answer?.choice && (
         <CommanderChoice mention={answer.choice.mention} options={answer.choice.options} onPick={pickCommander} />

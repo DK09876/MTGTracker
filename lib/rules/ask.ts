@@ -1,7 +1,7 @@
 /**
  * Answering a rules question.
  *
- *   1. Find the cards: named in the question (lib/rules/names), plus the
+ *   1. Find the cards: named in the question (lib/card-names.ts), plus the
  *      conversation's cards for a follow-up. A word that could be several
  *      cards ("kratos") stops here to ask which; the answer carries on with
  *      the picks, no model spent.
@@ -26,7 +26,7 @@ import type { Ruling, ScryfallCard } from '../scryfall';
 import { anchorRules } from './anchors';
 import { ANSWER_SCHEMA, ANSWER_SCHEMA_PRIVATE, ANSWER_SYSTEM, ANSWER_SYSTEM_PRIVATE, answerMessage, CHECK_SCHEMA, CHECK_SYSTEM, checkMessage, compactWorking, parseAnswer, type Earlier, type Source, type Turn } from './answer';
 import { keywordRules, placeWeight, referencedRules, ruleWithContext, searchRules, tokens, type RulesIndex } from './cr';
-import { findMentions, type NameIndex } from './names';
+import { findMentions, type ChoiceKind, type NameIndex } from '../card-names';
 import { parseResearch, RESEARCH_SCHEMA, RESEARCH_SYSTEM, researchMessage, type Clarify, type Research } from './research';
 import type { WikiPage } from './sources';
 import { markedNames } from '../agent-context';
@@ -34,6 +34,8 @@ import { markedNames } from '../agent-context';
 export interface AskDeps {
   rules: () => Promise<{ index: RulesIndex; vocab: Set<string> }>;
   names: () => Promise<NameIndex>;
+  /** Everyday English (lib/everyday-words.ts): a lower-case one is a word, not a card. */
+  everyday?: ReadonlySet<string>;
   /** Cards by exact name. */
   cards: (names: string[]) => Promise<ScryfallCard[]>;
   rulings: (card: ScryfallCard) => Promise<Ruling[]>;
@@ -63,7 +65,7 @@ export interface AskInput {
 }
 
 export type AskResult =
-  | { choice: Array<{ mention: string; options: string[] }> }
+  | { choice: Array<{ mention: string; options: string[]; kind: ChoiceKind }> }
   | { clarify: Clarify[] }
   | { turn: Turn };
 
@@ -300,20 +302,22 @@ export async function askRules(input: AskInput, deps: AskDeps, options?: CallOpt
   const earlier = input.earlier ?? [];
   const [{ vocab }, names] = await Promise.all([deps.rules(), deps.names()]);
   // A card written [[like this]] is exactly that card (lib/agent-context.ts); the rest of the question is read for names.
+  // The page checks the question first (useCardCheck), so its cards arrive marked; this is the same check again,
+  // so nothing unsure reaches the model whoever calls. A follow-up that says "Kratos" means the Kratos already in
+  // the conversation; only a word the conversation cannot settle is asked about.
+  const previous = earlier.flatMap((t) => t.cards);
   const marked = markedNames(question);
-  const found = findMentions(question.replace(/\[\[+[^[\]]*\]\]+/g, ' '), names, vocab);
+  const found = findMentions(question.replace(/\[\[+[^[\]]*\]\]+/g, ' '), names, vocab, { everyday: deps.everyday, known: previous });
   found.cards.unshift(...marked.filter((m) => !found.cards.includes(m)));
 
-  // A follow-up that says "Kratos" means the Kratos already in the
-  // conversation; only a word the conversation cannot settle is asked about.
-  const previous = earlier.flatMap((t) => t.cards);
   const picks = { ...input.picks };
   for (const a of found.ambiguous) {
     if (picks[a.mention]) continue;
     const known = a.options.filter((o) => previous.includes(o) || found.cards.includes(o));
     if (known.length === 1) picks[a.mention] = known[0];
   }
-  const unanswered = found.ambiguous.filter((a) => !picks[a.mention] || !a.options.includes(picks[a.mention]));
+  const answered = (a: (typeof found.ambiguous)[number]) => a.options.includes(picks[a.mention]);
+  const unanswered = found.ambiguous.filter((a) => !answered(a));
   if (unanswered.length) return { choice: unanswered };
 
   // The conversation's cards stay in play for a follow-up that does not name them.

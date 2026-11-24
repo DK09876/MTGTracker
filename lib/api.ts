@@ -18,6 +18,7 @@ const url = (path: string) => {
 };
 
 import type { BoxCopies, DeckCopies, Location, LocationKind, Ownership } from './collection';
+import type { CardPick, CardReading, NamedChoice } from './card-names';
 import type { LinkReport } from './mythic';
 import type { CardBefore, List, ListedCard, ListKind, Profile, RulesThread, RulesThreadSummary } from './db';
 import type { ImportSummary } from './import-into';
@@ -159,8 +160,8 @@ export const search = (q: string, page = 1) =>
 export type AskResponse = SearchResponse & Omit<Interpreted, keyof SearchResponse>;
 
 /** Search from anything typed - syntax, a name, or plain English. */
-export const ask = (q: string) =>
-  spending(fetch(url(`ask?q=${encodeURIComponent(q)}`)).then(json<AskResponse>));
+export const ask = (q: string, { checked = false } = {}) =>
+  spending(fetch(url(`ask?q=${encodeURIComponent(q)}${checked ? '&checked=1' : ''}`)).then(json<AskResponse>));
 
 const post = (body: object) =>
   spending(fetch(url('ask'), {
@@ -173,8 +174,8 @@ const post = (body: object) =>
 export const followUp = (q: string, previous: Previous) => post({ q, previous });
 
 /** A search from inside a deck, always for that deck's commander. */
-export const askForDeck = (q: string, commander: string, previous?: Previous) =>
-  post({ q, previous, forDeck: { commander } });
+export const askForDeck = (q: string, commander: string, previous?: Previous, { checked = false } = {}) =>
+  post({ q, previous, forDeck: { commander }, ...(checked ? { checked } : {}) });
 
 /** Carry on a search that stopped to ask which commander was meant. */
 export const resume = (q: string, previous: Previous | undefined, plan: Translation, commander: string) =>
@@ -807,7 +808,16 @@ export const identifyScan = (read: { title: string; set?: string; number?: strin
 
 // --- rules ------------------------------------------------------------------------
 
-export interface RulesChoice { mention: string; options: Array<{ name: string; image: string | null }> }
+/** Cards a word in the question could be (lib/card-names.ts). */
+export type RulesChoice = NamedChoice;
+
+/** Read what the owner typed for cards before it's sent (lib/cards.ts readCards): marked text, and what to ask. */
+export const readCards = (text: string, { known = [], picks = [], typing = false }: { known?: string[]; picks?: CardPick[]; typing?: boolean } = {}) =>
+  send('cards/read', 'POST', { text, known, picks, ...(typing ? { typing } : {}) }).then(json<CardReading>);
+
+/** Forget the profile's pick for some words ("innaiz"), so they're asked about again. */
+export const forgetCardPick = (phrase: string) =>
+  fetch(url(`cards/read?phrase=${encodeURIComponent(phrase)}`), { method: 'DELETE' }).then(json<{ ok: true }>);
 
 export const rulesThreads = () => fetch(url('rules')).then(json<{ threads: RulesThreadSummary[]; budget: Budget }>);
 

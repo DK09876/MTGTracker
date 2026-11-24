@@ -12,6 +12,7 @@
  * deck, so leaving the page loses nothing.
  */
 
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import CardText from './CardText';
 import ListControls, { GroupHead, sortRows, useFilterFallback, useListView, useShown } from './ListControls';
 import { UPDATING_TITLE, useUpdating } from '@/lib/use-reach';
@@ -36,6 +37,8 @@ interface Props {
   /** After applying or undoing, the deck page reads the deck again. */
   onChanged: () => Promise<void> | void;
   onTab: (tab: string) => void;
+  /** The deck's cards and commander: in play when the owner's words are read for cards (CardChoice). */
+  deckNames?: string[];
 }
 
 type Step = 'approach' | 'cuts' | 'review';
@@ -68,7 +71,7 @@ const reasonWords = (c?: { chip?: string | null; text?: string }) => [c?.chip ? 
 const addLine = (box: string, line: string) => { const t = box.trim(); return !t ? line : /[.!?]$/.test(t) ? `${t} ${line}` : `${t}. ${line}`; };
 const names = (xs: string[]) => xs.join('; ');
 
-export default function DeckTrim({ listId, version, sections, onChanged, onTab }: Props) {
+export default function DeckTrim({ listId, version, sections, onChanged, onTab, deckNames = [] }: Props) {
   // A deploy is under way: nothing new starts until it is back (handoff 9).
   const updating = useUpdating();
   const [view, setView] = useState<TrimView | null>(null);
@@ -81,6 +84,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   // The box in step 1, and the message back in step 2.
   const [box, setBox] = useState('');
   const [message, setMessage] = useState('');
+  // Card names in what's said back are checked before Claude reads them (AGENTS.md, "Reading the owner's words").
+  const cardCheck = useCardCheck();
   const [keepNotes, setKeepNotes] = useState<string[]>([]);
   const [cutsTo, setCutsTo] = useState<string | null>(null);
   const dirty = useRef(false);
@@ -98,6 +103,8 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
     if (fresh || !dirty.current) { setChoices(v.choices); if (fresh) setCard({}); }
     // A new list answered what was sent: the message box starts empty again, and "What changed" comes into view.
     if (fresh && v.run && runId.current !== null) { setStep('cuts'); setMessage(''); if (v.run.round > 1) scrollChanged.current = true; }
+    // The list went (a new round, from here or from Chat): back to step 1, not an empty step 2 or 3.
+    if (fresh && !v.run) setStep(null);
     runId.current = v.run?.id ?? null;
     // The box follows the saved text when it changes on the server (a draft, or Claude adding to it).
     const at = v.approach?.at ?? null;
@@ -213,20 +220,34 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
   const outs = [...sections].sort((a, b) => Number(b.purpose === 'out') - Number(a.purpose === 'out'));
   const refused = items.filter((i) => i.tier === 'cut' && !cuts.includes(i.name));
   const cost = money(view.costs[view.model]);
-  const send = () => act({ action: 'find', rerun: true, message });
+  const send = async () => {
+    let said = message;
+    if (said.trim()) {
+      // The deck's cards count as in play: a name of one of them is that card.
+      const checked = await cardCheck.check(said, { known: [...deckNames, ...items.map((i) => i.name)] });
+      if (checked === null) return;
+      setMessage(checked);
+      said = checked;
+    }
+    await act({ action: 'find', rerun: true, message: said });
+  };
 
   // --- done: what happened, and the way back --------------------------------------------
   if (view.done) {
     const d = view.done;
+    // The deck as it is now, not as the apply left it: cards may have come in or gone since.
+    const size = view.size;
+    const left = Math.max(0, size - 100);
     return (
       <section className={`${CARD} flex flex-col gap-3`} data-tour="trim-done" data-section="Trim">
-        <h3 className="font-display text-2xl font-semibold">{d.size === 100 ? 'The deck is at 100 cards' : `The deck is at ${d.size} cards${d.size > 100 ? `, ${d.size - 100} over` : ''}`}</h3>
+        <h3 className="font-display text-2xl font-semibold">{size === 100 ? 'The deck is at 100 cards' : `The deck is at ${size} cards${left ? `, ${left} over` : ''}`}</h3>
         <p className="text-sm text-[var(--muted)]">{d.cut} card{d.cut === 1 ? '' : 's'} moved to {d.to}, each with its reason. A snapshot from before is in History.{d.notes ? ` ${d.notes} line${d.notes === 1 ? '' : 's'} from the session went to your notes.` : ''}</p>
+        {view.changedSinceDone && <p className="text-sm text-[var(--muted)]">The deck changed since these cuts, so Undo is off: it could put back the wrong cards.</p>}
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
         <div className="flex flex-wrap gap-2">
-          <button className={C.go} onClick={() => onTab('check')}>Check mana and curve</button>
-          <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, async () => { setStep('cuts'); await onChanged(); })}>Undo</button>
-          {d.size > 100 && <button className={C.btn} disabled={busy} onClick={() => act({ action: 'reset' })}>Trim the rest</button>}
+          <button className={C.go} disabled={busy} onClick={() => act({ action: 'reset' }, () => setStep('approach'))}>Start another round{left ? ` · ${left} to cut` : ''}</button>
+          <button className={C.btn} onClick={() => onTab('check')}>Check mana and curve</button>
+          {!view.changedSinceDone && <button className={C.btn} disabled={busy} onClick={() => act({ action: 'undo' }, async () => { setStep('cuts'); await onChanged(); })}>Undo</button>}
         </div>
       </section>
     );
@@ -309,7 +330,7 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
           {view.run.stale && (
             <p role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/60 bg-amber-300/[0.05] px-3.5 py-2 text-sm">
               <span className="min-w-0 flex-1">The deck changed since this list was made. Cards no longer in the deck are left out.</span>
-              <button className={C.btn} disabled={busy || cutsRunning} onClick={send}>✦ Make a new list</button>
+              <button className={C.btn} disabled={busy || cutsRunning} onClick={() => void send()}>✦ Make a new list</button>
             </p>
           )}
 
@@ -333,8 +354,9 @@ export default function DeckTrim({ listId, version, sections, onChanged, onTab }
             ) : view.run.notes ? (
               <p className="text-sm text-[var(--muted)]"><span className={`font-semibold ${C.ai}`}>✦ Claude:</span> <CardText text={view.run.notes} /></p>
             ) : null}
-          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost}
-            disabled={busy || cutsRunning || view.noKey || updating} onSend={send} />
+          <Session turns={view.turns} ask={view.run.ask} message={message} setMessage={setMessage} marked={marked} cost={cost} known={deckNames}
+            disabled={busy || cutsRunning || view.noKey || updating} onSend={() => void send()} />
+          {cardCheck.panel}
 
           <div className={`${CARD} flex flex-col gap-1`}>
             <ListControls filter={lv.filter} onFilter={(f) => setLv({ filter: f })} sort={lv.sort} onSort={(x) => setLv({ sort: x })} filters={[
@@ -474,7 +496,8 @@ function Numbers({ rows }: { rows: TrimView['impact']['rows'] }) {
 }
 
 /** The cut session so far, the owner's turns in gold and Claude's in violet, then the box to say something back. */
-function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSend }: {
+function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSend, known }: {
+  known: string[];
   turns: TrimTurn[]; ask: string | null; message: string; setMessage: (m: string) => void; marked: number; cost: string; disabled: boolean; onSend: () => void;
 }) {
   const can = marked > 0 || !!message.trim();
@@ -491,6 +514,7 @@ function Session({ turns, ask, message, setMessage, marked, cost, disabled, onSe
           aria-describedby="trim-say-keys"
           placeholder="Why did you keep or cut what you did? What should count for more? Or ask why a card is on the list."
           className={`${C.input} w-full resize-y py-2.5`} />
+        <CardSuggestions text={message} onText={setMessage} known={known} />
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] text-[var(--muted)]">Weigh more:</span>
           {WEIGH.map((w) => <button key={w} type="button" className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--background)] px-3 text-[13px] hover:border-[#d6aa2e]" onClick={() => setMessage(addLine(message, `Weigh ${w} more.`))}>{w}</button>)}

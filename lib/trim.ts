@@ -577,16 +577,31 @@ export function setNeverCut(listId: string, name: string, on: boolean): void {
   if (card) setKeep(listId, card.oracle_id ?? card.id, on);
 }
 
-/** How many to cut: a number, a size to reach, or null for down to 100. Kept with the deck. */
-export function setTarget(listId: string, target: TrimTarget | null): void {
-  update(listId, (s) => { s.target = target; });
+/** A new round: the list, the choices, the session and the last apply go; the box, the target and what was remembered about cards stay. */
+function newRound(s: TrimStore): void {
+  s.run = null; s.choices = {}; s.carried = {}; s.turns = []; s.done = null;
 }
 
-/** Start over: the list, the choices and the session go; the box and what was remembered about cards stay. */
+/**
+ * How many to cut: a number, a size to reach, or null for down to 100. Kept
+ * with the deck. Asking for a number after an apply (from Chat, say) starts
+ * the next round, so it isn't stuck behind the finished screen.
+ */
+export function setTarget(listId: string, target: TrimTarget | null): void {
+  update(listId, (s) => {
+    if (s.done) newRound(s);
+    s.target = target;
+  });
+}
+
+/** Start over, or another round after an apply: the owner lands on "What matters" with the deck as it is now. */
 export function resetTrim(listId: string): void {
   quietly(() => closeAll(listId, 'trim:'));
-  update(listId, (s) => { s.run = null; s.choices = {}; s.carried = {}; s.turns = []; s.done = null; });
+  update(listId, newRound);
 }
+
+/** The main board's fingerprint as it is now, to tell whether the deck moved on since an apply. */
+const deckNow = (list: List) => deckHash(list.commander, cardsInList(list.id).filter((c) => c.board === 'main'));
 
 /** What the owner said in the session: the box at the start and each message, for "Keep for next time". */
 export function sessionMessages(turns: TrimTurn[]): Array<{ id: string; text: string }> {
@@ -626,7 +641,7 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board, k
   const done: TrimDone = {
     at: now(), cut: moved.cut, size: ctx.size - moved.cut, to: ctx.sections.find((x) => x.id === moved.to)?.name ?? 'Came out', undo: moved.undo,
     logged: { accepted: cut.size, refused: refused.length, left: items.filter((i) => i.tier === 'maybe' && !cut.has(i.name)).length, reasons },
-    notes: notes.length, noteIds: added, session: s.turns,
+    notes: notes.length, noteIds: added, session: s.turns, deckHash: deckNow(list),
   };
   quietly(() => {
     for (const name of cut) logOutcome(list.id, [itemKey(name)], 'accepted', { chip: (s.choices[name]?.chip ?? null) as ReasonChip | null, text: s.choices[name]?.text ?? null });
@@ -644,10 +659,16 @@ export async function applyTrim(list: List, profileId: string, cutsTo?: Board, k
   return done;
 }
 
-/** Put back what the last apply moved; the list and the choices are as they were. */
+/**
+ * Put back what the last apply moved; the list and the choices are as they
+ * were. Refused once the deck has changed since: the cards moved back could
+ * be the wrong ones (cut again by hand, or added back already). History
+ * still has the snapshot from before.
+ */
 export function undoTrim(list: List): { moved: number } {
   const s = trimStore(list.id);
   if (!s.done) return { moved: 0 };
+  if (s.done.deckHash && s.done.deckHash !== deckNow(list)) throw new Error('The deck changed since these cuts, so they can’t be undone here. The snapshot from before is in History.');
   const result = undoApply(list, s.done.undo as UndoMoves);
   // The notes the apply saved from "Keep for next time" come off again.
   for (const id of s.done.noteIds ?? []) changePlan(list.id, { notes: { remove: id } });
@@ -740,6 +761,8 @@ export async function trimView(list: List, profileId: string): Promise<TrimView>
     cutsTo: { id: cutsTo, name: ctx.sections.find((x) => x.id === cutsTo)?.name ?? 'Sideboard' },
     job,
     done: s.done,
+    // Older applies kept no fingerprint: Undo stays as it was for them.
+    changedSinceDone: !!s.done?.deckHash && s.done.deckHash !== hash,
     noKey: !process.env.ANTHROPIC_API_KEY,
   };
 }

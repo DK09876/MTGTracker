@@ -108,6 +108,8 @@ export interface TrimDone {
   noteIds?: string[];
   /** The session as it was, so an undo brings it back. */
   session?: TrimTurn[];
+  /** The deck's fingerprint right after the cuts. Undo is off once the deck moves on from it; missing on older applies. */
+  deckHash?: string;
 }
 
 /**
@@ -174,6 +176,8 @@ export interface TrimView {
   cutsTo: { id: string; name: string };
   job: TrimJob | null;
   done: TrimDone | null;
+  /** The deck changed since the cuts were applied, so Undo could put back the wrong cards. */
+  changedSinceDone: boolean;
   /** No Claude key on the server: the approach can still be drafted or written, the list can't be made. */
   noKey: boolean;
 }

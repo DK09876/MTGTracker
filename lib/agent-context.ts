@@ -24,7 +24,8 @@ You work inside MTG Tracker, an app for one playgroup's Magic: The Gathering dec
 - Where a field holds a card's name by itself (a "name" field, a list of card names, a "replaces" or "out" field), write the plain name with no brackets.
 
 ## The owner's words
-- The owner may write [[Card Name]] too. That names exactly that card, never another card with a similar name. Those cards' details are given to you under "Cards the owner named".`;
+- The owner may write [[Card Name]] too. That names exactly that card, never another card with a similar name. Those cards' details are given to you under "Cards the owner named".
+- A card name the owner wrote without [[ ]] is not confirmed: don't assume which card it is; if it matters, say what you took it to mean.`;
 
 /** Card names marked [[like this]] in a text, once each, as written. */
 export function markedNames(text: string): string[] {
