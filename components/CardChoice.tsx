@@ -15,8 +15,8 @@
  * forget. "None of these" sends nothing: the owner is asked to check the spelling and try again.
  *
  * A card's name in everyday words ("lightning bolt", "last chance", "humility") is never asked: CardSuggestions,
- * above the box, offers it quietly as the owner types. A tap marks it in the box; ✕ says it isn't a card, and is
- * remembered; left alone, the words go as words.
+ * above the box, offers it quietly as the owner types. The name is a card link (its picture on hover, the card on a
+ * tap); Use marks it in the box; ✕ says it isn't a card, and is remembered; left alone, the words go as words.
  *
  *   <CardSuggestions text={typed} onText={setTyped} known={deckNames} />
  */
@@ -211,10 +211,13 @@ export function CardSuggestions({ text, onText, known = [], className = '' }: {
     <div className={`flex flex-wrap gap-1.5 ${className}`} aria-live="polite">
       {list.map((s) => (
         <span key={`${s.mention}|${s.name}`} className="inline-flex items-center rounded-full border border-[var(--accent)]/45 bg-[color-mix(in_srgb,var(--accent)_12%,var(--background))] text-[13px] shadow-sm">
-          <button type="button" {...steady(() => onText(markText(text, [s])))} className="flex min-h-9 items-center gap-1.5 py-1 pl-2.5 pr-2 text-left" title={`Use the card ${s.name}`}>
+          {/* The name is the app's card link: its picture on hover, the card on a tap (CardText). */}
+          <span className="flex min-h-9 items-center gap-1.5 py-1 pl-2.5 pr-1.5">
             <span className="text-[var(--accent)]" aria-hidden>✦</span>
-            <span>Card: <b className="font-semibold">{s.name}</b>?</span>
-          </button>
+            <span>Card: <CardLink name={s.name} className="font-semibold" />?</span>
+          </span>
+          <button type="button" {...steady(() => onText(markText(text, [s])))} title={`Use the card ${s.name}`}
+            className="min-h-9 border-l border-[var(--border)] px-2.5 font-semibold text-[var(--accent)] hover:text-[var(--foreground)]">Use</button>
           <button type="button" {...steady(() => close(s))} aria-label={`“${s.mention}” isn’t the card ${s.name}`} className="grid min-h-9 min-w-9 place-items-center border-l border-[var(--border)] pr-1 text-[var(--muted)] hover:text-[var(--foreground)]">✕</button>
         </span>
       ))}

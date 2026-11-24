@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 
 import { localCards } from './card-store';
 import { foldName } from './card-lookup';
-import { findMentions, markText, nameIndex, phraseKey, phrasesForPick, type CardPick, type CardReading, type NameIndex } from './card-names';
+import { exactCard, findMentions, markText, nameIndex, phraseKey, phrasesForPick, type CardPick, type CardReading, type NameIndex } from './card-names';
 import { cardPicks, rememberPick } from './card-picks';
 import { EVERYDAY_WORDS } from './everyday-words';
 import { database, storeCard } from './db';
@@ -161,11 +161,14 @@ export async function readCards(
     for (const phrase of phrases) remembered.set(phrase, p.name);
     if (profile) rememberPick(profile, phrases, p.name);
   }
-  const unmarked = text.replace(/\[\[+[^[\]]*\]\]+/g, ' ');
+  // A [[mark]] no card has (an edit inside a marked name, a typo in brackets) is read again as words, so it's asked
+  // about like any other typo rather than sent as a card that doesn't exist.
+  const checked = text.replace(/\[\[+([^[\]]*)\]\]+/g, (mark, name: string) => (exactCard(name, index) ? mark : name));
+  const unmarked = checked.replace(/\[\[+[^[\]]*\]\]+/g, ' ');
   const m = findMentions(unmarked, index, vocab, { everyday: EVERYDAY_WORDS, known, remembered });
   const shown = pictures && m.ambiguous.length ? await findCards(m.ambiguous.flatMap((a) => a.options)).catch(() => null) : null;
   return {
-    text: markText(text, m.spans),
+    text: markText(checked, m.spans),
     cards: m.cards,
     choices: m.ambiguous.map((a) => ({
       mention: a.mention, kind: a.kind,

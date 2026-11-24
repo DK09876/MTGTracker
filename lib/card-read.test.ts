@@ -72,4 +72,11 @@ describe('readCards', () => {
     expect(await readCards('how does kratos attack', { profile: 'p', known: ['Kratos, Stoic Father'] }))
       .toMatchObject({ text: 'how does [[Kratos, Stoic Father]] attack', choices: [], readAs: [{ mention: 'kratos', name: 'Kratos, Stoic Father', remembered: false }] });
   });
+
+  it('reads a [[mark]] no card has as typed words, so a typo inside it is asked about', async () => {
+    const { readCards } = await import('./cards');
+    const r = await readCards('can I redirect [[Innaiz, the Gale Force]] and [[Rhystic Study]]', { profile: 'p' });
+    expect(r.text).toBe('can I redirect Innaiz, the Gale Force and [[Rhystic Study]]');
+    expect(r.choices).toMatchObject([{ kind: 'typo', mention: 'Innaiz, the Gale Force' }]);
+  });
 });

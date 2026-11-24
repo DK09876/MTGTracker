@@ -364,3 +364,8 @@ export function markText(text: string, spans: Array<{ mention: string; name: str
   }
   return out.replace(/\u0000(\d+)\u0000/g, (_, k) => kept[Number(k)]);
 }
+
+/** The card a name is, exactly (case, punctuation and a double-faced card's front aside); undefined when none. */
+export function exactCard(name: string, index: NameIndex): string | undefined {
+  return index.full.get(normalise(name.split(' // ')[0]));
+}
