@@ -5,8 +5,18 @@
  * of pictures, Archidekt-style stacks (each group a column of overlapping
  * cards, the last one whole), or a compact text list with a picture on
  * hover. One size slider (S, M, L to snap) sizes all of them; groups fold;
- * a card opens on a click, or - in Select mode - is picked, so several can
- * be moved, tagged or removed at once. Each card's ⋯ has the quick things.
+ * a card opens on a click, or - in Select mode, or with ⌘/Ctrl/Shift, or a
+ * long press on a phone - is picked, so several can be moved, tagged or
+ * removed at once. Each card's ⋯ has the quick things.
+ *
+ * Calm by default: a row's −, + and ⋯ show for the row under the pointer,
+ * a collection mark only where something needs doing (a card that's simply
+ * yours shows its ✓ on hover), and the list's columns are a choice. Chips
+ * above the cards (the deck's tags and roles, where copies are, foils) and
+ * the deck at a glance light up the cards behind a number; "Show only
+ * these" hides the rest. The filter box finds a card in the deck, or adds
+ * one it doesn't have. On a wide screen the card under the pointer shows in
+ * a panel beside the list.
  *
  * View choices are remembered in this browser, since they are how someone
  * likes to look at every deck, not a property of one deck; folded groups are
@@ -14,7 +24,7 @@
  */
 
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 
 import ManaCost from './ManaCost';
@@ -27,6 +37,7 @@ import { boardName, DEFAULT_SECTIONS, PURPOSES, type DeckSection, type Purpose }
 import * as api from '@/lib/api';
 import { groupCards, primaryType, type Categories, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
 import { filterCards, type IsWord } from '@/lib/filter';
+import { looksLikeSyntax } from '@/lib/syntax';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
@@ -34,6 +45,9 @@ import { nextColor, tagKey, tagsByCard, type DeckTags } from '@/lib/tags';
 import { mouseOnly } from '@/lib/mouse-only';
 
 export type Entry = Item & { board: Board; slot?: Slot | null };
+
+/** Cards lit up: by name (from the deck at a glance) or by a test. `n` makes a repeat ask count. */
+export interface Light { key: string; label: string; names?: string[]; test?: (e: Entry) => boolean; n?: number }
 
 interface Props {
   listId: string;
@@ -67,6 +81,10 @@ interface Props {
   filterTo?: { text: string; n: number };
   /** Read the deck again after a change made here directly (a finish toggled from the keyboard). */
   onChanged?: () => void;
+  /** Light up cards from outside: a curve bar or a role in the deck at a glance. */
+  light?: Light;
+  /** Shown at the end of the chips: the deck's copies summary. */
+  chipsEnd?: React.ReactNode;
 }
 
 type View = 'grid' | 'stacks' | 'text';
@@ -77,9 +95,12 @@ const SIZES = { S: 150, M: 210, L: 270 } as const;
 const MIN_SIZE = 140;
 const MAX_SIZE = 300;
 
-interface Prefs { view: View; groupBy: GroupBy; sortBy: SortBy; size: number; v?: number }
-// The compact list fits about forty cards on a screen; pictures are a click away (G, S).
-const DEFAULT_PREFS: Prefs = { view: 'text', groupBy: 'type', sortBy: 'name', size: SIZES.M, v: 2 };
+/** The list's optional columns. */
+export interface Columns { mana: boolean; price: boolean; type: boolean; tags: boolean }
+interface Prefs { view: View; groupBy: GroupBy; sortBy: SortBy; size: number; cols: Columns; preview: boolean; v?: number }
+// The compact list fits about forty cards on a screen; pictures are a click away (G, S). Sorted by mana value, as a curve reads.
+const DEFAULT_COLS: Columns = { mana: true, price: true, type: false, tags: true };
+const DEFAULT_PREFS: Prefs = { view: 'text', groupBy: 'type', sortBy: 'mv', size: SIZES.M, cols: DEFAULT_COLS, preview: true, v: 3 };
 
 function loadPrefs(): Prefs {
   try {
@@ -87,11 +108,33 @@ function loadPrefs(): Prefs {
     // 'visual' was the grid's old name. Before v2 the grid was the default, so a saved grid wasn't a choice: the list takes over once.
     const view: View = !saved.v ? 'text' : saved.view === 'stacks' || saved.view === 'text' ? saved.view : 'grid';
     const size = typeof saved.size === 'number' && saved.size >= MIN_SIZE && saved.size <= MAX_SIZE ? saved.size : SIZES.M;
-    return { ...DEFAULT_PREFS, ...saved, view, size, v: 2 };
+    // Before v3 name was the only sort anyone had been given: mana value takes over once.
+    const sortBy: SortBy = (saved.v ?? 0) < 3 ? 'mv' : saved.sortBy === 'name' || saved.sortBy === 'price' ? saved.sortBy : 'mv';
+    return { ...DEFAULT_PREFS, ...saved, view, size, sortBy, cols: { ...DEFAULT_COLS, ...saved.cols }, preview: saved.preview !== false, v: 3 };
   } catch {
     return DEFAULT_PREFS;
   }
 }
+
+// The card under the pointer, for the panel beside the list: a small store, so hovering re-draws only the panel.
+let hoverId: string | null = null;
+const hoverListeners = new Set<() => void>();
+function setHover(id: string | null) {
+  if (id === hoverId) return;
+  hoverId = id;
+  for (const l of hoverListeners) l();
+}
+const subscribeHover = (l: () => void) => { hoverListeners.add(l); return () => { hoverListeners.delete(l); }; };
+const useHover = () => useSyncExternalStore(subscribeHover, () => hoverId, () => null);
+
+// Wide enough for the panel beside the list (Tailwind's xl).
+const WIDE = '(min-width: 1280px)';
+const subscribeWide = (l: () => void) => { const m = matchMedia(WIDE); m.addEventListener('change', l); return () => m.removeEventListener('change', l); };
+const useWide = () => useSyncExternalStore(subscribeWide, () => matchMedia(WIDE).matches, () => false);
+
+/** The filter words for where a deck's copies are (lib/copy-status.ts), as chips. */
+const STATUS_CHIPS: Array<[string, string]> = [['inbox', 'In a box'], ['otherdeck', 'In another deck'], ['proxy', 'Proxies'], ['tobuy', 'To buy']];
+const front = (name: string) => name.split(' // ')[0].trim().toLowerCase();
 
 const foldKey = (listId: string) => `mtg-folded:${listId}`;
 function loadFolded(listId: string): Set<string> {
@@ -107,16 +150,19 @@ const SHORTCUTS: Array<[string, string]> = [
   ['M · B · D', 'Move it to the Maybeboard, the Sideboard, or back to the Deck'],
   ['F', 'Foil on or off'], ['Delete', 'Remove it'],
   ['⌘Z · Ctrl+Z', 'Undo the last change'],
-  ['X', 'Select cards (again to finish)'], ['A', 'While selecting: pick everything shown'],
+  ['X', 'Select cards (again to finish)'], ['⌘ · Ctrl · Shift-click', 'Pick a card without Select (a long press on a phone)'], ['A', 'While selecting: pick everything shown'],
   ['T · G · S', 'List, Grid or Stacks'], ['[ · ]', 'Cards smaller or bigger'],
   ['Esc', 'Close a menu · clear the selection · stop selecting'], ['1 – 5', 'Switch the deck\'s tabs'], ['?', 'Show these keys'],
 ];
 
-export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot, mark, isWord, filterTo, onChanged }: Props) {
+export default function DeckCards({ listId, entries, tags, onTags, version, isDeck, onSelect, onQuantity, onMove, onAsk, onChangeCommander, sections = DEFAULT_SECTIONS, onSections, commander, onSlot, mark, isWord, filterTo, onChanged, light: lightFrom, chipsEnd }: Props) {
   // The card under the pointer, for the card keys; a ref, so hovering doesn't re-render the deck.
   const hovered = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const over = (e: MouseEvent) => { hovered.current = (e.target as HTMLElement).closest?.('[data-card-id]') as HTMLElement | null; };
+    const over = (e: MouseEvent) => {
+      hovered.current = (e.target as HTMLElement).closest?.('[data-card-id]') as HTMLElement | null;
+      if (hovered.current?.dataset.cardId) setHover(hovered.current.dataset.cardId);
+    };
     document.addEventListener('mouseover', over);
     return () => document.removeEventListener('mouseover', over);
   }, []);
@@ -158,14 +204,14 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   const asked: GroupBy = prefs.groupBy === 'role' ? 'tag' : prefs.groupBy;
   const groupBy: GroupBy = !isDeck && asked === 'tag' ? 'type' : asked;
 
-  // The built-in tags (Scryfall's roles) are looked up only when someone groups by tags.
+  // The built-in tags (Scryfall's roles): for grouping by tags, and the chips that light cards up.
   const [roles, setRoles] = useState<RoleCount[] | null>(null);
   useEffect(() => {
-    if (!isDeck || groupBy !== 'tag') return;
+    if (!isDeck) return;
     let cancelled = false;
     api.deckRoles(listId).then((r) => { if (!cancelled) setRoles(r); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [isDeck, groupBy, listId, version]);
+  }, [isDeck, listId, version]);
 
   const onCard = useMemo(() => tagsByCard(tags ?? { brief: '', overview: '', tags: [], cardTags: [] }), [tags]);
   const categories = useMemo((): Categories | undefined => {
@@ -188,7 +234,30 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   }, [groupBy, tags, roles, onCard]);
 
   const onBoard = isDeck ? entries.filter((e) => e.board === board) : entries;
-  const { results: shown, unsupported } = filterCards(onBoard, filter, isWord);
+  const { results: matched, unsupported } = filterCards(onBoard, filter, isWord);
+
+  // Cards lit up by a chip or the deck at a glance; the rest dim, or hide with "Show only these".
+  const [light, setLight] = useState<Light | null>(null);
+  const [only, setOnly] = useState(false);
+  useEffect(() => {
+    if (!lightFrom) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a light asked for from outside
+    setLight(lightFrom);
+    setOnly(false);
+    setBoard('main');
+    filterBox.current?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }, [lightFrom]);
+  const lit = useMemo(() => {
+    if (!light) return null;
+    if (light.test) return light.test;
+    const names = new Set((light.names ?? []).map(front));
+    return (e: Entry) => names.has(front(e.card.name)) || names.has(e.card.name.toLowerCase());
+  }, [light]);
+  const shown = lit && only ? matched.filter(lit) : matched;
+  const dims = (e: Entry) => !!lit && !only && !lit(e) && !picked.has(e.card.id);
+  const toggleLight = (next: Light) => {
+    if (light?.key === next.key) { setLight(null); setOnly(false); } else setLight(next);
+  };
   const groups = groupCards(shown, groupBy, prefs.sortBy, categories);
   // In Stacks, the maybeboard sits beside the main deck as one more column.
   const maybe = isDeck && board === 'main' && prefs.view === 'stacks' ? filterCards(entries.filter((e) => e.board === 'maybe'), filter, isWord).results : [];
@@ -200,9 +269,12 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   const accepted = (tags?.tags ?? []).filter((t) => t.status === 'accepted');
 
   const stopSelecting = () => { setSelecting(false); setPicked(new Set()); lastPicked.current = null; };
-  // A click opens the card - or, while selecting, picks it (shift-click picks a range).
-  const activate = (entry: Entry, shift: boolean) => {
-    if (!selecting) { onSelect(entry.card); return; }
+  // A click opens the card - or, while selecting, or with ⌘, Ctrl or Shift held, picks it (shift-click picks a range).
+  const activate = (entry: Entry, e: Pick<React.MouseEvent, 'shiftKey' | 'metaKey' | 'ctrlKey'>) => {
+    const shift = e.shiftKey;
+    if (!selecting && !e.metaKey && !e.ctrlKey && !shift) { onSelect(entry.card); return; }
+    if (entry.commander && !selecting) { onSelect(entry.card); return; }
+    setSelecting(true);
     const id = entry.card.id;
     // Read the last pick now: the update below runs later, after it has moved on.
     const from = lastPicked.current;
@@ -240,6 +312,92 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   };
   const [newTag, setNewTag] = useState<string | null>(null);
 
+  // A long press on a phone picks a card, as ⌘-click does with a mouse; the tap that ends it doesn't open the card.
+  const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
+  const pressed = useRef(false);
+  const touchPick = {
+    onPointerDown: (e: React.PointerEvent) => {
+      // A long press that no tap followed mustn't swallow the next tap.
+      pressed.current = false;
+      if (e.pointerType === 'mouse') return;
+      const id = ((e.target as HTMLElement).closest('[data-card-id]') as HTMLElement | null)?.dataset.cardId;
+      const entry = id ? entries.find((x) => x.card.id === id && !x.commander) : undefined;
+      if (!entry) return;
+      press.current = { x: e.clientX, y: e.clientY, timer: setTimeout(() => {
+        press.current = null;
+        pressed.current = true;
+        setSelecting(true);
+        setPicked((prev) => new Set(prev).add(entry.card.id));
+        lastPicked.current = entry.card.id;
+        navigator.vibrate?.(10);
+      }, 480) };
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > 8) { clearTimeout(press.current.timer); press.current = null; }
+    },
+    onPointerUp: () => { if (press.current) { clearTimeout(press.current.timer); press.current = null; } },
+    onPointerCancel: () => { if (press.current) { clearTimeout(press.current.timer); press.current = null; } },
+    onClickCapture: (e: React.MouseEvent) => { if (pressed.current) { pressed.current = false; e.preventDefault(); e.stopPropagation(); } },
+  };
+
+  // The filter box adds a card the deck doesn't have: names that start with what's typed, the first on Enter.
+  const [quick, setQuick] = useState<{ q: string; cards: api.QuickCard[] } | null>(null);
+  const [addNote, setAddNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const typed = filter.trim();
+  const canAdd = typed.length >= 3 && !looksLikeSyntax(typed) && !matched.length && !!onBoard.length;
+  useEffect(() => {
+    if (!canAdd) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.quickCards(listId, typed).then((r) => { if (!cancelled) setQuick({ q: typed, cards: r.cards.slice(0, 4) }); }).catch(() => {});
+    }, 120);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [canAdd, typed, listId]);
+  const offers = canAdd && quick?.q === typed ? quick.cards : [];
+  const addQuick = async (card: api.QuickCard, toMaybe: boolean) => {
+    const to: Board = toMaybe && isDeck ? 'maybe' : board;
+    setFilter('');
+    setQuick(null);
+    try {
+      await api.addCard(listId, card.id, 1, to);
+      setAddNote({ text: `Added ${card.name} to ${isDeck ? nameOf(to) : 'the list'}`, ok: true });
+      onChanged?.();
+    } catch {
+      setAddNote({ text: `Couldn't add ${card.name}`, ok: false });
+    }
+    setTimeout(() => setAddNote(null), 3500);
+  };
+
+  // The chips: your tags, then the built-in roles, then where the copies are and foils. Counts are copies on this board.
+  const chips = useMemo(() => {
+    if (!isDeck) return [] as Array<Light & { count: number; tone?: string; color?: string }>;
+    const n = (test: (e: Entry) => boolean) => onBoard.filter(test).reduce((k, e) => k + e.quantity, 0);
+    const out: Array<Light & { count: number; tone?: string; color?: string }> = [];
+    for (const t of accepted) {
+      const test = (e: Entry) => (onCard.get(tagKey(e.card)) ?? []).some(({ tag }) => tag.id === t.id);
+      out.push({ key: `tag:${t.id}`, label: t.name, test, count: n(test), color: t.color });
+    }
+    for (const r of [...(roles ?? [])].filter((x) => x.count > 0).sort((a, b) => b.count - a.count).slice(0, 6)) {
+      const names = new Set(r.cards.map(front));
+      const test = (e: Entry) => names.has(front(e.card.name));
+      out.push({ key: `role:${r.id}`, label: r.label, test, count: n(test) });
+    }
+    // Where copies are counts cards, not copies: the summary beside them counts the copies.
+    if (isWord) for (const [word, label] of STATUS_CHIPS) {
+      const test = (e: Entry) => isWord(e, word) === true;
+      out.push({ key: `is:${word}`, label, test, count: onBoard.filter(test).length, tone: word });
+    }
+    const foil = (e: Entry) => e.finish !== 'nonfoil';
+    out.push({ key: 'foil', label: 'Foil or etched', test: foil, count: n(foil) });
+    const gc = (e: Entry) => !!e.card.game_changer;
+    out.push({ key: 'gc', label: 'Game Changers', test: gc, count: n(gc) });
+    return out.filter((c) => c.count > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- accepted follows tags
+  }, [isDeck, onBoard, tags, roles, onCard, isWord]);
+  const litCount = lit ? onBoard.filter(lit).reduce((k, e) => k + e.quantity, 0) : 0;
+  const wide = useWide();
+  const panel = isDeck && prefs.view === 'text' && prefs.preview && wide && shown.length > 0;
+
   // Shortcuts on this tab; the deck's tab keys (1-8, N) are the page's.
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -252,6 +410,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       const k = e.key.toLowerCase();
       if (k === 'escape') {
         if (menu) setMenu(null);
+        else if (light) { setLight(null); setOnly(false); }
         else if (picked.size) setPicked(new Set());
         else if (selecting) stopSelecting();
         return;
@@ -290,6 +449,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   });
 
   const size = prefs.size;
+  // A card that's simply yours shows its ✓ only on hover: the marks that stay are the ones that need something done.
+  const quietMark = (e: Entry) => isWord?.(e, 'held') === true;
   const openMenu = (entry: Entry, el: HTMLElement) => {
     const r = el.getBoundingClientRect();
     setMenu({ entry, x: Math.max(8, Math.min(window.innerWidth - 240, r.right - 228)), y: r.bottom + 6, up: r.bottom + 330 > window.innerHeight });
@@ -330,11 +491,18 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           ref={filterBox}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter  ( / )"
-          title="Filter by name or Scryfall syntax - t:creature, c:rg, cmc<=3"
-          aria-label="Filter this list"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && offers.length) { e.preventDefault(); void addQuick(offers[0], e.shiftKey); }
+          }}
+          placeholder="Find or add a card  ( / )"
+          title="Find a card by name or Scryfall syntax - t:creature, c:rg, cmc<=3. A name the deck doesn't have can be added with Enter."
+          aria-label="Find a card, or add one"
           className="min-w-[11rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
         />
+        <Pick label="Group" value={groupBy} onPick={(v) => setPrefs((p) => ({ ...p, groupBy: v }))}
+          options={[['type', 'Type'], ...(isDeck ? [['tag', 'Tags & roles'] as [GroupBy, string]] : []), ['mv', 'Mana value'], ['none', 'None']]} />
+        <Pick label="Sort" value={prefs.sortBy} onPick={(v) => setPrefs((p) => ({ ...p, sortBy: v }))}
+          options={[['mv', 'Mana value'], ['name', 'Name'], ['price', 'Price']]} />
         <div className="flex shrink-0 overflow-hidden rounded-full border border-[var(--border)] text-sm" role="group" aria-label="View">
           {(['grid', 'stacks', 'text'] as View[]).map((v) => (
             <button
@@ -344,7 +512,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
               aria-pressed={prefs.view === v}
               className={`px-3 py-1.5 ${prefs.view === v ? 'bg-[var(--surface-hover)] text-[var(--foreground)]' : 'text-[var(--muted)]'}`}
             >
-              {v === 'grid' ? 'Grid' : v === 'stacks' ? 'Stacks' : 'Text'}
+              {v === 'grid' ? 'Grid' : v === 'stacks' ? 'Stacks' : 'List'}
             </button>
           ))}
         </div>
@@ -356,10 +524,23 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           className="shrink-0 rounded-full border border-[var(--border)] px-3.5 py-1.5 text-sm text-[var(--muted)] hover:text-[var(--foreground)] aria-expanded:text-[var(--foreground)]"
         >
           <div className="flex flex-col gap-3 text-sm">
-            <Choice label="Group by" value={groupBy} onPick={(v) => setPrefs((p) => ({ ...p, groupBy: v }))}
-              options={[['type', 'Type'], ['mv', 'Mana value'], ...(isDeck ? [['tag', 'Tags'] as [GroupBy, string]] : []), ['none', 'None']]} />
-            <Choice label="Sort by" value={prefs.sortBy} onPick={(v) => setPrefs((p) => ({ ...p, sortBy: v }))}
-              options={[['name', 'Name'], ['mv', 'Mana value'], ['price', 'Price']]} />
+            <div>
+              <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">In the list</p>
+              <span className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                {([['mana', 'Mana cost'], ['price', 'Price'], ['type', 'Type'], ...(isDeck ? [['tags', 'Tag dots'] as [keyof Columns, string]] : [])] as Array<[keyof Columns, string]>).map(([k, label]) => (
+                  <label key={k} className="flex items-center gap-1.5 text-xs">
+                    <input type="checkbox" checked={prefs.cols[k]} onChange={(e) => setPrefs((p) => ({ ...p, cols: { ...p.cols, [k]: e.target.checked } }))} className="accent-[var(--c1)]" />
+                    {label}
+                  </label>
+                ))}
+              </span>
+              {isDeck && (
+                <label className="mt-2 flex items-center gap-1.5 text-xs max-xl:hidden">
+                  <input type="checkbox" checked={prefs.preview} onChange={(e) => setPrefs((p) => ({ ...p, preview: e.target.checked }))} className="accent-[var(--c1)]" />
+                  The card beside the list
+                </label>
+              )}
+            </div>
             <div>
               <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">Card size</p>
               <input type="range" min={MIN_SIZE} max={MAX_SIZE} step={5} value={size} aria-label="Card size"
@@ -381,12 +562,56 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           </div>
         </Popover>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <button data-tour="select-cards" onClick={() => (selecting ? stopSelecting() : setSelecting(true))} aria-pressed={selecting}
+          <button data-tour="select-cards" onClick={() => (selecting ? stopSelecting() : setSelecting(true))} aria-pressed={selecting} title="Or ⌘/Ctrl-click a card (a long press on a phone)"
             className={`rounded-full border px-3.5 py-1.5 text-sm ${selecting ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border)] hover:bg-[var(--surface-hover)]'}`}>
             {selecting ? `${picked.size} selected · Done` : 'Select'}
           </button>
         </div>
       </StickyBar>
+      {(chips.length > 0 || chipsEnd) && (
+        <div role="group" aria-label="Light up cards" className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 pt-0.5 [scrollbar-width:none] sm:flex-wrap">
+          {chips.map((c, i) => {
+            const on = light?.key === c.key;
+            const sep = i > 0 && chips[i - 1].key.split(':')[0] !== c.key.split(':')[0];
+            return (
+              <span key={c.key} className="contents">
+                {sep && <span aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border)]" />}
+                <button type="button" data-chip={c.key} aria-pressed={on} onClick={() => toggleLight(c)}
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs ${on
+                    ? 'border-[var(--c1)] bg-[color-mix(in_srgb,var(--c1)_14%,transparent)] text-[var(--foreground)]'
+                    : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+                  {c.color && <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: c.color }} />}
+                  {c.label} <b className={`font-semibold tabular-nums ${CHIP_TONE[c.tone ?? ''] ?? 'text-[var(--foreground)]'}`}>{c.count}</b>
+                </button>
+              </span>
+            );
+          })}
+          {chipsEnd && <span className="flex shrink-0 items-center gap-1 sm:ml-auto">{chipsEnd}</span>}
+        </div>
+      )}
+      {light && (
+        <div role="status" className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-[color-mix(in_srgb,var(--c1)_45%,transparent)] bg-[color-mix(in_srgb,var(--c1)_9%,transparent)] px-3 py-1.5 text-sm">
+          <span><b className="tabular-nums">{litCount}</b> lit up · {light.label}</span>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+            <input type="checkbox" checked={only} onChange={(e) => setOnly(e.target.checked)} className="accent-[var(--c1)]" /> Show only these
+          </label>
+          <button type="button" onClick={() => { setLight(null); setOnly(false); }} className="ml-auto text-xs text-[var(--c1)] hover:underline">Clear (Esc)</button>
+        </div>
+      )}
+      {offers.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm" data-add-offers>
+          <span className="text-[var(--muted)]">Not in {isDeck ? nameOf(board) : 'the list'}. Add:</span>
+          {offers.map((c, i) => (
+            <button key={c.id} type="button" onClick={(e) => void addQuick(c, e.shiftKey)}
+              title={c.inDeck ? `Already in ${nameOf(c.inDeck as Board)}` : undefined}
+              className={`rounded-full border px-3 py-0.5 ${i === 0 ? 'border-[var(--c1)] text-[var(--foreground)]' : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
+              {c.name}{c.inDeck && <span className="ml-1 text-[10px] text-[var(--faint)]">· in {nameOf(c.inDeck as Board)}</span>}
+            </button>
+          ))}
+          <span className="text-xs text-[var(--faint)] max-sm:hidden">Enter adds the first{isDeck && board !== 'maybe' ? ' · Shift+Enter to the Maybeboard' : ''}</span>
+        </div>
+      )}
+      {addNote && <p role="status" className={`mt-2 text-xs ${addNote.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{addNote.text}</p>}
       {unsupported.length > 0 && (
         <p className="mt-2 text-xs text-amber-400">
           Ignoring {unsupported.map((u) => `"${u}"`).join(', ')} — not supported here.
@@ -404,8 +629,10 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       {waiting && onBoard.length > 0 && <p className="mt-3 text-xs text-[var(--muted)]">Loading tags…</p>}
       {noTags && <p className="mt-3 text-xs text-[var(--muted)]">None of your own tags yet - the built-in ones are shown; make your own under Your tags on the Plan tab, or open a card to tag it.</p>}
       {groupBy === 'tag' && categories && <p className="mt-3 text-xs text-[var(--muted)]">Your tags first, then the built-in ones from Scryfall (marked auto). A card with several tags is listed under each.</p>}
-      {onBoard.length > 0 && !shown.length && <p className="mt-10 text-center text-[var(--muted)]">Nothing here matches that filter.</p>}
+      {onBoard.length > 0 && !shown.length && !offers.length && <p className="mt-10 text-center text-[var(--muted)]">Nothing here matches that filter.</p>}
 
+      <div {...touchPick} className={`[-webkit-touch-callout:none] ${panel ? 'grid grid-cols-[minmax(0,1fr)_13rem] items-start gap-5 2xl:grid-cols-[minmax(0,1fr)_16rem]' : ''}`}>
+      <div className="min-w-0">
       {prefs.view === 'stacks' ? (
         <div data-tour="card-grid" className="mt-5 flex flex-wrap items-start gap-3.5">
           {columns.map((group) => {
@@ -425,8 +652,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
                 {!shut && (
                   <div>
                     {group.items.map((entry, i) => (
-                      <StackCard key={entry.card.id} entry={entry} first={i === 0} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
-                        onActivate={(shift) => activate(entry, shift)} />
+                      <StackCard key={entry.card.id} entry={entry} first={i === 0} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)} quiet={quietMark(entry)} dim={dims(entry)}
+                        onActivate={(e) => activate(entry, e)} />
                     ))}
                   </div>
                 )}
@@ -440,30 +667,35 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       {columns.map((group) => {
         const shut = folded.has(group.key);
         const heading = groupBy !== 'none' || group.key === 'commander';
+        const sums = groupSums(group.items);
         return (
           <section key={group.key} className={prefs.view === 'text' ? 'break-inside-avoid pt-6' : 'mt-6'}>
             {heading && (
               <button onClick={() => fold(group.key)} aria-expanded={!shut} data-section={group.label} data-section-count={group.count}
-                className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--muted)] [break-after:avoid] hover:text-[var(--foreground)]">
+                className="mb-2 flex w-full items-center gap-2 text-sm font-medium text-[var(--muted)] [break-after:avoid] hover:text-[var(--foreground)]">
                 <span aria-hidden className={`inline-block transition-transform ${shut ? '-rotate-90' : ''}`}>▾</span>
                 {group.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: group.color }} aria-hidden="true" />}
                 <span style={group.color ? { color: group.color } : undefined}>{group.label}</span>
                 <span className="tabular-nums">({group.count})</span>
+                <span className="ml-auto text-xs font-normal tabular-nums text-[var(--faint)]">
+                  {sums.avg !== null && group.key !== 'commander' && <span title="Average mana value of its spells">avg {sums.avg.toFixed(1)} · </span>}${sums.price.toFixed(2)}
+                </span>
               </button>
             )}
             {!shut && (prefs.view === 'grid' ? (
               <div data-tour="card-grid" className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(var(--card), calc(50% - 6px)), 1fr))' }}>
                 {group.items.map((entry) => (
-                  <GridCard key={entry.card.id} entry={entry} isDeck={isDeck} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
-                    onActivate={(shift) => activate(entry, shift)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
+                  <GridCard key={entry.card.id} entry={entry} isDeck={isDeck} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)} quiet={quietMark(entry)} dim={dims(entry)}
+                    onActivate={(e) => activate(entry, e)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
                 ))}
               </div>
             ) : (
               <ul className="divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--surface)]">
                 {group.items.map((entry) => (
-                  <TextRow key={entry.card.id} entry={entry} isDeck={isDeck} size={size} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)}
+                  <TextRow key={entry.card.id} entry={entry} isDeck={isDeck} size={size} picked={picked.has(entry.card.id)} selecting={selecting} mark={mark?.(entry)} quiet={quietMark(entry)} dim={dims(entry)}
+                    cols={prefs.cols} hoverPicture={!panel}
                     tagDots={isDeck ? (onCard.get(tagKey(entry.card)) ?? []).map(({ tag }) => tag) : []}
-                    onActivate={(shift) => activate(entry, shift)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
+                    onActivate={(e) => activate(entry, e)} onQuantity={onQuantity} onMenu={(el) => openMenu(entry, el)} />
                 ))}
               </ul>
             ))}
@@ -472,6 +704,12 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       })}
       </div>
       )}
+      </div>
+      {panel && (
+        <SidePanel entries={entries} fallback={onBoard[0]} isDeck={isDeck} moveTo={(e) => tabs.filter((t) => t.id !== e.board)} nameOf={nameOf}
+          tags={onCard} onOpen={onSelect} onMove={onMove} onAsk={onAsk} onMenu={openMenu} />
+      )}
+      </div>
 
       {selecting && (
         <div data-tour="selection-bar" className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 mt-6 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] sm:flex-wrap sm:whitespace-normal rounded-2xl border border-[var(--accent)]/60 bg-[var(--surface-hover)] p-3 text-sm shadow-xl lg:bottom-4">
@@ -556,6 +794,26 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
 
 // --- the three views' cards --------------------------------------------------------
 
+type Activate = (e: Pick<React.MouseEvent, 'shiftKey' | 'metaKey' | 'ctrlKey'>) => void;
+
+/** A group's heading numbers: the average mana value of its spells (lands left out), and its price. */
+function groupSums(items: Entry[]): { avg: number | null; price: number } {
+  let price = 0;
+  let mv = 0;
+  let spells = 0;
+  for (const e of items) {
+    price += (priceOf(e.card, e.finish) ?? 0) * e.quantity;
+    if (primaryType(e.card) !== 'Lands') { mv += (e.card.cmc ?? 0) * e.quantity; spells += e.quantity; }
+  }
+  return { avg: spells ? mv / spells : null, price };
+}
+
+// The count's colour on a chip for where copies are, as the marks have it (CopyMark).
+const CHIP_TONE: Record<string, string> = { inbox: 'text-sky-400', otherdeck: 'text-violet-400', proxy: 'text-amber-300', tobuy: 'text-rose-400' };
+
+// A collection mark that's only a ✓: shown on hover or focus, and not at all on a touch screen.
+const quietClass = 'opacity-0 transition-opacity group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(hover:none)]:hidden';
+
 function Picture({ card, className = '' }: { card: ScryfallCard; className?: string }) {
   const src = imageOf(card, 'normal');
   return src
@@ -572,14 +830,14 @@ const Check = ({ on, left = false }: { on: boolean; left?: boolean }) => (
   <span aria-hidden className={`pointer-events-none absolute ${left ? 'left-1.5' : 'right-1.5'} top-1.5 z-[3] flex h-5 w-5 items-center justify-center rounded-md border-2 text-xs font-extrabold ${on ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-white bg-black/50'}`}>{on ? '✓' : ''}</span>
 );
 
-function GridCard({ entry, isDeck, picked, selecting, mark, onActivate, onQuantity, onMenu }: {
-  entry: Entry; isDeck: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode;
-  onActivate: (shift: boolean) => void; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
+function GridCard({ entry, isDeck, picked, selecting, mark, quiet, dim, onActivate, onQuantity, onMenu }: {
+  entry: Entry; isDeck: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode; quiet: boolean; dim: boolean;
+  onActivate: Activate; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
 }) {
   const { card, quantity } = entry;
   return (
-    <div data-card-id={entry.card.id} className="group relative flex flex-col gap-1">
-      <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
+    <div data-card-id={entry.card.id} className={`group group/card relative flex flex-col gap-1 transition-opacity ${dim ? 'opacity-25' : ''}`}>
+      <button onClick={(e) => onActivate(e)} aria-pressed={selecting ? picked : undefined}
         aria-label={selecting ? `Pick ${card.name}` : `Show details for ${card.name}`}
         className={`relative block w-full text-left ${selecting ? 'cursor-copy' : ''}`}>
         <Picture card={card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
@@ -600,7 +858,7 @@ function GridCard({ entry, isDeck, picked, selecting, mark, onActivate, onQuanti
         </div>
       )}
       <div className="flex items-center justify-between gap-2 px-0.5 text-xs text-[var(--muted)]">
-        {mark}
+        {mark && <span className={`flex ${quiet ? quietClass : ''}`}>{mark}</span>}
         <span className="mr-auto truncate">{entry.finish !== 'nonfoil' ? <span className="uppercase">{entry.finish}</span> : isDeck ? '' : card.set?.toUpperCase()}</span>
         <span className="tabular-nums">{money(entry)}</span>
       </div>
@@ -608,8 +866,8 @@ function GridCard({ entry, isDeck, picked, selecting, mark, onActivate, onQuanti
   );
 }
 
-function StackCard({ entry, first, picked, selecting, mark, onActivate }: {
-  entry: Entry; first: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode; onActivate: (shift: boolean) => void;
+function StackCard({ entry, first, picked, selecting, mark, quiet, dim, onActivate }: {
+  entry: Entry; first: boolean; picked: boolean; selecting: boolean; mark?: React.ReactNode; quiet: boolean; dim: boolean; onActivate: Activate;
 }) {
   // The mark sits in the name bar's right end, left of the copies badge and the Game Changer badge.
   const right = (entry.card.game_changer ? (entry.quantity > 1 ? 48 : 4) + 42 : 0) || (entry.quantity > 1 ? 34 : 4);
@@ -617,8 +875,8 @@ function StackCard({ entry, first, picked, selecting, mark, onActivate }: {
   return (
     // A percentage margin is of the column's width, which is the card's: it works at any size.
     // Hovered (or focused), it opens up: the cards under it slide down so the whole card shows (globals.css .stack-card).
-    <div style={{ marginTop: first ? 0 : '-120.5%' }} className="stack-card relative hover:z-10 focus-within:z-10">
-      <button data-card-id={entry.card.id} onClick={(e) => onActivate(e.shiftKey)} aria-pressed={selecting ? picked : undefined}
+    <div style={{ marginTop: first ? 0 : '-120.5%' }} className={`stack-card group/card relative hover:z-10 focus-within:z-10 ${dim ? '[&>button]:brightness-[.35]' : ''}`}>
+      <button data-card-id={entry.card.id} onClick={(e) => onActivate(e)} aria-pressed={selecting ? picked : undefined}
         aria-label={selecting ? `Pick ${entry.card.name}` : `Show details for ${entry.card.name}`}
         className={`relative block w-full rounded-[4.75%/3.4%] text-left shadow-[0_-2px_10px_rgba(0,0,0,0.45)] ${selecting ? 'cursor-copy' : ''}`}>
         <Picture card={entry.card} className={picked ? 'outline outline-[3px] -outline-offset-[3px] outline-[var(--accent)]' : ''} />
@@ -626,14 +884,15 @@ function StackCard({ entry, first, picked, selecting, mark, onActivate }: {
         {entry.card.game_changer && <GameChanger className={`absolute top-1 ${entry.quantity > 1 ? 'right-12' : 'right-1'}`} />}
         {selecting && <Check on={picked} left />}
       </button>
-      {mark && !selecting && <span className="absolute top-1 z-[3]" style={{ right }}>{mark}</span>}
+      {mark && !selecting && <span className={`absolute top-1 z-[3] ${quiet ? quietClass : ''}`} style={{ right }}>{mark}</span>}
     </div>
   );
 }
 
-function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActivate, onQuantity, onMenu }: {
-  entry: Entry; isDeck: boolean; size: number; picked: boolean; selecting: boolean; mark?: React.ReactNode; tagDots: Array<{ id: string; name: string; color: string }>;
-  onActivate: (shift: boolean) => void; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
+function TextRow({ entry, isDeck, size, picked, selecting, mark, quiet, dim, cols, hoverPicture, tagDots, onActivate, onQuantity, onMenu }: {
+  entry: Entry; isDeck: boolean; size: number; picked: boolean; selecting: boolean; mark?: React.ReactNode; quiet: boolean; dim: boolean;
+  cols: Columns; hoverPicture: boolean; tagDots: Array<{ id: string; name: string; color: string }>;
+  onActivate: Activate; onQuantity: Props['onQuantity']; onMenu: (el: HTMLElement) => void;
 }) {
   const [preview, setPreview] = useState<{ x: number; y: number } | null>(null);
   // The picture on hover is as big as the card size, half again for reading.
@@ -644,37 +903,42 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
     setPreview({ x, y: Math.min(window.innerHeight - h - 10, Math.max(10, e.clientY - h / 2)) });
   };
   const src = imageOf(entry.card, 'normal');
+  const type = (entry.card.type_line ?? entry.card.card_faces?.[0]?.type_line ?? '').split(' // ')[0].split(' — ')[0];
+  // A deck is mostly one of each: the count shows only when there are more (a list keeps it, since counts are its point).
+  const count = isDeck && entry.quantity === 1 ? '' : entry.quantity;
+  // The buttons: for the row under the pointer (or focused) with a mouse; just the ⋯ on a touch screen.
+  const hoverOnly = '[@media(hover:hover)]:absolute [@media(hover:hover)]:right-2 [@media(hover:hover)]:top-1/2 [@media(hover:hover)]:-translate-y-1/2 [@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover/card:flex [@media(hover:hover)]:group-focus-within/card:flex';
   return (
-    <li data-card-id={entry.card.id} className={`flex break-inside-avoid items-center gap-2 px-2.5 py-1 text-sm sm:gap-3 sm:px-3 sm:py-0.5 ${picked ? 'bg-[var(--accent)]/10' : ''}`}>
+    <li data-card-id={entry.card.id} className={`group/card relative flex break-inside-avoid items-center gap-2 px-2.5 py-1 text-sm transition-opacity sm:gap-3 sm:px-3 sm:py-0.5 [@media(hover:hover)]:hover:bg-[var(--surface-hover)] ${picked ? 'bg-[var(--accent)]/10' : ''} ${dim ? 'opacity-30' : ''}`}>
       {selecting && (
-        <button onClick={(e) => onActivate(e.shiftKey)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
+        <button onClick={(e) => onActivate(e)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
       )}
-      <span className="w-6 text-right tabular-nums text-[var(--muted)]">{entry.quantity}</span>
-      <button onClick={(e) => onActivate(e.shiftKey)} onPointerEnter={mouseOnly((e) => { if (!selecting && src) place(e); })} onPointerMove={mouseOnly((e) => { if (preview) place(e); })} onMouseLeave={() => setPreview(null)}
+      <span className="w-5 shrink-0 text-right text-xs tabular-nums text-[var(--muted)]">{count}{count !== '' && isDeck ? '×' : ''}</span>
+      <button onClick={(e) => onActivate(e)} onPointerEnter={mouseOnly((e) => { if (hoverPicture && !selecting && src) place(e); })} onPointerMove={mouseOnly((e) => { if (preview) place(e); })} onMouseLeave={() => setPreview(null)}
         className="min-w-0 flex-1 truncate text-left hover:text-[var(--accent)]">
         {entry.card.name}
         {entry.finish !== 'nonfoil' && <span className="ml-2 text-[10px] uppercase text-[var(--muted)]">{entry.finish}</span>}
         {entry.slot === 'companion' && <span className="ml-2 text-[10px] font-bold uppercase text-[var(--accent)]">Companion</span>}
       </button>
       {/* Kept small in a row, even on a phone, so the name keeps its room. */}
-      {mark && <span className="flex shrink-0 [&_button]:!h-5 [&_button]:!w-5 [&_button]:!text-[11px]">{mark}</span>}
+      {mark && <span className={`flex shrink-0 [&_button]:!h-5 [&_button]:!w-5 [&_button]:!text-[11px] ${quiet ? quietClass : ''}`}>{mark}</span>}
       {entry.card.game_changer && <GameChanger />}
-      {tagDots.length > 0 && (
+      {cols.tags && tagDots.length > 0 && (
         <span className="hidden items-center gap-1 sm:flex" title={tagDots.map((t) => t.name).join(', ')}>
           {tagDots.map((t) => <span key={t.id} className="h-2 w-2 rounded-full" style={{ background: t.color }} />)}
         </span>
       )}
-      <span className="hidden w-32 truncate text-xs text-[var(--muted)] lg:inline xl:hidden 2xl:inline">{(entry.card.type_line ?? entry.card.card_faces?.[0]?.type_line ?? '').split(' // ')[0].split(' — ')[0]}</span>
-      <ManaCost cost={manaCostOf(entry.card)} size={13} />
-      <span className="hidden w-14 text-right tabular-nums text-[var(--muted)] sm:inline">{money(entry)}</span>
-      {!selecting && (
-        <span className="flex items-center gap-1">
+      {cols.type && <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--muted)] sm:inline">{type}</span>}
+      {cols.mana && <span className="flex w-[4.75rem] shrink-0 justify-end max-sm:w-auto"><ManaCost cost={manaCostOf(entry.card)} size={13} /></span>}
+      {cols.price && <span className="hidden w-14 shrink-0 text-right tabular-nums text-[var(--muted)] sm:inline">{money(entry)}</span>}
+      {!selecting && (!entry.commander || isDeck) && (
+        <span className={`flex shrink-0 items-center gap-1 rounded-md bg-[var(--surface-hover)] [@media(hover:hover)]:pl-2 ${hoverOnly}`}>
           {!entry.commander && <>
-            <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">−</button>
-            <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">+</button>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity - 1)} aria-label={`One fewer ${entry.card.name}`} className={`h-6 w-6 rounded border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] sm:h-5 sm:w-5 sm:leading-none ${isDeck ? '[@media(hover:none)]:hidden' : ''}`}>−</button>
+            <button onClick={() => onQuantity(entry.card.id, entry.quantity + 1)} aria-label={`One more ${entry.card.name}`} className={`h-6 w-6 rounded border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] sm:h-5 sm:w-5 sm:leading-none ${isDeck ? '[@media(hover:none)]:hidden' : ''}`}>+</button>
           </>}
-          {isDeck && <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${entry.card.name}`} aria-haspopup="menu" className="h-6 w-6 sm:h-5 sm:w-5 sm:leading-none rounded border border-[var(--border)] hover:bg-[var(--surface-hover)]">⋯</button>}
+          {isDeck && <button onClick={(e) => onMenu(e.currentTarget)} aria-label={`More for ${entry.card.name}`} aria-haspopup="menu" className="h-7 w-7 rounded border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-hover)] sm:h-5 sm:w-5 sm:leading-none">⋯</button>}
         </span>
       )}
       {preview && src && createPortal(
@@ -684,6 +948,61 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, tagDots, onActi
         document.body,
       )}
     </li>
+  );
+}
+
+/**
+ * The card under the pointer, beside the list on a wide screen: its picture, what it is, and the quick things.
+ * It follows the pointer (a store, so the list doesn't redraw); before any hover it shows the first card.
+ */
+function SidePanel({ entries, fallback, isDeck, moveTo, nameOf, tags, onOpen, onMove, onAsk, onMenu }: {
+  entries: Entry[]; fallback?: Entry; isDeck: boolean; moveTo: (e: Entry) => Array<{ id: Board; name: string }>; nameOf: (b: Board) => string;
+  tags: ReturnType<typeof tagsByCard>; onOpen: (card: ScryfallCard) => void; onMove: (cardId: string, board: Board) => void;
+  onAsk?: (question: string) => void; onMenu: (entry: Entry, el: HTMLElement) => void;
+}) {
+  const id = useHover();
+  const entry = (id ? entries.find((e) => e.card.id === id) : undefined) ?? fallback;
+  if (!entry) return null;
+  const { card } = entry;
+  const src = imageOf(card, 'normal');
+  const its = (tags.get(tagKey(card)) ?? []).map(({ tag }) => tag);
+  const btn = 'w-full rounded-lg border border-[var(--border)] px-2.5 py-1 text-left text-xs hover:bg-[var(--surface-hover)]';
+  return (
+    <aside aria-label="The card under the pointer" data-side-panel className="sticky top-28 mt-6 flex flex-col gap-2">
+      <button type="button" onClick={() => onOpen(card)} aria-label={`Open ${card.name}`} className="block">
+        {src
+          ? <Image src={src} alt={card.name} width={488} height={680} className="h-auto w-full rounded-[4.75%/3.4%] shadow-[0_12px_30px_rgba(0,0,0,0.45)]" unoptimized />
+          : <span className="flex aspect-[488/680] items-center justify-center rounded-xl border border-[var(--border)] p-3 text-center text-sm">{card.name}</span>}
+      </button>
+      <div>
+        <p className="font-semibold leading-tight">{card.name}</p>
+        <p className="text-xs text-[var(--muted)]">{card.type_line ?? card.card_faces?.[0]?.type_line} · {money(entry)}{entry.finish !== 'nonfoil' ? ` · ${entry.finish}` : ''}{isDeck && entry.board !== 'main' ? ` · ${nameOf(entry.board)}` : ''}</p>
+      </div>
+      {its.length > 0 && (
+        <p className="flex flex-wrap gap-1">{its.map((t) => <span key={t.id} className="flex items-center gap-1 rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-[11px] text-[var(--muted)]"><span className="h-1.5 w-1.5 rounded-full" style={{ background: t.color }} />{t.name}</span>)}</p>
+      )}
+      <div className="flex flex-col gap-1">
+        {isDeck && !entry.commander && moveTo(entry).slice(0, 2).map((t) => (
+          <button key={t.id} type="button" className={btn} onClick={() => onMove(card.id, t.id)}>To {t.name}</button>
+        ))}
+        {onAsk && !entry.commander && <button type="button" className={btn} onClick={() => onAsk(`Suggest replacements for ${card.name} that fit the plan.`)}>Find a replacement</button>}
+        <button type="button" className={btn} onClick={(e) => onMenu(entry, e.currentTarget)} aria-haspopup="menu">More…</button>
+      </div>
+      <p className="text-[11px] text-[var(--faint)]">Follows the pointer. Turn it off under View.</p>
+    </aside>
+  );
+}
+
+/** Group or Sort: a small select that reads as a chip. */
+function Pick<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: Array<[T, string]>; onPick: (v: T) => void }) {
+  return (
+    <label className="flex shrink-0 items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] pl-3 text-sm text-[var(--muted)]">
+      {label}
+      <select value={value} onChange={(e) => onPick(e.target.value as T)} aria-label={label}
+        className="cursor-pointer rounded-full bg-transparent py-1.5 pl-1 pr-2 text-[var(--foreground)] outline-none">
+        {options.map(([v, text]) => <option key={v} value={v} className="bg-[var(--surface)]">{text}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -862,19 +1181,3 @@ function QuickMenu({ entry, x, y, up, isDeck, tags, moveTo, slotOptions, onSlot,
   );
 }
 
-/** A row of choices inside a settings panel: the picked one filled. */
-function Choice<T extends string>({ label, value, options, onPick }: { label: string; value: T; options: Array<[T, string]>; onPick: (v: T) => void }) {
-  return (
-    <div>
-      <p className="mb-1.5 text-xs font-medium text-[var(--muted)]">{label}</p>
-      <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1">
-        {options.map(([v, text]) => (
-          <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onPick(v)}
-            className={`rounded-full px-2.5 py-1 text-xs ${value === v ? 'bg-[var(--surface-hover)] font-semibold text-[var(--foreground)] ring-1 ring-[color-mix(in_srgb,var(--c1)_60%,transparent)]' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>
-            {text}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}

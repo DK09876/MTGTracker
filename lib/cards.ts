@@ -10,7 +10,7 @@
  * caller's choice to offer, never a silent answer here. Server only.
  */
 
-import { localCards } from './card-store';
+import { localCards, pieceNames } from './card-store';
 import { foldName } from './card-lookup';
 import { database, storeCard } from './db';
 import { collection, getCard, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
@@ -92,6 +92,15 @@ export async function cardById(id: string): Promise<ScryfallCard | null> {
     if (e instanceof ScryfallError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * Which of these names (a card's related parts) are token, emblem or reminder cards rather than cards to play: from
+ * the weekly copy, so a deck's extras show Morph or Cyberman and leave out Tower Winder. Names it can't place are
+ * left out.
+ */
+export function tablePieces(names: string[]): string[] {
+  try { return [...pieceNames(names)]; } catch { return []; }
 }
 
 const PRINTINGS_MS = 6 * 3600_000;

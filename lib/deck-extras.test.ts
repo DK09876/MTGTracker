@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extrasOf } from './deck-extras';
+import { extrasOf, piecesToAsk } from './deck-extras';
 import type { ScryfallCard } from './scryfall';
 
 const part = (id: string, component: string, name: string, type_line: string) => ({ object: 'related_card', id, component, name, type_line });
@@ -28,5 +28,39 @@ describe('a deck’s tokens and extras', () => {
       card('Urza, Lord Protector', [part('u2', 'meld_part', 'The Mightstone and Weakstone', 'Legendary Artifact'), part('u3', 'meld_result', 'Urza, Planeswalker', 'Legendary Planeswalker — Urza')]),
       card('The Mightstone and Weakstone', []),
     ]).map((e) => e.name)).toEqual(['Urza, Planeswalker']);
+  });
+
+  it('finds face-down reminder cards Scryfall files as combo pieces, and leaves out real cards linked the same way', () => {
+    const deck = [
+      card('Etrata, Deadly Fugitive', [part('a1', 'combo_piece', 'A Mysterious Creature', 'Creature')]),
+      card('Ruthless Ripper', [part('m1', 'combo_piece', 'Morph', 'Creature')]),
+      card('Cyber Conversion', [part('y1', 'combo_piece', 'Cyberman', 'Artifact Creature — Cyberman')]),
+      card('Command Tower', [part('w1', 'combo_piece', 'Tower Winder', 'Creature — Snake')]),
+    ];
+    const pieces = new Set(['A Mysterious Creature', 'Morph', 'Cyberman']);
+    expect(extrasOf(deck, pieces).map((e) => [e.kind, e.name, e.from])).toEqual([
+      ['facedown', 'A Mysterious Creature', ['Etrata, Deadly Fugitive']],
+      ['token', 'Cyberman', ['Cyber Conversion']],
+      ['facedown', 'Morph', ['Ruthless Ripper']],
+    ]);
+    // Before the server answers, a bare "Creature" type is taken as a reminder card; a typed creature isn't.
+    expect(extrasOf(deck).map((e) => e.name)).toEqual(['A Mysterious Creature', 'Morph']);
+    expect(piecesToAsk(deck)).toEqual(['A Mysterious Creature', 'Cyberman', 'Morph', 'Tower Winder']);
+  });
+
+  it('reads the rules text for face-down creatures and tokens Scryfall has not linked', () => {
+    const text = (name: string, oracle_text: string) => ({ ...card(name, []), oracle_text }) as ScryfallCard;
+    const extras = extrasOf([
+      text('Some Cloaker', 'Whenever this creature attacks, cloak the top card of your library. (To cloak a card, put it onto the battlefield face down as a 2/2 creature with ward {2}.)'),
+      text('New Maker', 'When this creature enters, create a 2/2 green Wolf creature token.'),
+      text('Grizzly Bears', ''),
+      // Reminder text alone makes nothing; a "nontoken" mention isn't a token.
+      text('Plain Fellow', 'Whenever a nontoken creature you control dies, draw a card. (Like a token, it is gone.)'),
+    ]);
+    expect(extrasOf([]).length).toBe(0);
+    expect(extras.map((e) => [e.kind, e.name, e.words ?? null])).toEqual([
+      ['facedown', 'A Mysterious Creature', null],
+      ['token', 'New Maker', 'When this creature enters, create a 2/2 green Wolf creature token.'],
+    ]);
   });
 });

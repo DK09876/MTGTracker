@@ -11,6 +11,10 @@ import type { Release, UnreleasedItem } from './releases';
  * v…", with no banner.
  */
 export const UNRELEASED: UnreleasedItem[] = [
+  { kind: 'fix', date: '2026-11-26', title: 'Tokens & extras show your face-down creatures', details: 'Cloak, disguise, manifest and morph cards now list the reminder card for their face-down 2/2s, as [[Etrata, Deadly Fugitive]] does. A card that makes a token with no picture yet shows the words that make it, so nothing goes missing.' },
+  { kind: 'new', date: '2026-11-26', title: 'A calmer card list that shows what needs doing', details: 'On a deck\'s Cards tab, −, + and ⋯ show for the card you point at, and a ✓ for a card you own shows only then, so a card in a box or still to buy stands out. Group and Sort sit in the toolbar, each group shows its average mana value and price, and on a wide screen the card you point at shows beside the list.' },
+  { kind: 'new', date: '2026-11-26', title: 'Click a number to see the cards behind it', details: 'Chips above a deck\'s cards light up your tags, roles, cards in a box and foils, and so do the curve bars and Ramp, Card draw and Removal in the deck at a glance. Tick Show only these to hide the rest. The Show row is now one of these chips.' },
+  { kind: 'new', date: '2026-11-26', title: 'Add a card from the filter box, and pick cards without Select', details: 'Type a name the deck doesn\'t have in the box above the cards and press Enter to add it (Shift+Enter for the Maybeboard). ⌘ or Ctrl-click cards to pick several, or long-press on a phone; a phone row now has just its ⋯, so names fit.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */

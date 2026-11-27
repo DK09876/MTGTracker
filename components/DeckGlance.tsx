@@ -4,8 +4,9 @@
  * The deck at a glance, above its cards: the state of the deck without
  * leaving the Cards tab - curve, lands against the plan, the built-in tags
  * against their ranges, colour sources, bracket, the last good-start rate.
- * Customize picks which show (remembered in this browser); each one opens
- * the tab with its detail. Everything here is read from what the other tabs
+ * Customize picks which show (remembered in this browser). A curve bar or a
+ * role (ramp, draw, removal, wipes) lights up its cards in the list below;
+ * the others open the tab with their detail. Everything here is read from what the other tabs
  * already work out.
  */
 
@@ -53,9 +54,13 @@ interface Props {
   price: number;
   /** Opens a tab by its name, old names included (lib/deck-tabs.ts). */
   onTab: (tab: string) => void;
+  /** Lights up these cards in the list below. */
+  onLight?: (key: string, label: string, names: string[]) => void;
 }
 
-export default function DeckGlance({ listId, version, price, onTab }: Props) {
+const LIGHTS = new Set<WidgetId>(['curve', 'ramp', 'draw', 'removal', 'wipe']);
+
+export default function DeckGlance({ listId, version, price, onTab, onLight }: Props) {
   const [shown, setShown] = useState<WidgetId[]>(() => (typeof window === 'undefined' ? DEFAULT : load()));
   const [editing, setEditing] = useState(false);
   const [health, setHealth] = useState(() => api.peek<api.DeckHealth>(api.paths.health(listId)) ?? null);
@@ -100,12 +105,18 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
         const max = Math.max(1, ...h.curve.map((c) => c.count));
         return (
           <span className="flex h-12 items-end gap-1" aria-label={`Mana curve: ${h.curve.map((c) => `${c.count} at ${c.label}`).join(', ')}`}>
-            {h.curve.map((c) => (
-              <span key={c.label} className="flex w-4 flex-col items-center gap-0.5">
-                <span className="w-full rounded-t-[3px] bg-[linear-gradient(to_top,var(--c1),var(--c3))]" style={{ height: `${(c.count / max) * 34}px`, minHeight: c.count ? 2 : 0 }} title={`${c.count} at ${c.label}`} />
-                <span className="text-[10px] leading-none text-[var(--muted)]">{c.label}</span>
-              </span>
-            ))}
+            {h.curve.map((c) => {
+              const bar = (
+                <>
+                  <span className="w-full rounded-t-[3px] bg-[linear-gradient(to_top,var(--c1),var(--c3))]" style={{ height: `${(c.count / max) * 34}px`, minHeight: c.count ? 2 : 0 }} />
+                  <span className="text-[10px] leading-none text-[var(--muted)]">{c.label}</span>
+                </>
+              );
+              return onLight
+                ? <button key={c.label} type="button" data-curve={c.label} disabled={!c.count} onClick={() => onLight(`mv:${c.label}`, `Mana value ${c.label}`, c.cards)}
+                  title={`${c.count} at ${c.label}: light them up`} className="flex w-4 flex-col items-center justify-end gap-0.5 self-stretch rounded-sm hover:opacity-80 disabled:cursor-default">{bar}</button>
+                : <span key={c.label} title={`${c.count} at ${c.label}`} className="flex w-4 flex-col items-center gap-0.5">{bar}</span>;
+            })}
           </span>
         );
       }
@@ -142,6 +153,16 @@ export default function DeckGlance({ listId, version, price, onTab }: Props) {
       {shown.map((id) => {
         const w = WIDGETS.find((x) => x.id === id)!;
         const content = body(id);
+        // The curve's bars are buttons of their own; a role lights its cards up.
+        if (onLight && id === 'curve' && content) return <div key={id} className="shrink-0">{content}</div>;
+        const r = onLight && LIGHTS.has(id) ? role(id) : undefined;
+        if (r && content) {
+          return (
+            <button key={id} data-glance={id} onClick={() => onLight!(`role:${r.id}`, r.label, r.cards)} title={`${r.label}: light up these cards (Check has the detail)`} className="shrink-0 rounded-lg text-left hover:opacity-80">
+              {content}
+            </button>
+          );
+        }
         return (
           <button key={id} onClick={() => onTab(w.tab)} title={`${w.label}: open ${w.tab === 'collection' ? 'your copies' : w.tab === 'playtest' ? 'Check → Playtest' : w.tab === 'tune' ? 'Tune' : 'Check'}`} className="shrink-0 rounded-lg text-left hover:opacity-80">
             {content ?? <span className="flex flex-col text-xs text-[var(--muted)]">{w.label}<b className="text-base font-normal">…</b></span>}
