@@ -18,6 +18,7 @@ export const UNRELEASED: UnreleasedItem[] = [
   { kind: 'new', date: '2026-11-26', title: 'See what a deck\'s price is made of', details: 'Point at a deck\'s price, or tap it on a phone, to see it split into the real copies in the deck, the proxies, copies waiting in your boxes, cards another deck holds and cards to buy, with the priciest cards in each named.' },
   { kind: 'fix', date: '2026-11-26', title: 'Deck tiles are all the same size', details: 'On the Decks page every tile is the same height: the count, price and record sit on one line, and how many cards are yours sits under them with a small bar.' },
   { kind: 'fix', date: '2026-11-26', title: 'Black mana looks black', details: 'The black mana symbol is a black disc with a pale skull and a faint violet edge, instead of a grey one that looked colourless beside the other colours. It shows this way everywhere: deck tiles, filters and mana costs.' },
+  { kind: 'new', date: '2026-11-26', title: 'Drag a card in from Scryfall to add it', details: 'Drag a card\'s picture or its page from Scryfall, or a card picture from EDHREC, onto a deck\'s Cards tab and drop it: that exact printing is added to the board you\'re looking at.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */

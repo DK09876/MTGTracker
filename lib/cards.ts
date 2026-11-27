@@ -20,7 +20,7 @@ import { cardPicks, rememberPick } from './card-picks';
 import { EVERYDAY_WORDS } from './everyday-words';
 import { database, storeCard } from './db';
 import { rulesIndex } from './rules/sources';
-import { cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
+import { cardAt, cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
 
 /** The key a name is matched by: its front face, folded (case, accents, curly quotes). */
 export const cardKey = (name: string) => foldName(name);
@@ -85,6 +85,13 @@ export async function findCards(names: string[]): Promise<CardMap> {
 /** One card by name (see findCards), or null. */
 export async function findCard(name: string): Promise<ScryfallCard | null> {
   return (await findCards([name])).get(name) ?? null;
+}
+
+/** A printing by set code and collector number (a Scryfall card page dropped on a deck): Scryfall's, stored. Null when there is none. */
+export async function cardAtPrinting(set: string, number: string): Promise<ScryfallCard | null> {
+  const c = await cardAt(set, number);
+  if (c) storeCard(c);
+  return c;
 }
 
 /** A card by its Scryfall id: the stored copy, else Scryfall's (stored). Null when there is no such card. */

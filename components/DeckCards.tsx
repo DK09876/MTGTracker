@@ -16,7 +16,8 @@
  * the deck at a glance light up the cards behind a number; "Show only
  * these" hides the rest. The filter box finds a card in the deck, or adds
  * one it doesn't have. On a wide screen the card under the pointer shows in
- * a panel beside the list.
+ * a panel beside the list. A card dragged in from Scryfall (its picture or
+ * its page; EDHREC's pictures too) is added to the board shown.
  *
  * View choices are remembered in this browser, since they are how someone
  * likes to look at every deck, not a property of one deck; folded groups are
@@ -38,6 +39,7 @@ import * as api from '@/lib/api';
 import { groupCards, primaryType, type Categories, type GroupBy, type Item, type SortBy } from '@/lib/deckview';
 import { filterCards, type IsWord } from '@/lib/filter';
 import { looksLikeSyntax } from '@/lib/syntax';
+import { cardInDrop } from '@/lib/card-drop';
 import type { ScryfallCard } from '@/lib/scryfall';
 import { imageOf, manaCostOf, priceOf } from '@/lib/scryfall';
 import type { RoleCount } from '@/lib/roles';
@@ -342,7 +344,14 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
 
   // The filter box adds a card the deck doesn't have: names that start with what's typed, the first on Enter.
   const [quick, setQuick] = useState<{ q: string; cards: api.QuickCard[] } | null>(null);
-  const [addNote, setAddNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const [addNote, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  // Each note stays its own time: a new one restarts the clock, so an older note's timer can't clear it early.
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setAddNote = (note: { text: string; ok: boolean } | null, ms = 3500) => {
+    if (noteTimer.current) clearTimeout(noteTimer.current);
+    setNote(note);
+    if (note) noteTimer.current = setTimeout(() => setNote(null), ms);
+  };
   const typed = filter.trim();
   const canAdd = typed.length >= 3 && !looksLikeSyntax(typed) && !matched.length;
   useEffect(() => {
@@ -365,7 +374,43 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
     } catch {
       setAddNote({ text: `Couldn't add ${card.name}`, ok: false });
     }
-    setTimeout(() => setAddNote(null), 3500);
+  };
+
+  // A card dragged in from Scryfall or EDHREC: added to the board shown. A drag that started on this page (one of the
+  // deck's own pictures) is never a drop, or dragging a picture by accident would add another copy.
+  const [dropping, setDropping] = useState(false);
+  const dragDepth = useRef(0);
+  const ownDrag = useRef(false);
+  useEffect(() => {
+    const start = () => { ownDrag.current = true; };
+    const end = () => { ownDrag.current = false; };
+    document.addEventListener('dragstart', start);
+    document.addEventListener('dragend', end);
+    return () => { document.removeEventListener('dragstart', start); document.removeEventListener('dragend', end); };
+  }, []);
+  const outside = (e: React.DragEvent) => !ownDrag.current && ['text/uri-list', 'text/html', 'text/plain'].some((t) => e.dataTransfer.types.includes(t));
+  const dropZone = {
+    onDragEnter: (e: React.DragEvent) => { if (!outside(e)) return; e.preventDefault(); dragDepth.current++; setDropping(true); },
+    onDragOver: (e: React.DragEvent) => { if (!outside(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; },
+    onDragLeave: () => { if (dragDepth.current > 0 && --dragDepth.current === 0) setDropping(false); },
+    onDrop: async (e: React.DragEvent) => {
+      if (!outside(e)) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setDropping(false);
+      const found = cardInDrop({ uriList: e.dataTransfer.getData('text/uri-list'), text: e.dataTransfer.getData('text/plain'), html: e.dataTransfer.getData('text/html') });
+      const to: Board = isDeck ? board : 'main';
+      const where = isDeck ? nameOf(to) : 'the list';
+      if (!found) { setAddNote({ text: 'That isn\'t a card from Scryfall: drag a card\'s picture or its page from Scryfall (or a picture from EDHREC).', ok: false }, 5000); return; }
+      try {
+        const card = 'id' in found ? await api.cardById(found.id) : await api.cardAtPrinting(found.set, found.number);
+        await api.addCard(listId, card.id, 1, to);
+        setAddNote({ text: `Added ${card.name} to ${where}`, ok: true });
+        onChanged?.();
+      } catch {
+        setAddNote({ text: 'Couldn\'t add that card: Scryfall didn\'t know it, or isn\'t answering.', ok: false });
+      }
+      },
   };
 
   // The chips: your tags, then the built-in roles, then where the copies are and foils. Counts are copies on this board.
@@ -458,7 +503,12 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   };
 
   return (
-    <div className="mt-5" style={{ ['--card' as string]: `${size}px` }}>
+    <div {...dropZone} className="relative mt-5" style={{ ['--card' as string]: `${size}px` }} data-drop-zone>
+      {dropping && (
+        <div aria-hidden className="pointer-events-none absolute -inset-2 z-30 flex items-start justify-center rounded-2xl border-2 border-dashed border-[var(--c1)] bg-[color-mix(in_srgb,var(--c1)_10%,transparent)] pt-24 backdrop-blur-[1px]">
+          <span className="sticky top-40 rounded-full bg-[var(--surface-hover)] px-4 py-2 text-sm font-semibold shadow-xl">Drop to add it to {isDeck ? nameOf(board) : 'the list'}</span>
+        </div>
+      )}
       {isDeck && (
         <>
         <div data-tour="boards" className="flex items-end gap-1 overflow-x-auto border-b border-[var(--border)] [scrollbar-width:none]">
@@ -616,7 +666,10 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           <span className="text-xs text-[var(--faint)] max-sm:hidden">Enter adds the first{isDeck && board !== 'maybe' ? ' · Shift+Enter to the Maybeboard' : ''}</span>
         </div>
       )}
-      {addNote && <p role="status" className={`mt-2 text-xs ${addNote.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{addNote.text}</p>}
+      {/* Floats at the bottom of the screen: a card dropped far down the list still says it was added. */}
+      {addNote && (
+        <p role="status" data-add-note className={`fixed bottom-[calc(var(--nav-h,0px)+6rem)] left-1/2 z-[85] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-[var(--border)] bg-[var(--surface-hover)] px-4 py-2 text-sm shadow-xl lg:bottom-6 ${addNote.ok ? 'text-emerald-300' : 'text-amber-300'}`}>{addNote.text}</p>
+      )}
       {unsupported.length > 0 && (
         <p className="mt-2 text-xs text-amber-400">
           Ignoring {unsupported.map((u) => `"${u}"`).join(', ')} — not supported here.
