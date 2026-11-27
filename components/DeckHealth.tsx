@@ -474,10 +474,11 @@ const LEVEL = {
 function Warnings({ warnings }: { warnings: Warning[] }) {
   if (!warnings.length) {
     return (
-      <p className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+      // On a phone the reason goes under the heading rather than squeezing beside it.
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
         <span aria-hidden className="font-bold" style={{ color: STATUS.good }}>✓</span>
         <span className="font-medium">No problems</span>
-        <span className="text-[var(--muted)]">— every card legal and in the commander&apos;s colours, no extra copies, card draw in the deck, lands not far under range.</span>
+        <span className="text-[var(--muted)] max-sm:order-last max-sm:basis-full"><span className="max-sm:hidden">— </span>every card legal and in the commander&apos;s colours, no extra copies, card draw in the deck, lands not far under range.</span>
         <Tip label="What counts as a problem">Only hard failures are warnings here: cards that make the deck not legal, no card draw at all, or lands {LANDS_FAR_UNDER} or more under the low end of the range (or under 37, if the range starts higher). Everything else is a number with its range below: being a little outside a range is often on purpose.</Tip>
       </p>
     );

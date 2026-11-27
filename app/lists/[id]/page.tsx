@@ -13,7 +13,7 @@ import CommanderPicker from '@/components/CommanderPicker';
 import DeckCards, { type Entry, type Light } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
 import PlanTab from '@/components/PlanTab';
-import { CardTextContext } from '@/components/CardText';
+import { CardLink, CardTextContext } from '@/components/CardText';
 import DeckExtras from '@/components/DeckExtras';
 import { openCard } from '@/components/CardPopup';
 import TagsTab from '@/components/TagsTab';
@@ -24,6 +24,7 @@ import DeckPlaytest from '@/components/DeckPlaytest';
 import { finishWant } from '@/lib/chat-pages';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
+import Popover from '@/components/Popover';
 import Tip from '@/components/Tip';
 import { useDeckCopies } from '@/components/useDeckCopies';
 import DeckHealth from '@/components/DeckHealth';
@@ -48,7 +49,7 @@ import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-link
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { LinkReport } from '@/lib/mythic';
-import { summaryLine } from '@/lib/copy-status';
+import { priceBreakdown, summaryLine, type PricePart } from '@/lib/copy-status';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { DeckTags as Tags } from '@/lib/tags';
 import { imageOf, priceOf } from '@/lib/scryfall';
@@ -439,7 +440,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               {deck
                 ? <span className={`rounded-full px-2.5 py-1 ${deckSize === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{deckSize} / 100</span>
                 : <span className="rounded-full bg-white/5 px-2.5 py-1">{copies} card{copies === 1 ? '' : 's'}</span>}
-              {value > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>}
+              {value > 0 && (deck && ownership
+                ? <PriceChip value={value} parts={priceBreakdown(ownership.cards)} onCopies={showCopies} />
+                : <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>)}
               {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
               {sectionCounts.map((x) => <span key={x.id} className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{x.n} in {x.name}</span>)}
               {deck && shown && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">Public</span>}
@@ -861,3 +864,42 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   );
 }
 
+/**
+ * The deck's price, and on pointing at it (or a tap) what it's made of: the real copies in the deck, the proxies
+ * standing in, and what's still short - in a box, in another deck, or to buy.
+ */
+function PriceChip({ value, parts, onCopies }: { value: number; parts: PricePart[]; onCopies: () => void }) {
+  const tone: Record<PricePart['key'], string> = { real: 'bg-emerald-400', proxy: 'bg-amber-300', box: 'bg-sky-400', other: 'bg-violet-400', buy: 'bg-rose-400' };
+  const money = (n: number) => `$${n.toFixed(2)}`;
+  return (
+    <Popover hover aria-label="What the price is made of" panelClassName="w-72" data-tour="price-chip"
+      label={<>{money(value)}</>}
+      className="rounded-full bg-white/5 px-2.5 py-1 font-bold tabular-nums underline decoration-dotted decoration-white/30 underline-offset-4 hover:bg-white/10 aria-expanded:bg-white/10">
+      <div className="flex flex-col gap-2 text-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">What the {money(value)} is</p>
+        {/* One bar, each part its share of the price. */}
+        <span aria-hidden className="flex h-1.5 overflow-hidden rounded-full bg-white/10">
+          {parts.map((p) => p.value > 0 && <span key={p.key} className={tone[p.key]} style={{ width: `${(p.value / Math.max(value, 0.01)) * 100}%` }} />)}
+        </span>
+        <ul className="flex flex-col gap-1">
+          {parts.map((p) => (
+            <li key={p.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5" data-price-part={p.key}>
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${tone[p.key]}`} />
+              <span className="min-w-0 flex-1">{p.label} <span className="text-xs text-[var(--muted)]">· {p.copies}</span></span>
+              <span className="tabular-nums">{money(p.value)}</span>
+              {/* Where the money is: the priciest few, for the parts worth asking about. */}
+              {(p.key === 'proxy' || p.key === 'other' || p.key === 'buy') && (
+                <span className="basis-full pl-4 text-xs text-[var(--muted)]">
+                  {p.cards.slice(0, 3).map((c, i) => <span key={c.name}>{i > 0 && ', '}<CardLink name={c.name} /> {money(c.value)}</span>)}
+                  {p.cards.length > 3 && <span>, and {p.cards.length - 3} more</span>}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-[var(--muted)]">At the printing and finish each card is listed as. Proxies count at what a real copy would cost.</p>
+        <button type="button" onClick={onCopies} className="self-start text-xs font-semibold text-[var(--accent)] hover:underline">Where your copies are</button>
+      </div>
+    </Popover>
+  );
+}

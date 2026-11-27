@@ -919,7 +919,8 @@ function TextRow({ entry, isDeck, size, picked, selecting, mark, quiet, dim, col
         <button onClick={(e) => onActivate(e)} aria-pressed={picked} aria-label={`Pick ${entry.card.name}`}
           className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 text-xs font-extrabold ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-[#1c0d06]' : 'border-[var(--muted)]'}`}>{picked ? '✓' : ''}</button>
       )}
-      <span className="w-5 shrink-0 text-right text-xs tabular-nums text-[var(--muted)]">{count}{count !== '' && isDeck ? '×' : ''}</span>
+      {/* On a phone an empty count takes no room, so the name starts at the edge. */}
+      <span className={`w-5 shrink-0 text-right text-xs tabular-nums text-[var(--muted)] ${count === '' ? 'max-sm:hidden' : ''}`}>{count}{count !== '' && isDeck ? '×' : ''}</span>
       <button onClick={(e) => onActivate(e)} onPointerEnter={mouseOnly((e) => { if (hoverPicture && !selecting && src) place(e); })} onPointerMove={mouseOnly((e) => { if (preview) place(e); })} onMouseLeave={() => setPreview(null)}
         className="min-w-0 flex-1 truncate text-left hover:text-[var(--accent)]">
         {entry.card.name}
