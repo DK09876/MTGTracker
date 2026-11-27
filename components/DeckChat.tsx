@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import AiModelPicker from './AiModelPicker';
 import { foldName } from '@/lib/card-lookup';
+import { CardSuggestions, useCardCheck } from './CardChoice';
 import CardText, { CardLink, CardTextContext } from './CardText';
 import { openCard as openPopup } from './CardPopup';
 import { AI_READS } from '@/lib/ai-reads';
@@ -106,12 +107,17 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
   /** Allow, when Claude asked to read the Tune page: let it, then ask it to go ahead, as the owner would. */
   const allowTune = async () => { await setShareTune(true); await send('Go ahead and read my Tune page.'); };
 
-  const send = async (question = text) => {
-    if (!question.trim() || replying || sendingRef.current || updating) return;
+  const cardCheck = useCardCheck();
+  const send = async (typed = text) => {
+    if (!typed.trim() || replying || sendingRef.current || updating) return;
     sendingRef.current = true;
     setSending(true);
     setError(null);
     try {
+      // Card names are checked before Claude reads them (AGENTS.md, "Reading the owner's words"); the deck's own
+      // cards count as in play, so "kratos" is the Kratos in this deck.
+      const question = await cardCheck.check(typed, { known: [...cards.map((c) => c.card.name), ...(commander ? [commander.name] : [])] });
+      if (question === null) return;
       const r = await api.askDeck(listId, question, open ?? undefined, open ? undefined : shareTuneNew);
       setText('');
       setChat(r.chat);
@@ -355,7 +361,9 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
           <span className="text-[var(--faint)]">{shareTune ? 'Your Finish, Upgrades and Trim lists and what you’ve staged. Tap to stop.' : 'Or just ask about it (“why did Finish pick this?”).'}</span>
         </div>
         {/* The composer stays at the bottom of the screen as the thread grows, as on Rules. */}
-        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
+        <form data-tour="chat-composer" onSubmit={(e) => { e.preventDefault(); void send(); }} className="sticky bottom-[calc(var(--nav-h,0px)+5.5rem)] z-20 flex flex-wrap items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shadow-xl lg:bottom-4">
+          {/* Cards the words may be, offered as you type, inside the pinned box so they're always in view. */}
+          <CardSuggestions text={text} onText={setText} known={[...cards.map((c) => c.card.name), ...(commander ? [commander.name] : [])]} className="basis-full empty:hidden" />
           <label htmlFor={`ask-${listId}`} className="sr-only">Ask about this deck</label>
           <textarea
             id={`ask-${listId}`}
@@ -370,6 +378,8 @@ export default function DeckChat({ listId, cards, question = '', onChanged, onCa
           <span className="self-center"><Tip label="What Claude reads"><span className="font-semibold">What Claude reads:</span><ul className="mt-1 list-disc pl-4">{AI_READS.chat.map((x) => <li key={x}>{x}</li>)}</ul></Tip></span>
           <button type="submit" disabled={replying || sending || updating || !text.trim()} title={updating ? UPDATING_TITLE : undefined} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#221c08] disabled:opacity-50">Send</button>
         </form>
+        {/* Below the composer, which stays pinned to the screen and would cover it. */}
+        {cardCheck.panel}
       </section>
     </div>
   );

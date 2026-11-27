@@ -4,8 +4,6 @@
  *   - The Comprehensive Rules, from magic.wizards.com/en/rules - the current
  *     text file is found on that page, fetched at most weekly and kept on
  *     disk, so the Pi can answer if Wizards is unreachable.
- *   - Every card name, from Scryfall's catalog, daily - for finding cards in
- *     a question.
  *   - A card's official rulings, from Scryfall, for a week.
  *   - An MTG Wiki page (mtg.wiki - the active wiki; the Fandom copy is no
  *     longer kept up), for a week. Read as a page, as a browser would: the
@@ -18,9 +16,8 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
-import { cardNameCatalog, rulingsFor, type Ruling, type ScryfallCard } from '../scryfall';
+import { rulingsFor, type Ruling, type ScryfallCard } from '../scryfall';
 import { parseRules, vocabulary, type RulesIndex } from './cr';
-import { nameIndex, type NameIndex } from './names';
 
 const DIR = join(dirname(process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`), 'rules');
 const DAY = 24 * 60 * 60 * 1000;
@@ -29,7 +26,6 @@ const UA = 'MTGTracker/0.1 (https://github.com/DK09876/MTGTracker)';
 // Kept on globalThis: every route's bundle has its own copy of this module.
 const store = globalThis as unknown as {
   __rules?: { index: RulesIndex; vocab: Set<string>; at: number };
-  __names?: { index: NameIndex; at: number };
   __rulings?: Map<string, { at: number; rulings: Ruling[] }>;
   __wiki?: Map<string, { at: number; page: WikiPage | null }>;
 };
@@ -83,27 +79,6 @@ export async function rulesIndex(): Promise<{ index: RulesIndex; vocab: Set<stri
   const entry = { index, vocab: vocabulary(index), at: Date.now() };
   store.__rules = entry;
   return entry;
-}
-
-/** Every card name, indexed for finding them in a question. */
-export async function cardNames(): Promise<NameIndex> {
-  const cached = store.__names;
-  if (cached && Date.now() - cached.at < DAY) return cached.index;
-  const path = join(DIR, 'card-names.json');
-  let names: string[] | null = null;
-  if (fresh(path, DAY)) names = JSON.parse(readKept(path) ?? 'null');
-  if (!names) {
-    try {
-      names = await cardNameCatalog();
-      keep(path, JSON.stringify(names));
-    } catch (error) {
-      names = JSON.parse(readKept(path) ?? 'null');
-      if (!names) throw error;
-    }
-  }
-  const index = nameIndex(names);
-  store.__names = { index, at: Date.now() };
-  return index;
 }
 
 /** A card's rulings, official ones first, newest first. */

@@ -14,9 +14,9 @@
  * stored with their sources, so opening one again costs no model request.
  */
 
-import Image from 'next/image';
 import { useCallback, useEffect, useState } from 'react';
 
+import CardChoice, { CardSuggestions, useCardCheck } from '@/components/CardChoice';
 import CardText, { CardLinks, CardTextContext } from '@/components/CardText';
 import { withoutMarks } from '@/lib/chat-text';
 import HistoryPanel, { type HistoryEntry } from '@/components/HistoryPanel';
@@ -96,10 +96,18 @@ export default function RulesPage() {
     return () => clearTimeout(timer);
   }, [refresh, open]);
 
+  const cards = useCardCheck();
   const ask = async (text: string, picks: Record<string, string> = {}, inThread = thread, clarifications: Array<{ question: string; answer: string }> = []) => {
-    const q = text.trim();
+    let q = text.trim();
     if (!q || busy) return;
     dismissKeyboard();
+    // A new question's card names are checked first (AGENTS.md, "Reading the owner's words"): sure ones marked, the
+    // rest asked; the conversation's cards count as in play.
+    if (!Object.keys(picks).length && !clarifications.length) {
+      const checked = await cards.check(q, { known: inThread?.turns.flatMap((t) => t.cards) ?? [] });
+      if (checked === null) return;
+      q = checked;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -169,25 +177,19 @@ export default function RulesPage() {
 
   // "Which card did you mean?" - shown where the question was asked: under the
   // question box, or above the follow-up box in a conversation.
-  const choicePanel = choosing && !busy && (
-        <section id="which-card" className="mt-5 flex scroll-mt-20 flex-col gap-5 rounded-2xl border border-[var(--accent)]/50 p-4" aria-label="Which card?">
-          {choosing.choice.filter((c) => !choosing.picks[c.mention]).slice(0, 1).map((c) => (
-            <div key={c.mention}>
-              <h2 className="font-medium">Which {c.mention[0].toUpperCase() + c.mention.slice(1)} did you mean?</h2>
-              <p className="text-sm text-[var(--muted)]">For: <CardText text={choosing.question} /></p>
-              <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {c.options.map((o) => (
-                  <button key={o.name} {...steady(() => pick(c.mention, o.name))} className="flex flex-col gap-1 rounded-xl border border-[var(--border)] p-2 text-left text-sm hover:border-[var(--accent)]">
-                    {o.image && <Image src={o.image} alt="" width={244} height={340} className="w-full rounded-lg" unoptimized />}
-                    <span>{o.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <button onClick={() => setChoosing(null)} className={`${button} self-start`}>Cancel</button>
-        </section>
-        );
+  const openChoice = choosing?.choice.find((c) => !choosing.picks[c.mention]);
+  const choicePanel = choosing && openChoice && !busy && (
+    <CardChoice
+      choice={openChoice}
+      question={choosing.question}
+      onPick={(name) => pick(openChoice.mention, name)}
+      onNone={() => {
+        setChoosing(null);
+        setError(`No card matched “${openChoice.mention}”. Check the spelling and the words, then try again.`);
+      }}
+      onCancel={() => setChoosing(null)}
+    />
+  );
   // Bring it into view: it may appear far from where the Ask button was.
   useEffect(() => {
     if (choosing) setTimeout(() => document.getElementById('which-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
@@ -298,6 +300,7 @@ export default function RulesPage() {
       )}
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
+      {!thread && cards.panel}
       {!thread && choicePanel}
       {!thread && clarifyPanel}
 
@@ -361,11 +364,13 @@ export default function RulesPage() {
             </section>
           ))}
 
+          {cards.panel}
           {choicePanel}
           {clarifyPanel}
           <Composer
             value={followUp}
             onChange={setFollowUp}
+            known={thread?.turns.flatMap((t) => t.cards)}
             onSend={() => ask(followUp)}
             busy={busy}
             placeholder="Follow up - the cards above stay in the conversation"
@@ -383,7 +388,9 @@ export default function RulesPage() {
  * The question box, docked at the bottom of the screen as a chat's is:
  * Enter sends, Shift+Enter starts a new line.
  */
-function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
+function Composer({ value, onChange, onSend, busy, placeholder, label, hint, known }: {
+  /** The conversation's cards: never offered, they're the card already. */
+  known?: string[];
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
@@ -398,6 +405,7 @@ function Composer({ value, onChange, onSend, busy, placeholder, label, hint }: {
       className="sticky bottom-[calc(var(--nav-h)+0.75rem)] z-10 mt-5 flex flex-col gap-1.5 bg-gradient-to-t from-[var(--background)] from-60% to-transparent pt-4 sm:bottom-4"
       onSubmit={(e) => { e.preventDefault(); onSend(); }}
     >
+      <CardSuggestions text={value} onText={onChange} known={known} />
       <div className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-2 pl-4 pr-2 shadow-lg focus-within:border-[var(--accent)]">
         <textarea
           value={value}

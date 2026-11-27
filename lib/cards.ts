@@ -10,10 +10,17 @@
  * caller's choice to offer, never a silent answer here. Server only.
  */
 
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+
 import { localCards, pieceNames } from './card-store';
 import { foldName } from './card-lookup';
+import { exactCard, findMentions, markText, nameIndex, phraseKey, phrasesForPick, type CardPick, type CardReading, type NameIndex } from './card-names';
+import { cardPicks, rememberPick } from './card-picks';
+import { EVERYDAY_WORDS } from './everyday-words';
 import { database, storeCard } from './db';
-import { collection, getCard, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
+import { rulesIndex } from './rules/sources';
+import { cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
 
 /** The key a name is matched by: its front face, folded (case, accents, curly quotes). */
 export const cardKey = (name: string) => foldName(name);
@@ -116,4 +123,69 @@ export function printingsFor(oracleId: string): Promise<ScryfallCard[]> {
   cards.catch(() => { if (printingsKept.get(oracleId)?.cards === cards) printingsKept.delete(oracleId); });
   if (printingsKept.size > 500) printingsKept.delete(printingsKept.keys().next().value!);
   return cards;
+}
+
+// --- Every card's name, for reading the owner's words (lib/card-names.ts) ---
+
+const NAMES_FILE = join(dirname(process.env.MTG_DB_PATH || `${process.cwd()}/data/mtg.db`), 'rules', 'card-names.json');
+const DAY = 24 * 3600_000;
+// Kept on globalThis: every route's bundle has its own copy of this module.
+const kept = globalThis as unknown as { __cardNames?: { index: NameIndex; at: number } };
+
+/** Every card name (Scryfall's catalog, fetched daily and kept on disk), indexed for findMentions. */
+export async function cardNameIndex(): Promise<NameIndex> {
+  if (kept.__cardNames && Date.now() - kept.__cardNames.at < DAY) return kept.__cardNames.index;
+  const read = () => { try { return JSON.parse(readFileSync(NAMES_FILE, 'utf8')) as string[]; } catch { return null; } };
+  let names: string[] | null = null;
+  try { if (Date.now() - statSync(NAMES_FILE).mtimeMs < DAY) names = read(); } catch { /* not kept yet */ }
+  if (!names) {
+    try {
+      names = await cardNameCatalog();
+      try { mkdirSync(dirname(NAMES_FILE), { recursive: true }); writeFileSync(NAMES_FILE, JSON.stringify(names)); } catch { /* in memory only */ }
+    } catch (error) {
+      // An old copy beats none.
+      names = read();
+      if (!names) throw error;
+    }
+  }
+  const index = nameIndex(names);
+  kept.__cardNames = { index, at: Date.now() };
+  return index;
+}
+
+/**
+ * Read the owner's words for cards (AGENTS.md, "Reading the owner's words"): the cards we're sure of marked
+ * [[like this]] in the text, what to ask about, and how a loose word was read. `picks` are the owner's answers to
+ * earlier choices: remembered for the profile (lib/card-picks.ts), so the same words aren't asked again.
+ * `known`: cards in play where the text was written (the deck's, the conversation's).
+ */
+export async function readCards(
+  text: string,
+  { profile = null, known = [], picks = [], pictures = true }: { profile?: string | null; known?: string[]; picks?: CardPick[]; pictures?: boolean } = {},
+): Promise<CardReading> {
+  const [index, vocab] = await Promise.all([cardNameIndex(), rulesIndex().then((r) => r.vocab).catch(() => new Set<string>())]);
+  const remembered = profile ? cardPicks(profile) : new Map<string, string>();
+  for (const p of picks) {
+    const phrases = phrasesForPick(p.mention, p.name, p.kind, index);
+    for (const phrase of phrases) remembered.set(phrase, p.name);
+    if (profile) rememberPick(profile, phrases, p.name);
+  }
+  // A [[mark]] no card has (an edit inside a marked name, a typo in brackets) is read again as words, so it's asked
+  // about like any other typo rather than sent as a card that doesn't exist.
+  const checked = text.replace(/\[\[+([^[\]]*)\]\]+/g, (mark, name: string) => (exactCard(name, index) ? mark : name));
+  const unmarked = checked.replace(/\[\[+[^[\]]*\]\]+/g, ' ');
+  const m = findMentions(unmarked, index, vocab, { everyday: EVERYDAY_WORDS, known, remembered });
+  const shown = pictures && m.ambiguous.length ? await findCards(m.ambiguous.flatMap((a) => a.options)).catch(() => null) : null;
+  return {
+    text: markText(checked, m.spans),
+    cards: m.cards,
+    choices: m.ambiguous.map((a) => ({
+      mention: a.mention, kind: a.kind,
+      options: a.options.map((name) => { const c = shown?.get(name); return { name, image: c ? imageOf(c, 'normal') : null }; }),
+    })),
+    // A word read loosely (a pick from before, a card in play) is said, with a way to forget a pick.
+    readAs: m.spans.filter((s) => s.how !== 'exact' && phraseKey(s.mention) !== phraseKey(s.name.split(' // ')[0]))
+      .map((s) => ({ mention: s.mention, name: s.name, remembered: s.how === 'remembered' })),
+    suggestions: m.suggestions,
+  };
 }

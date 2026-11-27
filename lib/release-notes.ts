@@ -23,6 +23,37 @@ export const UNRELEASED: UnreleasedItem[] = [
 /** Every version, newest first. Only cut by the owner's say-so. */
 export const RELEASE_NOTES: Release[] = [
   {
+    version: '1.31.0',
+    date: '2026-11-24',
+    title: 'The app asks which card you meant',
+    items: [
+      {
+        title: 'The app asks which card you meant before Claude answers',
+        details: 'In Rules, Search, Chat, Tune and Trim, a misspelt or unclear card name, like “Innaiz”, shows the closest cards to pick from first. Before, the answer could be about the wrong card. Claude is only given the cards you meant.',
+      },
+      {
+        title: 'Card suggestions as you type',
+        details: 'When your words might be a card, like “lightning bolt”, a small suggestion appears by the box. Point at the name to see the card, tap Use to mean it, or ignore it and your words stay words.',
+      },
+      {
+        title: 'Pick a card once and the app remembers it',
+        details: 'After you pick Inniaz for “innaiz”, the app reads it that way from then on, everywhere. A line under your message says how a word was read, with a way to forget it.',
+      },
+      {
+        title: 'Trim lets you start another round after applying cuts',
+        details: 'After applying cuts, Trim used to stay on its finished screen until you pressed Undo. Now Start another round takes you back to What matters with the deck as it is, the heading shows its real size, and Undo turns off once the deck has changed since the cuts.',
+      },
+      {
+        title: 'Everyday words aren’t taken for cards',
+        details: 'Words like “really”, “wrath” or “flicker” in a question stay words: no more “Which Really did you mean?”. Write a name with a capital to mean the card.',
+      },
+      {
+        title: 'Rules finds card names with an apostrophe',
+        details: 'Questions about cards like [[Teferi’s Protection]] or [[Thassa’s Oracle]] go straight to that card, written with or without the apostrophe, instead of asking which Teferi you meant.',
+      },
+    ],
+  },
+  {
     version: '1.30.0',
     date: '2026-11-18',
     title: 'What’s new, and every past update',

@@ -686,6 +686,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
             onTab={(tab) => { setSection(tab); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onAsk={(q) => { setChatQuestion(q); setSection('chat'); window.scrollTo({ top: 0 }); }}
             onCard={setSelected}
+            deckNames={[...cards.map((c) => c.card.name), ...(list.commander ? [list.commander.name] : [])]}
           />
         </>
       ) : deck && section === 'chat' ? (

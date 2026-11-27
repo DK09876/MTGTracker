@@ -5,7 +5,7 @@ import { ANSWER_SCHEMA, ANSWER_SYSTEM, AUTO_CHECKS, parseAnswer, type Source } f
 import { anchorRules } from './anchors';
 import { askRules, type AskDeps } from './ask';
 import { keywordRules, parseRules, placeWeight, referencedRules, ruleWithContext, searchRules } from './cr';
-import { nameIndex } from './names';
+import { nameIndex } from '../card-names';
 
 // A slice of the real text: contents, body, glossary, credits.
 const CR = `Magic: The Gathering Comprehensive Rules
@@ -190,7 +190,7 @@ describe('askRules', () => {
   it('asks which card a word means before spending a model request', async () => {
     const model = vi.fn();
     const r = await askRules({ question: 'how does blade of selves interact with kratos' }, deps(model));
-    expect(r).toEqual({ choice: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'] }] });
+    expect(r).toEqual({ choice: [{ mention: 'kratos', options: ['Kratos, God of War', 'Kratos, Stoic Father'], kind: 'several' }] });
     expect(model).not.toHaveBeenCalled();
   });
 

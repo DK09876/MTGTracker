@@ -42,6 +42,25 @@ name anywhere else.
 - In the browser: `/api/cards?name=…&name=…` or `?id=…`, through `lib/card-cache.ts` (`lookCard`, `useCardState`,
   `rememberCards`). It's one cache for the whole app, and names asked for together go in one request.
 
+## Reading the owner's words: `lib/card-names.ts`
+
+Card names in what the owner types (a question, a search, a chat message) are found with `findMentions`, never by
+matching text yourself. Exact names are taken; a word that could be several cards, or a misspelt name, comes back as a
+choice, and the page shows it with `<CardChoice>` before any AI call. A near match is never taken silently.
+
+- An AI call only gets a card we're sure the owner meant. A page that sends typed text to an AI checks it first with
+  `useCardCheck` (`components/CardChoice.tsx`): `const text = await cardCheck.check(typed, { known })`, then sends
+  `text`, or nothing when it's `null`. The server side is `readCards` in `lib/cards.ts` (`POST /api/cards/read`).
+- The sure cards come back marked `[[like this]]`, so the AI is given exactly those cards. `known` is the cards in
+  play on that page (the deck's, the conversation's): they win when the words could be them.
+- The owner's picks are remembered for their profile (`lib/card-picks.ts`), so the same words aren't asked twice; the
+  page says how it read them, with a way to forget. "None of these" sends nothing and asks them to check the spelling.
+- Everyday English in lower case stays words ("flicker effect"): the list is `lib/everyday-words.ts`, made by
+  `scripts/everyday-words.mts`. Run it again now and then, as new sets add names.
+- A card's name in everyday words ("lightning bolt", "last chance") is never asked about: `<CardSuggestions text
+  onText known />` beside the box offers it as the owner types: the name is a card link, Use marks it, ✕ is
+  remembered; ignored, it's words.
+
 ## AI calls and the agent context
 
 Every AI call passes one of three places:

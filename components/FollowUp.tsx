@@ -9,6 +9,8 @@
 
 import { useState } from 'react';
 
+import { CardSuggestions } from './CardChoice';
+
 interface Props {
   /** Each request so far, the original search first. */
   thread: string[];
@@ -56,6 +58,7 @@ export default function FollowUp({ thread, busy, onSubmit }: Props) {
           )}
         </label>
       </div>
+      <CardSuggestions text={draft} onText={setDraft} className="mt-1.5" />
     </form>
   );
 }
