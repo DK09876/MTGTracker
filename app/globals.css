@@ -228,3 +228,11 @@ html:has([data-tour="selection-bar"]) [data-undo-toast] { bottom: calc(var(--nav
 @media (width >= 64rem) {
   html:has([data-tour="selection-bar"]) [data-undo-toast] { bottom: 6.5rem; }
 }
+
+/* Black mana as black: the Mana font's grey disc read as colourless beside the others. A deep black disc with a pale
+   skull and a faint violet rim (black's own glow), so it still stands out on the dark page. Everywhere a {B} shows. */
+.ms-cost.ms-b, .ms-cost.ms-bp {
+  background: radial-gradient(circle at 35% 30%, #3b3545 0%, #16131b 55%, #070609 100%);
+  color: #ece4f4;
+  box-shadow: 0 0 0 0.06em rgb(200 175 235 / 0.55), 0 0 0.35em rgb(150 110 210 / 0.4);
+}

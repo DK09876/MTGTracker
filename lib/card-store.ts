@@ -338,6 +338,24 @@ export function localCards(names: string[]): ScryfallCard[] {
   return [...best.values()].filter(playable);
 }
 
+const PIECE_LAYOUTS = new Set(['token', 'double_faced_token', 'emblem']);
+
+/**
+ * Which of these names the copy has as a token, emblem or reminder card (Morph, Manifest, Cyberman…), so a deck's
+ * extras can tell them from real cards Scryfall links the same way. Names it doesn't have are left out.
+ */
+export function pieceNames(names: string[]): Set<string> {
+  const wanted = new Map(names.map((n) => [nameKey(n), n]));
+  const out = new Set<string>();
+  const keys = [...wanted.keys()];
+  for (let i = 0; i < keys.length; i += 500) {
+    const part = keys.slice(i, i + 500);
+    const rows = table().all(`SELECT nameKey, json_extract(data, '$.layout') AS layout FROM oracle_cards WHERE nameKey IN (${part.map(() => '?').join(',')})`, part) as Array<{ nameKey: string; layout: string | null }>;
+    for (const r of rows) if (PIECE_LAYOUTS.has(r.layout ?? '')) out.add(wanted.get(r.nameKey)!);
+  }
+  return out;
+}
+
 export interface CardDataStatus {
   refreshedAt: string | null;
   error: string | null;

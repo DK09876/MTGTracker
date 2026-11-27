@@ -10,10 +10,10 @@ import CardEditor from '@/components/CardEditor';
 import CardModal from '@/components/CardModal';
 import CardTags from '@/components/CardTags';
 import CommanderPicker from '@/components/CommanderPicker';
-import DeckCards, { type Entry } from '@/components/DeckCards';
+import DeckCards, { type Entry, type Light } from '@/components/DeckCards';
 import DeckGlance from '@/components/DeckGlance';
 import PlanTab from '@/components/PlanTab';
-import { CardTextContext } from '@/components/CardText';
+import { CardLink, CardTextContext } from '@/components/CardText';
 import DeckExtras from '@/components/DeckExtras';
 import { openCard } from '@/components/CardPopup';
 import TagsTab from '@/components/TagsTab';
@@ -24,6 +24,7 @@ import DeckPlaytest from '@/components/DeckPlaytest';
 import { finishWant } from '@/lib/chat-pages';
 import DeckChat from '@/components/DeckChat';
 import DeckCollection from '@/components/DeckCollection';
+import Popover from '@/components/Popover';
 import Tip from '@/components/Tip';
 import { useDeckCopies } from '@/components/useDeckCopies';
 import DeckHealth from '@/components/DeckHealth';
@@ -48,7 +49,7 @@ import { DECKLIST_EXAMPLE, MOXFIELD_REFUSES, readDeckBox } from '@/lib/deck-link
 import { canLead } from '@/lib/import';
 import type { ImportSummary } from '@/lib/import-into';
 import type { LinkReport } from '@/lib/mythic';
-import { summaryLine } from '@/lib/copy-status';
+import { priceBreakdown, summaryLine, type PricePart } from '@/lib/copy-status';
 import type { ScryfallCard } from '@/lib/scryfall';
 import type { DeckTags as Tags } from '@/lib/tags';
 import { imageOf, priceOf } from '@/lib/scryfall';
@@ -71,11 +72,12 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   const [section, setTab] = useState<DeckTab>('cards');
   // Check is Health and Playtest; Cards can show which cards you own and where (it was the Collection tab).
   const [checkPart, setCheckPart] = useState<'health' | 'playtest'>('health');
-  const [owner, setOwner] = useState<'all' | 'mine' | 'missing'>('all');
+  // Cards lit up from the deck at a glance (a curve bar, a role): passed to the Cards view.
+  const [light, setLight] = useState<Light | undefined>(undefined);
   // Read once per deck and again when its cards change: the marks, the chip and "Where your copies are" share it.
   const deckCopies = useDeckCopies(id, list?.kind === 'deck', cards);
   const ownership = deckCopies.data;
-  // "Where your copies are" shows with Mine or Missing, or once the chip or one of its filters asks for it.
+  // "Where your copies are" shows once the copies chip, the Collection tab or one of its filters asks for it.
   const [copiesShown, setCopiesShown] = useState(false);
   const [filterTo, setFilterTo] = useState<{ text: string; n: number } | undefined>(undefined);
   const showCopies = () => {
@@ -87,7 +89,7 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
     const place = placeOf(tab);
     setTab(place.tab);
     if (place.check) setCheckPart(place.check);
-    if (place.copies) setOwner((o) => (o === 'all' ? 'mine' : o));
+    if (place.copies) setCopiesShown(true);
     // The section may not be drawn yet (the tab loads its data first): look for it for a few seconds.
     if (place.anchor) {
       let tries = 0;
@@ -438,7 +440,9 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
               {deck
                 ? <span className={`rounded-full px-2.5 py-1 ${deckSize === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{deckSize} / 100</span>
                 : <span className="rounded-full bg-white/5 px-2.5 py-1">{copies} card{copies === 1 ? '' : 's'}</span>}
-              {value > 0 && <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>}
+              {value > 0 && (deck && ownership
+                ? <PriceChip value={value} parts={priceBreakdown(ownership.cards)} onCopies={showCopies} />
+                : <span className="rounded-full bg-white/5 px-2.5 py-1">${value.toFixed(2)}</span>)}
               {unique !== copies && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{unique} unique</span>}
               {sectionCounts.map((x) => <span key={x.id} className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">{x.n} in {x.name}</span>)}
               {deck && shown && <span className="rounded-full bg-white/5 px-2.5 py-1 font-semibold text-[var(--muted)]">Public</span>}
@@ -727,39 +731,25 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
         <>
         {deck && <FlaggedZone flags={flags} cutName={cutName} onFix={fixFlag} />}
         {deck && <GameChangerLine names={entries.filter((e) => e.board === 'main' && e.card.game_changer).map((e) => e.card.name)} bracket={bracket} onPlan={() => { setSection('plan'); window.scrollTo({ top: 0 }); }} />}
-        {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }} />}
-        {deck && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-sm" data-tour="owner-filter">
-            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--faint)]">Show</span>
-            <div role="radiogroup" aria-label="Which cards" className="flex gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] p-0.5">
-              {([['all', 'All'], ['mine', 'Mine'], ['missing', 'Missing']] as const).map(([v, label]) => (
-                <button key={v} role="radio" aria-checked={owner === v} data-owner={v} onClick={() => setOwner(v)}
-                  className={`rounded-full px-3 py-1 ${owner === v ? 'bg-[var(--surface-hover)] font-semibold' : 'text-[var(--muted)] hover:text-[var(--foreground)]'}`}>{label}</button>
-              ))}
-            </div>
-            {ownership ? (
-              <span className="flex min-w-0 items-center gap-1">
-                <button data-testid="owned-chip" onClick={showCopies} title="Where your copies are"
-                  className="rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-left text-xs tabular-nums hover:bg-[var(--surface-hover)]">
-                  {summaryLine(ownership.summary)}
-                </button>
-                <Tip label="What these numbers mean">
-                  <p><b>Yours</b>: real copies in this deck. <b>Proxies</b>: stand-ins. <b>In your boxes</b>: owned and free to pull. <b>In other decks</b>: every copy you own is in another deck. <b>To buy</b>: not in your collection.</p>
-                  <p className="mt-1.5">Each card has a mark saying which; tap it to pull, take, return or proxy it. Mine shows the cards you have a copy of, Missing the ones still to get.</p>
-                </Tip>
-              </span>
-            ) : <span className="text-xs text-[var(--muted)]">Reading your collection…</span>}
-          </div>
-        )}
+        {deck && <DeckGlance listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} price={value} onTab={(t) => { setSection(t); window.scrollTo({ top: 0 }); }}
+          onLight={(key, label, names) => setLight({ key, label, names, n: Date.now() })} />}
         <DeckCards
           listId={id}
           onChanged={() => { void load(); }}
-          entries={deck && owner !== 'all' && ownership ? entries.filter((e) => {
-            if (e.board !== 'main') return owner === 'mine';
-            const h = ownership.cards.find((x) => x.cardIds.includes(e.card.id) || x.name === e.card.name);
-            const mine = !!h && h.status !== 'missing';
-            return owner === 'mine' ? mine : !mine;
-          }) : entries}
+          entries={entries}
+          light={light}
+          chipsEnd={deck ? (ownership ? (
+            <>
+              <button data-testid="owned-chip" data-tour="owner-filter" onClick={showCopies} title="Where your copies are"
+                className="whitespace-nowrap rounded-full border border-[var(--border)] px-2.5 py-0.5 text-left text-xs tabular-nums text-[var(--muted)] hover:bg-[var(--surface-hover)] hover:text-[var(--foreground)]">
+                {summaryLine(ownership.summary)}
+              </button>
+              <Tip label="What these numbers mean">
+                <p><b>Yours</b>: real copies in this deck. <b>Proxies</b>: stand-ins. <b>In your boxes</b>: owned and free to pull. <b>In other decks</b>: every copy you own is in another deck. <b>To buy</b>: not in your collection.</p>
+                <p className="mt-1.5">A card that&apos;s yours shows its ✓ when you point at it; the other marks always show. Tap a mark to pull, take, return or proxy it. The chips light up the cards in a box, in another deck or to buy.</p>
+              </Tip>
+            </>
+          ) : <span className="text-xs text-[var(--muted)]">Reading your collection…</span>) : undefined}
           tags={deck ? tags : null}
           version={`${list.updatedAt}:${list.commander?.id ?? ''}`}
           isDeck={deck}
@@ -777,11 +767,11 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
           isWord={deck ? deckCopies.isWord : undefined}
           filterTo={filterTo}
         />
-        {deck && (owner !== 'all' || copiesShown) && (
+        {deck && copiesShown && (
           <section id="your-copies" data-section="Your copies" className="mt-10 scroll-mt-24 border-t border-[var(--border)] pt-6">
             <h2 className="font-display text-2xl font-semibold">Where your copies are</h2>
             <DeckCollection listId={id} version={`${list.updatedAt}:${list.commander?.id ?? ''}`} data={ownership} onData={deckCopies.setData}
-              onFilter={(text) => { setOwner('all'); setCopiesShown(true); setFilterTo({ text, n: Date.now() }); }} />
+              onFilter={(text) => { setCopiesShown(true); setFilterTo({ text, n: Date.now() }); }} />
           </section>
         )}
         {deck && <DeckExtras cards={[...(list.commander ? [list.commander] : []), ...cards.filter((c) => c.board === 'main').map((c) => c.card)]} />}
@@ -875,3 +865,42 @@ export default function ListPage({ params }: { params: Promise<{ id: string }> }
   );
 }
 
+/**
+ * The deck's price, and on pointing at it (or a tap) what it's made of: the real copies in the deck, the proxies
+ * standing in, and what's still short - in a box, in another deck, or to buy.
+ */
+function PriceChip({ value, parts, onCopies }: { value: number; parts: PricePart[]; onCopies: () => void }) {
+  const tone: Record<PricePart['key'], string> = { real: 'bg-emerald-400', proxy: 'bg-amber-300', box: 'bg-sky-400', other: 'bg-violet-400', buy: 'bg-rose-400' };
+  const money = (n: number) => `$${n.toFixed(2)}`;
+  return (
+    <Popover hover aria-label="What the price is made of" panelClassName="w-72" data-tour="price-chip"
+      label={<>{money(value)}</>}
+      className="rounded-full bg-white/5 px-2.5 py-1 font-bold tabular-nums underline decoration-dotted decoration-white/30 underline-offset-4 hover:bg-white/10 aria-expanded:bg-white/10">
+      <div className="flex flex-col gap-2 text-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">What the {money(value)} is</p>
+        {/* One bar, each part its share of the price. */}
+        <span aria-hidden className="flex h-1.5 overflow-hidden rounded-full bg-white/10">
+          {parts.map((p) => p.value > 0 && <span key={p.key} className={tone[p.key]} style={{ width: `${(p.value / Math.max(value, 0.01)) * 100}%` }} />)}
+        </span>
+        <ul className="flex flex-col gap-1">
+          {parts.map((p) => (
+            <li key={p.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5" data-price-part={p.key}>
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${tone[p.key]}`} />
+              <span className="min-w-0 flex-1">{p.label} <span className="text-xs text-[var(--muted)]">· {p.copies}</span></span>
+              <span className="tabular-nums">{money(p.value)}</span>
+              {/* Where the money is: the priciest few, for the parts worth asking about. */}
+              {(p.key === 'proxy' || p.key === 'other' || p.key === 'buy') && (
+                <span className="basis-full pl-4 text-xs text-[var(--muted)]">
+                  {p.cards.slice(0, 3).map((c, i) => <span key={c.name}>{i > 0 && ', '}<CardLink name={c.name} /> {money(c.value)}</span>)}
+                  {p.cards.length > 3 && <span>, and {p.cards.length - 3} more</span>}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="text-[11px] text-[var(--muted)]">At the printing and finish each card is listed as. Proxies count at what a real copy would cost.</p>
+        <button type="button" onClick={onCopies} className="self-start text-xs font-semibold text-[var(--accent)] hover:underline">Where your copies are</button>
+      </div>
+    </Popover>
+  );
+}

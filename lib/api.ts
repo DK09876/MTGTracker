@@ -925,6 +925,7 @@ export type FinishAction =
   | { action: 'reset' };
 export const finish = (listId: string) => get<FinishView>(`lists/${listId}/finish`);
 /** A card in full by its id, through the app's one way of getting a card (lib/cards.ts). */
+export const cardAtPrinting = (set: string, number: string) => get<{ card: import('./scryfall').ScryfallCard }>(`cards?set=${encodeURIComponent(set)}&number=${encodeURIComponent(number)}`).then((r) => r.card);
 export const cardById = (id: string) => get<{ card: import('./scryfall').ScryfallCard }>(`cards?id=${encodeURIComponent(id)}`).then((r) => r.card);
 export const finishAct = (listId: string, act: FinishAction) => {
   const paid = act.action === 'find';

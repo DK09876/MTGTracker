@@ -109,3 +109,45 @@ export function undoFor(listId: string, act: api.DeckCollectionAction, before: H
       return null;
   }
 }
+
+/** One line of a deck's price breakdown: how many copies, and what they cost. */
+export interface PricePart {
+  key: 'real' | 'proxy' | 'box' | 'other' | 'buy'; label: string; copies: number; value: number;
+  /** The cards in it, priciest first. */
+  cards: Array<{ name: string; value: number }>;
+}
+
+/**
+ * What a deck's price is made of (the price chip on the deck page): the real copies in it, the proxies standing in
+ * (what the real ones would cost), and the copies it's still short - free in a box, held by another deck, or to buy.
+ * The 100 only (the commander included), at the printing and finish the deck lists. Parts with no copies are left out.
+ */
+export function priceBreakdown(cards: Holding[]): PricePart[] {
+  const parts: Record<PricePart['key'], PricePart> = {
+    real: { key: 'real', label: 'Real copies in the deck', copies: 0, value: 0, cards: [] },
+    proxy: { key: 'proxy', label: 'Proxies', copies: 0, value: 0, cards: [] },
+    box: { key: 'box', label: 'In your boxes, to pull', copies: 0, value: 0, cards: [] },
+    other: { key: 'other', label: 'Held by another deck', copies: 0, value: 0, cards: [] },
+    buy: { key: 'buy', label: 'To buy', copies: 0, value: 0, cards: [] },
+  };
+  let name = '';
+  const add = (k: PricePart['key'], n: number, price: number) => {
+    if (n <= 0) return;
+    parts[k].copies += n;
+    parts[k].value += n * price;
+    parts[k].cards.push({ name, value: n * price });
+  };
+  for (const h of cards) {
+    if (h.board !== 'main') continue;
+    const price = h.price ?? 0;
+    name = h.name;
+    const proxies = Math.min(h.proxies, h.need);
+    const short = Math.max(0, Math.min(h.short, h.need - proxies));
+    add('real', h.need - short - proxies, price);
+    add('proxy', proxies, price);
+    // A card short of copies: where the rest are is its status (a basic land's are in a box, or nowhere it tracks).
+    add(h.status === 'in-box' || h.basic ? 'box' : h.status === 'in-other-deck' ? 'other' : 'buy', short, price);
+  }
+  for (const p of Object.values(parts)) p.cards.sort((a, b) => b.value - a.value);
+  return Object.values(parts).filter((p) => p.copies > 0);
+}

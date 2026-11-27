@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Holding } from './collection';
-import { holdingIndex, markOf, statusWord, summaryLine, tileLine, undoFor } from './copy-status';
+import { holdingIndex, markOf, statusWord, summaryLine, tileLine, undoFor, priceBreakdown } from './copy-status';
 import type { ScryfallCard } from './scryfall';
 
 const card = (oracle: string) => ({ id: `${oracle}-1`, oracle_id: oracle, name: oracle }) as ScryfallCard;
@@ -83,5 +83,23 @@ describe('undo', () => {
     });
     expect(undoFor('a', { action: 'take', fromListId: 'b', key: 'opt' }, h({}), 1)).toEqual({ listId: 'b', act: { action: 'take', fromListId: 'a', key: 'opt', quantity: 1 } });
     expect(undoFor('a', { action: 'proxies', cardId: 'opt-1', proxies: 2 }, h({ proxies: 1 }), 0)).toEqual({ listId: 'a', act: { action: 'proxies', cardId: 'opt-1', proxies: 1 } });
+  });
+});
+
+describe('a deck\'s price, broken down', () => {
+  it('splits real copies, proxies and what is still short by where it is', () => {
+    const parts = priceBreakdown([
+      h({ key: 'a', name: 'Sol Ring', need: 1, pulled: 1, proxies: 0, short: 0, status: 'in-deck', price: 2 }),
+      h({ key: 'b', name: 'Rhystic Study', need: 1, pulled: 0, proxies: 1, short: 0, status: 'proxy', price: 30 }),
+      h({ key: 'c', name: 'Island', need: 10, pulled: 4, proxies: 0, short: 6, status: 'in-box', basic: true, price: 0.1 }),
+      h({ key: 'd', name: 'Cyclonic Rift', need: 1, pulled: 0, proxies: 0, short: 1, status: 'in-other-deck', price: 20 }),
+      h({ key: 'e', name: 'Smothering Tithe', need: 1, pulled: 0, proxies: 0, short: 1, status: 'missing', price: 15 }),
+      h({ key: 'f', name: 'Opt', need: 1, pulled: 1, proxies: 0, short: 0, status: 'in-deck', price: 5, board: 'side' }),
+    ]);
+    expect(parts.map((p) => [p.key, p.copies, Math.round(p.value * 100) / 100])).toEqual([
+      ['real', 5, 2.4], ['proxy', 1, 30], ['box', 6, 0.6], ['other', 1, 20], ['buy', 1, 15],
+    ]);
+    expect(parts[0].cards.map((c) => c.name)).toEqual(['Sol Ring', 'Island']);
+    expect(parts[1].cards).toEqual([{ name: 'Rhystic Study', value: 30 }]);
   });
 });

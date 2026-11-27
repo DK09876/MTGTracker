@@ -13,14 +13,14 @@
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
-import { localCards } from './card-store';
+import { localCards, pieceNames } from './card-store';
 import { foldName } from './card-lookup';
 import { exactCard, findMentions, markText, nameIndex, phraseKey, phrasesForPick, type CardPick, type CardReading, type NameIndex } from './card-names';
 import { cardPicks, rememberPick } from './card-picks';
 import { EVERYDAY_WORDS } from './everyday-words';
 import { database, storeCard } from './db';
 import { rulesIndex } from './rules/sources';
-import { cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
+import { cardAt, cardNameCatalog, collection, getCard, imageOf, printingsOf, ScryfallError, type ScryfallCard } from './scryfall';
 
 /** The key a name is matched by: its front face, folded (case, accents, curly quotes). */
 export const cardKey = (name: string) => foldName(name);
@@ -87,6 +87,13 @@ export async function findCard(name: string): Promise<ScryfallCard | null> {
   return (await findCards([name])).get(name) ?? null;
 }
 
+/** A printing by set code and collector number (a Scryfall card page dropped on a deck): Scryfall's, stored. Null when there is none. */
+export async function cardAtPrinting(set: string, number: string): Promise<ScryfallCard | null> {
+  const c = await cardAt(set, number);
+  if (c) storeCard(c);
+  return c;
+}
+
 /** A card by its Scryfall id: the stored copy, else Scryfall's (stored). Null when there is no such card. */
 export async function cardById(id: string): Promise<ScryfallCard | null> {
   const r = database().get('SELECT data FROM cards WHERE id = ?', [id]) as { data: string } | null;
@@ -99,6 +106,15 @@ export async function cardById(id: string): Promise<ScryfallCard | null> {
     if (e instanceof ScryfallError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * Which of these names (a card's related parts) are token, emblem or reminder cards rather than cards to play: from
+ * the weekly copy, so a deck's extras show Morph or Cyberman and leave out Tower Winder. Names it can't place are
+ * left out.
+ */
+export function tablePieces(names: string[]): string[] {
+  try { return [...pieceNames(names)]; } catch { return []; }
 }
 
 const PRINTINGS_MS = 6 * 3600_000;

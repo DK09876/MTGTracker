@@ -451,7 +451,7 @@ export default function DecksPage() {
             // Each deck in its commander's colours, its art on the cover; its ⋯ sits beside the link, not in it.
             <div
               key={deck.id}
-              className={`relative transition-opacity ${dragging === deck.id ? 'opacity-40' : ''}`}
+              className={`relative h-full transition-opacity ${dragging === deck.id ? 'opacity-40' : ''}`}
               onPointerEnter={mouseOnly(() => setGlow(identity))}
               onMouseLeave={() => setGlow(null)}
               // Dragged onto a folder in the rail, it goes in it.
@@ -469,7 +469,7 @@ export default function DecksPage() {
             <Link
               href={`/decks/${deck.id}`}
               style={identityStyle(identity)}
-              className="group relative flex flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] bg-[linear-gradient(105deg,color-mix(in_srgb,var(--c1)_15%,var(--surface)),color-mix(in_srgb,var(--c2)_15%,var(--surface))_55%,color-mix(in_srgb,var(--c3)_15%,var(--surface)))] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
+              className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--c1)_30%,var(--border))] bg-[var(--surface)] bg-[linear-gradient(105deg,color-mix(in_srgb,var(--c1)_15%,var(--surface)),color-mix(in_srgb,var(--c2)_15%,var(--surface))_55%,color-mix(in_srgb,var(--c3)_15%,var(--surface)))] transition-[border-color,box-shadow] duration-200 hover:border-[color-mix(in_srgb,var(--c1)_60%,var(--border))] hover:shadow-[0_10px_28px_color-mix(in_srgb,var(--c1)_22%,transparent)]"
             >
               {/* Nothing on the tile moves or is filtered on hover - a lift, a scale or a brightness filter
                   each left seams on the art's edges; the border and glow show it instead.
@@ -483,23 +483,31 @@ export default function DecksPage() {
               <div className="relative -mt-4 flex flex-1 flex-col gap-0.5 px-2.5 pb-2.5 sm:-mt-5 sm:px-3.5 sm:pb-3.5">
                 <p className="truncate font-display text-sm font-extrabold leading-tight sm:text-lg" title={deck.name}>{deck.name}</p>
                 <p className="truncate text-xs text-[var(--muted)] sm:text-sm">{deck.commander?.name ?? 'No commander'}</p>
-                <div className="mt-1 flex flex-wrap gap-1 text-[11px] font-bold tabular-nums sm:mt-1.5 sm:gap-1.5 sm:text-xs">
-                  <span className={`rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 ${total === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{total} / 100</span>
-                  {deck.totalValue > 0 && <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1">${deck.totalValue.toFixed(2)}</span>}
-                  {owned[deck.id]?.need > 0 && (() => {
-                    const line = tileLine(owned[deck.id]);
-                    return (
-                      <span data-testid="deck-owned" className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${summaryLine(owned[deck.id])} - from your collection`}>
-                        {line.owned} yours{line.extra.length ? ` · ${line.extra.join(' · ')}` : ''}
-                      </span>
-                    );
-                  })()}
+                {/* Every tile the same shape: one row of chips that never wraps, then one line for your copies. */}
+                <div className="mt-1 flex gap-1 overflow-hidden whitespace-nowrap text-[11px] font-bold tabular-nums sm:mt-1.5 sm:gap-1.5 sm:text-xs">
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 sm:px-2.5 sm:py-1 ${total === 100 ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}>{total} / 100</span>
+                  {deck.totalValue > 0 && <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1">${deck.totalValue.toFixed(2)}</span>}
                   {records[deck.id] && (
-                    <span className="rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${records[deck.id].wins} won of ${records[deck.id].games} games played`}>
-                      {records[deck.id].wins}–{records[deck.id].games - records[deck.id].wins} · {Math.round((records[deck.id].wins / records[deck.id].games) * 100)}%
+                    <span className="min-w-0 truncate rounded-full bg-white/5 px-2 py-0.5 sm:px-2.5 sm:py-1" title={`${records[deck.id].wins} won of ${records[deck.id].games} games played`}>
+                      {records[deck.id].wins}–{records[deck.id].games - records[deck.id].wins}
                     </span>
                   )}
                 </div>
+                <p className="mt-1.5 flex h-4 min-w-0 items-center gap-1.5 text-[11px] text-[var(--muted)] sm:text-xs">
+                  {owned[deck.id]?.need > 0 ? (() => {
+                    const o = owned[deck.id];
+                    const line = tileLine(o);
+                    const share = Math.min(1, (o.inDeck + o.proxies) / o.need);
+                    return (
+                      <span data-testid="deck-owned" className="flex min-w-0 items-center gap-1.5" title={`${summaryLine(o)} - from your collection`}>
+                        <span aria-hidden className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-white/10 sm:w-10">
+                          <span className="block h-full rounded-full bg-emerald-400/80" style={{ width: `${share * 100}%` }} />
+                        </span>
+                        <span className="truncate">{line.owned} yours{line.extra.length ? ` · ${line.extra.join(' · ')}` : ''}</span>
+                      </span>
+                    );
+                  })() : null}
+                </p>
               </div>
               {/* The colour bar glows brighter under the pointer. */}
               <div aria-hidden className="id-grad h-1 shadow-[0_-4px_16px_color-mix(in_srgb,var(--c2)_45%,transparent)] transition-[height,box-shadow] duration-200 group-hover:h-[7px] group-hover:shadow-[0_-6px_24px_color-mix(in_srgb,var(--c2)_75%,transparent)] sm:h-[5px]" />

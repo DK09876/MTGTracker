@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 
 
-import { access, guarded, signedIn } from './auth';
+import { access, guarded, signedIn, trustedLocal } from './auth';
 import { getList, knownProfile, type List } from './db';
 import { isConfirmed } from './plan-help';
 
@@ -18,13 +18,14 @@ const TOUR_PROFILE = 'tour';
 
 /**
  * The profile a request asks for, if it may use it: a profile with a
- * password (or an admin) only from a browser signed in as it.
+ * password (or an admin) only from a browser signed in as it, or from the
+ * dev server on this machine (trustedLocal).
  */
 export function profileOf(request: Request): string | null {
   const id = knownProfile(new URL(request.url).searchParams.get('profile')?.trim() || null);
   if (!id) return null;
   const who = access(id);
-  return who && guarded(who) && signedIn(request) !== id ? null : id;
+  return who && guarded(who) && !trustedLocal(request) && signedIn(request) !== id ? null : id;
 }
 
 /** The profile, or the response to send instead - 401 when it needs signing in. */
