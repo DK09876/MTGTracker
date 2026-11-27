@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server';
 
-import { access, guarded, signedIn } from '@/lib/auth';
+import { access, guarded, signedIn, trustedLocal } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,8 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get('profile') ?? '';
   const who = access(id);
   if (!who) return NextResponse.json({ error: 'No such profile' }, { status: 404 });
-  const session = signedIn(request) === id;
+  // The dev server on this machine asks for no password (trustedLocal).
+  const session = trustedLocal(request) || signedIn(request) === id;
   return NextResponse.json({
     ...who,
     signedIn: session,

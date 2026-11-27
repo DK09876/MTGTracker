@@ -131,6 +131,24 @@ export function cookieToken(request: Request): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1', 'localhost', '[::1]']);
+const hostOf = (host: string) => (host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0]);
+
+/**
+ * Whether a request needs no sign-in: the dev server (`npm run dev`), reached from this machine. Trying the app
+ * locally shouldn't ask for passwords. The Pi runs a production build, so this never holds there, nor for a phone
+ * on the network reaching a dev server by its address. The dev server fills in x-forwarded-for with the caller's
+ * own address (one, with no proxy before it), and the request's URL says 0.0.0.0 when it listens on every address.
+ */
+export function trustedLocal(request: Request, env: string | undefined = process.env.NODE_ENV): boolean {
+  if (env !== 'development') return false;
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded?.includes(',')) return false;
+  const caller = forwarded?.trim() || new URL(request.url).hostname;
+  const host = hostOf(request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? new URL(request.url).host);
+  return LOOPBACK.has(caller) && LOOPBACK.has(host);
+}
+
 /** The profile this browser is signed in as, if any. */
 export function signedIn(request: Request, now = new Date()): string | null {
   const token = cookieToken(request);
