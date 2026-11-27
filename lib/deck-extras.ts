@@ -38,9 +38,18 @@ export const FACE_DOWN = {
 } as const;
 const FACE_DOWN_NAMES = new Set<string>(Object.values(FACE_DOWN).map((f) => f.name));
 
-const textOf = (c: ScryfallCard) => [c.oracle_text ?? '', ...(c.card_faces ?? []).map((f) => f.oracle_text ?? '')].join('\n')
-  // Reminder text explains a keyword; it never makes anything itself.
-  .replace(/\([^)]*\)/g, '');
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * What a card's rules say it does: reminder text taken out (it explains a keyword, it never makes anything), and the
+ * card's own name too ("except his name is Chameleon, Master of Disguise" isn't disguise).
+ */
+function textOf(c: ScryfallCard): string {
+  const names = [c.name, ...c.name.split(' // '), ...(c.card_faces ?? []).map((f) => f.name ?? '')].filter(Boolean).sort((a, b) => b.length - a.length);
+  let text = [c.oracle_text ?? '', ...(c.card_faces ?? []).map((f) => f.oracle_text ?? '')].join('\n').replace(/\([^)]*\)/g, '');
+  for (const n of names) text = text.replace(new RegExp(escape(n), 'gi'), 'this card');
+  return text;
+}
 
 /** The face-down creatures a card makes, from its rules text: which reminder card goes on each. */
 function faceDownFromText(text: string): Array<keyof typeof FACE_DOWN> {
@@ -51,8 +60,16 @@ function faceDownFromText(text: string): Array<keyof typeof FACE_DOWN> {
   return [...out];
 }
 
-/** The sentences of a card's text that make a token. */
-const tokenWords = (text: string) => text.split(/(?<=\.)\s+|\n/).filter((s) => /\bcreates?\b.*\btokens?\b/i.test(s)).map((s) => s.trim());
+/**
+ * The sentences of a card's text that make a token. What a card reacts to isn't what it makes: a leading condition
+ * ("Whenever you create a token, …", "If an effect would create tokens, …") is read past, and a replacement
+ * ("… creates twice that many … instead") makes none of its own.
+ */
+const makesToken = (sentence: string) => {
+  const effect = sentence.replace(/^[^,]*\b(whenever|when|if|for each|as long as)\b[^,]*,/i, '');
+  return /\bcreates?\b.*\btokens?\b/i.test(effect) && !/\binstead\b/i.test(effect);
+};
+const tokenWords = (text: string) => text.split(/(?<=\.)\s+|\n/).filter(makesToken).map((s) => s.trim());
 
 /**
  * The extras a deck's cards make, grouped and named once each. `pieces` is the linked names the server knows to be

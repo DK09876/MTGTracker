@@ -10,7 +10,9 @@ import type { Release, UnreleasedItem } from './releases';
  * decides when they become a version (AGENTS.md, "Cutting a version"). On the Releases page they show as "Since
  * v…", with no banner.
  */
-export const UNRELEASED: UnreleasedItem[] = [];
+export const UNRELEASED: UnreleasedItem[] = [
+  { kind: 'fix', date: '2026-11-26', title: 'Tokens & extras lists only what your cards make', details: 'A card that only reacts to tokens, like [[Tchotchke Elemental]], or only has a word like disguise in its name, like [[Chameleon, Master of Disguise]], no longer adds a token or a face-down card to the list.' },
+];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
 export const RELEASE_NOTES: Release[] = [
