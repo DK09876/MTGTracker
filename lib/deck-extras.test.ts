@@ -63,4 +63,20 @@ describe('a deck’s tokens and extras', () => {
       ['token', 'New Maker', 'When this creature enters, create a 2/2 green Wolf creature token.'],
     ]);
   });
+
+  it('reads what a card does, not its own name or what it reacts to', () => {
+    const text = (name: string, oracle_text: string) => ({ ...card(name, []), oracle_text }) as ScryfallCard;
+    expect(extrasOf([
+      // "Disguise" here is only the card's name.
+      text('Chameleon, Master of Disguise', 'You may have Chameleon enter as a copy of a creature you control, except his name is Chameleon, Master of Disguise.'),
+      // It reacts to tokens; it makes none.
+      text('Tchotchke Elemental', 'Whenever you create a token or put a counter or a sticker on another permanent, put a knickknack counter on this creature.'),
+      // A replacement doubles tokens; it makes none of its own.
+      text('Doubling Season', 'If an effect would create one or more tokens under your control, it creates twice that many of those tokens instead.'),
+    ])).toEqual([]);
+    // A condition first, then a token made: that one counts.
+    expect(extrasOf([text('Token Echo', 'Whenever you create a token, create a 1/1 white Spirit creature token with flying.')]).map((e) => e.name)).toEqual(['Token Echo']);
+    // A card that really has disguise still gets its reminder card.
+    expect(extrasOf([text('Forum Familiar', 'Disguise {1}{W} (You may cast this card face down for {3} as a 2/2 creature with ward {2}.)')]).map((e) => e.name)).toEqual(['A Mysterious Creature']);
+  });
 });
