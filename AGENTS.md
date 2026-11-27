@@ -91,6 +91,13 @@ what Claude would have read. Never set it on the Pi. Use a copy of the data in `
 The owner uses the app on an iPhone. Hover effects that change the page (a highlight, a preview, a tip) run for a
 real mouse only (`lib/mouse-only.ts`); otherwise Safari treats the first tap as a hover and drops the click.
 
+## Deploying to the Pi
+
+Only when the owner asks. The Pi's address and sign-in are in `AGENTS.local.md` at the root of the main checkout
+(`$(git rev-parse --git-common-dir)/../AGENTS.local.md` from a worktree). It is gitignored: never copy what it says into a
+tracked file, a commit, a PR, a log or a memory. How a deploy runs is `scripts/DEPLOY.md`: on the Pi, inside tmux,
+`bash ~/mtg/current/scripts/deploy.sh`.
+
 ## Releases: every change the owner will notice gets a note
 
 The app has a version and release notes the people using it read: a "What's new" line under the header after a new

@@ -12,3 +12,6 @@ scripts/rules-eval/results-*.json
 scripts/role-eval/.cache.json
 scripts/role-eval/ours.json
 tsconfig.tsbuildinfo
+
+# Local-only notes for agents (the Pi's address and sign-in): never committed. See AGENTS.md, "Deploying".
+AGENTS.local.md

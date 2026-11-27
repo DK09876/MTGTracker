@@ -10,19 +10,49 @@ import type { Release, UnreleasedItem } from './releases';
  * decides when they become a version (AGENTS.md, "Cutting a version"). On the Releases page they show as "Since
  * v…", with no banner.
  */
-export const UNRELEASED: UnreleasedItem[] = [
-  { kind: 'fix', date: '2026-11-26', title: 'Tokens & extras show your face-down creatures', details: 'Cloak, disguise, manifest and morph cards now list the reminder card for their face-down 2/2s, as [[Etrata, Deadly Fugitive]] does. A card that makes a token with no picture yet shows the words that make it, so nothing goes missing.' },
-  { kind: 'new', date: '2026-11-26', title: 'A calmer card list that shows what needs doing', details: 'On a deck\'s Cards tab, −, + and ⋯ show for the card you point at, and a ✓ for a card you own shows only then, so a card in a box or still to buy stands out. Group and Sort sit in the toolbar, each group shows its average mana value and price, and on a wide screen the card you point at shows beside the list.' },
-  { kind: 'new', date: '2026-11-26', title: 'Click a number to see the cards behind it', details: 'Chips above a deck\'s cards light up your tags, roles, cards in a box and foils, and so do the curve bars and Ramp, Card draw and Removal in the deck at a glance. Tick Show only these to hide the rest. The Show row is now one of these chips.' },
-  { kind: 'new', date: '2026-11-26', title: 'Add a card from the filter box, and pick cards without Select', details: 'Type a name the deck doesn\'t have in the box above the cards and press Enter to add it (Shift+Enter for the Maybeboard). ⌘ or Ctrl-click cards to pick several, or long-press on a phone; a phone row now has just its ⋯, so names fit.' },
-  { kind: 'new', date: '2026-11-26', title: 'See what a deck\'s price is made of', details: 'Point at a deck\'s price, or tap it on a phone, to see it split into the real copies in the deck, the proxies, copies waiting in your boxes, cards another deck holds and cards to buy, with the priciest cards in each named.' },
-  { kind: 'fix', date: '2026-11-26', title: 'Deck tiles are all the same size', details: 'On the Decks page every tile is the same height: the count, price and record sit on one line, and how many cards are yours sits under them with a small bar.' },
-  { kind: 'fix', date: '2026-11-26', title: 'Black mana looks black', details: 'The black mana symbol is a black disc with a pale skull and a faint violet edge, instead of a grey one that looked colourless beside the other colours. It shows this way everywhere: deck tiles, filters and mana costs.' },
-  { kind: 'new', date: '2026-11-26', title: 'Drag a card in from Scryfall to add it', details: 'Drag a card\'s picture or its page from Scryfall, or a card picture from EDHREC, onto a deck\'s Cards tab and drop it: that exact printing is added to the board you\'re looking at.' },
-];
+export const UNRELEASED: UnreleasedItem[] = [];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
 export const RELEASE_NOTES: Release[] = [
+  {
+    version: '1.32.0',
+    date: '2026-11-26',
+    title: 'A calmer, quicker card list',
+    items: [
+      {
+        title: 'A calmer card list that shows what needs doing',
+        details: 'On a deck\'s Cards tab, −, + and ⋯ show for the card you point at, and a ✓ for a card you own shows only then, so a card in a box or still to buy stands out. Group and Sort sit in the toolbar, each group shows its average mana value and price, and on a wide screen the card you point at shows beside the list.',
+      },
+      {
+        title: 'Click a number to see the cards behind it',
+        details: 'Chips above a deck\'s cards light up your tags, roles, cards in a box and foils, and so do the curve bars and Ramp, Card draw and Removal in the deck at a glance. Tick Show only these to hide the rest. The Show row is now one of these chips.',
+      },
+      {
+        title: 'Add a card from the filter box, and pick cards without Select',
+        details: 'Type a name the deck doesn\'t have in the box above the cards and press Enter to add it (Shift+Enter for the Maybeboard). ⌘ or Ctrl-click cards to pick several, or long-press on a phone; a phone row now has just its ⋯, so names fit.',
+      },
+      {
+        title: 'Drag a card in from Scryfall to add it',
+        details: 'Drag a card\'s picture or its page from Scryfall, or a card picture from EDHREC, onto a deck\'s Cards tab and drop it: that exact printing is added to the board you\'re looking at.',
+      },
+      {
+        title: 'See what a deck\'s price is made of',
+        details: 'Point at a deck\'s price, or tap it on a phone, to see it split into the real copies in the deck, the proxies, copies waiting in your boxes, cards another deck holds and cards to buy, with the priciest cards in each named.',
+      },
+      {
+        title: 'Tokens & extras show your face-down creatures',
+        details: 'Cloak, disguise, manifest and morph cards now list the reminder card for their face-down 2/2s, as [[Etrata, Deadly Fugitive]] does. A card that makes a token with no picture yet shows the words that make it, so nothing goes missing.',
+      },
+      {
+        title: 'Deck tiles are all the same size',
+        details: 'On the Decks page every tile is the same height: the count, price and record sit on one line, and how many cards are yours sits under them with a small bar.',
+      },
+      {
+        title: 'Black mana looks black',
+        details: 'The black mana symbol is a black disc with a pale skull and a faint violet edge, instead of a grey one that looked colourless beside the other colours. It shows this way everywhere: deck tiles, filters and mana costs.',
+      },
+    ],
+  },
   {
     version: '1.31.0',
     date: '2026-11-24',
