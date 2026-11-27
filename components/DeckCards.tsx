@@ -344,7 +344,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
   const [quick, setQuick] = useState<{ q: string; cards: api.QuickCard[] } | null>(null);
   const [addNote, setAddNote] = useState<{ text: string; ok: boolean } | null>(null);
   const typed = filter.trim();
-  const canAdd = typed.length >= 3 && !looksLikeSyntax(typed) && !matched.length && !!onBoard.length;
+  const canAdd = typed.length >= 3 && !looksLikeSyntax(typed) && !matched.length;
   useEffect(() => {
     if (!canAdd) return;
     let cancelled = false;
@@ -382,10 +382,10 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       const test = (e: Entry) => names.has(front(e.card.name));
       out.push({ key: `role:${r.id}`, label: r.label, test, count: n(test) });
     }
-    // Where copies are counts cards, not copies: the summary beside them counts the copies.
+    // Copies, as "Where your copies are" counts them.
     if (isWord) for (const [word, label] of STATUS_CHIPS) {
       const test = (e: Entry) => isWord(e, word) === true;
-      out.push({ key: `is:${word}`, label, test, count: onBoard.filter(test).length, tone: word });
+      out.push({ key: `is:${word}`, label, test, count: n(test), tone: word });
     }
     const foil = (e: Entry) => e.finish !== 'nonfoil';
     out.push({ key: 'foil', label: 'Foil or etched', test: foil, count: n(foil) });
@@ -403,7 +403,8 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
     const key = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const t = e.target as HTMLElement;
-      if (t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) {
+      // Typing goes to the box being typed in; a checkbox or button just clicked keeps the keys working.
+      if (t.closest('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [contenteditable="true"], [role="dialog"]')) {
         if (e.key === 'Escape' && t === filterBox.current) filterBox.current.blur();
         return;
       }
@@ -487,6 +488,7 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
       {/* Sticks under the top bar as the cards scroll: one row to swipe on a phone, wrapped on wider screens. */}
       <StickyBar data-tour="card-tools" className="mt-1"
         rowClassName="flex items-center gap-2 overflow-x-auto py-2 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible">
+        <span className="relative flex min-w-[11rem] flex-1">
         <input
           ref={filterBox}
           value={filter}
@@ -494,11 +496,14 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
           onKeyDown={(e) => {
             if (e.key === 'Enter' && offers.length) { e.preventDefault(); void addQuick(offers[0], e.shiftKey); }
           }}
-          placeholder="Find or add a card  ( / )"
+          placeholder="Find or add a card"
           title="Find a card by name or Scryfall syntax - t:creature, c:rg, cmc<=3. A name the deck doesn't have can be added with Enter."
           aria-label="Find a card, or add one"
-          className="min-w-[11rem] flex-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)]"
+          className="peer w-full rounded-full border border-[var(--border)] bg-[var(--surface)] px-4 py-1.5 text-sm outline-none focus:border-[var(--c1)] sm:pr-9"
         />
+        {/* The key, inside the box where there's room; gone once something is typed. */}
+        {!filter && <kbd aria-hidden className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-[var(--border)] px-1.5 font-mono text-[11px] leading-4 text-[var(--muted)] max-sm:hidden">/</kbd>}
+        </span>
         <Pick label="Group" value={groupBy} onPick={(v) => setPrefs((p) => ({ ...p, groupBy: v }))}
           options={[['type', 'Type'], ...(isDeck ? [['tag', 'Tags & roles'] as [GroupBy, string]] : []), ['mv', 'Mana value'], ['none', 'None']]} />
         <Pick label="Sort" value={prefs.sortBy} onPick={(v) => setPrefs((p) => ({ ...p, sortBy: v }))}
@@ -619,11 +624,11 @@ export default function DeckCards({ listId, entries, tags, onTags, version, isDe
         </p>
       )}
 
-      {!onBoard.length && (
+      {!onBoard.length && !offers.length && (
         <p className="mt-10 text-center text-[var(--muted)]">
           {isDeck && board !== 'main'
-            ? `Nothing in ${nameOf(board)} yet — move cards here from a card's ⋯${board === 'maybe' ? ', or use Maybe when adding' : ''}.`
-            : 'Nothing here yet — use Add cards.'}
+            ? `Nothing in ${nameOf(board)} yet. Type a card's name in the box above to add it, or move cards here from a card's ⋯.`
+            : 'Nothing here yet. Type a card\'s name in the box above to add it.'}
         </p>
       )}
       {waiting && onBoard.length > 0 && <p className="mt-3 text-xs text-[var(--muted)]">Loading tags…</p>}
