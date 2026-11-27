@@ -17,6 +17,7 @@ export const UNRELEASED: UnreleasedItem[] = [
   { kind: 'new', date: '2026-11-26', title: 'Add a card from the filter box, and pick cards without Select', details: 'Type a name the deck doesn\'t have in the box above the cards and press Enter to add it (Shift+Enter for the Maybeboard). ⌘ or Ctrl-click cards to pick several, or long-press on a phone; a phone row now has just its ⋯, so names fit.' },
   { kind: 'new', date: '2026-11-26', title: 'See what a deck\'s price is made of', details: 'Point at a deck\'s price, or tap it on a phone, to see it split into the real copies in the deck, the proxies, copies waiting in your boxes, cards another deck holds and cards to buy, with the priciest cards in each named.' },
   { kind: 'fix', date: '2026-11-26', title: 'Deck tiles are all the same size', details: 'On the Decks page every tile is the same height: the count, price and record sit on one line, and how many cards are yours sits under them with a small bar.' },
+  { kind: 'fix', date: '2026-11-26', title: 'Black mana looks black', details: 'The black mana symbol is a black disc with a pale skull and a faint violet edge, instead of a grey one that looked colourless beside the other colours. It shows this way everywhere: deck tiles, filters and mana costs.' },
 ];
 
 /** Every version, newest first. Only cut by the owner's say-so. */
